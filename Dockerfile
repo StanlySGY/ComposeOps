@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------- Stage 1: build the Vue frontend ----------
-FROM node:22-bookworm-slim AS frontend-build
+FROM node:25-bookworm-slim AS frontend-build
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -21,7 +21,7 @@ RUN npm run build
 # python3/make/g++,也就不需要 apt —— 国内直连 deb.debian.org 拉 Packages 索引
 # 经常超时(实测同一容器里 InRelease 能通、12MB 的 Packages.gz 必断),
 # 少一次 apt 就少一个构建失败点。仅当预编译不可用时才回退源码编译。
-FROM node:22-bookworm-slim AS backend-build
+FROM node:25-bookworm-slim AS backend-build
 
 # apt 源镜像(仅在预编译失败的源码编译回退分支里才会用到 apt)。
 # 默认为清华源:实测同一容器里 deb.debian.org 拉 InRelease 能通、但 12MB 的
@@ -58,7 +58,7 @@ RUN npm config set registry https://registry.npmmirror.com \
 # ---------- Stage 3: runtime ----------
 # Node 22 base (matches local dev v22) + docker CLI + compose plugin
 # (compose route spawns `docker compose` as a child process).
-FROM node:22-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 
 # docker CLI + compose 插件直接取自官方 docker:cli 镜像。
 # 这样 runtime 阶段完全不需要 apt 装 docker-ce-cli —— 也就不会再去访问
