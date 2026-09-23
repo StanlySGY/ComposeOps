@@ -13,11 +13,11 @@
     "rebuild": "cd node_modules/better-sqlite3 && npx --yes prebuild-install"
   },
   "dependencies": {
-    "@fastify/static": "^7.0.4",
-    "@fastify/websocket": "^10.0.1",
+    "@fastify/static": "^10.1.4",
+    "@fastify/websocket": "^11.3.1",
     "better-sqlite3": "^11.3.0",
     "dockerode": "^4.0.2",
-    "fastify": "^4.28.1",
+    "fastify": "^5.12.5",
     "nodemailer": "^7.0.13",
     "ssh2": "^1.17.0",
     "tar-stream": "^2.2.0",
