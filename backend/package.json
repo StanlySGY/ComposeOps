@@ -18,7 +18,7 @@
     "better-sqlite3": "^11.3.0",
     "dockerode": "^4.0.2",
     "fastify": "^4.28.1",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.0.10",
     "ssh2": "^1.17.0",
     "tar-stream": "^2.2.0",
     "yaml": "^2.5.1"
