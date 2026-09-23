@@ -20,7 +20,7 @@
     "fastify": "^4.28.1",
     "nodemailer": "^7.0.13",
     "ssh2": "^1.17.0",
-    "tar-stream": "^2.2.0",
+    "tar-stream": "^3.2.1",
     "yaml": "^2.5.1"
   },
   "devDependencies": {
