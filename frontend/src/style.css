@@ -347,7 +347,7 @@ body[data-density='compact'] .data-table td { @apply !py-1.5 !px-2; }
   .agent-rich-markdown tr:nth-child(even) td { @apply bg-surface-950/30; }
   .agent-rich-markdown a { @apply text-cyan-300 underline decoration-cyan-700 underline-offset-2 hover:text-cyan-200; }
   .agent-rich-markdown hr { @apply my-4 border-surface-700; }
-  .tabs { @apply flex gap-1 border-b border-surface-800 overflow-x-auto; }
+  .tabs { @apply flex shrink-0 gap-1 border-b border-surface-800 overflow-x-auto; }
   .tabs button { @apply inline-flex items-center gap-1.5 px-3 py-2 text-sm text-surface-400 border-b-2 border-transparent whitespace-nowrap; }
   .tabs button.active { @apply text-surface-100 border-accent; }
   .settings-section { @apply card space-y-5 p-4 sm:p-6; }

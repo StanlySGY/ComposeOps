@@ -8,7 +8,7 @@
       <div class="page-actions">
         <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
           <option value="">选择项目</option>
-          <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
+          <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
         <label class="toggle-label whitespace-nowrap" title="同时展示所有项目的服务,支持跨项目依赖"><input v-model="crossProject" type="checkbox" @change="loadProject" />跨项目</label>
         <button class="btn-secondary" :disabled="loading" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
@@ -107,13 +107,14 @@ const error = ref('');
 const services = ref([]);
 const networks = ref([]);
 const volumes = ref([]);
+const composeProjects = computed(() => store.projects.filter((project) => project.editable));
 
 const nodeW = 150;
 const nodeH = 52;
 const levelGap = 220;
 const nodeGap = 90;
 
-const project = computed(() => store.projects.find((p) => p.id === selectedProjectId.value));
+const project = computed(() => composeProjects.value.find((p) => p.id === selectedProjectId.value));
 const containerCount = computed(() => (crossProject.value ? store.projects.reduce((n, p) => n + (p.containers?.length || 0), 0) : project.value?.containers?.length || 0));
 const runningContainers = computed(() => (crossProject.value ? store.projects.reduce((n, p) => n + (p.containers || []).filter((c) => c.state === 'running').length, 0) : (project.value?.containers || []).filter((c) => c.state === 'running').length));
 const networkCount = computed(() => networks.value.length);
@@ -242,7 +243,7 @@ async function loadProject() {
   networks.value = [];
   volumes.value = [];
   try {
-    const targets = crossProject.value ? store.projects : store.projects.filter((p) => p.id === selectedProjectId.value);
+    const targets = crossProject.value ? composeProjects.value : composeProjects.value.filter((p) => p.id === selectedProjectId.value);
     const results = await Promise.allSettled(targets.map((p) => api.getComposeFile(p.id, 0)));
     const allServices = [];
     const allNetworks = new Set();
@@ -281,8 +282,8 @@ async function loadProject() {
 onMounted(async () => {
   await store.refresh(false);
   // 空画布对首次访问不友好:有项目时默认选中第一个,直接展示拓扑
-  if (!selectedProjectId.value && !crossProject.value && store.projects.length) {
-    selectedProjectId.value = store.projects[0].id;
+  if (!selectedProjectId.value && !crossProject.value && composeProjects.value.length) {
+    selectedProjectId.value = composeProjects.value[0].id;
     await loadProject();
   }
 });

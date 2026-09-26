@@ -8,7 +8,7 @@
       <div class="page-actions">
         <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
           <option value="">选择项目</option>
-          <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
+          <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
         <button class="btn-secondary" :disabled="loading" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
       </div>
@@ -17,7 +17,7 @@
     <div v-else class="mb-3 flex flex-wrap items-center justify-end gap-2">
       <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
         <option value="">选择项目</option>
-        <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
+        <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
       </select>
       <button class="btn-secondary" :disabled="loading" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
     </div>
@@ -187,6 +187,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 
 const store = useServicesStore();
+const composeProjects = computed(() => store.projects.filter((project) => project.editable));
 const selectedProjectId = ref('');
 const loading = ref(false);
 const error = ref('');

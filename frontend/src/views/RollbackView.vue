@@ -29,7 +29,7 @@
       <div class="metric-tile"><span class="metric-icon text-blue-300"><FileCode2 class="h-5 w-5" /></span><span><strong>{{ composeBackups.length }}</strong><small>Compose 备份</small></span><span class="metric-meta">配置版本</span></div>
       <div class="metric-tile"><span class="metric-icon text-violet-300"><HardDrive class="h-5 w-5" /></span><span><strong>{{ volumeBackups.length }}</strong><small>数据卷备份</small></span><span class="metric-meta">持久化数据</span></div>
       <div class="metric-tile"><span class="metric-icon text-emerald-300"><GitBranch class="h-5 w-5" /></span><span><strong>{{ gitopsRepos.length }}</strong><small>GitOps 仓库</small></span><span class="metric-meta">代码版本</span></div>
-      <div class="metric-tile"><span class="metric-icon text-amber-300"><RotateCcw class="h-5 w-5" /></span><span><strong>{{ rollbackableProjects }}</strong><small>可回滚项目</small></span><span class="metric-meta">有升级备份</span></div>
+      <div class="metric-tile"><span class="metric-icon text-amber-300"><RotateCcw class="h-5 w-5" /></span><span><strong>{{ rollbackableProjectCount }}</strong><small>可回滚项目</small></span><span class="metric-meta">有升级备份</span></div>
     </div>
 
     <!-- Compose 配置备份 -->
@@ -100,7 +100,7 @@
     <!-- 镜像升级回滚 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">镜像升级回滚</h2><p class="mt-1 text-muted">升级后未通过健康检查的项目,可回滚到升级前配置</p></div>
-      <div v-if="!rollbackableProjects" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无待回滚的升级项目。</div>
+      <div v-if="!rollbackableProjectCount" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无待回滚的升级项目。</div>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>状态</th><th class="text-right">操作</th></tr></thead>
@@ -176,6 +176,7 @@ let pendingAction = null;
 let rollbackController = null;
 
 const rollbackableProjects = computed(() => store.projects.filter((p) => p.managed && p.editable && p.status !== 'running'));
+const rollbackableProjectCount = computed(() => rollbackableProjects.value.length);
 
 function reasonLabel(reason) {
   return { save: '保存', upgrade: '升级', restore: '恢复', 'env.apply': '环境变量' }[reason] || reason;
@@ -213,7 +214,10 @@ async function load() {
 }
 async function loadComposeBackups() {
   composeBackups.value = [];
-  const projects = selectedProjectId.value ? store.projects.filter((p) => p.id === selectedProjectId.value) : store.projects;
+  const projects = (selectedProjectId.value
+    ? store.projects.filter((p) => p.id === selectedProjectId.value)
+    : store.projects
+  ).filter((project) => project.managed);
   const results = await Promise.allSettled(projects.map((p) => api.getBackups(p.id)));
   for (const result of results) {
     if (result.status === 'fulfilled') {

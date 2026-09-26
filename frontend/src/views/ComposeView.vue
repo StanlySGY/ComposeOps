@@ -229,7 +229,7 @@ const popularImages = [
   { label: 'caddy:alpine', detail: 'Caddy', description: '自动 HTTPS Web 服务器' },
 ];
 const route = useRoute(); const router = useRouter();
-const editorEl = ref(null); const editorReady = ref(false); const projects = ref([]); const projectId = ref(route.query.projectId || '');
+const editorEl = ref(null); const editorReady = ref(false); const projects = ref([]); const projectsLoaded = ref(false); const projectId = ref('');
 const fileIndex = ref(0); const filePath = ref(''); const content = ref(''); const original = ref('');
 const saving = ref(false); const error = ref(''); const message = ref(''); const backups = ref([]);
 const showBackups = ref(false); const comparison = ref(null); const showConverter = ref(false);
@@ -260,11 +260,49 @@ const toast = useToastStore();
 
 onMounted(async () => {
   await Promise.all([reloadProjects(), loadTemplates()]);
-  await nextTick(); createEditor(); if (projectId.value) await load();
+  projectsLoaded.value = true;
+  await nextTick(); createEditor(); await syncProjectFromRoute();
   window.addEventListener('beforeunload', beforeUnload);
   window.addEventListener('composeops:host-changed', onHostChanged);
 });
 async function reloadProjects() { projects.value = (await api.getProjects()).projects.filter((p) => p.editable); }
+function resetLoadedConfig() {
+  fileIndex.value = 0;
+  filePath.value = '';
+  content.value = '';
+  original.value = '';
+  error.value = '';
+  message.value = '';
+  semanticIssues.value = [];
+  changePreview.value = null;
+  showPreview.value = false;
+  visualServices.value = [];
+  editor?.setValue('');
+}
+async function syncProjectFromRoute() {
+  if (!projectsLoaded.value) return;
+  const requestedId = String(route.query.projectId || '');
+  if (!requestedId) {
+    if (projectId.value) {
+      projectId.value = '';
+      resetLoadedConfig();
+    }
+    return;
+  }
+  if (!projects.value.some((item) => item.id === requestedId)) {
+    projectId.value = '';
+    resetLoadedConfig();
+    const query = { ...route.query };
+    delete query.projectId;
+    await router.replace({ query });
+    return;
+  }
+  if (projectId.value === requestedId) return;
+  projectId.value = requestedId;
+  resetLoadedConfig();
+  await load();
+}
+watch(() => route.query.projectId, () => { void syncProjectFromRoute(); });
 async function loadTemplates() {
   try {
     const [favoriteResult, builtinResult] = await Promise.all([
@@ -532,11 +570,18 @@ function findLineByContent(yamlContent, searchText, startLine = 0) {
   }
   return startLine || 1;
 }
-async function selectProject() { fileIndex.value = 0; await router.replace({ query: projectId.value ? { projectId: projectId.value } : {} }); await nextTick(); createEditor(); if (projectId.value) load(); }
+async function selectProject() { resetLoadedConfig(); await router.replace({ query: projectId.value ? { projectId: projectId.value } : {} }); await nextTick(); createEditor(); if (projectId.value) load(); }
 async function load() {
+  const requestedProjectId = projectId.value;
+  const requestedFileIndex = fileIndex.value;
   error.value = ''; message.value = ''; semanticIssues.value = []; showPreview.value = false; changePreview.value = null;
-  try { const data = await api.getComposeFile(projectId.value, fileIndex.value); filePath.value = data.path; original.value = content.value = data.content; editor?.setValue(data.content); }
-  catch (e) { error.value = e.message; }
+  try {
+    const data = await api.getComposeFile(requestedProjectId, requestedFileIndex);
+    if (projectId.value !== requestedProjectId || fileIndex.value !== requestedFileIndex || String(route.query.projectId || '') !== requestedProjectId) return;
+    filePath.value = data.path; original.value = content.value = data.content; editor?.setValue(data.content);
+  } catch (e) {
+    if (projectId.value === requestedProjectId && fileIndex.value === requestedFileIndex) error.value = e.message;
+  }
 }
 async function validateSemantics() {
   error.value = '';
