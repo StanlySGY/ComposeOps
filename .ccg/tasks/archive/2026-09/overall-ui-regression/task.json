@@ -1,0 +1,12 @@
+{
+  "id": "overall-ui-regression",
+  "title": "整体回归测试与界面巡检",
+  "status": "completed",
+  "complexity": "L",
+  "risk": "medium",
+  "domain": "frontend",
+  "currentPhase": "completed",
+  "nextAction": "归档任务并推送提交",
+  "createdAt": "2026-09-25T00:00:00Z",
+  "branch": "main"
+}
