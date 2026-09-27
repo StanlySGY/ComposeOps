@@ -63,7 +63,7 @@ function readDiskStats() {
       const pcent = parseInt(parts[4], 10) || 0;
       disk.push({ mountpoint, total: size, used, free: avail, percent: pcent });
     }
-  } catch {}
+  } catch { /* df 不可用时返回空磁盘统计。 */ }
   return disk;
 }
 
@@ -95,7 +95,7 @@ function readNetStats(prev) {
     prev.netRx = rx;
     prev.netTx = tx;
     prev.ts = now;
-  } catch {}
+  } catch { /* /proc/net/dev 不可读时返回零速率。 */ }
   return net;
 }
 async function readContainerStats() {

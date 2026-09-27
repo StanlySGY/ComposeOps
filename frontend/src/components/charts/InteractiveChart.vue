@@ -221,10 +221,6 @@ const dragEnd = ref(null);
 const wrapperRef = ref(null);
 const canvasWrapper = ref(null);
 
-// Phase 2: Touch gesture support
-const touchStartDistance = ref(0);
-const lastTouchCenter = ref(null);
-
 // Phase 2: Keyboard navigation
 const focusedPointIndex = ref(null);
 const keyboardEnabled = ref(false);
@@ -483,7 +479,7 @@ function onMouseDown(event) {
   dragEnd.value = { x, y };
 }
 
-function onMouseUp(event) {
+function onMouseUp() {
   if (!isDragging.value || !dragStart.value || !dragEnd.value) {
     isDragging.value = false;
     dragStart.value = null;

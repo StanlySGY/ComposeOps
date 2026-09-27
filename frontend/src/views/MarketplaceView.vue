@@ -30,7 +30,7 @@
         <select v-model="selectedSource" @change="loadTemplates" class="input filter-select">
           <option value="all">全部来源</option>
           <option value="builtin">内置模板</option>
-          <option value="community">社区模板</option>
+          <option value="community" :disabled="!stats.communityAvailable">社区模板(未接入)</option>
           <option value="custom">自定义模板</option>
         </select>
         <select v-model="selectedCategory" @change="loadTemplates" class="input filter-select">
@@ -43,6 +43,8 @@
         </label>
       </div>
     </section>
+
+    <p v-if="stats && !stats.communityAvailable" class="mx-4 mb-3 rounded-md border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 sm:mx-0">{{ stats.communityMessage || '社区模板源尚未接入,当前仅提供内置和自定义模板。' }}</p>
 
     <!-- 统计卡片 -->
     <section v-if="stats" class="stats-grid">
@@ -273,7 +275,7 @@ const { openAgent, updateAgentContext } = useAgentConsole();
 
 const loading = ref(false);
 const error = ref('');
-const stats = ref({ totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [] });
+const stats = ref({ totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [], communityAvailable: false, communityMessage: '' });
 const filteredTemplates = ref([]);
 const searchQuery = ref('');
 const selectedSource = ref('all');

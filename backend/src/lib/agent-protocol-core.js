@@ -71,7 +71,7 @@ export function scanIcallProtocols(source, onCall = null) {
     while (end < source.length && /\s/.test(source[end])) end += 1;
     if (source[end] !== '>') return { content: output, incomplete: true };
     if (onCall) {
-      try { onCall(JSON.parse(source.slice(jsonStart, jsonEnd))); } catch {}
+      try { onCall(JSON.parse(source.slice(jsonStart, jsonEnd))); } catch { /* 协议块解析失败时只清理可见文本。 */ }
     }
     cursor = end + 1;
     marker.lastIndex = cursor;

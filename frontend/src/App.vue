@@ -53,7 +53,7 @@ import { preloadRouteChunks } from './router.js';
 // 保住输入中状态、滚动位置与重组件(Monaco/终端/会话),切回页面零重建。
 // 实时数据页与任务页刻意不保活,切页后及时释放 WebSocket、SSE 和轮询。
 const keepAliveViews = [
-  'ComposeView', 'ShellView', 'AgentWorkflowView', 'AgentExecutionHistoryView',
+  'ComposeView', 'AgentExecutionHistoryView',
   'SettingsView', 'MarketplaceView', 'GitOpsView', 'CostAnalysisView',
   'ResourcesView', 'CMDBView', 'WorkflowCenterView',
 ];

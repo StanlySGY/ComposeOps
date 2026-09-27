@@ -31,7 +31,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { useRouter } from 'vue-router';
 import { useHostsStore } from '../stores/hosts.js';

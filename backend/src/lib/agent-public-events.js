@@ -54,7 +54,7 @@ export function toPublicAgentEvent(event) {
         const source = result === undefined ? { error: event.result?.error || '执行失败', durationMs: Number(event.result?.durationMs || 0) } : result;
         const serialized = JSON.stringify(source);
         if (typeof serialized === 'string') summary = serialized.slice(0, 600);
-      } catch {}
+      } catch { /* 结果不可序列化时使用下方的人话兜底。 */ }
     }
     if (!summary || summary === '{}' || summary === '[]' || summary === 'null') {
       summary = event.result?.success === false ? '执行失败,无返回内容' : '执行成功,该操作没有返回数据';
@@ -70,7 +70,7 @@ export function toPublicAgentEvent(event) {
   }
   if (event.type === 'tool_requested') {
     let paramsText = '';
-    try { paramsText = JSON.stringify(redactValue(event.params || {})).slice(0, 600); } catch {}
+    try { paramsText = JSON.stringify(redactValue(event.params || {})).slice(0, 600); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
     return { type: 'tool_requested', tool: String(event.tool || ''), paramsText };
   }
   // 思考/执行进度轨迹:元数据已脱敏,只透出阶段与一句话内容,供"执行动态"面板实时展示
@@ -98,7 +98,7 @@ export function toPublicAgentEvent(event) {
   if (event.type === 'tool_executing') {
     // 执行参数必须透出:此前只带工具名,点开"参数与结果"是空的,用户看不到 Agent 到底要做什么。
     let paramsText = '';
-    try { paramsText = JSON.stringify(redactValue(event.params || {})).slice(0, 800); } catch {}
+    try { paramsText = JSON.stringify(redactValue(event.params || {})).slice(0, 800); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
     return { type: 'tool_executing', tool: String(event.tool || ''), paramsText };
   }
   if (event.type === 'tool_rejected') return { type: 'tool_rejected', tool: String(event.tool || '') };

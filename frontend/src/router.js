@@ -46,8 +46,9 @@ export default createRouter({
  * 消除"第一次切到某页顿一下"的感知。失败静默,进入页面时仍会正常加载。
  */
 export function preloadRouteChunks() {
+  const excluded = new Set(['shell', 'agent', 'agent-history', 'compose', 'monitor']);
   for (const route of routes) {
-    if (typeof route.component === 'function') {
+    if (!excluded.has(route.name) && typeof route.component === 'function') {
       route.component().catch(() => {});
     }
   }

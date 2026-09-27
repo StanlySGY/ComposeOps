@@ -449,6 +449,22 @@ const MIGRATIONS = [
       `);
     }
   },
+  {
+    version: 12,
+    name: 'CMDB 关系幂等约束',
+    up(database) {
+      const hasRelations = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'asset_relations'").get();
+      if (!hasRelations) return;
+      database.exec(`
+        DELETE FROM asset_relations
+        WHERE id NOT IN (
+          SELECT MIN(id) FROM asset_relations GROUP BY source_id, target_id, relation
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_asset_relations_edge
+          ON asset_relations(source_id, target_id, relation);
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -519,11 +535,22 @@ export function addAiMessage(role, content, context = null, sessionId = null) {
   return messageId;
 }
 
-export function getAiHistory(limit = 50, sessionId = null) {
+export function getAiHistory(limit = 50, sessionId = null, beforeId = null) {
+  const hasBeforeId = Number.isSafeInteger(Number(beforeId)) && Number(beforeId) > 0;
   if (sessionId != null) {
+    if (hasBeforeId) {
+      return db.prepare(
+        'SELECT id, role, content, context, session_id AS sessionId, created_at FROM ai_history WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?'
+      ).all(sessionId, Number(beforeId), limit).reverse();
+    }
     return db.prepare(
       'SELECT id, role, content, context, session_id AS sessionId, created_at FROM ai_history WHERE session_id = ? ORDER BY id DESC LIMIT ?'
     ).all(sessionId, limit).reverse();
+  }
+  if (hasBeforeId) {
+    return db.prepare(
+      'SELECT id, role, content, context, session_id AS sessionId, created_at FROM ai_history WHERE id < ? ORDER BY id DESC LIMIT ?'
+    ).all(Number(beforeId), limit).reverse();
   }
   return db.prepare(
     'SELECT id, role, content, context, session_id AS sessionId, created_at FROM ai_history ORDER BY id DESC LIMIT ?'
@@ -1195,14 +1222,23 @@ export function deleteVolumeBackupRow(id) {
   return db.prepare('DELETE FROM volume_backups WHERE id = ?').run(Number(id)).changes > 0;
 }
 
-/** 同一(project, volume)只保留最近 N 份,返回被清理的记录(调用方负责删文件)。 */
-export function pruneVolumeBackups(projectId, volume, keep = VOLUME_BACKUP_KEEP) {
+/** 同一宿主的(project, volume)只保留最近 N 份,返回被清理的记录(调用方负责删文件)。 */
+export function pruneVolumeBackups(projectId, volume, keepOrOptions = VOLUME_BACKUP_KEEP, host = null) {
+  const options = keepOrOptions && typeof keepOrOptions === 'object' ? keepOrOptions : {};
+  const keep = Number.isInteger(options.keep) && options.keep >= 0
+    ? options.keep
+    : (Number.isInteger(keepOrOptions) && keepOrOptions >= 0 ? keepOrOptions : VOLUME_BACKUP_KEEP);
+  const scopedHost = options.host ?? host;
+  const hostClause = scopedHost ? ' AND host = ?' : '';
+  const params = scopedHost
+    ? [projectId, volume, scopedHost, projectId, volume, scopedHost, keep]
+    : [projectId, volume, projectId, volume, keep];
   return db.prepare(`
     SELECT * FROM volume_backups
-    WHERE project_id = ? AND volume = ? AND id NOT IN (
-      SELECT id FROM volume_backups WHERE project_id = ? AND volume = ? ORDER BY id DESC LIMIT ?
+    WHERE project_id = ? AND volume = ?${hostClause} AND id NOT IN (
+      SELECT id FROM volume_backups WHERE project_id = ? AND volume = ?${hostClause} ORDER BY id DESC LIMIT ?
     )
-  `).all(projectId, volume, projectId, volume, keep).map((row) => ({ id: Number(row.id), file: row.file }));
+  `).all(...params).map((row) => ({ id: Number(row.id), file: row.file, host: row.host || 'local' }));
 }
 
 // ===== 巡检报告 =====
@@ -1322,15 +1358,16 @@ export function getAsset(id) {
   return row ? mapAssetRow(row) : null;
 }
 
-export function listAssets({ kind = '', hostId = '', query = '', limit = 500 } = {}) {
+export function listAssets({ kind = '', hostId = '', query = '', limit = 500, offset = 0 } = {}) {
   const conditions = [];
   const params = [];
   if (kind) { conditions.push('kind = ?'); params.push(kind); }
   if (hostId) { conditions.push('host_id = ?'); params.push(hostId); }
   if (query) { conditions.push('(name LIKE ? OR display_name LIKE ? OR owner LIKE ?)'); const like = `%${query}%`; params.push(like, like, like); }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 500, 2000));
-  const rows = db.prepare(`SELECT * FROM assets ${where} ORDER BY kind, name LIMIT ?`).all(...params, safeLimit);
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 500, 500));
+  const safeOffset = Math.max(0, Math.min(Number(offset) || 0, 100000));
+  const rows = db.prepare(`SELECT * FROM assets ${where} ORDER BY kind, name LIMIT ? OFFSET ?`).all(...params, safeLimit, safeOffset);
   return rows.map(mapAssetRow);
 }
 
@@ -1342,19 +1379,30 @@ export function addAssetRelation(sourceId, targetId, relation, properties = {}) 
   db.prepare(`
     INSERT INTO asset_relations(source_id, target_id, relation, properties)
     VALUES(?, ?, ?, ?)
+    ON CONFLICT(source_id, target_id, relation) DO UPDATE SET properties = excluded.properties
   `).run(sourceId, targetId, String(relation || 'depends_on'), JSON.stringify(properties || {}));
   return true;
 }
 
-export function listAssetRelations() {
+export function listAssetRelations({ limit = 500, offset = 0, assetIds = null } = {}) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 500, 500));
+  const safeOffset = Math.max(0, Math.min(Number(offset) || 0, 100000));
+  const params = [];
+  let filter = '';
+  if (Array.isArray(assetIds) && assetIds.length) {
+    const placeholders = assetIds.map(() => '?').join(',');
+    filter = `WHERE r.source_id IN (${placeholders}) AND r.target_id IN (${placeholders})`;
+    params.push(...assetIds, ...assetIds);
+  }
   return db.prepare(`
     SELECT r.id, r.source_id AS sourceId, r.target_id AS targetId, r.relation, r.properties, r.created_at AS createdAt,
            s.name AS sourceName, s.kind AS sourceKind, t.name AS targetName, t.kind AS targetKind
     FROM asset_relations r
     JOIN assets s ON s.id = r.source_id
     JOIN assets t ON t.id = r.target_id
-    ORDER BY r.id
-  `).all().map((row) => ({ ...row, properties: safeParse(row.properties, {}) }));
+    ${filter}
+    ORDER BY r.id LIMIT ? OFFSET ?
+  `).all(...params, safeLimit, safeOffset).map((row) => ({ ...row, properties: safeParse(row.properties, {}) }));
 }
 
 export function deleteAssetRelation(id) {
@@ -1537,6 +1585,26 @@ export function updateWorkflowInstance(id, patch = {}) {
     WHERE id = ?
   `).run(status, currentNode, context, result, startedAt, finishedAt, id);
   return getWorkflowInstance(id);
+}
+
+/** 仅当实例仍处于指定状态时更新，避免取消与执行完成互相覆盖。 */
+export function updateWorkflowInstanceIfStatus(id, expectedStatuses, patch = {}) {
+  const current = db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(id);
+  if (!current) return null;
+  const expected = Array.isArray(expectedStatuses) ? expectedStatuses.map(String) : [String(expectedStatuses)];
+  if (!expected.includes(String(current.status))) return null;
+  const status = patch.status !== undefined ? String(patch.status) : current.status;
+  const currentNode = patch.currentNode !== undefined ? String(patch.currentNode) : current.current_node;
+  const context = patch.context !== undefined ? JSON.stringify(patch.context) : current.context;
+  const result = patch.result !== undefined ? JSON.stringify(patch.result) : current.result;
+  const startedAt = patch.startedAt !== undefined ? patch.startedAt : current.started_at;
+  const finishedAt = patch.finishedAt !== undefined ? patch.finishedAt : current.finished_at;
+  const placeholders = expected.map(() => '?').join(',');
+  const changed = db.prepare(`
+    UPDATE workflow_instances SET status = ?, current_node = ?, context = ?, result = ?, started_at = ?, finished_at = ?
+    WHERE id = ? AND status IN (${placeholders})
+  `).run(status, currentNode, context, result, startedAt, finishedAt, id, ...expected).changes;
+  return changed ? getWorkflowInstance(id) : null;
 }
 
 export function addWorkflowStep({ instanceId, nodeId = '', nodeType = '', status = 'pending', input = {}, output = {}, error = '' }) {

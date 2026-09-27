@@ -161,7 +161,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useToastStore } from '../stores/toast.js';
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
-import { AlignLeft, ArrowLeft, ArrowRightLeft, Eye, FileCode2, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
+import { AlignLeft, ArrowLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
 import DockerRunConverter from '../components/DockerRunConverter.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import { diffLines } from '../lib/diff.js';
@@ -484,7 +484,7 @@ function validateInlineErrors() {
         
         // Check for invalid port format
         if (serviceConfig.ports) {
-          serviceConfig.ports.forEach((port, idx) => {
+          serviceConfig.ports.forEach((port) => {
             const portStr = String(port);
             if (!/^\d+:\d+$/.test(portStr) && !/^\d+$/.test(portStr) && !/^[\d.]+:\d+:\d+$/.test(portStr)) {
               const portLine = findLineByContent(yamlContent, portStr, serviceLine);

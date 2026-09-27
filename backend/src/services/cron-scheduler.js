@@ -230,7 +230,7 @@ async function recordRun(job, status, error = '', duration) {
           config,
         ).catch(() => {});
       }
-    } catch {}
+    } catch { /* 单个任务状态异常不应阻断其他任务。 */ }
   }
 }
 

@@ -30,6 +30,9 @@ const nodeSchema = {
     id: { type: 'string', maxLength: 64 },
     type: { type: 'string', maxLength: 16 },
     config: { type: 'object' },
+    next: { type: 'string', maxLength: 64 },
+    onTrue: { type: 'string', maxLength: 64 },
+    onFalse: { type: 'string', maxLength: 64 },
   },
 };
 

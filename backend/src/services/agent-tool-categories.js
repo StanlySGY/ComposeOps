@@ -211,15 +211,17 @@ const PRECONDITIONS = {
   'volume.mount': [
     {
       check: async (params, context) => {
-        if (!params.hostPath) return false;
+        if (!params.source) return false;
         
         // 安全检查：路径必须在项目目录内
         const project = await findProject(context.projectId);
         if (!project) return false;
         
         const { resolve, relative } = await import('path');
-        const absHostPath = resolve(project.path, params.hostPath);
-        const relPath = relative(project.path, absHostPath);
+        const projectRoot = project.workingDir || project.path;
+        if (!projectRoot || !String(params.source).startsWith('/')) return false;
+        const absHostPath = resolve(projectRoot, params.source);
+        const relPath = relative(projectRoot, absHostPath);
         
         // 不允许 .. 跳出项目目录
         return !relPath.startsWith('..') && !relPath.startsWith('/');

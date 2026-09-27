@@ -7,6 +7,9 @@
 import { getActivityDocker } from './docker-hosts.js';
 import db, { pruneAiData } from '../lib/db.js';
 import { getSetting, setSetting } from '../lib/db.js';
+import { applyRetentionPolicy } from './metrics.js';
+
+const collectionState = { promise: null };
 
 /** 给一个 Promise 加超时,避免 Docker API 调用挂起时采集循环无限堆积。 */
 function withTimeout(promise, ms, label) {
@@ -23,25 +26,150 @@ const STATS_TIMEOUT = 10000; // container.stats 单次最多等 10 秒
  * 采集所有运行中容器的指标
  */
 export async function collectAllMetrics() {
-  try {
-    const docker = await getActivityDocker();
-    const containers = await docker.listContainers({ filters: { status: ['running'] } });
-    
-    const collected = [];
-    for (const containerInfo of containers) {
-      try {
-        const metrics = await collectContainerMetrics(containerInfo.Id);
-        collected.push({ container: containerInfo.Id, metrics });
-      } catch (error) {
-        console.error(`采集容器 ${containerInfo.Id} 指标失败:`, error.message);
+  if (collectionState.promise) return { collected: 0, skipped: true, timestamp: Date.now() };
+  const operation = (async () => {
+    try {
+      const docker = await getActivityDocker();
+      const containers = await docker.listContainers({ filters: { status: ['running'] } });
+
+      const collected = [];
+      for (const containerInfo of containers) {
+        try {
+          const metrics = await collectContainerMetrics(containerInfo.Id);
+          collected.push({ container: containerInfo.Id, metrics });
+        } catch (error) {
+          console.error(`采集容器 ${containerInfo.Id} 指标失败:`, error.message);
+        }
       }
+
+      return { collected: collected.length, timestamp: Date.now() };
+    } catch (error) {
+      console.error('采集指标失败:', error.message);
+      throw error;
     }
-    
-    return { collected: collected.length, timestamp: Date.now() };
-  } catch (error) {
-    console.error('采集指标失败:', error.message);
-    throw error;
+  })();
+  collectionState.promise = operation;
+  return operation.finally(() => {
+    if (collectionState.promise === operation) collectionState.promise = null;
+  });
+}
+
+/** 将 Docker stats 中的任意输入归一化为有限数字。 */
+function finiteMetricNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function nonNegativeMetricNumber(value) {
+  return Math.max(0, finiteMetricNumber(value));
+}
+
+function sumNonNegativeMetricValues(items, readValue) {
+  return items.reduce((sum, item) => {
+    const next = sum + nonNegativeMetricNumber(readValue(item));
+    return Number.isFinite(next) ? next : Number.MAX_VALUE;
+  }, 0);
+}
+
+/**
+ * 将单个容器的 Docker stats 转换为可持久化指标。
+ * Docker 在容器刚启动、禁用资源限制或不同存储驱动下可能省略部分字段。
+ */
+export function parseContainerMetrics(containerId, stats = {}, timestamp = Date.now()) {
+  const source = stats && typeof stats === 'object' ? stats : {};
+  const metricTimestamp = finiteMetricNumber(timestamp, Date.now());
+  const metrics = [];
+
+  // CPU 的首个 stats 样本可能没有可用的前一采样值,此时跳过而不是写入 NaN。
+  const cpuStats = source.cpu_stats || {};
+  const previousCpuStats = source.precpu_stats || {};
+  const cpuDelta = finiteMetricNumber(cpuStats.cpu_usage?.total_usage)
+    - finiteMetricNumber(previousCpuStats.cpu_usage?.total_usage);
+  const systemDelta = finiteMetricNumber(cpuStats.system_cpu_usage)
+    - finiteMetricNumber(previousCpuStats.system_cpu_usage);
+  const onlineCpus = finiteMetricNumber(cpuStats.online_cpus, 1);
+  if (systemDelta > 0 && onlineCpus > 0) {
+    const cpuPercent = Math.max(0, (cpuDelta / systemDelta) * onlineCpus * 100);
+    if (Number.isFinite(cpuPercent)) {
+      metrics.push({
+        container_id: containerId,
+        metric_type: 'cpu',
+        value: Math.round(cpuPercent * 100) / 100,
+        unit: '%',
+        timestamp: metricTimestamp
+      });
+    }
   }
+
+  // 内存没有 limit 时不写入无意义的 Infinity;缓存字段缺失按 0 处理。
+  const memoryStats = source.memory_stats || {};
+  const memoryUsed = Math.max(0,
+    finiteMetricNumber(memoryStats.usage) - finiteMetricNumber(memoryStats.stats?.cache));
+  const memoryLimit = finiteMetricNumber(memoryStats.limit);
+  if (memoryLimit > 0) {
+    const memoryPercent = (memoryUsed / memoryLimit) * 100;
+    if (Number.isFinite(memoryPercent)) {
+      metrics.push({
+        container_id: containerId,
+        metric_type: 'memory',
+        value: Math.round(memoryPercent * 100) / 100,
+        unit: '%',
+        timestamp: metricTimestamp
+      });
+    }
+  }
+
+  // 网络流量和磁盘 IO 即使缺失也保留 0 样本,便于趋势查询区分无数据与零流量。
+  const networks = source.networks && typeof source.networks === 'object' ? source.networks : {};
+  const networkValues = Object.values(networks);
+  const rxBytes = sumNonNegativeMetricValues(networkValues, (network) => network?.rx_bytes);
+  const txBytes = sumNonNegativeMetricValues(networkValues, (network) => network?.tx_bytes);
+
+  metrics.push({
+    container_id: containerId,
+    metric_type: 'network_rx',
+    value: rxBytes,
+    unit: 'bytes',
+    timestamp: metricTimestamp
+  });
+
+  metrics.push({
+    container_id: containerId,
+    metric_type: 'network_tx',
+    value: txBytes,
+    unit: 'bytes',
+    timestamp: metricTimestamp
+  });
+
+  const blkio = Array.isArray(source.blkio_stats?.io_service_bytes_recursive)
+    ? source.blkio_stats.io_service_bytes_recursive
+    : [];
+  const diskRead = sumNonNegativeMetricValues(
+    blkio.filter((item) => String(item?.op || '').toLowerCase() === 'read'),
+    (item) => item?.value
+  );
+  const diskWrite = sumNonNegativeMetricValues(
+    blkio.filter((item) => String(item?.op || '').toLowerCase() === 'write'),
+    (item) => item?.value
+  );
+
+  metrics.push({
+    container_id: containerId,
+    metric_type: 'disk_read',
+    value: diskRead,
+    unit: 'bytes',
+    timestamp: metricTimestamp
+  });
+
+  metrics.push({
+    container_id: containerId,
+    metric_type: 'disk_write',
+    value: diskWrite,
+    unit: 'bytes',
+    timestamp: metricTimestamp
+  });
+
+  return metrics;
 }
 
 /**
@@ -51,82 +179,8 @@ async function collectContainerMetrics(containerId) {
   const docker = await getActivityDocker();
   const container = docker.getContainer(containerId);
   const stats = await withTimeout(container.stats({ stream: false }), STATS_TIMEOUT, `容器 ${containerId} stats`);
-  
-  const timestamp = Date.now();
-  const metrics = [];
-  
-  // CPU 使用率
-  const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-  const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-  const cpuPercent = (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
-  
-  if (!isNaN(cpuPercent) && isFinite(cpuPercent)) {
-    metrics.push({
-      container_id: containerId,
-      metric_type: 'cpu',
-      value: Math.round(cpuPercent * 100) / 100,
-      unit: '%',
-      timestamp
-    });
-  }
-  
-  // 内存使用率
-  const memUsed = stats.memory_stats.usage - (stats.memory_stats.stats?.cache || 0);
-  const memLimit = stats.memory_stats.limit;
-  const memPercent = (memUsed / memLimit) * 100;
-  
-  if (!isNaN(memPercent) && isFinite(memPercent)) {
-    metrics.push({
-      container_id: containerId,
-      metric_type: 'memory',
-      value: Math.round(memPercent * 100) / 100,
-      unit: '%',
-      timestamp
-    });
-  }
-  
-  // 网络流量
-  const networks = stats.networks || {};
-  const rxBytes = Object.values(networks).reduce((sum, net) => sum + net.rx_bytes, 0);
-  const txBytes = Object.values(networks).reduce((sum, net) => sum + net.tx_bytes, 0);
-  
-  metrics.push({
-    container_id: containerId,
-    metric_type: 'network_rx',
-    value: rxBytes,
-    unit: 'bytes',
-    timestamp
-  });
-  
-  metrics.push({
-    container_id: containerId,
-    metric_type: 'network_tx',
-    value: txBytes,
-    unit: 'bytes',
-    timestamp
-  });
-  
-  // 磁盘 IO
-  const blkio = stats.blkio_stats.io_service_bytes_recursive || [];
-  const diskRead = blkio.find(s => s.op === 'read')?.value || 0;
-  const diskWrite = blkio.find(s => s.op === 'write')?.value || 0;
-  
-  metrics.push({
-    container_id: containerId,
-    metric_type: 'disk_read',
-    value: diskRead,
-    unit: 'bytes',
-    timestamp
-  });
-  
-  metrics.push({
-    container_id: containerId,
-    metric_type: 'disk_write',
-    value: diskWrite,
-    unit: 'bytes',
-    timestamp
-  });
-  
+  const metrics = parseContainerMetrics(containerId, stats);
+
   // 批量插入数据库
   const insert = db.prepare(`
     INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp)
@@ -164,6 +218,9 @@ export function pruneMetrics(retentionDays = 7) {
  * @param {number} intervalSeconds - 采集间隔(秒)
  */
 export function startMetricsCollection(intervalSeconds = 30) {
+  const safeIntervalSeconds = Number.isFinite(Number(intervalSeconds))
+    ? Math.max(5, Math.min(Number(intervalSeconds), 3600))
+    : 30;
   // 立即执行一次
   collectAllMetrics().catch(error => {
     console.error('初始指标采集失败:', error.message);
@@ -174,12 +231,12 @@ export function startMetricsCollection(intervalSeconds = 30) {
     collectAllMetrics().catch(error => {
       console.error('定时指标采集失败:', error.message);
     });
-  }, intervalSeconds * 1000);
+  }, safeIntervalSeconds * 1000);
   
   // 每小时清理一次过期数据;AI 会话/Agent 审计按天粒度顺带清理(每天最多跑一次)
   const pruneIntervalId = setInterval(() => {
     try {
-      pruneMetrics();
+      applyRetentionPolicy();
     } catch (error) {
       console.error('清理过期指标失败:', error.message);
     }

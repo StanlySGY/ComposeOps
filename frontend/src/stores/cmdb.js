@@ -15,13 +15,13 @@ export const useCmdbStore = defineStore('cmdb', () => {
 
   async function load(force = false) {
     if (!force && assets.value.length) {
-      api.getCmdbAssets({ limit: 2000 }).then((data) => { assets.value = data.assets || []; error.value = ''; }).catch((e) => { error.value = e.message; });
+      api.getCmdbAssets({ limit: 500 }).then((data) => { assets.value = data.assets || []; error.value = ''; }).catch((e) => { error.value = e.message; });
       return;
     }
     loading.value = true;
     error.value = '';
     try {
-      const data = await api.getCmdbAssets({ limit: 2000 });
+      const data = await api.getCmdbAssets({ limit: 500 });
       assets.value = data.assets || [];
     } catch (e) {
       error.value = e.message;

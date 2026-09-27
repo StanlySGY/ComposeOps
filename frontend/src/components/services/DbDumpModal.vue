@@ -56,7 +56,9 @@ async function dump() {
     const res = await api.streamDbDump(props.project.id, containerId.value, dbName.value.trim());
     if (!res.ok) {
       let msg = `导出失败 (HTTP ${res.status})`;
-      try { const body = await res.json(); msg = body.message || msg; } catch {}
+      try { const body = await res.json(); msg = body.message || msg; } catch {
+        // 非 JSON 错误响应沿用 HTTP 状态文本。
+      }
       throw new Error(msg);
     }
     const disposition = res.headers.get('content-disposition') || '';

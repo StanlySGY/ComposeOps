@@ -62,7 +62,7 @@ import { Activity, Bot, Boxes, ChartNoAxesCombined, ChevronDown, FileCode2, File
 import EventCenter from './EventCenter.vue';
 import HostSwitcher from './HostSwitcher.vue';
 import CommandPalette from './common/CommandPalette.vue';
-import { api } from '../api/client.js';
+import { api, bumpHostEpoch } from '../api/client.js';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 
@@ -191,22 +191,36 @@ async function switchNode(host) {
     toast.error(`切换到 ${host.name} 失败:${error?.message || '未知错误'}`);
   }
 }
+async function reloadHostProjects() {
+  try {
+    const data = await api.getProjects(true);
+    const list = asArray(data?.projects);
+    envProjects.value = list.filter((project) => project.editable);
+    allProjects.value = list;
+  } catch {
+    envProjects.value = [];
+    allProjects.value = [];
+  }
+}
+function onHostChanged() {
+  bumpHostEpoch();
+  projectSwitcherOpen.value = false;
+  void reloadHostProjects();
+  void api.getBlueprints(true).then((data) => { appBlueprints.value = asArray(data?.blueprints); }).catch(() => {});
+}
 function onGlobalKeydown(event) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); commandOpen.value = !commandOpen.value; }
 }
 onMounted(() => {
   if (!hostsStore.hosts.length) void hostsStore.load();
-  void api.getProjects(true).then((data) => {
-    const list = asArray(data?.projects);
-    envProjects.value = list.filter((project) => project.editable);
-    allProjects.value = list;
-  }).catch(() => {});
+  void reloadHostProjects();
   void api.getBlueprints().then((data) => { appBlueprints.value = asArray(data?.blueprints); }).catch(() => {});
   ping();
   currentTime.value = new Date().toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   pingTimer = setInterval(ping, 5000);
   clockTimer = setInterval(() => { currentTime.value = new Date().toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }, 30000);
   window.addEventListener('keydown', onGlobalKeydown);
+  window.addEventListener('composeops:host-changed', onHostChanged);
 });
-onUnmounted(() => { clearInterval(pingTimer); clearInterval(clockTimer); window.removeEventListener('keydown', onGlobalKeydown); });
+onUnmounted(() => { clearInterval(pingTimer); clearInterval(clockTimer); window.removeEventListener('keydown', onGlobalKeydown); window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>

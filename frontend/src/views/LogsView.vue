@@ -161,7 +161,9 @@ async function reloadProjects() {
   try {
     projects.value = (await api.getProjects()).projects.filter((project) => project.managed);
     if ((containerId.value || aggregateMode.value) && projects.value.some((project) => project.id === projectId.value)) connect();
-  } catch {}
+  } catch {
+    error.value = '项目列表刷新失败,请稍后重试';
+  }
 }
 function onProjectChange() { containerId.value = ''; selectedContainers.value = []; disconnect(); clearLines(); }
 function onContainerChange() { disconnect(); clearLines(); }
@@ -198,7 +200,9 @@ function ingest(event, aggregate) {
     }
     pending.value.push({ id: ++sequence.value, type: frame.type, data: frame.data });
     flushPending();
-  } catch {}
+  } catch {
+    // 非法 WebSocket 帧被丢弃,连接仍可继续接收后续日志。
+  }
 }
 function flushPending() {
   if (paused.value) return;

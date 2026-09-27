@@ -24,14 +24,15 @@ const assetQuery = {
     kind: { type: 'string', maxLength: 32 },
     hostId: { type: 'string', maxLength: 64 },
     query: { type: 'string', maxLength: 200 },
-    limit: { type: 'integer', minimum: 1, maximum: 2000 },
+    limit: { type: 'integer', minimum: 1, maximum: 500 },
+    offset: { type: 'integer', minimum: 0, maximum: 100000 },
   },
 };
 
 export default async function cmdbRoutes(fastify) {
   fastify.get('/assets', { schema: { querystring: assetQuery } }, async (request) => {
-    const { kind = '', hostId = '', query = '', limit } = request.query || {};
-    return { assets: queryAssets({ kind, hostId, query, limit }) };
+    const { kind = '', hostId = '', query = '', limit, offset } = request.query || {};
+    return { assets: queryAssets({ kind, hostId, query, limit, offset }) };
   });
 
   fastify.get('/assets/:id', {
@@ -57,7 +58,7 @@ export default async function cmdbRoutes(fastify) {
     return { ok: true, ...result };
   });
 
-  fastify.get('/topology', async () => getTopology());
+  fastify.get('/topology', { schema: { querystring: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 500 }, offset: { type: 'integer', minimum: 0, maximum: 100000 } } } } }, async (request) => getTopology(request.query || {}));
 
   fastify.post('/relations', {
     schema: {

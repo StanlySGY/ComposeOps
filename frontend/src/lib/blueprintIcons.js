@@ -1,5 +1,5 @@
 import {
-  BookOpen, Box, BrainCircuit, ChartColumn, Code, Container, Database,
+  BookOpen, Box, BrainCircuit, ChartColumn, Code, Database,
   FileArchive, FolderOpen, Gauge, Home, KeyRound, MonitorDown, Search,
   Shield, ShieldCheck, Workflow, Wrench,
 } from 'lucide-vue-next';

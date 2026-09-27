@@ -218,7 +218,12 @@ function applyStats(rows) {
 }
 function numberValue(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; }
 function closeStats() {
-  if (statsAbort) { try { statsAbort.abort(); } catch {} statsAbort = null; }
+  if (statsAbort) {
+    try { statsAbort.abort(); } catch {
+      // 流已结束时 abort 可能抛错,清理本地引用仍然必须继续。
+    }
+    statsAbort = null;
+  }
   if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
   metrics.value = {};
 }

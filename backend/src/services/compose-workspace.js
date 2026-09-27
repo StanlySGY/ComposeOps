@@ -259,17 +259,22 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     onOutput('stderr', chunk.toString('utf8').slice(-20000));
   });
   if (input !== undefined) stream.end(input);
+  let timer;
   try {
-    await Promise.race([Promise.all([
-    new Promise((resolve, reject) => demux.stdout.on('end', resolve).on('error', reject)),
-    new Promise((resolve, reject) => demux.stderr.on('end', resolve).on('error', reject)),
-    ]), new Promise((_, reject) => {
-      const timer = setTimeout(() => reject(Object.assign(new Error('Compose 工作命令执行超时'), { statusCode: 504 })), timeoutMs);
-      timer.unref?.();
-    })]);
+    const outputDone = Promise.all([
+      new Promise((resolve, reject) => demux.stdout.on('end', resolve).on('error', reject)),
+      new Promise((resolve, reject) => demux.stderr.on('end', resolve).on('error', reject)),
+    ]);
+    const timedOut = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error('Compose 工作命令执行超时'), { statusCode: 504 })), timeoutMs);
+    });
+    await Promise.race([outputDone, timedOut]);
   } catch (error) {
+    try { stream.destroy?.(); } catch { /* 超时清理时 stream 可能已经结束。 */ }
     demux.destroy?.();
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
   const result = await instance.inspect();
   return {

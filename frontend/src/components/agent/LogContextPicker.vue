@@ -49,7 +49,9 @@ try {
   const remembered = JSON.parse(localStorage.getItem(MEMORY_KEY) || '{}');
   projectId.value = remembered.projectId || '';
   containerId.value = remembered.containerId || '';
-} catch {}
+} catch {
+  // 本地记忆损坏时使用空选择,不阻断 Agent 工作台加载。
+}
 const logLines = ref([]);
 const loading = ref(false);
 const query = ref('');
@@ -72,7 +74,9 @@ function levelClass(level) {
 }
 function onProjectChange() { containerId.value = ''; logLines.value = []; selected.value = []; remember(); }
 function remember() {
-  try { localStorage.setItem(MEMORY_KEY, JSON.stringify({ projectId: projectId.value, containerId: containerId.value })); } catch {}
+  try { localStorage.setItem(MEMORY_KEY, JSON.stringify({ projectId: projectId.value, containerId: containerId.value })); } catch {
+    // 隐私模式或存储配额不足时仅放弃记忆,不影响当前选择。
+  }
 }
 function onContainerChange() { logLines.value = []; selected.value = []; remember(); if (containerId.value) loadLogs(); }
 function clear() { selected.value = []; }

@@ -7,7 +7,7 @@ import {
   listAssetRelations,
   deleteAssetRelation,
 } from '../lib/db.js';
-import { listHosts, getActiveHostId } from './docker-hosts.js';
+import { listHosts, getActiveHostId, getActivityDocker } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 
 /**
@@ -22,6 +22,11 @@ export async function syncAssets() {
   const activeHostId = getActiveHostId();
   const hosts = listHosts();
   const projects = await scanProjects().catch(() => []);
+  const docker = getActivityDocker();
+  const [volumeResult, networkResult] = await Promise.all([
+    docker.listVolumes().catch(() => ({ Volumes: [] })),
+    docker.listNetworks().catch(() => []),
+  ]);
 
   // 1. Host 资产
   for (const host of hosts) {
@@ -71,24 +76,55 @@ export async function syncAssets() {
     }
   }
 
-  return { hosts: hosts.length, projects: projects.length };
+  for (const volume of volumeResult?.Volumes || []) {
+    if (!volume?.Name) continue;
+    upsertAsset({
+      id: `volume:${activeHostId}:${volume.Name}`,
+      kind: 'volume',
+      name: volume.Name,
+      displayName: volume.Name,
+      hostId: activeHostId,
+      status: 'available',
+      properties: { driver: volume.Driver || '', mountpoint: volume.Mountpoint || '', scope: volume.Scope || '' },
+      source: 'docker',
+    });
+    addAssetRelation(`volume:${activeHostId}:${volume.Name}`, `host:${activeHostId}`, 'runs_on');
+  }
+  for (const network of networkResult || []) {
+    if (!network?.Id && !network?.Name) continue;
+    const networkName = network.Name || network.Id;
+    upsertAsset({
+      id: `network:${activeHostId}:${networkName}`,
+      kind: 'network',
+      name: networkName,
+      displayName: networkName,
+      hostId: activeHostId,
+      status: Object.keys(network.Containers || {}).length ? 'connected' : 'available',
+      properties: { driver: network.Driver || '', scope: network.Scope || '', internal: !!network.Internal },
+      source: 'docker',
+    });
+    addAssetRelation(`network:${activeHostId}:${networkName}`, `host:${activeHostId}`, 'runs_on');
+  }
+
+  return { hosts: hosts.length, projects: projects.length, volumes: (volumeResult?.Volumes || []).length, networks: (networkResult || []).length };
 }
 
 export function getAssetById(id) {
   return getAsset(id);
 }
 
-export function queryAssets({ kind = '', hostId = '', query = '', limit = 500 } = {}) {
-  return listAssets({ kind, hostId, query, limit });
+export function queryAssets({ kind = '', hostId = '', query = '', limit = 500, offset = 0 } = {}) {
+  return listAssets({ kind, hostId, query, limit, offset });
 }
 
 export function removeAsset(id) {
   return deleteAsset(id);
 }
 
-export function getTopology() {
-  const assets = listAssets({ limit: 2000 });
-  const relations = listAssetRelations();
+export function getTopology({ limit = 500, offset = 0 } = {}) {
+  const assets = listAssets({ limit, offset });
+  const assetIds = assets.map((asset) => asset.id);
+  const relations = assetIds.length ? listAssetRelations({ limit, offset: 0, assetIds }) : [];
   return { assets, relations };
 }
 

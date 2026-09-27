@@ -8,6 +8,8 @@
     </template>
     <template v-else>
       <span v-if="levelBadge" class="level-badge" :class="levelBadgeClass">{{ levelBadge }}</span>
+      <!-- highlighted 先完整转义原始日志,仅插入固定 mark 标签后展示。 -->
+      <!-- eslint-disable-next-line vue/no-v-html -->
       <span class="line-data" :class="levelClass" v-html="highlighted"></span>
     </template>
   </div>

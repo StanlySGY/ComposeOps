@@ -84,7 +84,14 @@ async function start() {
     streaming.value = false;
   }
 }
-function stop() { if (controller) { try { controller.abort(); } catch {} controller = null; } }
+function stop() {
+  if (controller) {
+    try { controller.abort(); } catch {
+      // 控制器已经结束时 abort 失败不影响关闭诊断弹窗。
+    }
+    controller = null;
+  }
+}
 function close() { stop(); emit('close'); }
 async function copyFix() {
   try { await navigator.clipboard.writeText(fullText.value); toast.success('修复建议已复制到剪贴板'); }

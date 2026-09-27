@@ -2,6 +2,7 @@
  * Compose 域工具注册(compose.* 生命周期 / 编排 / 日志 / ps)。
  * 由 agent-tools.js 拆分 —— 工具注册链与 helper 逐字节搬运。
  */
+import { randomUUID } from 'node:crypto';
 import { readContainerLogs } from '../../lib/docker-exec.js';
 import { spawnComposeCommand } from '../compose-runner.js';
 import { runWorkspaceComposeArgs } from '../compose-workspace.js';
@@ -17,6 +18,52 @@ function collectOutput() {
     push: (stream, chunk) => { text = `${text}${chunk}`.slice(-1024 * 1024); },
     text: () => text.slice(-20000),
   };
+}
+
+const COMPOSE_EXEC_TIMEOUT_MS = 125000;
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Docker exec 没有稳定的跨版本 stop API。把 exec shell PID 写入容器内临时文件，
+ * 超时后通过第二个短 exec 终止该 shell及其直接子进程，避免把整个业务容器杀掉。
+ */
+export function buildExecCommand(command, marker) {
+  const escaped = String(command).replace(/'/g, "'\\''");
+  const markerArg = shellQuote(marker);
+  return `marker=${markerArg}; echo "$$" > "$marker"; if command -v timeout >/dev/null 2>&1; then timeout --signal=TERM 120s /bin/sh -c '${escaped}'; else /bin/sh -c '${escaped}'; fi`;
+}
+
+async function cleanupExecMarker(container, marker) {
+  try {
+    const cleanup = await container.exec({ AttachStdout: false, AttachStderr: false, Cmd: ['/bin/sh', '-c', `rm -f ${shellQuote(marker)}`] });
+    const cleanupStream = await cleanup.start({ Tty: false });
+    await new Promise((resolve) => {
+      cleanupStream.once('end', resolve);
+      cleanupStream.once('close', resolve);
+      cleanupStream.once('error', resolve);
+      cleanupStream.resume?.();
+    });
+  } catch { /* marker 清理失败不影响后续工具调用。 */ }
+}
+
+export async function terminateExecProcess(container, marker, stream) {
+  try { stream?.destroy?.(); } catch { /* 超时时 stream 可能已经结束。 */ }
+  const killCommand = `pid=$(cat ${shellQuote(marker)} 2>/dev/null) || exit 0; [ -n "$pid" ] || exit 0; kill -TERM "$pid" 2>/dev/null || true; pkill -TERM -P "$pid" 2>/dev/null || true; sleep 1; kill -KILL "$pid" 2>/dev/null || true; pkill -KILL -P "$pid" 2>/dev/null || true; rm -f ${shellQuote(marker)}`;
+  try {
+    const killer = await container.exec({ AttachStdout: false, AttachStderr: false, Cmd: ['/bin/sh', '-c', killCommand] });
+    const killStream = await killer.start({ Tty: false });
+    await new Promise((resolve) => {
+      killStream.once('end', resolve);
+      killStream.once('close', resolve);
+      killStream.once('error', resolve);
+      killStream.resume?.();
+    });
+  } catch {
+    await cleanupExecMarker(container, marker);
+  }
 }
 /** 在 mounted / workspace 两种可编辑模式下执行任意 docker compose 参数。 */
 async function runComposeArgs(project, args, onOutput = () => {}) {
@@ -260,16 +307,21 @@ export function registerComposeTools(agent) {
         const docker = getActivityDocker();
         const container = docker.getContainer(context.container.id);
         const started = Date.now();
-        const escaped = command.replace(/'/g, "'\\''");
-        const boundedCommand = `if command -v timeout >/dev/null 2>&1; then timeout --signal=TERM 120s /bin/sh -c '${escaped}'; else /bin/sh -c '${escaped}'; fi`;
+        const marker = `/tmp/composeops-exec-${randomUUID()}.pid`;
+        const boundedCommand = buildExecCommand(command, marker);
         const exec = await container.exec({ AttachStdout: true, AttachStderr: true, Cmd: ['/bin/sh', '-c', boundedCommand] });
         const stream = await exec.start({ Tty: false });
         const chunks = [];
         const maxBytes = 1024 * 1024;
         let totalBytes = 0;
+        let deadlineTimer;
+        let timedOut = false;
         const deadline = new Promise((_, reject) => {
-          const timer = setTimeout(() => reject(Object.assign(new Error('容器命令执行超时'), { statusCode: 504 })), 125000);
-          timer.unref?.();
+          deadlineTimer = setTimeout(() => {
+            timedOut = true;
+            reject(Object.assign(new Error('容器命令执行超时,已尝试终止实际命令'), { statusCode: 504, timedOut: true }));
+          }, COMPOSE_EXEC_TIMEOUT_MS);
+          deadlineTimer.unref?.();
         });
         const readOutput = (async () => {
           for await (const chunk of stream) {
@@ -281,7 +333,16 @@ export function registerComposeTools(agent) {
             }
           }
         })();
-        await Promise.race([readOutput, deadline]);
+        try {
+          await Promise.race([readOutput, deadline]);
+        } catch (error) {
+          if (timedOut) await terminateExecProcess(container, marker, stream);
+          readOutput.catch(() => {});
+          throw error;
+        } finally {
+          clearTimeout(deadlineTimer);
+        }
+        await cleanupExecMarker(container, marker);
         const inspect = await exec.inspect().catch(() => null);
         return {
           stdout: redactText(Buffer.concat(chunks).toString('utf8')),

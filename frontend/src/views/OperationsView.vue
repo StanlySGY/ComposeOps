@@ -134,7 +134,9 @@ function loadFilters() {
   } catch { return {}; }
 }
 function saveFilters(filters) {
-  try { localStorage.setItem(STORAGE_KEY_FILTERS, JSON.stringify(filters)); } catch {}
+  try { localStorage.setItem(STORAGE_KEY_FILTERS, JSON.stringify(filters)); } catch {
+    // 筛选条件无法持久化时仍保留当前页面状态。
+  }
 }
 
 const savedFilters = loadFilters();

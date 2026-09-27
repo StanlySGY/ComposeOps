@@ -100,9 +100,6 @@ export default async function aiRoutes(fastify) {
     }
   });
 
-  // POST /api/v1/ai/exec  body: { projectId, containerId, command } —— AI 排障只读探针
-  // 不设 required:处理函数自己返回 missing_params。命令白名单归 execReadonly,
-  // schema 只挡超长载荷 —— 白名单写进 schema 就会有两份规则、且必然漂移。
   // POST /api/v1/ai/logs  body: { projectId, containerId, tail? } —— AI 排障使用的容器日志上下文
   // tail 越界由处理函数 clamp 到 20..2000,schema 只挡非数值。
   fastify.post('/logs', {
@@ -132,18 +129,21 @@ export default async function aiRoutes(fastify) {
     return { logs, count: logs.split('\n').filter((l) => l.trim()).length };
   });
 
-  // GET /api/v1/ai/history?sessionId=<id>&limit=100 —— 会话消息(留空取全部)
+  // GET /api/v1/ai/history?sessionId=<id>&limit=100&beforeId=<id> —— 会话消息游标分页
   fastify.get('/history', {
     schema: {
       querystring: {
         type: 'object',
-        properties: { sessionId: numericId, limit: limitField(200) },
+        properties: { sessionId: numericId, limit: limitField(200), beforeId: numericId },
       },
     },
   }, async (request) => {
     const sessionId = request.query?.sessionId;
+    const beforeId = request.query?.beforeId;
     const limit = Math.max(1, Math.min(Number(request.query?.limit) || 100, 200));
-    const messages = sessionId ? getAiHistory(limit + 1, Number(sessionId)) : getAiHistory(limit + 1);
+    const messages = sessionId
+      ? getAiHistory(limit + 1, Number(sessionId), beforeId)
+      : getAiHistory(limit + 1, null, beforeId);
     const hasMore = messages.length > limit;
     return { messages: hasMore ? messages.slice(1) : messages, hasMore };
   });

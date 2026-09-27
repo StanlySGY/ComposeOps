@@ -2,10 +2,10 @@ import { readFile } from 'fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { setSetting, addOperation, setProjectPreference } from '../lib/db.js';
-import { getActivityDocker } from './docker-hosts.js';
-import { spawnComposeCommand } from './compose-runner.js';
-import { withRunner, putArchiveFile } from './compose-workspace.js';
+import { getActivityDocker, getActiveHostType } from './docker-hosts.js';
+import { withRunner, putArchiveFile, runWorkspaceComposeArgs } from './compose-workspace.js';
 import { validateYaml } from '../lib/files.js';
+import { composeProjectId } from './project-id.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BLUEPRINTS_PATH = path.join(__dirname, '../data/blueprints.json');
@@ -92,7 +92,15 @@ function projectRoot(projectName) {
  * 部署蓝图:在项目目录创建 docker-compose.yml + .env,注册纳管并 up -d。
  * 返回 { projectId, projectName, workingDir, code }。
  */
-export async function deployBlueprint(blueprintId, values = {}, { onOutput = () => {}, onChild = () => {} } = {}) {
+export async function deployBlueprint(blueprintId, values = {}, options = {}) {
+  const {
+    onOutput = () => {},
+    onChild = () => {},
+    hostType = getActiveHostType(),
+    dockerClient = null,
+    workspaceRunner = withRunner,
+    composeRunner = runWorkspaceComposeArgs,
+  } = options;
   const blueprint = await getBlueprint(blueprintId);
   if (!blueprint) throw Object.assign(new Error('蓝图不存在'), { statusCode: 404 });
   const projectName = String(values.projectName || '').trim() || String(blueprint.name).toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -103,67 +111,54 @@ export async function deployBlueprint(blueprintId, values = {}, { onOutput = () 
   const envContent = renderBlueprintEnv(blueprint, { ...values, CONTAINER_NAME: safeName });
   validateYaml(compose);
 
+  if (hostType === 'tcp') {
+    throw Object.assign(new Error('TCP Docker API 节点无法验证宿主 Compose 文件路径,蓝图部署请切换到本地或 SSH 节点'), { statusCode: 409 });
+  }
+
   const root = projectRoot(safeName);
-  const docker = getActivityDocker();
+  const docker = dockerClient || getActivityDocker();
+  const projectId = composeProjectId(root, safeName);
   // 检查目录是否已存在
   const existing = await docker.listContainers({ all: true }).then((cs) => cs.filter((c) => (c.Labels || {})['com.docker.compose.project.working_dir'] === root));
   if (existing.length) throw Object.assign(new Error('同名项目已经部署'), { statusCode: 409 });
 
-  let writeMode;
-  try {
-    // 尝试宿主直写(容器内 /projects 可达)
-    const { mkdir, writeFile } = await import('fs/promises');
-    await mkdir(root, { recursive: true });
-    await writeFile(path.posix.join(root, 'docker-compose.yml'), compose, 'utf8');
-    await writeFile(path.posix.join(root, '.env'), envContent, 'utf8');
-    writeMode = 'direct';
-  } catch {
-    // 回退 workspace runner 容器写(宿主机 /projects 不一定挂到面板容器)
-    writeMode = 'workspace';
-    const mockProject = { id: `blueprint-${safeName}`, composeFiles: [path.posix.join(root, 'docker-compose.yml')], workingDir: root, managed: true, mountEnabled: true };
-    await withRunner(mockProject, async (container) => {
-      await putArchiveFile(container, root, 'docker-compose.yml', compose, { mode: 0o644, uid: 0, gid: 0 });
-      await putArchiveFile(container, root, '.env', envContent, { mode: 0o600, uid: 0, gid: 0 });
-    });
-  }
+  // 统一通过宿主可见的 workspace runner 写文件。面板容器内 mkdir 成功
+  // 不能证明 Docker daemon 所在宿主机能看到同一路径。
+  const writeMode = 'workspace';
+  const mockProject = { id: projectId, composeFiles: [path.posix.join(root, 'docker-compose.yml')], workingDir: root, managed: true, mountEnabled: true };
+  await workspaceRunner(mockProject, async (container) => {
+    await putArchiveFile(container, root, 'docker-compose.yml', compose, { mode: 0o644, uid: 0, gid: 0 });
+    await putArchiveFile(container, root, '.env', envContent, { mode: 0o600, uid: 0, gid: 0 });
+  });
 
   // 注册纳管(供后续扫描器发现)
-  setProjectPreference(safeName, { managed: true, mountEnabled: true });
+  setProjectPreference(projectId, { managed: true, mountEnabled: true });
   // 注册 compose 项目缓存标记(非容器标签,仅供扫描器经 DOCKER 标签识别;实际以容器标签为准)
   setSetting(`blueprint.${safeName}.deployed`, String(Date.now()));
 
   let code;
   try {
     const project = {
-      id: safeName,
+      id: projectId,
       projectName: safeName,
       workingDir: root,
       composeFiles: [path.posix.join(root, 'docker-compose.yml')],
-      mounted: writeMode === 'direct',
+      mounted: false,
       editable: true,
       managed: true,
       host: null,
     };
-    code = await runUp(project, { onOutput, onChild });
+    code = await runUp(project, { onOutput, onChild, composeRunner });
   } catch (error) {
     code = 1;
     onOutput('stderr', `${error.message}\n`);
   }
-  addOperation({ projectId: safeName, projectName: safeName, action: 'blueprint.deploy', status: code === 0 ? 'success' : 'failed', detail: blueprint.name });
-  return { projectId: safeName, projectName: safeName, workingDir: root, blueprint: blueprint.name, code, writeMode };
+  addOperation({ projectId, projectName: safeName, action: 'blueprint.deploy', status: code === 0 ? 'success' : 'failed', detail: blueprint.name });
+  return { projectId, projectName: safeName, workingDir: root, blueprint: blueprint.name, code, writeMode };
 }
 
-async function runUp(project, { onOutput, onChild }) {
-  if (project.mounted) {
-    return new Promise((resolve, reject) => {
-      const child = spawnComposeCommand(project, ['up', '-d']);
-      onChild(child);
-      child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
-      child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
-      child.on('error', reject);
-      child.on('close', (exitCode) => resolve(exitCode ?? 1));
-    });
-  }
-  const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
-  return runWorkspaceComposeArgs(project, ['up', '-d'], onOutput);
+async function runUp(project, { onOutput, onChild, composeRunner }) {
+  return composeRunner(project, ['up', '-d'], onOutput, {
+    onExec: (handle) => onChild(handle),
+  });
 }

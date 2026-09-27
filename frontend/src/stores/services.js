@@ -77,7 +77,9 @@ export const useServicesStore = defineStore('services', () => {
 
   function stopWebSocket() {
     if (wsHook) {
-      try { wsHook.close(); } catch {}
+      try { wsHook.close(); } catch {
+        // Socket 已关闭时 close 失败不应阻断轮询降级。
+      }
       wsHook = null;
     }
     if (containerEventDebounce) { clearTimeout(containerEventDebounce); containerEventDebounce = null; }

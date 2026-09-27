@@ -1,9 +1,9 @@
 import { access } from 'fs/promises';
-import { createHash } from 'crypto';
 import path from 'node:path';
 import { getActiveHostType, getActivityDocker } from './docker-hosts.js';
 import { getProjectMountEnabled, getProjectPreference } from '../lib/db.js';
 import { safeProjectMountPath } from './mount-plan.js';
+import { composeProjectId } from './project-id.js';
 
 const COMPOSE_PROJECT_LABEL = 'com.docker.compose.project';
 const COMPOSE_WORKDIR_LABEL = 'com.docker.compose.project.working_dir';
@@ -54,10 +54,6 @@ export async function scanAndGroupServices() {
   return { owners, groupedByOwner };
 }
 
-function projectId(workingDir, projectName) {
-  return createHash('sha256').update(`${workingDir}\0${projectName}`).digest('hex').slice(0, 20);
-}
-
 function parseComposeFiles(raw, workingDir) {
   const files = String(raw || '').split(',').map((item) => item.trim()).filter(Boolean);
   return files.length ? files : (workingDir ? [`${workingDir}/docker-compose.yml`] : []);
@@ -85,7 +81,7 @@ export async function scanProjects() {
 
     if (!projects.has(key)) {
       projects.set(key, {
-        id: projectId(workingDir, projectName),
+        id: composeProjectId(workingDir, projectName),
         projectName,
         owner,
         workingDir,

@@ -97,7 +97,9 @@ function detectAnomaliesMovingAverage(metrics, windowSize = 10, deviationThresho
     const window = metrics.slice(i - windowSize, i);
     const movingAvg = window.reduce((sum, m) => sum + m.value, 0) / windowSize;
     const currentValue = metrics[i].value;
-    const deviation = Math.abs(currentValue - movingAvg) / movingAvg;
+    const deviation = movingAvg === 0
+      ? (currentValue === 0 ? 0 : 1)
+      : Math.abs(currentValue - movingAvg) / Math.abs(movingAvg);
 
     if (deviation > deviationThreshold) {
       anomalies.push({
@@ -232,14 +234,16 @@ export function queryHistoricalMetrics({
     params.push(metricType);
   }
 
-  if (startTime) {
+  const hasStartTime = startTime !== undefined && startTime !== null && Number.isFinite(Number(startTime));
+  const hasEndTime = endTime !== undefined && endTime !== null && Number.isFinite(Number(endTime));
+  if (hasStartTime) {
     query += ' AND timestamp >= ?';
-    params.push(startTime);
+    params.push(Number(startTime));
   }
 
-  if (endTime) {
+  if (hasEndTime) {
     query += ' AND timestamp <= ?';
-    params.push(endTime);
+    params.push(Number(endTime));
   }
 
   query += ' ORDER BY timestamp ASC';
@@ -247,8 +251,8 @@ export function queryHistoricalMetrics({
   const metrics = db.prepare(query).all(...params);
 
   // 自动聚合
-  if (aggregation === 'auto' && startTime && endTime) {
-    const timeRange = endTime - startTime;
+  if (aggregation === 'auto' && hasStartTime && hasEndTime) {
+    const timeRange = Number(endTime) - Number(startTime);
     const { interval } = getAggregationInterval(timeRange);
     return aggregateMetrics(metrics, interval);
   }

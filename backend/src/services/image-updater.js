@@ -112,7 +112,7 @@ export async function getProjectUpdates(project, { force = false } = {}) {
   const docker = getActivityDocker();
   let composeContent = '';
   if (project.mounted) {
-    try { composeContent = (await readCompose(project, 0)).content; } catch {}
+    try { composeContent = (await readCompose(project, 0)).content; } catch { /* 本地 Compose 不可读时尝试 workspace。 */ }
   } else if (project.workspaceAvailable) {
     try {
       composeContent = await withRunner(project, async (container) => {
@@ -120,7 +120,7 @@ export async function getProjectUpdates(project, { force = false } = {}) {
         return content;
       });
       composeContent = composeContent || '';
-    } catch {}
+    } catch { /* workspace Compose 不可读时返回无配置结果。 */ }
   }
   const refs = extractImageRefs(composeContent);
   const images = [];
@@ -186,7 +186,7 @@ async function writeUpgradeBackups(project) {
         await writeFile(backupPath, content, 'utf8');
         addComposeBackup(project.id, file, content, 'upgrade');
         backups.push({ path: backupPath, file, content });
-      } catch {}
+      } catch { /* 单个备份文件不可读时继续扫描其他文件。 */ }
     }
     const envPath = path.posix.join(project.workingDir, '.env');
     try {
@@ -194,7 +194,7 @@ async function writeUpgradeBackups(project) {
       const backupPath = `${envPath}${stamp}`;
       await copyFile(envPath, backupPath);
       backups.push({ path: backupPath, file: envPath, content });
-    } catch {}
+    } catch { /* env 备份不可读时继续扫描其他文件。 */ }
   }
   return backups;
 }
@@ -280,7 +280,7 @@ export async function rollbackProject(project, { onOutput = () => {}, onChild = 
         if (index < 0) continue;
         await writeFile(filePath, backup.content, 'utf8');
         restored += 1;
-      } catch {}
+      } catch { /* 单个项目恢复失败时继续处理其他项目。 */ }
     }
   } else {
     for (const backup of backups.slice(0, 1)) {
@@ -292,7 +292,7 @@ export async function rollbackProject(project, { onOutput = () => {}, onChild = 
           await putArchiveFile(container, path.posix.dirname(backup.filePath), path.posix.basename(backup.filePath), backup.content, previous.header);
         });
         restored += 1;
-      } catch {}
+      } catch { /* 单个环境文件恢复失败时继续处理其他文件。 */ }
     }
   }
   if (!restored) throw Object.assign(new Error('未找到可恢复的 Compose 备份'), { statusCode: 409 });

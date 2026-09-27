@@ -54,7 +54,7 @@ export default async function metricsRoutes(fastify) {
             container: { type: 'string', description: '容器 ID 或名称' },
             metric: { type: 'string', enum: ['cpu', 'memory', 'network', 'disk'] },
             threshold: { type: 'number', description: '阈值' },
-            duration: { type: 'string', description: '持续时间', default: '5m' },
+            duration: { type: 'string', maxLength: 16, pattern: '^[1-9][0-9]*(s|m|h|d)$', description: '持续时间', default: '5m' },
             action: { type: 'string', enum: ['notify', 'restart', 'scale'], default: 'notify' }
           }
         }
@@ -131,8 +131,8 @@ export default async function metricsRoutes(fastify) {
       const metrics = queryHistoricalMetrics({
         containerId: container.id,
         metricType,
-        startTime: startTime ? parseInt(startTime, 10) : undefined,
-        endTime: endTime ? parseInt(endTime, 10) : undefined,
+        startTime: startTime !== undefined ? parseInt(startTime, 10) : undefined,
+        endTime: endTime !== undefined ? parseInt(endTime, 10) : undefined,
         aggregation: aggregation === 'auto' ? 'auto' : parseInt(aggregation, 10),
       });
 
@@ -194,6 +194,8 @@ export default async function metricsRoutes(fastify) {
             containerId: { type: 'string', description: '容器 ID' },
             metricType: { type: 'string', description: '指标类型' },
             hours: { type: 'integer', description: '检测小时数', default: 24 },
+            startTime: { type: 'integer', description: '开始时间戳(毫秒,优先于 hours)' },
+            endTime: { type: 'integer', description: '结束时间戳(毫秒,优先于 hours)' },
             algorithms: { 
               type: 'array', 
               items: { type: 'string', enum: ['z_score', 'moving_average', 'trend'] },
@@ -204,12 +206,18 @@ export default async function metricsRoutes(fastify) {
         }
       }
     },
-    async (request) => {
-      const { containerId, metricType, hours = 24, algorithms = ['z_score', 'moving_average', 'trend'] } = request.body;
+    async (request, reply) => {
+      const { containerId, metricType, hours = 24, startTime: requestedStart, endTime: requestedEnd, algorithms = ['z_score', 'moving_average', 'trend'] } = request.body;
       const { container } = await resolveManagedContainer(containerId);
 
-      const endTime = Date.now();
-      const startTime = endTime - hours * 3600 * 1000;
+      const endTime = Number.isFinite(Number(requestedEnd)) ? Number(requestedEnd) : Date.now();
+      const requestedHours = Number(hours);
+      const startTime = Number.isFinite(Number(requestedStart))
+        ? Number(requestedStart)
+        : endTime - (Number.isFinite(requestedHours) && requestedHours >= 0 ? requestedHours : 24) * 3600 * 1000;
+      if (startTime > endTime) {
+        return reply.code(400).send({ error: 'invalid_time_range', message: '指标时间范围无效' });
+      }
 
       const metrics = queryHistoricalMetrics({
         containerId: container.id,
@@ -223,7 +231,7 @@ export default async function metricsRoutes(fastify) {
       return {
         anomalies,
         count: anomalies.length,
-        timeRange: { start: startTime, end: endTime, hours },
+        timeRange: { start: startTime, end: endTime, hours: (endTime - startTime) / 3600000 },
       };
     }
   );

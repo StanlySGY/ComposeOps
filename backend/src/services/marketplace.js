@@ -6,7 +6,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getSetting, setSetting } from '../lib/db.js';
 import { getAiConfig, callOpenAI, searchWeb, UNTRUSTED_GUARD } from './ai.js';
-import { validateYaml } from '../lib/files.js';
+import { parseYaml, validateYaml } from '../lib/files.js';
+import { validateComposeSemantics } from './compose-validator.js';
 import { listBlueprints } from './app-blueprints.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,41 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export async function getCommunityTemplates() {
   // 没有真实社区源。以前这里写死下载量和评分,并缓存 24 小时。
   return [];
+}
+
+export function getCommunitySourceStatus() {
+  const configured = String(getSetting('marketplace.community.source', '') || '').trim();
+  return configured
+    ? { available: false, configured: true, message: '已配置社区源,但当前版本尚未实现远程源同步' }
+    : { available: false, configured: false, message: '社区模板源尚未接入,当前仅提供内置和自定义模板' };
+}
+
+function validateTemplateCompose(content) {
+  const compose = String(content || '');
+  if (!compose.trim() || compose.length > 2 * 1024 * 1024) {
+    throw Object.assign(new Error('Compose 内容为空或超过 2MB'), { statusCode: 400 });
+  }
+  validateYaml(compose);
+  const document = parseYaml(compose);
+  if (!document?.services || typeof document.services !== 'object' || !Object.keys(document.services).length) {
+    throw Object.assign(new Error('Compose 顶层必须包含至少一个 services 服务'), { statusCode: 422 });
+  }
+  const issues = validateComposeSemantics(compose);
+  const errors = issues.filter((issue) => issue.level === 'error');
+  if (errors.length) {
+    throw Object.assign(new Error(`Compose 语义校验失败:${errors.slice(0, 3).map((issue) => issue.message).join('; ')}`), { statusCode: 422, issues });
+  }
+  return issues;
+}
+
+function normalizeEnvSchema(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 32).map((item) => ({
+    key: String(item?.key || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 80),
+    label: String(item?.label || item?.key || '').slice(0, 100),
+    default: String(item?.default ?? '').slice(0, 1000),
+    type: ['text', 'number', 'password'].includes(item?.type) ? item.type : 'text',
+    secret: !!item?.secret,
+  })).filter((item) => item.key);
 }
 
 /**
@@ -46,13 +82,13 @@ function parseJsonLoose(text) {
   const candidate = fenced ? fenced[1] : source;
   try {
     return JSON.parse(candidate.trim());
-  } catch {}
+  } catch { /* 模型返回非 JSON 时继续尝试提取对象片段。 */ }
   const first = candidate.indexOf('{');
   const last = candidate.lastIndexOf('}');
   if (first >= 0 && last > first) {
     try {
       return JSON.parse(candidate.slice(first, last + 1));
-    } catch {}
+    } catch { /* 候选片段不是合法 JSON 时继续尝试下一种边界。 */ }
   }
   return null;
 }
@@ -102,21 +138,22 @@ export async function discoverTemplateWithAI(query) {
 export async function createCustomTemplate(template) {
   const { name, category, description, defaultCompose, envSchema } = template;
   
-  if (!name?.trim()) throw new Error('模板名称不能为空');
-  if (!defaultCompose?.trim()) throw new Error('Compose 内容不能为空');
+  if (!name?.trim()) throw Object.assign(new Error('模板名称不能为空'), { statusCode: 400 });
+  if (!defaultCompose?.trim()) throw Object.assign(new Error('Compose 内容不能为空'), { statusCode: 400 });
+  validateTemplateCompose(defaultCompose);
   
   const customs = await getCustomTemplates();
   const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   
   const newTemplate = {
     id,
-    name: name.trim(),
-    category: category?.trim() || 'Custom',
-    description: description?.trim() || '',
+    name: name.trim().slice(0, 200),
+    category: category?.trim().slice(0, 50) || 'Custom',
+    description: description?.trim().slice(0, 500) || '',
     author: 'user',
     createdAt: new Date().toISOString(),
-    defaultCompose,
-    envSchema: envSchema || []
+    defaultCompose: String(defaultCompose),
+    envSchema: normalizeEnvSchema(envSchema),
   };
   
   customs.push(newTemplate);
@@ -132,10 +169,22 @@ export async function updateCustomTemplate(id, updates) {
   const customs = await getCustomTemplates();
   const index = customs.findIndex(t => t.id === id);
   
-  if (index === -1) throw new Error('模板不存在');
+  if (index === -1) throw Object.assign(new Error('模板不存在'), { statusCode: 404 });
   if (!customs[index].id.startsWith('custom-')) throw new Error('只能编辑自定义模板');
   
-  customs[index] = { ...customs[index], ...updates, updatedAt: new Date().toISOString() };
+  const next = { ...customs[index], ...updates };
+  if (!next.name?.trim()) throw Object.assign(new Error('模板名称不能为空'), { statusCode: 400 });
+  if (!next.defaultCompose?.trim()) throw Object.assign(new Error('Compose 内容不能为空'), { statusCode: 400 });
+  validateTemplateCompose(next.defaultCompose);
+  customs[index] = {
+    ...next,
+    name: String(next.name).trim().slice(0, 200),
+    category: String(next.category || 'Custom').trim().slice(0, 50) || 'Custom',
+    description: String(next.description || '').trim().slice(0, 500),
+    defaultCompose: String(next.defaultCompose),
+    envSchema: normalizeEnvSchema(next.envSchema),
+    updatedAt: new Date().toISOString(),
+  };
   setSetting('marketplace.custom.templates', JSON.stringify(customs));
   
   return customs[index];
@@ -148,7 +197,7 @@ export async function deleteCustomTemplate(id) {
   const customs = await getCustomTemplates();
   const index = customs.findIndex(t => t.id === id);
   
-  if (index === -1) throw new Error('模板不存在');
+  if (index === -1) throw Object.assign(new Error('模板不存在'), { statusCode: 404 });
   if (!customs[index].id.startsWith('custom-')) throw new Error('只能删除自定义模板');
   
   customs.splice(index, 1);
@@ -210,7 +259,8 @@ export async function getAllTemplates() {
   return {
     builtin: builtin.map(markFavorite),
     community: community.map(markFavorite),
-    custom: custom.map(markFavorite)
+    custom: custom.map(markFavorite),
+    communityStatus: getCommunitySourceStatus(),
   };
 }
 
@@ -267,6 +317,8 @@ export async function getMarketplaceStats() {
     totalCommunity: allTemplates.community.length,
     totalCustom: allTemplates.custom.length,
     totalFavorites: favorites.length,
+    communityAvailable: getCommunitySourceStatus().available,
+    communityMessage: getCommunitySourceStatus().message,
     categories: [...new Set([
       ...allTemplates.builtin.map(t => t.category),
       ...allTemplates.community.map(t => t.category),

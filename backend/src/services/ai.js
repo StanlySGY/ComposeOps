@@ -114,7 +114,7 @@ function stripBareToolCallProtocol(text, calls) {
         continue;
       }
       if (calls) {
-        try { createTextToolCall(JSON.parse(segment.slice(jsonStart, jsonEnd + 1)), calls); } catch {}
+        try { createTextToolCall(JSON.parse(segment.slice(jsonStart, jsonEnd + 1)), calls); } catch { /* 非法协议片段不应进入工具调用。 */ }
       }
       result += segment.slice(cursor, match.index);
       cursor = jsonEnd + 1;
@@ -130,7 +130,7 @@ function sanitizeTextToolProtocol(text) {
   const calls = [];
   const pattern = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
   const withoutClosedXml = source.replace(pattern, (whole, raw) => {
-    try { createTextToolCall(JSON.parse(raw), calls); } catch {}
+    try { createTextToolCall(JSON.parse(raw), calls); } catch { /* 非法协议片段不应进入工具调用。 */ }
     return '';
   });
   const withoutOpenXml = withoutClosedXml
@@ -395,7 +395,7 @@ export async function callOpenAI({ baseUrl, apiKey, model, messages, tools, stre
         if (json?.usage) {
           usage = json.usage;
         }
-      } catch {}
+      } catch { /* 单条搜索结果解析失败时继续处理其他结果。 */ }
     }
   }
   if (onToken) flushBufferedVisibleText(fullText, emittedContentLength, onToken);
@@ -451,7 +451,7 @@ export async function searchWeb(query) {
         }
       }
     }
-  } catch {}
+  } catch { /* 第一个搜索源失败时尝试后备源。 */ }
   try {
     const timeout = AbortSignal.timeout(8000);
     const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`, {
@@ -470,7 +470,7 @@ export async function searchWeb(query) {
         if (title) results.push({ title: title.slice(0, 120), url: topic.FirstURL || '', snippet: topic.Text || '', sourceType: 'search_summary' });
       }
     }
-  } catch {}
+  } catch { /* 后备搜索源失败时返回已收集结果。 */ }
   if (!results.length) {
     // 回退:html.duckduckgo.com 摘要抽取
     try {
@@ -487,7 +487,7 @@ export async function searchWeb(query) {
           if (text) results.push({ title: '', url: '', snippet: text.slice(0, 200), sourceType: 'search_summary' });
         }
       }
-    } catch {}
+      } catch { /* 单条结果字段异常时跳过该结果。 */ }
   }
   return results.filter((item, index, list) => item.url || list.findIndex((candidate) => candidate.snippet === item.snippet) === index).slice(0, 8);
 }

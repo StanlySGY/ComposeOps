@@ -14,6 +14,19 @@ const activeExecSessions = new Map(); // socket -> { idleTimer, destroyed }
 export { MAX_EXEC_SESSIONS, EXEC_SESSION_TIMEOUT_MS, activeExecSessions };
 
 /**
+ * 释放 Web Shell 会话占用。路由中的 Docker exec 建立可能在 socket 已登记后
+ * 失败，因此清理必须独立且幂等，不能只依赖 close/end 事件。
+ */
+export function teardownExecSession(socket) {
+  const session = activeExecSessions.get(socket);
+  if (!session) return false;
+  session.destroyed = true;
+  if (session.idleTimer) clearTimeout(session.idleTimer);
+  activeExecSessions.delete(socket);
+  return true;
+}
+
+/**
  * WebSocket 路由：实时日志流与容器 Web Shell。
  *
  * - GET/WS /api/v1/ws/logs?containerId=<id>&tail=200
@@ -130,12 +143,12 @@ export default async function wsRoutes(fastify) {
     logStream.on('error', (e) => safeSend(socket, { type: 'error', data: e.message }));
     logStream.on('end', () => {
       safeSend(socket, { type: 'end', data: 'log stream ended' });
-      try { socket.close(); } catch {}
+      try { socket.close(); } catch { /* socket 已关闭时忽略重复 close。 */ }
     });
 
     // 客户端断开 -> 停止日志流
     socket.on('close', () => {
-      try { logStream.destroy(); } catch {}
+      try { logStream.destroy(); } catch { /* 日志流已结束时忽略重复销毁。 */ }
     });
   });
 
@@ -211,15 +224,11 @@ export default async function wsRoutes(fastify) {
       session.idleTimer = setTimeout(() => {
         if (session.destroyed) return;
         safeSend(socket, { type: 'error', data: '会话因超过 30 分钟无操作已自动关闭' });
-        try { socket.close(); } catch {}
+        try { socket.close(); } catch { /* socket 已关闭时忽略重复 close。 */ }
       }, EXEC_SESSION_TIMEOUT_MS);
     };
     const teardown = () => {
-      const session = activeExecSessions.get(socket);
-      if (!session) return;
-      session.destroyed = true;
-      if (session.idleTimer) clearTimeout(session.idleTimer);
-      activeExecSessions.delete(socket);
+      teardownExecSession(socket);
     };
     refreshIdle();
 
@@ -234,6 +243,7 @@ export default async function wsRoutes(fastify) {
       });
     } catch (e) {
       socket.send(JSON.stringify({ type: 'error', data: e.message }));
+      teardown();
       return socket.close();
     }
 
@@ -242,6 +252,7 @@ export default async function wsRoutes(fastify) {
       stream = await exec.start({ hijack: true, stdin: true, Tty: true });
     } catch (e) {
       socket.send(JSON.stringify({ type: 'error', data: e.message }));
+      teardown();
       return socket.close();
     }
 
@@ -250,11 +261,12 @@ export default async function wsRoutes(fastify) {
       if (socket.readyState === WebSocket.OPEN) socket.send(b);
     });
     stream.on('error', (e) => {
+      teardown();
       safeSend(socket, { type: 'error', data: e.message });
     });
     stream.on('end', () => {
       teardown();
-      try { socket.close(); } catch {}
+      try { socket.close(); } catch { /* socket 已关闭时忽略重复 close。 */ }
     });
 
     // 统一收消息：JSON 控制帧（resize）走控制路径，二进制/文本走容器 stdin。
@@ -272,7 +284,7 @@ export default async function wsRoutes(fastify) {
             }
             // 其它未知控制帧忽略，不写入 stdin
             return;
-          } catch {
+            } catch {
             // 解析失败视为普通输入
           }
         }
@@ -280,12 +292,12 @@ export default async function wsRoutes(fastify) {
       refreshIdle();
       try {
         if (stream.writable) stream.write(Buffer.isBuffer(data) ? data : Buffer.from(data));
-      } catch {}
+      } catch { /* 客户端断开时忽略写入失败。 */ }
     });
 
     socket.on('close', () => {
       teardown();
-      try { stream.destroy(); } catch {}
+      try { stream.destroy(); } catch { /* stream 已结束时忽略重复销毁。 */ }
     });
   });
 }
@@ -295,7 +307,7 @@ function safeSend(socket, payload) {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(payload));
     }
-  } catch {}
+  } catch { /* WebSocket 路由清理必须保持幂等。 */ }
 }
 
 /** 日志行级别分类:error / warn / info,供前端过滤与高亮。 */

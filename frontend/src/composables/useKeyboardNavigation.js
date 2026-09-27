@@ -7,7 +7,6 @@ import { onBeforeUnmount, onMounted } from 'vue';
  * - 在 Input / Textarea / contenteditable / Monaco 聚焦时自动禁用全部快捷键。
  */
 const ACTIVE_TAG = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
-const ACTIVE_ATTR = 'contenteditable';
 
 /**
  * @param {object} opts

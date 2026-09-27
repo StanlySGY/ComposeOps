@@ -23,7 +23,7 @@ export function subscribeEvents(callback) {
 export function emitEvent(payload) {
   const event = { ts: Date.now(), ...payload };
   for (const subscriber of SUBSCRIBERS) {
-    try { subscriber(event); } catch {}
+    try { subscriber(event); } catch { /* 单个订阅者异常不应阻断事件广播。 */ }
   }
   return event;
 }

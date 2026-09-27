@@ -32,12 +32,16 @@ export function pushMonitorTrend({ cpu, mem, net }) {
 
 export function resetMonitorTrends() {
   monitorTrends.value = { cpu: [], mem: [], net: [] };
-  try { localStorage.removeItem(TRENDS_KEY); } catch {}
+  try { localStorage.removeItem(TRENDS_KEY); } catch {
+    // 趋势内存状态已经清空,持久化清理失败不影响当前页面。
+  }
 }
 
 function persist() {
   try {
     const t = monitorTrends.value;
     localStorage.setItem(TRENDS_KEY, JSON.stringify({ cpu: t.cpu, mem: t.mem, net: t.net, ts: Date.now() }));
-  } catch {}
+  } catch {
+    // 本地存储不可用时继续以内存趋势运行。
+  }
 }

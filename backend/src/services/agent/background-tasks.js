@@ -142,7 +142,7 @@ export function stopBackgroundTask(taskId) {
   if (child && typeof child.kill === 'function' && child.exitCode === null && !child.killed) {
     child.kill('SIGTERM');
     setTimeout(() => {
-      try { if (child.exitCode === null) child.kill('SIGKILL'); } catch {}
+      try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* 子进程可能已自行退出。 */ }
     }, 5000).unref?.();
     return { stopped: true, killed: true };
   }
@@ -176,7 +176,7 @@ export function drainTaskNotifications(sessionId) {
 export function resetBackgroundTasks() {
   for (const task of tasks.values()) {
     if (task.status === 'running' && task.child?.kill) {
-      try { task.child.kill('SIGKILL'); } catch {}
+      try { task.child.kill('SIGKILL'); } catch { /* 停止竞态下子进程可能已退出。 */ }
     }
   }
   tasks.clear();

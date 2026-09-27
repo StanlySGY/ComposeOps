@@ -180,7 +180,7 @@
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';
-import { Bot, RefreshCw, Rocket, ShieldCheck } from 'lucide-vue-next';
+import { Bot, RefreshCw, Rocket } from 'lucide-vue-next';
 import { api, streamComposeControl } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';

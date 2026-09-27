@@ -119,6 +119,57 @@ test('routes: schema 校验失败沿用全站 { error, message } 契约', async 
   assert.match(body.message, /校验失败/);
 });
 
+test('routes: 市场状态字段保留且不存在模板返回 404', async () => {
+  const setup = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/setup',
+    headers: { origin: 'http://localhost:3001', host: 'localhost:3001' },
+    payload: { password: 'route-test-password' },
+  });
+  assert.equal(setup.statusCode, 200);
+  const cookie = String(setup.headers['set-cookie']).split(';', 1)[0];
+  const headers = { cookie, origin: 'http://localhost:3001', host: 'localhost:3001' };
+
+  const templates = await app.inject({ method: 'GET', url: '/api/v1/marketplace/templates', headers });
+  assert.equal(templates.statusCode, 200);
+  const templateBody = templates.json();
+  assert.ok(Array.isArray(templateBody.builtin));
+  assert.ok(Array.isArray(templateBody.community));
+  assert.ok(Array.isArray(templateBody.custom));
+  assert.equal(templateBody.communityStatus.available, false);
+  assert.equal(typeof templateBody.communityStatus.message, 'string');
+
+  const stats = await app.inject({ method: 'GET', url: '/api/v1/marketplace/stats', headers });
+  assert.equal(stats.statusCode, 200);
+  assert.equal(stats.json().communityAvailable, false);
+  assert.equal(typeof stats.json().communityMessage, 'string');
+
+  for (const method of ['PATCH', 'DELETE']) {
+    const response = await app.inject({
+      method,
+      url: '/api/v1/marketplace/templates/custom/does-not-exist',
+      headers,
+      payload: method === 'PATCH' ? { name: 'missing' } : undefined,
+    });
+    assert.equal(response.statusCode, 404, `${method} 不存在模板应返回 404`);
+  }
+});
+
+test('routes: 蓝图列表等待异步加载并返回数组', async () => {
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/v1/ops/blueprints',
+    headers: { cookie: String((await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { origin: 'http://localhost:3001', host: 'localhost:3001' },
+      payload: { password: 'route-test-password' },
+    })).headers['set-cookie']).split(';', 1)[0] },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.ok(Array.isArray(response.json().blueprints));
+});
+
 test('routes: 未注册路径返回 404 而不是 401', async () => {
   const response = await app.inject({ method: 'GET', url: '/definitely-not-a-route' });
   assert.equal(response.statusCode, 404);

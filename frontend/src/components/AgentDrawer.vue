@@ -43,7 +43,7 @@ const { open, context, closeAgent } = useAgentConsole();
 // 抽屉用自己的 channel:与 AI 助手工作台的状态彻底隔离。
 // 在别的页面点"页面 Agent"应该是全新会话,而不是续上工作台里那段对话。
 const chat = useAgentChat({ channel: PAGE_DRAWER_CHANNEL });
-const { messages, input, running, sessionId, scrollEl, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom } = chat;
+const { messages, input, running, scrollEl, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom } = chat;
 const inputEl = ref(null);
 // 页面通过"交给 Agent"按钮携带一段预填 prompt 打开抽屉:事件可能早于
 // open 的 watch 派发,先暂存,startFreshSession 清空输入后再写入。

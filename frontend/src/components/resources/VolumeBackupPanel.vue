@@ -44,7 +44,7 @@
               <td class="px-3 py-2 text-zinc-500">{{ formatTime(backup.createdAt) }}</td>
               <td class="px-3 py-2"><span class="rounded bg-surface-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">{{ backup.host }}</span></td>
               <td class="whitespace-nowrap px-3 py-2 text-right">
-                <a v-if="backup.host === 'local'" :href="api.volumeBackupDownloadUrl(backup.id)" class="mr-2 inline-flex text-cyan-400 hover:text-cyan-300" title="下载"><Download class="h-3.5 w-3.5" /></a>
+                <a :href="api.volumeBackupDownloadUrl(backup.id)" class="mr-2 inline-flex text-cyan-400 hover:text-cyan-300" title="下载"><Download class="h-3.5 w-3.5" /></a>
                 <button class="mr-2 text-amber-400 hover:text-amber-300" title="恢复到卷(覆盖现有内容)" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" /></button>
                 <button class="text-zinc-500 hover:text-rose-300" title="删除备份" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
               </td>
@@ -55,13 +55,13 @@
       </div>
     </div>
 
-    <ConfirmDialog :show="restoreTarget !== null" title="恢复数据卷" :message="`将用备份覆盖卷「${restoreTarget?.volume}」的现有内容,容器内服务正在写入时建议先停止。继续?`" tone="warning" confirm-text="覆盖恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
+    <ConfirmDialog :show="restoreTarget !== null" title="恢复数据卷" :message="`将用 ${restoreTarget?.host || 'local'} 节点上的备份覆盖卷「${restoreTarget?.volume}」的现有内容,容器内服务正在写入时建议先停止。继续?`" tone="warning" confirm-text="覆盖恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
     <ConfirmDialog :show="deleteTarget !== null" title="删除备份" :message="`删除备份文件 ${deleteTarget?.file}?该操作不可恢复。`" tone="danger" confirm-text="删除" @confirm="doDelete" @cancel="deleteTarget = null" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { Ban, Download, HardDriveDownload, RefreshCw, Trash2, Undo2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import { useToastStore } from '../../stores/toast.js';

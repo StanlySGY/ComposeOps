@@ -38,7 +38,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { TrendingUp, BarChart3, Activity, Download, FileText, Image } from 'lucide-vue-next';
+import { Download, FileText, Image } from 'lucide-vue-next';
 
 defineProps({
   modelValue: { type: String, default: 'area' },

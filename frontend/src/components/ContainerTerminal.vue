@@ -166,7 +166,7 @@ function connect() {
     }
   };
 
-  ws.onerror = (err) => {
+  ws.onerror = () => {
     connecting.value = false;
     error.value = '连接失败';
     terminal.write('\r\n\x1b[31m✗ 连接失败\x1b[0m\r\n');

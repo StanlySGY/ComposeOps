@@ -25,3 +25,14 @@ test('exec 上限与超时取合理值(20 会话 / 30 分钟)', () => {
 test('路由默认导出可调用(fastify 插件形态)', () => {
   assert.equal(typeof ws.default, 'function');
 });
+
+test('exec 会话清理幂等且释放失败建立的槽位', () => {
+  const socket = {};
+  ws.activeExecSessions.set(socket, { idleTimer: setTimeout(() => {}, 60_000), destroyed: false });
+  const original = ws.activeExecSessions.get(socket).idleTimer;
+  const released = ws.teardownExecSession(socket);
+  assert.equal(released, true);
+  assert.equal(ws.activeExecSessions.has(socket), false);
+  assert.equal(ws.teardownExecSession(socket), false);
+  clearTimeout(original);
+});

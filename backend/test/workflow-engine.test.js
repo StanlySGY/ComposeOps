@@ -9,8 +9,15 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const {
   createDefinition, listDefinitions, getDefinition, removeDefinition,
-  startWorkflow, getInstance, approveInstance,
+  startWorkflow, getInstance, approveInstance, cancelInstance, evaluateCondition,
 } = await import('../src/services/workflow-engine.js');
+
+test('workflow: 条件表达式正确解析根上下文与字面量', () => {
+  assert.equal(evaluateCondition('context.verified == true', { verified: true }), true);
+  assert.equal(evaluateCondition('context.retryCount >= 2', { retryCount: 3 }), true);
+  assert.equal(evaluateCondition('service == "api"', { service: 'api' }), true);
+  assert.equal(evaluateCondition('context.verified == false', { verified: true }), false);
+});
 
 test('workflow: 创建定义并校验节点', () => {
   const definition = createDefinition({
@@ -84,6 +91,86 @@ test('workflow: 拒绝审批则取消', async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
   const cancelled = approveInstance(instance.id, { approved: false });
   assert.equal(cancelled.status, 'cancelled');
+});
+
+test('workflow: condition true 分支只执行可达节点', async () => {
+  const definition = createDefinition({
+    name: '条件真分支',
+    nodes: [
+      { id: 'trigger', type: 'trigger', next: 'condition', config: {} },
+      { id: 'condition', type: 'condition', onTrue: 'true-node', onFalse: 'false-node', config: { expression: 'context.enabled == true' } },
+      { id: 'false-node', type: 'verify', next: 'end', config: {} },
+      { id: 'true-node', type: 'verify', next: 'end', config: {} },
+      { id: 'end', type: 'trigger', config: {} },
+    ],
+  });
+  const instance = startWorkflow(definition.id, { enabled: true });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const done = getInstance(instance.id);
+  assert.equal(done.status, 'success');
+  assert.ok(done.steps.some((step) => step.nodeId === 'true-node' && step.status === 'success'));
+  assert.equal(done.steps.some((step) => step.nodeId === 'false-node'), false);
+});
+
+test('workflow: condition false 分支只执行可达节点', async () => {
+  const definition = createDefinition({
+    name: '条件假分支',
+    nodes: [
+      { id: 'trigger', type: 'trigger', next: 'condition', config: {} },
+      { id: 'condition', type: 'condition', onTrue: 'true-node', onFalse: 'false-node', config: { expression: 'context.enabled == true' } },
+      { id: 'true-node', type: 'verify', next: 'end', config: {} },
+      { id: 'false-node', type: 'verify', next: 'end', config: {} },
+      { id: 'end', type: 'trigger', config: {} },
+    ],
+  });
+  const instance = startWorkflow(definition.id, { enabled: false });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const done = getInstance(instance.id);
+  assert.equal(done.status, 'success');
+  assert.ok(done.steps.some((step) => step.nodeId === 'false-node' && step.status === 'success'));
+  assert.equal(done.steps.some((step) => step.nodeId === 'true-node'), false);
+});
+
+test('workflow: 取消后异步执行不得覆盖为 success', async () => {
+  const definition = createDefinition({
+    name: '立即取消',
+    nodes: [
+      { id: 'trigger', type: 'trigger', config: {} },
+      { id: 'verify', type: 'verify', config: {} },
+    ],
+  });
+  const instance = startWorkflow(definition.id, {});
+  const cancelled = cancelInstance(instance.id);
+  assert.equal(cancelled.status, 'cancelled');
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(getInstance(instance.id).status, 'cancelled');
+});
+
+test('workflow: 运行时循环失败且不改写此前成功步骤', async () => {
+  const definition = createDefinition({
+    name: '循环流',
+    nodes: [
+      { id: 'start', type: 'trigger', next: 'loop', config: {} },
+      { id: 'loop', type: 'trigger', next: 'loop', config: {} },
+    ],
+  });
+  const instance = startWorkflow(definition.id, {});
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const failed = getInstance(instance.id);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.steps.find((step) => step.nodeId === 'start')?.status, 'success');
+  assert.equal(failed.steps.find((step) => step.nodeId === 'loop')?.status, 'success');
+});
+
+test('workflow: 拒绝重复节点 ID 与循环跳转', () => {
+  assert.throws(() => createDefinition({
+    name: '重复节点',
+    nodes: [{ id: 'same', type: 'trigger', config: {} }, { id: 'same', type: 'trigger', config: {} }],
+  }), /节点 ID 重复/);
+  assert.throws(() => createDefinition({
+    name: '无效跳转',
+    nodes: [{ id: 'a', type: 'trigger', next: 'missing', config: {} }],
+  }), /跳转目标不存在/);
 });
 
 test('workflow: 删除定义', () => {

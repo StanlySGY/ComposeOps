@@ -26,7 +26,15 @@ export default async function marketplaceRoutes(fastify) {
           properties: {
             builtin: { type: 'array' },
             community: { type: 'array' },
-            custom: { type: 'array' }
+            custom: { type: 'array' },
+            communityStatus: {
+              type: 'object',
+              properties: {
+                available: { type: 'boolean' },
+                configured: { type: 'boolean' },
+                message: { type: 'string' },
+              },
+            },
           }
         }
       }
@@ -80,6 +88,8 @@ export default async function marketplaceRoutes(fastify) {
             totalCommunity: { type: 'number' },
             totalCustom: { type: 'number' },
             totalFavorites: { type: 'number' },
+            communityAvailable: { type: 'boolean' },
+            communityMessage: { type: 'string' },
             categories: { type: 'array', items: { type: 'string' } }
           }
         }
@@ -145,10 +155,14 @@ export default async function marketplaceRoutes(fastify) {
         }
       }
     }
-  }, async (req) => {
-    const template = await createCustomTemplate(req.body);
-    addOperation({ action: 'marketplace.template.create', status: 'success', detail: template.name });
-    return { template };
+  }, async (req, reply) => {
+    try {
+      const template = await createCustomTemplate(req.body);
+      addOperation({ action: 'marketplace.template.create', status: 'success', detail: template.name });
+      return { template };
+    } catch (error) {
+      return reply.code(error.statusCode || 422).send({ error: 'template_invalid', message: error.message, issues: error.issues || [] });
+    }
   });
 
   // 更新自定义模板
@@ -181,10 +195,14 @@ export default async function marketplaceRoutes(fastify) {
         }
       }
     }
-  }, async (req) => {
-    const template = await updateCustomTemplate(req.params.id, req.body);
-    addOperation({ action: 'marketplace.template.update', status: 'success', detail: template.name });
-    return { template };
+  }, async (req, reply) => {
+    try {
+      const template = await updateCustomTemplate(req.params.id, req.body);
+      addOperation({ action: 'marketplace.template.update', status: 'success', detail: template.name });
+      return { template };
+    } catch (error) {
+      return reply.code(error.statusCode || 422).send({ error: 'template_invalid', message: error.message, issues: error.issues || [] });
+    }
   });
 
   // 删除自定义模板
@@ -207,10 +225,14 @@ export default async function marketplaceRoutes(fastify) {
         }
       }
     }
-  }, async (req) => {
-    await deleteCustomTemplate(req.params.id);
-    addOperation({ action: 'marketplace.template.delete', status: 'success', detail: req.params.id });
-    return { message: '模板已删除' };
+  }, async (req, reply) => {
+    try {
+      await deleteCustomTemplate(req.params.id);
+      addOperation({ action: 'marketplace.template.delete', status: 'success', detail: req.params.id });
+      return { message: '模板已删除' };
+    } catch (error) {
+      return reply.code(error.statusCode || 422).send({ error: 'template_delete_failed', message: error.message });
+    }
   });
 
   // 添加收藏

@@ -22,6 +22,16 @@ test('ai: 会话消息按 sessionId 隔离', () => {
   assert.ok(sessionB.every((message) => message.sessionId === 2));
 });
 
+test('ai: 历史支持按 beforeId 加载更早消息', () => {
+  clearAiHistory();
+  const first = addAiMessage('user', '第一条', null, 901);
+  const second = addAiMessage('assistant', '第二条', null, 901);
+  const third = addAiMessage('user', '第三条', null, 901);
+  const older = getAiHistory(50, 901, third);
+  assert.deepEqual(older.map((message) => message.id), [first, second]);
+  assert.equal(getAiHistory(50, 901, first).length, 0);
+});
+
 test('ai: 会话列表聚合标题与消息数', () => {
   clearAiHistory();
   addAiMessage('user', '帮我排查容器启动失败', null, 10);

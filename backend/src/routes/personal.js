@@ -103,7 +103,7 @@ export default async function personalRoutes(fastify) {
 
   fastify.get('/updates', async () => {
     let lastResults = [];
-    try { lastResults = JSON.parse(getSetting('updates.last_results', '[]')); } catch {}
+    try { lastResults = JSON.parse(getSetting('updates.last_results', '[]')); } catch { /* 历史结果损坏时按空列表展示。 */ }
     return {
       autoEnabled: getSetting('updates.auto_enabled', '0') === '1',
       intervalHours: Number(getSetting('updates.interval_hours', '24')),

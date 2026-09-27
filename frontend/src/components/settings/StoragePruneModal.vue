@@ -49,7 +49,7 @@ import { useToastStore } from '../../stores/toast.js';
 import { Trash2, Zap } from 'lucide-vue-next';
 import BaseModal from '../common/BaseModal.vue';
 
-const props = defineProps({ open: { type: Boolean, default: true } });
+defineProps({ open: { type: Boolean, default: true } });
 const emit = defineEmits(['close', 'reclaimed']);
 const toast = useToastStore();
 const df = ref(null);

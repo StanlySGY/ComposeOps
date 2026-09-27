@@ -160,7 +160,7 @@
           </div>
         </div>
         <div class="mt-4 flex gap-2">
-          <button @click="createAlertRule" :disabled="!alertForm.metric || !alertForm.threshold" class="btn-primary flex-1">
+          <button @click="createAlertRule" :disabled="!alertForm.metric || alertForm.threshold == null || !Number.isFinite(Number(alertForm.threshold))" class="btn-primary flex-1">
             创建规则
           </button>
           <button @click="showAlertModal = false" class="btn-secondary flex-1">
@@ -311,7 +311,7 @@ async function loadMetrics() {
     );
     const [seriesResult, anomalyResult] = await Promise.all([
       metricsApi.getHistoricalMetrics({ containerId: containerId.value, metricType: backendMetric(selectedMetric.value), startTime, endTime, aggregation: 'auto' }),
-      metricsApi.detectAnomalies({ containerId: containerId.value, metricType: backendMetric(selectedMetric.value), hours: Math.max(1, Math.ceil(periodMs(period.value) / 3600000)) }),
+      metricsApi.detectAnomalies({ containerId: containerId.value, metricType: backendMetric(selectedMetric.value), startTime, endTime }),
     ]);
     if (requestId !== metricsRequestId) return;
     metricsData.value = {};
@@ -341,7 +341,7 @@ async function loadAlerts() {
 }
 
 async function createAlertRule() {
-  if (!containerId.value || !alertForm.value.metric || !alertForm.value.threshold) return;
+  if (!containerId.value || !alertForm.value.metric || alertForm.value.threshold == null || !Number.isFinite(Number(alertForm.value.threshold))) return;
   try {
     await metricsApi.createAlert({
       container: containerId.value,

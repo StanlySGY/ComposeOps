@@ -169,7 +169,7 @@ export async function runDbDump(project, containerId, { dbName = '' } = {}) {
   try {
     const info = await instance.inspect();
     exitCode = info.ExitCode ?? 1;
-  } catch {}
+  } catch { /* exec inspect 失败时使用默认失败码。 */ }
   // 让 gzip 收尾(可能还有少量尾部数据)
   await new Promise((resolve) => setTimeout(resolve, 300));
   if (!gzip.writableEnded) gzip.end();

@@ -61,7 +61,7 @@ export async function aggregateProjectLogs({ project, containerIds = [], onLine 
     stop() {
       stopped = true;
       for (const stream of streams) {
-        try { stream.destroy(); } catch {}
+        try { stream.destroy(); } catch { /* 流已结束时忽略重复销毁。 */ }
       }
       streams.length = 0;
     },

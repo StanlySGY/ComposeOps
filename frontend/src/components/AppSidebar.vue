@@ -13,10 +13,10 @@
         <span class="md:flex-1">{{ item.label }}</span>
         <span class="nav-indicator hidden md:block w-1.5 h-1.5 rounded-full bg-accent opacity-0"></span>
       </router-link>
-      <details class="mt-3">
-        <summary class="cursor-pointer list-none px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">更多</summary>
+      <section v-for="group in desktopGroups" :key="group.label" class="mt-3 first:mt-4">
+        <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">{{ group.label }}</div>
         <router-link
-          v-for="item in desktopMoreItems"
+          v-for="item in group.items"
           :key="item.to"
           :to="item.to"
           class="nav-link group flex md:flex-row items-center justify-start gap-3 px-3 py-2 text-sm text-surface-400"
@@ -25,7 +25,7 @@
           <component :is="item.icon" class="w-[18px] h-[18px] shrink-0" />
           <span class="flex-1">{{ item.label }}</span>
         </router-link>
-      </details>
+      </section>
     </nav>
     <nav class="flex md:hidden h-16 items-stretch justify-around px-1 pb-[env(safe-area-inset-bottom)]" aria-label="主导航">
       <router-link v-for="item in mobileItems" :key="item.to" :to="item.to" class="nav-link flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] text-surface-400" active-class="nav-link-active">
@@ -46,10 +46,13 @@
     <div v-if="moreOpen" class="fixed inset-0 z-[51] bg-black/55 md:hidden" @click.self="moreOpen = false">
       <section class="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-2xl border-t border-surface-700 bg-surface-950 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl" role="dialog" aria-modal="true" aria-label="更多功能">
         <div class="mb-3 flex items-center justify-between"><div><h2 class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" title="关闭" @click="moreOpen = false">×</button></div>
-        <div class="grid grid-cols-2 gap-2">
-          <router-link v-for="item in moreItems" :key="item.to" :to="item.to" class="flex min-h-14 items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-2.5 text-sm text-surface-300 transition hover:border-surface-600 hover:bg-surface-800" @click="moreOpen = false">
-            <component :is="item.icon" class="h-4 w-4 shrink-0 text-accent" /><span>{{ item.label }}</span>
-          </router-link>
+        <div v-for="group in mobileGroups" :key="group.label" class="mb-4 last:mb-0">
+          <h3 class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">{{ group.label }}</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <router-link v-for="item in group.items" :key="item.to" :to="item.to" class="flex min-h-14 items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-2.5 text-sm text-surface-300 transition hover:border-surface-600 hover:bg-surface-800" @click="moreOpen = false">
+              <component :is="item.icon" class="h-4 w-4 shrink-0 text-accent" /><span>{{ item.label }}</span>
+            </router-link>
+          </div>
         </div>
       </section>
     </div>
@@ -66,27 +69,48 @@ const primaryItems = [
   { to: '/compose', icon: FileCode2, label: '配置' },
   { to: '/logs', icon: ScrollText, label: '日志' },
   { to: '/agent', icon: Bot, label: 'AI 助手' },
-  { to: '/settings', icon: Settings, label: '设置' },
 ];
-const desktopMoreItems = [
-  { to: '/topology', icon: Network, label: '拓扑' },
-  { to: '/node-groups', icon: ServerCog, label: '节点组' },
-  { to: '/cmdb', icon: Database, label: '资产中心' },
-  { to: '/shell', icon: TerminalSquare, label: '终端' },
-  { to: '/inspection', icon: ShieldCheck, label: 'AI 巡检' },
-  { to: '/review', icon: FileSearch, label: '变更与回滚' },
-  { to: '/monitor', icon: ChartNoAxesCombined, label: '实时监控' },
-  { to: '/marketplace', icon: Store, label: '应用市场' },
-  { to: '/ops-center', icon: Workflow, label: '运维任务' },
-  { to: '/workflows', icon: Workflow, label: '工作流' },
-  { to: '/events', icon: BellRing, label: '事件中心' },
-  { to: '/cron', icon: Clock3, label: '定时任务' },
-  { to: '/gitops', icon: GitBranch, label: 'GitOps' },
-  { to: '/resources', icon: HardDrive, label: '存储清理' },
-  { to: '/cost', icon: DollarSign, label: '成本分析' },
+const navGroups = [
+  {
+    label: '观测',
+    items: [
+      { to: '/topology', icon: Network, label: '拓扑' },
+      { to: '/monitor', icon: ChartNoAxesCombined, label: '实时监控' },
+      { to: '/events', icon: BellRing, label: '事件中心' },
+      { to: '/inspection', icon: ShieldCheck, label: 'AI 巡检' },
+    ],
+  },
+  {
+    label: '自动化',
+    items: [
+      { to: '/ops-center', icon: Workflow, label: '运维任务' },
+      { to: '/workflows', icon: Workflow, label: '工作流' },
+      { to: '/cron', icon: Clock3, label: '定时任务' },
+      { to: '/gitops', icon: GitBranch, label: 'GitOps' },
+      { to: '/review', icon: FileSearch, label: '变更与回滚' },
+    ],
+  },
+  {
+    label: '资源',
+    items: [
+      { to: '/cmdb', icon: Database, label: '资产中心' },
+      { to: '/node-groups', icon: ServerCog, label: '节点组' },
+      { to: '/marketplace', icon: Store, label: '应用市场' },
+      { to: '/resources', icon: HardDrive, label: '存储清理' },
+      { to: '/cost', icon: DollarSign, label: '成本分析' },
+    ],
+  },
+  {
+    label: '系统',
+    items: [
+      { to: '/shell', icon: TerminalSquare, label: '终端' },
+      { to: '/settings', icon: Settings, label: '设置' },
+    ],
+  },
 ];
+const desktopGroups = navGroups;
 const moreOpen = ref(false);
 const mobileItems = [primaryItems[0], primaryItems[1], primaryItems[3], primaryItems[4]];
-const moreItems = [...primaryItems, ...desktopMoreItems].filter((item) => !mobileItems.some((mobileItem) => mobileItem.to === item.to));
+const mobileGroups = navGroups;
 useEscapeKey({ active: moreOpen, layer: 'drawer', onClose: () => { moreOpen.value = false; }, lockBody: true });
 </script>

@@ -187,7 +187,7 @@ export default async function opsRoutes(fastify) {
   });
 
   // ---- 应用模板市场 ----
-  fastify.get('/blueprints', async () => ({ blueprints: listBlueprints() }));
+  fastify.get('/blueprints', async () => ({ blueprints: await listBlueprints() }));
 
   // values 刻意不声明子属性:蓝图变量名由蓝图自己定义,一旦收紧就会被剥空。
   // blueprintId 缺失仍由处理函数返回 missing_blueprint_id,故这里不设 required。
@@ -223,9 +223,20 @@ export default async function opsRoutes(fastify) {
       reply.raw.end();
     };
     let child;
+    let disconnected = false;
+    const stopChild = (candidate) => {
+      if (!candidate || finished || typeof candidate.kill !== 'function') return;
+      const running = candidate.exitCode === undefined
+        ? candidate.killed !== true
+        : candidate.exitCode === null && candidate.killed !== true;
+      if (running) candidate.kill('SIGTERM');
+    };
     deployBlueprint(blueprintId, values || {}, {
       onOutput: (type, text) => { output += text; send(type, text); },
-      onChild: (process) => { child = process; },
+      onChild: (process) => {
+        child = process;
+        if (disconnected) stopChild(process);
+      },
     }).then((result) => {
       send('exit', { code: result.code });
       finish({ ok: true, ...result, output });
@@ -236,7 +247,8 @@ export default async function opsRoutes(fastify) {
       finish({ ok: false, message: error.message, output });
     });
     reply.raw.on('close', () => {
-      if (!finished && child && child.exitCode === null && !child.killed) child.kill('SIGTERM');
+      disconnected = true;
+      stopChild(child);
     });
   });
 

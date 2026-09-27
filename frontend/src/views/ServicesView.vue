@@ -139,8 +139,16 @@ function loadCollapsedState(key) {
 }
 const inspectionCollapsed = ref(loadCollapsedState('services.inspectionCollapsed'));
 const metricsCollapsed = ref(loadCollapsedState('services.metricsCollapsed'));
-watch(inspectionCollapsed, (value) => { try { localStorage.setItem('services.inspectionCollapsed', value ? '1' : '0'); } catch {} });
-watch(metricsCollapsed, (value) => { try { localStorage.setItem('services.metricsCollapsed', value ? '1' : '0'); } catch {} });
+watch(inspectionCollapsed, (value) => {
+  try { localStorage.setItem('services.inspectionCollapsed', value ? '1' : '0'); } catch {
+    // 折叠状态无法持久化时不影响当前页面交互。
+  }
+});
+watch(metricsCollapsed, (value) => {
+  try { localStorage.setItem('services.metricsCollapsed', value ? '1' : '0'); } catch {
+    // 折叠状态无法持久化时不影响当前页面交互。
+  }
+});
 function toggleInspectionCollapsed() { inspectionCollapsed.value = !inspectionCollapsed.value; }
 function toggleMetricsCollapsed() { metricsCollapsed.value = !metricsCollapsed.value; }
 const lastUpdated = ref('');
@@ -359,7 +367,9 @@ const containerSocket = useWebSocket(
   {
     onMessage: (event) => {
       store.wsConnected = true;
-      try { store.handleContainerEvent?.(JSON.parse(event.data)); } catch {}
+      try { store.handleContainerEvent?.(JSON.parse(event.data)); } catch {
+        // 忽略异常容器事件,后续事件仍会触发刷新。
+      }
     },
     onOpen: ({ resumed }) => {
       store.wsConnected = true;

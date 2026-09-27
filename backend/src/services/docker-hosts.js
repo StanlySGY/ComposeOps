@@ -206,15 +206,20 @@ function invalidateClient(id) {
 export function composeEnv(host = getActiveHost()) {
   if (host.type === 'local') return {};
   if (host.type === 'ssh') {
-    return { DOCKER_HOST: `ssh://${host.username || 'root'}@${host.host}:${host.port || 22}` };
+    throw Object.assign(
+      new Error('SSH Docker 节点不能通过面板本地 Compose CLI 执行,请使用远端 SSH runner'),
+      { statusCode: 409, code: 'REMOTE_COMPOSE_RUNNER_REQUIRED' },
+    );
   }
   if (host.type === 'tcp') {
     const tls = host.tls || {};
-    if (tls.ca || tls.cert || tls.key) {
-      // TLS 客户端需要证书文件,CLI 场景建议使用 SSH 节点;这里仍给出 TCP 直连地址。
-      return { DOCKER_HOST: `tcp://${host.host}:${host.port || 2375}` };
-    }
-    return { DOCKER_HOST: `tcp://${host.host}:${host.port || 2375}` };
+    const detail = tls.ca || tls.cert || tls.key
+      ? 'TLS 证书未以临时文件安全传递给 Compose CLI'
+      : 'TCP 节点仅提供 Docker API,面板进程没有远端 Compose 文件工作区';
+    throw Object.assign(
+      new Error(`${detail},请使用 SSH 节点或在本地挂载 Compose 项目目录`),
+      { statusCode: 409, code: 'REMOTE_COMPOSE_RUNNER_REQUIRED' },
+    );
   }
   return {};
 }

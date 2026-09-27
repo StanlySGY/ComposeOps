@@ -11,6 +11,7 @@ const BASE = '/api/v1';
 const swrCache = new Map(); // key -> { data, ts, inflight }
 const SWR_TTL = 12000;
 const CACHEABLE_PATHS = ['/projects', '/hosts', '/personal/preferences', '/system/capabilities', '/ops/blueprints', '/cron'];
+let hostEpoch = 0;
 
 function isGet(opts) {
   return !opts?.method || opts.method === 'GET';
@@ -33,7 +34,9 @@ function doFetch(path, opts = {}) {
       try {
         const body = await res.json();
         msg = body.message || body.error || JSON.stringify(body);
-      } catch {}
+      } catch {
+        // 错误响应可能不是 JSON,保留 HTTP 状态文本作为兜底。
+      }
       const err = new Error(msg);
       err.status = res.status;
       if (res.status === 401) window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
@@ -73,7 +76,7 @@ async function request(path, opts = {}) {
     invalidateSwr('/jobs');
     return data;
   }
-  const key = path + (opts.cacheKey || '');
+  const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
   const entry = swrCache.get(key);
   // 命中新鲜缓存:立即返回,后台 revalidate
   if (entry && !opts.force && Date.now() - entry.ts < SWR_TTL) {
@@ -93,8 +96,16 @@ async function request(path, opts = {}) {
 /** 使某个路径前缀的 SWR 缓存失效(写操作后调用)。 */
 export function invalidateSwr(prefix) {
   for (const key of [...swrCache.keys()]) {
-    if (key.startsWith(prefix)) swrCache.delete(key);
+    const separator = key.indexOf(':');
+    const cachePath = separator >= 0 ? key.slice(separator + 1) : key;
+    if (cachePath.startsWith(prefix)) swrCache.delete(key);
   }
+}
+
+/** 切换 Docker 节点后丢弃所有节点相关的 SWR 数据,避免跨宿主复用项目/资源列表。 */
+export function bumpHostEpoch() {
+  hostEpoch += 1;
+  swrCache.clear();
 }
 
 export const api = {
@@ -130,7 +141,9 @@ export const api = {
             const frame = JSON.parse(line.slice(5).trim());
             if (frame?.job) frame.job = normalizeBackgroundJob(frame.job);
             onFrame(frame);
-          } catch {}
+          } catch {
+            // 单个坏帧不应阻断后续任务事件。
+          }
         }
       }
     });
@@ -204,9 +217,8 @@ export const api = {
   getAiConfig: () => request('/ai/config'),
   saveAiConfig: (payload) => request('/ai/config', { method: 'POST', body: JSON.stringify(payload) }),
   fetchAiModels: (payload = {}) => request('/ai/fetch-models', { method: 'POST', body: JSON.stringify(payload) }),
-  execContainer: (payload) => request('/ai/exec', { method: 'POST', body: JSON.stringify(payload) }),
   getProjectLogs: (projectId, containerId, tail = 200) => request('/ai/logs', { method: 'POST', body: JSON.stringify({ projectId, containerId, tail }) }),
-  getAiHistory: (sessionId, limit = 200) => request(`/ai/history?${new URLSearchParams({ ...(sessionId ? { sessionId } : {}), limit })}`),
+  getAiHistory: (sessionId, limit = 200, beforeId = null) => request(`/ai/history?${new URLSearchParams({ ...(sessionId ? { sessionId } : {}), ...(beforeId ? { beforeId } : {}), limit })}`),
   getAiSessions: (limit = 30, kind = '') => request(`/ai/sessions?limit=${limit}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`),
   createAgentSession: () => request('/ai/agent/sessions', { method: 'POST' }),
   renameAgentSession: (sessionId, title) => request(`/ai/agent/sessions/${encodeURIComponent(sessionId)}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
@@ -309,7 +321,9 @@ export async function streamComposeControl(projectId, action, onFrame, path = nu
       if (!line.startsWith('data:')) continue;
       try {
         onFrame(JSON.parse(line.slice(5).trim()));
-      } catch {}
+      } catch {
+        // 跳过无法解析的控制流帧,让连接继续接收后续事件。
+      }
     }
   }
 }
@@ -339,7 +353,9 @@ export async function streamSse(path, body, onFrame, signal) {
       if (!line.startsWith('data:')) continue;
       try {
         onFrame(JSON.parse(line.slice(5).trim()));
-      } catch {}
+      } catch {
+        // 跳过无法解析的 AI 流帧,让连接继续接收后续事件。
+      }
     }
   }
 }
@@ -362,7 +378,9 @@ export function streamProjectStats(projectId, onFrame, signal, interval = 2500) 
         if (!line.startsWith('data:')) continue;
         try {
           onFrame(JSON.parse(line.slice(5).trim()));
-        } catch {}
+        } catch {
+          // 跳过无法解析的指标流帧,避免单帧污染终止整条流。
+        }
       }
     }
   });
@@ -399,10 +417,10 @@ export const metricsApi = {
   getMetricsStats: (containerId, metricType, hours = 24) => 
     request(`/metrics/stats/${containerId}/${metricType}?hours=${hours}`),
   
-  detectAnomalies: ({ containerId, metricType, hours = 24, algorithms = ['z_score', 'moving_average', 'trend'] }) => 
+  detectAnomalies: ({ containerId, metricType, hours = 24, startTime, endTime, algorithms = ['z_score', 'moving_average', 'trend'] }) =>
     request('/metrics/anomalies', { 
       method: 'POST', 
-      body: JSON.stringify({ containerId, metricType, hours, algorithms }) 
+      body: JSON.stringify({ containerId, metricType, hours, startTime, endTime, algorithms })
     }),
   
   evaluateAlerts: (containerId) => 

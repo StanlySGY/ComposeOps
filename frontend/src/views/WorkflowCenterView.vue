@@ -90,20 +90,42 @@
           <div>
             <label class="form-label">节点编排</label>
             <div class="space-y-2">
-              <div v-for="(node, i) in form.nodes" :key="i" class="flex items-center gap-2 rounded-lg border border-surface-800 bg-surface-900/60 p-2">
-                <span class="count-badge text-surface-400">{{ nodeLabel(node.type) }}</span>
-                <input v-model="node.id" class="input !py-1 text-xs" placeholder="节点ID" />
-                <select v-model="node.type" class="input !py-1 text-xs">
-                  <option value="trigger">触发</option>
-                  <option value="condition">条件</option>
-                  <option value="agent">Agent</option>
-                  <option value="approval">审批</option>
-                  <option value="action">执行</option>
-                  <option value="verify">验证</option>
-                </select>
-                <button class="icon-btn" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
+              <div v-for="(node, i) in form.nodes" :key="i" class="rounded-lg border border-surface-800 bg-surface-900/60 p-3">
+                <div class="flex items-center gap-2">
+                  <span class="count-badge shrink-0 text-surface-400">{{ nodeLabel(node.type) }}</span>
+                  <input v-model="node.id" class="input !py-1 text-xs" placeholder="节点 ID" />
+                  <select v-model="node.type" class="input !py-1 text-xs" @change="normalizeNode(node)">
+                    <option value="trigger">触发</option>
+                    <option value="condition">条件</option>
+                    <option value="agent">Agent</option>
+                    <option value="approval">审批</option>
+                    <option value="action">执行</option>
+                    <option value="verify">验证</option>
+                  </select>
+                  <button class="icon-btn shrink-0" title="删除节点" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
+                </div>
+                <div class="mt-2 grid gap-2 sm:grid-cols-3">
+                  <label class="form-grid-label sm:col-span-3"><span>下一节点(可选)</span><input v-model="node.next" class="input !py-1 text-xs" list="workflow-node-ids" placeholder="留空按列表顺序执行" /></label>
+                  <template v-if="node.type === 'condition'">
+                    <label class="form-grid-label sm:col-span-3"><span>条件表达式</span><input v-model="node.config.expression" class="input !py-1 text-xs" placeholder="如: context.verified == true" /></label>
+                    <label class="form-grid-label"><span>满足时跳转</span><input v-model="node.onTrue" class="input !py-1 text-xs" list="workflow-node-ids" placeholder="节点 ID" /></label>
+                    <label class="form-grid-label"><span>不满足时跳转</span><input v-model="node.onFalse" class="input !py-1 text-xs" list="workflow-node-ids" placeholder="节点 ID" /></label>
+                  </template>
+                  <template v-else-if="node.type === 'agent'">
+                    <label class="form-grid-label sm:col-span-3"><span>分析提示词</span><textarea v-model="node.config.prompt" class="input !py-1 text-xs" rows="2" placeholder="请分析当前运维上下文并给出建议" /></label>
+                    <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input !py-1 text-xs"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                  </template>
+                  <template v-else-if="node.type === 'action'">
+                    <label class="form-grid-label"><span>操作</span><select v-model="node.config.action" class="input !py-1 text-xs"><option value="">选择操作</option><option value="up">启动</option><option value="stop">停止</option><option value="restart">重启</option><option value="pull">拉取镜像</option></select></label>
+                    <label class="form-grid-label sm:col-span-2"><span>项目</span><select v-model="node.config.projectId" class="input !py-1 text-xs"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                  </template>
+                  <template v-else-if="node.type === 'verify'">
+                    <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input !py-1 text-xs"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                  </template>
+                </div>
               </div>
             </div>
+            <datalist id="workflow-node-ids"><option v-for="node in form.nodes" :key="node.id" :value="node.id" /></datalist>
             <button class="btn-secondary mt-2 !px-3 !py-1.5 text-xs" @click="addNode"><Plus class="w-3.5 h-3.5" />添加节点</button>
           </div>
         </div>
@@ -117,10 +139,11 @@
 </template>
 
 <script setup>
-import { onActivated, onMounted, reactive, ref } from 'vue';
+import { onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { Pencil, Play, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next';
 import { useWorkflowStore } from '../stores/workflow.js';
 import { useToastStore } from '../stores/toast.js';
+import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 
@@ -129,6 +152,7 @@ const toast = useToastStore();
 const showEditor = ref(false);
 const editingId = ref('');
 const form = reactive({ name: '', description: '', triggerType: 'manual', nodes: [] });
+const projects = ref([]);
 
 const definitions = store.definitions;
 const instances = store.instances;
@@ -154,12 +178,26 @@ function formatTime(ts) {
   return new Date(ts.replace(' ', 'T')).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+function normalizeNode(node) {
+  if (!node.config || typeof node.config !== 'object' || Array.isArray(node.config)) node.config = {};
+  if (node.type === 'action' && !node.config.action) node.config.action = 'restart';
+  return node;
+}
+
+function cloneNode(node) {
+  return normalizeNode({ ...node, config: { ...(node.config || {}) } });
+}
+
 function openCreate() {
   editingId.value = '';
   form.name = '';
   form.description = '';
   form.triggerType = 'manual';
-  form.nodes = [{ id: 'trigger', type: 'trigger' }, { id: 'approval', type: 'approval' }, { id: 'action', type: 'action' }];
+  form.nodes = [
+    { id: 'trigger', type: 'trigger', config: {} },
+    { id: 'approval', type: 'approval', config: {} },
+    { id: 'action', type: 'action', config: { action: 'restart', projectId: '' } },
+  ];
   showEditor.value = true;
 }
 function openEdit(def) {
@@ -167,17 +205,27 @@ function openEdit(def) {
   form.name = def.name;
   form.description = def.description;
   form.triggerType = def.triggerType;
-  form.nodes = def.nodes.map((n) => ({ ...n }));
+  form.nodes = def.nodes.map(cloneNode);
   showEditor.value = true;
 }
 function addNode() {
-  form.nodes.push({ id: `node-${form.nodes.length + 1}`, type: 'action' });
+  form.nodes.push({ id: `node-${form.nodes.length + 1}`, type: 'action', config: { action: 'restart', projectId: '' } });
 }
 async function save() {
   if (!form.name.trim()) { toast.error('请填写工作流名称'); return; }
+  const ids = new Set();
+  for (const node of form.nodes) {
+    normalizeNode(node);
+    if (!node.id?.trim()) { toast.error('每个节点都需要填写 ID'); return; }
+    if (ids.has(node.id)) { toast.error(`节点 ID 重复:${node.id}`); return; }
+    ids.add(node.id);
+    if (node.type === 'condition' && !node.config.expression?.trim()) { toast.error(`条件节点「${node.id}」需要表达式`); return; }
+    if (node.type === 'action' && (!node.config.action || !node.config.projectId)) { toast.error(`执行节点「${node.id}」需要选择操作和项目`); return; }
+  }
+  const payload = { ...form, nodes: form.nodes.map((node) => ({ ...node, config: { ...node.config } })) };
   try {
-    if (editingId.value) await store.update(editingId.value, { ...form });
-    else await store.create({ ...form });
+    if (editingId.value) await store.update(editingId.value, payload);
+    else await store.create(payload);
     toast.success('工作流已保存');
     showEditor.value = false;
   } catch (e) {
@@ -225,8 +273,17 @@ async function load() {
   await store.loadDefinitions();
   await store.loadInstances();
 }
+async function loadProjects() {
+  try {
+    projects.value = ((await api.getProjects(true)).projects || []).filter((project) => project.managed);
+  } catch {
+    projects.value = [];
+  }
+}
+function onHostChanged() { void loadProjects(); }
 
-onMounted(load);
+onMounted(() => { void load(); void loadProjects(); window.addEventListener('composeops:host-changed', onHostChanged); });
+onBeforeUnmount(() => window.removeEventListener('composeops:host-changed', onHostChanged));
 let activatedOnce = false;
 onActivated(() => { if (activatedOnce) void load(); activatedOnce = true; });
 

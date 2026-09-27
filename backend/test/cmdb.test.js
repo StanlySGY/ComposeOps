@@ -30,6 +30,20 @@ test('cmdb: 资产关系建立与查询', () => {
   assert.ok(relations.some((r) => r.sourceId === 'container:c1' && r.targetId === 'project:web' && r.relation === 'runs_on'));
 });
 
+test('cmdb: 关系重复写入幂等且查询有安全上限', () => {
+  addAssetRelation('container:c1', 'project:web', 'runs_on', { source: 'second-sync' });
+  const same = listAssetRelations().filter((r) => r.sourceId === 'container:c1' && r.targetId === 'project:web' && r.relation === 'runs_on');
+  assert.equal(same.length, 1);
+  assert.deepEqual(same[0].properties, { source: 'second-sync' });
+
+  for (let index = 0; index < 510; index += 1) {
+    upsertAsset({ id: `service:bulk-${index}`, kind: 'service', name: `bulk-${index}` });
+  }
+  assert.equal(listAssets({ kind: 'service', limit: 9999 }).length, 500);
+  assert.equal(listAssets({ kind: 'service', limit: 10, offset: 500 }).length, 10);
+  assert.equal(listAssetRelations({ limit: 9999 }).length <= 500, true);
+});
+
 test('cmdb: 删除资产', () => {
   upsertAsset({ id: 'project:temp', kind: 'project', name: 'temp' });
   assert.ok(getAsset('project:temp'));

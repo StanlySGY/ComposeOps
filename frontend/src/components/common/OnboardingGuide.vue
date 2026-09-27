@@ -35,7 +35,9 @@ const steps = [
 
 function dismiss() {
   show.value = false;
-  try { localStorage.setItem(STORAGE_KEY, '1'); } catch {}
+  try { localStorage.setItem(STORAGE_KEY, '1'); } catch {
+    // 无法写入本地存储时本次仍关闭引导,下次打开会再次显示。
+  }
 }
 
 onMounted(async () => {

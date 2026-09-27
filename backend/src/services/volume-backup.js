@@ -14,16 +14,28 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { getActivityDocker, getActiveHost } from './docker-hosts.js';
+import { getActiveHost, getDockerForHost, getHost } from './docker-hosts.js';
 import { readCompose } from './compose-runner.js';
+import { readWorkspaceCompose } from './compose-workspace.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { getSetting, addOperation, addVolumeBackup, listVolumeBackups, getVolumeBackup, deleteVolumeBackupRow, pruneVolumeBackups } from '../lib/db.js';
 
 const HELPER_IMAGE = 'busybox:1.36';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function getBackupDir() {
-  return getSetting('backup.volume_dir', '') || path.join(__dirname, '../../data/volume-backups');
+export function getBackupDir(host = null) {
+  const hostId = host?.id || 'local';
+  return getSetting(`backup.volume_dir.${hostId}`, getSetting('backup.volume_dir', '')) || path.join(__dirname, '../../data/volume-backups');
+}
+
+function hostForId(hostId) {
+  const host = getHost(hostId || 'local');
+  if (!host) throw Object.assign(new Error(`备份所属 Docker 节点不存在:${hostId}`), { statusCode: 409 });
+  return host;
+}
+
+function isLocalHost(host) {
+  return (host?.id || 'local') === 'local' || host?.type === 'local';
 }
 
 /**
@@ -41,7 +53,14 @@ export function parseProjectVolumes(composeContent) {
   const topVolumes = doc.volumes && typeof doc.volumes === 'object' ? doc.volumes : {};
   const merged = new Map();
   for (const [name, def] of Object.entries(topVolumes)) {
-    merged.set(name, { name, external: !!(def && typeof def === 'object' && def.external), skip: '' });
+    const definition = def && typeof def === 'object' ? def : {};
+    merged.set(name, {
+      name,
+      composeName: name,
+      dockerName: typeof definition.name === 'string' ? definition.name.trim() : '',
+      external: !!definition.external,
+      skip: '',
+    });
   }
   const services = doc.services && typeof doc.services === 'object' ? doc.services : {};
   for (const [serviceName, service] of Object.entries(services)) {
@@ -64,27 +83,65 @@ export function parseProjectVolumes(composeContent) {
         continue;
       }
       if (merged.has(source)) continue;
-      merged.set(source, { name: source, external: false, skip: '' });
+      merged.set(source, { name: source, composeName: source, dockerName: '', external: false, skip: '' });
     }
   }
   return { volumes: [...merged.values()], error: '' };
 }
 
+/**
+ * 将 Compose 中的逻辑卷键解析为 Docker 实际卷名。
+ * 普通卷默认带 Compose 项目前缀,external 卷不带前缀,显式 name 优先;
+ * 已存在清单只用于判断期望卷是否存在,不会把同名裸卷误认成项目卷。
+ */
+export function resolveProjectVolumeNames(volumes, projectName = '', existingNames = []) {
+  const existing = new Set(existingNames);
+  const prefix = String(projectName || '').trim();
+  return (Array.isArray(volumes) ? volumes : []).map((item) => {
+    if (item?.skip) return { ...item, composeName: item.composeName || item.name, exists: null };
+    const composeName = String(item?.composeName || item?.name || '').trim();
+    const candidates = [];
+    const addCandidate = (value) => {
+      const candidate = String(value || '').trim();
+      if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
+    };
+    if (item?.dockerName) addCandidate(item.dockerName);
+    else if (item?.external) addCandidate(composeName);
+    else if (prefix) addCandidate(`${prefix}_${composeName}`);
+    else addCandidate(composeName);
+    const name = candidates[0] || composeName;
+    const existingName = candidates.find((candidate) => existing.has(candidate));
+    return {
+      ...item,
+      name: existingName || name,
+      composeName,
+      exists: existing.has(existingName || name),
+    };
+  });
+}
+
+function composeReaderForProject(project) {
+  if (project?.composeMode === 'direct') return readCompose;
+  if (project?.composeMode === 'workspace') return readWorkspaceCompose;
+  throw Object.assign(
+    new Error('当前 Docker 节点没有可安全读取的 Compose 工作区,无法列出数据卷'),
+    { statusCode: 409, code: 'COMPOSE_WORKSPACE_REQUIRED' },
+  );
+}
+
 /** 列出项目可备份卷:解析 compose + 校验卷在当前宿主上存在。 */
 export async function listProjectVolumes(project) {
-  const compose = await readCompose(project);
+  const compose = await composeReaderForProject(project)(project);
   const { volumes, error } = parseProjectVolumes(compose.content);
   if (error) throw Object.assign(new Error(error), { statusCode: 400 });
-  const docker = getActivityDocker();
+  const host = getActiveHost();
+  const docker = getDockerForHost(host.id);
   const existing = new Set();
   try {
     const all = await docker.listVolumes();
     for (const volume of all?.Volumes || all || []) existing.add(volume.Name);
-  } catch {}
-  return volumes.map((item) => ({
-    ...item,
-    exists: item.skip ? null : existing.has(item.name),
-  }));
+  } catch { /* Docker API 不可列出卷时仅返回未确认存在。 */ }
+  return resolveProjectVolumeNames(volumes, project.projectName, existing);
 }
 
 function safeFileName(projectName, volume, timestamp = Date.now()) {
@@ -92,11 +149,27 @@ function safeFileName(projectName, volume, timestamp = Date.now()) {
   return `${clean(projectName)}_${clean(volume)}_${timestamp}.tar.gz`;
 }
 
+function assertBackupFileName(file) {
+  const value = String(file || '');
+  if (!value || value.length > 255 || !/^[A-Za-z0-9_.-]+\.tar\.gz$/.test(value) || /[\\/\0]/.test(value)) {
+    throw Object.assign(new Error('备份文件名不合法'), { statusCode: 409 });
+  }
+  return value;
+}
+
+function assertVolumeName(volume) {
+  const value = String(volume || '');
+  if (!value || value.length > 255 || !/^[A-Za-z0-9_.-]+$/.test(value)) {
+    throw Object.assign(new Error('卷名不合法'), { statusCode: 400 });
+  }
+  return value;
+}
+
 async function ensureHelperImage(docker) {
   try {
     await docker.getImage(HELPER_IMAGE).inspect();
     return;
-  } catch {}
+  } catch { /* helper 镜像已存在或检查失败时继续 pull 流程。 */ }
   const stream = await docker.pull(HELPER_IMAGE);
   await new Promise((resolve, reject) => {
     docker.modem.followProgress(stream, (error) => (error ? reject(error) : resolve()));
@@ -131,26 +204,24 @@ async function runHelper(docker, cmd, binds) {
   }
 }
 
-function volumeBinds(volume, mode) {
-  return [`${volume}:/src:${mode}`, `${getBackupDir()}:/backup`];
+function volumeBinds(volume, mode, host = getActiveHost()) {
+  return [`${volume}:/src:${mode}`, `${getBackupDir(host)}:/backup`];
 }
 
 /** 备份单个命名卷,返回新纪录。 */
 export async function createVolumeBackup(project, volumeName) {
-  if (!volumeName || /[^\w.-]/.test(volumeName)) {
-    throw Object.assign(new Error('卷名不合法'), { statusCode: 400 });
-  }
-  const docker = getActivityDocker();
+  volumeName = assertVolumeName(volumeName);
   const host = getActiveHost();
   const hostId = host?.id || 'local';
-  const dir = getBackupDir();
-  if (hostId === 'local') await mkdir(dir, { recursive: true });
+  const dir = getBackupDir(host);
+  const docker = getDockerForHost(hostId);
+  if (isLocalHost(host)) await mkdir(dir, { recursive: true });
   const file = safeFileName(project.projectName, volumeName);
   const started = Date.now();
   const { exitCode, output } = await runHelper(
     docker,
     `tar czf "/backup/${file}" -C /src . && du -b "/backup/${file}" | cut -f1`,
-    volumeBinds(volumeName, 'ro'),
+    volumeBinds(volumeName, 'ro', host),
   ).catch((error) => {
     throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
   });
@@ -158,33 +229,38 @@ export async function createVolumeBackup(project, volumeName) {
     throw Object.assign(new Error(`卷备份失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
   }
   let bytes = Number(output.split('\n').pop()) || 0;
-  if (!bytes && hostId === 'local') {
+  if (!bytes && isLocalHost(host)) {
     bytes = (await stat(path.join(dir, file)).catch(() => null))?.size || 0;
   }
   const id = addVolumeBackup({ projectId: project.id, projectName: project.projectName, volume: volumeName, file, bytes, host: hostId });
   addOperation({ action: 'volume.backup', status: 'success', detail: `${project.projectName}/${volumeName} → ${file}` });
   // 清理同卷超限的旧备份(记录+文件)
-  for (const stale of pruneVolumeBackups(project.id, volumeName)) {
-    await removeBackupFile(stale.file).catch(() => {});
+  for (const stale of pruneVolumeBackups(project.id, volumeName, { host: hostId })) {
+    await removeBackupFile(stale.file, stale.host).catch(() => {});
     deleteVolumeBackupRow(stale.id);
   }
   return { id, file, bytes, durationMs: Date.now() - started };
 }
 
-async function removeBackupFile(file) {
-  const docker = getActivityDocker();
-  await runHelper(docker, `rm -f "/backup/${file}"`, [`${getBackupDir()}:/backup`]);
+async function removeBackupFile(file, hostId = 'local') {
+  file = assertBackupFileName(file);
+  const host = hostForId(hostId);
+  const docker = getDockerForHost(host.id);
+  await runHelper(docker, `rm -f "/backup/${file}"`, [`${getBackupDir(host)}:/backup`]);
 }
 
 /** 恢复:把备份 tar 解回卷(覆盖现有内容)。 */
 export async function restoreVolumeBackup(id) {
   const record = getVolumeBackup(id);
   if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
-  const docker = getActivityDocker();
+  const file = assertBackupFileName(record.file);
+  const volume = assertVolumeName(record.volume);
+  const host = hostForId(record.host);
+  const docker = getDockerForHost(host.id);
   const { exitCode, output } = await runHelper(
     docker,
-    `tar xzf "/backup/${record.file}" -C /src`,
-    volumeBinds(record.volume, 'rw'),
+    `tar xzf "/backup/${file}" -C /src`,
+    volumeBinds(volume, 'rw', host),
   ).catch((error) => {
     throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
   });
@@ -198,7 +274,7 @@ export async function restoreVolumeBackup(id) {
 export async function deleteVolumeBackup(id) {
   const record = getVolumeBackup(id);
   if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
-  await removeBackupFile(record.file).catch(() => {});
+  await removeBackupFile(record.file, record.host).catch(() => {});
   deleteVolumeBackupRow(id);
   addOperation({ action: 'volume.backup.delete', status: 'success', detail: `${record.projectName}/${record.volume} × ${record.file}` });
   return { ok: true };
@@ -210,12 +286,13 @@ export async function listBackups(projectId = '') {
 
 /** 备份文件是否存在且可下载。 */
 async function resolveBackupFile(record) {
-  const host = getActiveHost();
-  const isLocal = (host?.id || 'local') === 'local' || host?.type === 'local';
+  const file = assertBackupFileName(record.file);
+  const host = hostForId(record.host);
+  const isLocal = isLocalHost(host);
   if (isLocal) {
-    const target = path.join(getBackupDir(), record.file);
+    const target = path.join(getBackupDir(host), file);
     const info = await stat(target).catch(() => null);
-    if (!info) throw Object.assign(new Error('备份文件已不存在(可能被清理)'), { statusCode: 410 });
+    if (!info?.isFile()) throw Object.assign(new Error('备份文件已不存在(可能被清理)'), { statusCode: 410 });
     return { kind: 'local', path: target, bytes: info.size };
   }
   return { kind: 'remote' };
@@ -225,36 +302,96 @@ async function resolveBackupFile(record) {
 export async function streamBackupToReply(id, reply) {
   const record = getVolumeBackup(id);
   if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+  const file = assertBackupFileName(record.file);
   const resolved = await resolveBackupFile(record);
   reply.header('Content-Type', 'application/gzip');
-  reply.header('Content-Disposition', `attachment; filename="${record.file}"`);
+  reply.header('Content-Disposition', `attachment; filename="${file}"`);
   if (resolved.kind === 'local') {
     reply.header('Content-Length', resolved.bytes);
     return reply.send(createReadStream(resolved.path));
   }
   // 远程宿主:一次性 helper 容器读取文件,demux 后只把 stdout 转发给浏览器
-  const docker = getActivityDocker();
+  const host = hostForId(record.host);
+  const docker = getDockerForHost(host.id);
   await ensureHelperImage(docker);
+  const volume = assertVolumeName(record.volume);
   const container = await docker.createContainer({
     Image: HELPER_IMAGE,
-    Cmd: ['sh', '-c', `cat "/backup/${record.file}"`],
-    HostConfig: { Binds: volumeBinds(record.volume, 'ro') },
+    Cmd: ['sh', '-c', `cat "/backup/${file}"`],
+    HostConfig: { Binds: volumeBinds(volume, 'ro', host) },
     Labels: { 'composeops.role': 'volume-backup' },
   });
+  let attach = null;
+  let demux = null;
+  let cleaned = false;
+  let containerFinished = false;
+  let stdoutFinished = false;
+  let stderrFinished = false;
+  let finishTimer = null;
+  const cleanup = async (endReply = false) => {
+    if (cleaned) return;
+    cleaned = true;
+    if (finishTimer) clearTimeout(finishTimer);
+    reply.raw.off?.('close', onReplyClose);
+    demux?.stdout?.unpipe(reply.raw);
+    demux?.stdout?.destroy();
+    demux?.stderr?.destroy();
+    demux?.destroy();
+    attach?.destroy?.();
+    await container.remove({ force: true }).catch(() => {});
+    if (endReply && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
+  };
+  const onReplyClose = () => { void cleanup(); };
+  const abortStream = () => {
+    if (cleaned) return;
+    void cleanup().finally(() => {
+      if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.destroy();
+    });
+  };
+  const markStreamFinished = () => {
+    if (stdoutFinished && stderrFinished) finishNormally();
+  };
+  const finishNormally = () => {
+    if (!containerFinished || !stdoutFinished || !stderrFinished || cleaned) return;
+    void cleanup(true);
+  };
   try {
-    const attach = await container.attach({ stream: true, stdout: true, stderr: true, logs: false });
+    reply.raw.once('close', onReplyClose);
+    attach = await container.attach({ stream: true, stdout: true, stderr: true, logs: false });
     await container.start();
-    const demux = demuxStream();
+    if (cleaned) throw new Error('客户端已断开');
+    demux = demuxStream();
+    attach.on('error', abortStream);
+    demux.on('error', abortStream);
+    demux.stdout.on('error', abortStream);
+    demux.stderr.on('error', abortStream);
+    demux.stdout.once('end', () => {
+      stdoutFinished = true;
+      markStreamFinished();
+    });
+    demux.stderr.once('end', () => {
+      stderrFinished = true;
+      markStreamFinished();
+    });
     attach.pipe(demux);
     demux.stderr.resume();
-    demux.stdout.pipe(reply.raw);
-    container.wait().finally(() => {
-      reply.raw.end();
-      container.remove({ force: true }).catch(() => {});
-    });
+    demux.stdout.pipe(reply.raw, { end: false });
+    const onContainerFinished = (result) => {
+      if (result && result.StatusCode !== undefined && Number(result.StatusCode) !== 0) {
+        abortStream();
+        return;
+      }
+      containerFinished = true;
+      finishNormally();
+      if ((!stdoutFinished || !stderrFinished) && !cleaned) {
+        finishTimer = setTimeout(abortStream, 5000);
+        finishTimer.unref?.();
+      }
+    };
+    void container.wait().then(onContainerFinished, abortStream);
     return reply;
   } catch (error) {
-    await container.remove({ force: true }).catch(() => {});
+    await cleanup();
     reply.raw.destroy();
     throw Object.assign(new Error(`远程备份读取失败:${error.message}`), { statusCode: 502 });
   }

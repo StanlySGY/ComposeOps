@@ -8,6 +8,7 @@ import {
   getWorkflowInstance,
   listWorkflowInstances,
   updateWorkflowInstance,
+  updateWorkflowInstanceIfStatus,
   addWorkflowStep,
   updateWorkflowStep,
 } from '../lib/db.js';
@@ -30,10 +31,30 @@ const NODE_TYPES = new Set(['trigger', 'condition', 'agent', 'approval', 'action
 
 function validateNodes(nodes) {
   if (!Array.isArray(nodes)) throw Object.assign(new Error('节点编排必须是数组'), { statusCode: 400 });
+  const ids = new Set();
   for (const node of nodes) {
     if (!node || typeof node !== 'object') throw Object.assign(new Error('节点格式无效'), { statusCode: 400 });
     if (!node.id) throw Object.assign(new Error('节点缺少 id'), { statusCode: 400 });
+    if (ids.has(String(node.id))) throw Object.assign(new Error(`节点 ID 重复:${node.id}`), { statusCode: 400 });
+    ids.add(String(node.id));
     if (!NODE_TYPES.has(node.type)) throw Object.assign(new Error(`未知节点类型:${node.type}`), { statusCode: 400 });
+    const config = node.config && typeof node.config === 'object' ? node.config : {};
+    if (node.type === 'condition' && !String(config.expression || '').trim()) {
+      throw Object.assign(new Error(`条件节点 ${node.id} 缺少 expression`), { statusCode: 400 });
+    }
+    if (node.type === 'action' && !String(config.action || '').trim()) {
+      throw Object.assign(new Error(`执行节点 ${node.id} 缺少 action`), { statusCode: 400 });
+    }
+    for (const edge of [node.next, node.onTrue, node.onFalse]) {
+      if (edge !== undefined && edge !== null && typeof edge !== 'string') {
+        throw Object.assign(new Error(`节点 ${node.id} 的跳转目标无效`), { statusCode: 400 });
+      }
+    }
+  }
+  for (const node of nodes) {
+    for (const edge of [node.next, node.onTrue, node.onFalse]) {
+      if (edge && !ids.has(edge)) throw Object.assign(new Error(`节点 ${node.id} 跳转目标不存在:${edge}`), { statusCode: 400 });
+    }
   }
   return nodes;
 }
@@ -89,6 +110,7 @@ async function runWorkflow(instanceId) {
   if (!definition) return;
 
   const nodes = definition.nodes || [];
+  const explicitGraph = nodes.some((node) => node.next || node.onTrue || node.onFalse);
   let context = { ...(instance.context || {}) };
   const completedNodeIds = new Set(
     (instance.steps || []).filter((step) => step.status === 'success').map((step) => step.nodeId)
@@ -96,9 +118,26 @@ async function runWorkflow(instanceId) {
   let currentStepId = null;
 
   try {
-    for (const node of nodes) {
+    let nodeIndex = 0;
+    const visited = new Set();
+    while (nodeIndex < nodes.length) {
+      const node = explicitGraph ? nodes[nodeIndex] : nodes[nodeIndex];
+      if (visited.has(node.id)) throw new Error(`工作流节点存在循环:${node.id}`);
+      visited.add(node.id);
       // 审批通过后恢复执行时,跳过已完成节点。
-      if (completedNodeIds.has(node.id)) continue;
+      if (completedNodeIds.has(node.id)) {
+        const nextId = explicitGraph ? resolveNextNode(node, context) : null;
+        if (explicitGraph && nextId) {
+          const nextIndex = nodes.findIndex((candidate) => candidate.id === nextId);
+          if (nextIndex < 0) throw new Error(`工作流跳转目标不存在:${nextId}`);
+          nodeIndex = nextIndex;
+        } else {
+          nodeIndex += 1;
+        }
+        continue;
+      }
+      const current = getWorkflowInstance(instanceId);
+      if (!current || !['running', 'pending'].includes(current.status)) return;
 
       const stepId = addWorkflowStep({
         instanceId,
@@ -121,11 +160,32 @@ async function runWorkflow(instanceId) {
       }
 
       const result = await executeNode(node, context);
+      const afterNode = getWorkflowInstance(instanceId);
+      if (!afterNode || afterNode.status === 'cancelled') {
+        if (afterNode?.status === 'cancelled') {
+          updateWorkflowStep(stepId, { status: 'cancelled', error: '工作流已取消', finishedAt: new Date().toISOString() });
+          currentStepId = null;
+        }
+        return;
+      }
       context = { ...context, ...(result.context || {}) };
+      updateWorkflowInstance(instanceId, { context });
       updateWorkflowStep(stepId, { status: 'success', output: result.output || {}, finishedAt: new Date().toISOString() });
+      // 只有正在执行的节点才允许在 catch 中被标记为 failed。清空它可避免
+      // 后续发现图循环时把已经成功落库的前一个节点改写成失败。
+      currentStepId = null;
       emitEvent({ type: 'workflow', eventType: 'workflow', title: `工作流节点完成:${node.id}`, detail: node.type, severity: 'info' });
+      const nextId = explicitGraph ? resolveNextNode(node, context) : null;
+      if (explicitGraph && nextId) {
+        const nextIndex = nodes.findIndex((candidate) => candidate.id === nextId);
+        if (nextIndex < 0) throw new Error(`工作流跳转目标不存在:${nextId}`);
+        nodeIndex = nextIndex;
+      } else {
+        nodeIndex += 1;
+      }
     }
-    updateWorkflowInstance(instanceId, { status: 'success', result: { summary: '工作流执行完成' }, finishedAt: new Date().toISOString() });
+    const completed = updateWorkflowInstanceIfStatus(instanceId, ['running', 'pending'], { status: 'success', result: { summary: '工作流执行完成' }, finishedAt: new Date().toISOString() });
+    if (!completed) return;
     addEventRecord({
       eventType: 'workflow',
       source: 'workflow',
@@ -136,11 +196,17 @@ async function runWorkflow(instanceId) {
       payload: { instanceId, definitionId: definition.id },
     });
   } catch (error) {
+    const current = getWorkflowInstance(instanceId);
+    if (current?.status === 'cancelled') {
+      if (currentStepId) updateWorkflowStep(currentStepId, { status: 'cancelled', error: '工作流已取消', finishedAt: new Date().toISOString() });
+      return;
+    }
     // 标记当前执行中的步骤为失败,避免停留在 running。
     if (currentStepId) {
       updateWorkflowStep(currentStepId, { status: 'failed', error: error.message, finishedAt: new Date().toISOString() });
     }
-    updateWorkflowInstance(instanceId, { status: 'failed', result: { error: error.message }, finishedAt: new Date().toISOString() });
+    const failed = updateWorkflowInstanceIfStatus(instanceId, ['running', 'pending'], { status: 'failed', result: { error: error.message }, finishedAt: new Date().toISOString() });
+    if (!failed) return;
     addEventRecord({
       eventType: 'workflow',
       source: 'workflow',
@@ -162,7 +228,13 @@ async function executeNode(node, context) {
     case 'condition': {
       const expr = node.config?.expression || '';
       const matched = evaluateCondition(expr, context);
-      return { output: { matched }, context: { conditionMatched: matched } };
+      return {
+        output: { matched },
+        context: {
+          conditionMatched: matched,
+          conditionResults: { ...(context.conditionResults || {}), [node.id]: matched },
+        },
+      };
     }
     case 'agent': {
       // Agent 节点:真正调用 Agent 引擎做只读分析。
@@ -208,7 +280,7 @@ async function executeNode(node, context) {
         throw Object.assign(new Error(`操作 ${action} 失败(exit ${exitCode})`), { statusCode: 500 });
       }
       return {
-        output: { action, projectId, exitCode, output: outputLines.join('').slice(-4000) },
+        output: { action, projectId, exitCode, output: outputLines.map((chunk) => Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)).join('').slice(-4000) },
         context: { lastAction: action, lastProjectId: projectId },
       };
     }
@@ -222,7 +294,7 @@ async function executeNode(node, context) {
       const outputLines = [];
       const exitCode = await prepared.run((stream, chunk) => outputLines.push(chunk));
       return {
-        output: { verified: exitCode === 0, exitCode, output: outputLines.join('').slice(-2000) },
+        output: { verified: exitCode === 0, exitCode, output: outputLines.map((chunk) => Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)).join('').slice(-2000) },
         context: { verified: exitCode === 0 },
       };
     }
@@ -231,22 +303,45 @@ async function executeNode(node, context) {
   }
 }
 
+function resolveNextNode(node, context) {
+  if (node.type === 'condition') {
+    const matched = Object.prototype.hasOwnProperty.call(context.conditionResults || {}, node.id)
+      ? context.conditionResults[node.id]
+      : context.conditionMatched === true;
+    return (matched ? node.onTrue : node.onFalse) || node.next || null;
+  }
+  return node.next || null;
+}
+
 /** 简单条件求值:支持 `context.field == value` / `!=` / `>` / `<`。 */
-function evaluateCondition(expr, context) {
-  const match = /^([\w.]+)\s*(==|!=|>|<|>=|<=)\s*(.+)$/.exec(String(expr || '').trim());
+export function evaluateCondition(expr, context = {}) {
+  const match = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(String(expr || '').trim());
   if (!match) return false;
   const [, field, op, rawValue] = match;
-  const actual = field.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), context);
-  const expected = rawValue.trim().replace(/^['"]|['"]$/g, '');
+  const path = field.startsWith('context.') ? field.slice('context.'.length) : field;
+  const actual = path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), context);
+  const expected = parseConditionLiteral(rawValue);
   switch (op) {
-    case '==': return String(actual) === expected;
-    case '!=': return String(actual) !== expected;
+    case '==': return actual === expected || String(actual) === String(expected);
+    case '!=': return !(actual === expected || String(actual) === String(expected));
     case '>': return Number(actual) > Number(expected);
     case '<': return Number(actual) < Number(expected);
     case '>=': return Number(actual) >= Number(expected);
     case '<=': return Number(actual) <= Number(expected);
     default: return false;
   }
+}
+
+function parseConditionLiteral(rawValue) {
+  const value = String(rawValue || '').trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null') return null;
+  if (/^-?(?:\d+\.?\d*|\.\d+)$/.test(value)) return Number(value);
+  return value;
 }
 
 export function listInstances({ status = '', limit = 50 } = {}) {
@@ -264,8 +359,8 @@ export function approveInstance(instanceId, { approved = true, note = '' } = {})
   if (instance.status !== 'waiting_approval') throw Object.assign(new Error('该实例不在等待审批状态'), { statusCode: 400 });
 
   if (!approved) {
-    updateWorkflowInstance(instanceId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-    return getWorkflowInstance(instanceId);
+    return updateWorkflowInstanceIfStatus(instanceId, ['waiting_approval'], { status: 'cancelled', finishedAt: new Date().toISOString() })
+      || getWorkflowInstance(instanceId);
   }
 
   // 找到等待审批的步骤,标记为通过,然后继续执行后续节点。
@@ -273,14 +368,16 @@ export function approveInstance(instanceId, { approved = true, note = '' } = {})
   if (pendingStep) {
     updateWorkflowStep(pendingStep.id, { status: 'success', output: { approved: true, note }, finishedAt: new Date().toISOString() });
   }
-  updateWorkflowInstance(instanceId, { status: 'running' });
+  const resumed = updateWorkflowInstanceIfStatus(instanceId, ['waiting_approval'], { status: 'running' });
+  if (!resumed) return getWorkflowInstance(instanceId);
   void runWorkflow(instanceId);
-  return getWorkflowInstance(instanceId);
+  return resumed;
 }
 
 export function cancelInstance(instanceId) {
   const instance = getWorkflowInstance(instanceId);
   if (!instance) throw Object.assign(new Error('工作流实例不存在'), { statusCode: 404 });
-  updateWorkflowInstance(instanceId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-  return getWorkflowInstance(instanceId);
+  const cancelled = updateWorkflowInstanceIfStatus(instanceId, ['pending', 'running', 'waiting_approval'], { status: 'cancelled', finishedAt: new Date().toISOString() });
+  if (!cancelled) throw Object.assign(new Error('该实例已经结束，无法取消'), { statusCode: 409 });
+  return cancelled;
 }

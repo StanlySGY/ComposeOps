@@ -26,7 +26,7 @@ export function isMasked(value) {
 }
 
 /** 根据表单输入构造提交 payload(掩码字段不覆盖已有安全值)。 */
-export function buildHostPayload(editor = {}, existing = null) {
+export function buildHostPayload(editor = {}) {
   const payload = {
     name: String(editor.name || '').trim(),
     type: editor.type === 'ssh' ? 'ssh' : 'tcp',

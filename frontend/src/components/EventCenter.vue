@@ -86,7 +86,9 @@ function notifyDesktop(item) {
       tag: `composeops-${item.id || Date.now()}`,
     });
     notify.onclick = () => { window.focus(); notify.close(); };
-  } catch {}
+  } catch {
+    // 浏览器可能拒绝 Notification 构造,不影响事件中心本身。
+  }
 }
 const alertEvents = ref([]);
 const expandedLogEventId = ref(null);
@@ -104,7 +106,9 @@ const eventStream = useWebSocket(() => wsUrl('/ws/events'), {
         alertEvents.value = [frame.data, ...alertEvents.value.filter((item) => item.id !== frame.data.id)].slice(0, 60);
         notifyDesktop(frame.data);
       }
-    } catch {}
+    } catch {
+      // 忽略格式异常的推送帧,下一帧仍可继续更新事件中心。
+    }
   },
   // 重连成功后补拉一次,填补断线期间漏掉的事件
   onOpen: ({ resumed }) => { if (resumed) void load(); },
@@ -214,7 +218,9 @@ async function load() {
     updates.value = updateData || { lastResults: [] };
     jobs.value = jobData.jobs || [];
     alertEvents.value = alertData.events || [];
-  } catch {}
+  } catch {
+    // 事件中心允许显示已有缓存,加载失败由下一次刷新或重连补偿。
+  }
   finally { loading.value = false; }
 }
 function connectEventStream() {

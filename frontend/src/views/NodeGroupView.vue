@@ -101,7 +101,9 @@ function groupOf(hostId) {
 }
 function assignGroup(host, groupId) {
   groupAssignments.value = { ...groupAssignments.value, [host.id]: groupId };
-  try { localStorage.setItem('composeops:node-groups', JSON.stringify(groupAssignments.value)); } catch {}
+  try { localStorage.setItem('composeops:node-groups', JSON.stringify(groupAssignments.value)); } catch {
+    // 节点分组仍保留在当前会话,仅无法持久化到下次访问。
+  }
   toast.success(`已将节点 ${host.name} 加入${groups.find((g) => g.id === groupId)?.label}`);
 }
 function switchHost(host) {
@@ -125,7 +127,9 @@ async function load() {
     try {
       const saved = JSON.parse(localStorage.getItem('composeops:node-groups') || '{}');
       groupAssignments.value = saved;
-    } catch {}
+    } catch {
+      // 分组记忆损坏时回退到默认生产组。
+    }
   } catch (e) {
     error.value = e.message || '节点加载失败';
   } finally {

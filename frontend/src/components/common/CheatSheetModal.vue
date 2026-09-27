@@ -24,7 +24,7 @@
 <script setup>
 import { Keyboard } from 'lucide-vue-next';
 import BaseModal from './BaseModal.vue';
-const props = defineProps({ open: { type: Boolean, default: false } });
+defineProps({ open: { type: Boolean, default: false } });
 const emit = defineEmits(['close']);
 function close() { emit('close'); }
 

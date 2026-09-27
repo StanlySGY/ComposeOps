@@ -132,7 +132,9 @@ export function useWebSocket(url, options = {}) {
       socket.onerror = null;
       try {
         socket.close();
-      } catch {}
+      } catch {
+        // 主动关闭阶段 Socket 可能已经由浏览器清理,无需向 UI 报错。
+      }
     }
   }
 

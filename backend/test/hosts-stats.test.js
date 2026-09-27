@@ -76,13 +76,13 @@ test('hosts: setActiveHost 切换并持久化,删除后回落本地', () => {
   assert.equal(getActiveHostId(), 'local');
 });
 
-test('hosts: probeHost 构建临时节点,composeEnv 输出 DOCKER_HOST', () => {
+test('hosts: probeHost 构建临时节点,远程 Compose CLI 明确要求 runner', () => {
   const probe = probeHost({ type: 'ssh', host: '10.1.1.1', port: 2222, username: 'admin', password: 'pw' });
   assert.equal(probe.type, 'ssh');
   assert.equal(probe.host, '10.1.1.1');
   assert.equal(probe.port, 2222);
-  assert.equal(composeEnv(probe).DOCKER_HOST, 'ssh://admin@10.1.1.1:2222');
+  assert.throws(() => composeEnv(probe), (error) => error.code === 'REMOTE_COMPOSE_RUNNER_REQUIRED');
   const tcp = probeHost({ type: 'tcp', host: '10.1.1.2' });
-  assert.equal(composeEnv(tcp).DOCKER_HOST, 'tcp://10.1.1.2:2375');
+  assert.throws(() => composeEnv(tcp), (error) => error.code === 'REMOTE_COMPOSE_RUNNER_REQUIRED');
   assert.throws(() => probeHost({ type: 'tcp', host: '  ' }), /主机地址/);
 });
