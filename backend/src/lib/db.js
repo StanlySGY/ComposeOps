@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { chmodSync } from 'fs';
+import { chmodSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { createHash } from 'node:crypto';
@@ -8,6 +8,8 @@ import { redactValue } from './redaction.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/opsdash.db');
 
+// 父目录可能不存在(CI fresh checkout / 首次运行):better-sqlite3 只建文件不建目录。
+mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
 chmodSync(DB_PATH, 0o600);
 db.pragma('journal_mode = WAL');
