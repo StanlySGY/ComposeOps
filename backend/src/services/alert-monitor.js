@@ -7,6 +7,7 @@ import { recordAlertEventAndNotify } from './events.js';
 import { parseContainerStat } from './stats.js';
 import { spawnComposeCommand } from './compose-runner.js';
 import { runWorkspaceComposeArgs } from './compose-workspace.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 
 const previousStates = new Map();
 const agentCooldowns = new Map();
@@ -61,10 +62,12 @@ async function applyAgentAlertAction(rule, project, container, current) {
   });
   await sendNotification(title, body).catch(() => {});
 
+  // 自动处置动作持项目操作锁:自动 restart/scale 与用户手动 stop/升级并发会互相踩踏。
   if (rule.action === 'auto_restart') {
-    await getActivityDocker().getContainer(container.id).restart().catch(() => {});
+    await withProjectOperationLock(project.id, () =>
+      getActivityDocker().getContainer(container.id).restart().catch(() => {}));
   } else if (rule.action === 'scale') {
-    await scaleServiceByOne(project, rule.service).catch(() => {});
+    await withProjectOperationLock(project.id, () => scaleServiceByOne(project, rule.service).catch(() => {}));
   }
 }
 

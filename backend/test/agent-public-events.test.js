@@ -37,8 +37,13 @@ test('公开 Agent 事件隐藏工具协议和内部工具字段', () => {
     params: { password: 'hidden', name: 'backup' },
     executionId: 12,
     toolCallId: 'call-1',
+    risk: 'medium',
     description: '创建定时任务',
-  }), { type: 'confirmation_required', executionId: '12', toolCallId: 'call-1', tool: 'cron.create', params: { password: '[REDACTED]', name: 'backup' }, description: '创建定时任务' });
+  }), { type: 'confirmation_required', executionId: '12', toolCallId: 'call-1', tool: 'cron.create', params: { password: '[REDACTED]', name: 'backup' }, risk: 'medium', description: '创建定时任务' });
+  // risk 透传给前端:critical 操作要隐藏"本会话不再询问"按钮(fail-closed)
+  assert.equal(toPublicAgentEvent({ type: 'confirmation_required', risk: 'critical' }).risk, 'critical');
+  // 达到最大循环次数必须透传:此前被静默丢弃,前端只看到流关闭无任何提示
+  assert.deepEqual(toPublicAgentEvent({ type: 'max_loops_reached', maxLoops: 20 }), { type: 'max_loops_reached', maxLoops: 20 });
 });
 
 test('公开 Agent 事件保留用户需要的上下文和完成通知', () => {

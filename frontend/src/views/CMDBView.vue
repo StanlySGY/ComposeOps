@@ -127,8 +127,10 @@ function statusLabel(status) {
   return { online: '在线', offline: '离线', running: '运行中', stopped: '已停止', partial: '部分', unknown: '未知' }[status] || status;
 }
 function statusTone(status) {
+  // 与 StatusBadge 语义对齐:stopped 是正常态用中性灰,offline(宿主不可达)才是异常红。
   if (['online', 'running'].includes(status)) return 'bg-emerald-500/10 text-emerald-400';
-  if (['offline', 'stopped'].includes(status)) return 'bg-rose-500/10 text-rose-400';
+  if (status === 'stopped') return 'bg-surface-800/40 text-surface-400';
+  if (status === 'offline') return 'bg-rose-500/10 text-rose-400';
   if (status === 'partial') return 'bg-amber-500/10 text-amber-400';
   return 'bg-surface-800 text-surface-400';
 }

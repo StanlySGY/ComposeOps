@@ -465,6 +465,38 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 13,
+    name: '热表索引(ai_history/operation_history/compose_backups)',
+    up(database) {
+      // 三张表都是热路径:AI 每条消息按 session_id 读写 ai_history,
+      // 项目 activity 按 project_id 查 operation_history/compose_backups,此前全表扫描。
+      // 按表+列存在性分别守卫:中间态数据库(迁移测试/极端历史库)可能缺表或缺列。
+      const hasTable = (name) => !!database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+      const columnsOf = (name) => new Set(database.prepare(`PRAGMA table_info(${name})`).all().map((column) => column.name));
+      if (hasTable('ai_history')) {
+        const columns = columnsOf('ai_history');
+        if (columns.has('session_id') && columns.has('id')) {
+          database.exec(`CREATE INDEX IF NOT EXISTS idx_ai_history_session ON ai_history(session_id, id);`);
+        }
+        if (columns.has('created_at')) {
+          database.exec(`CREATE INDEX IF NOT EXISTS idx_ai_history_created ON ai_history(created_at);`);
+        }
+      }
+      if (hasTable('operation_history')) {
+        const columns = columnsOf('operation_history');
+        if (columns.has('project_id') && columns.has('created_at')) {
+          database.exec(`CREATE INDEX IF NOT EXISTS idx_operation_history_project ON operation_history(project_id, created_at);`);
+        }
+      }
+      if (hasTable('compose_backups')) {
+        const columns = columnsOf('compose_backups');
+        if (columns.has('project_id') && columns.has('id')) {
+          database.exec(`CREATE INDEX IF NOT EXISTS idx_compose_backups_project ON compose_backups(project_id, id);`);
+        }
+      }
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1015,6 +1047,9 @@ export function setProjectMounts(discoveredProjectIds, managedProjectIds, mountP
   return setProjectManagement(discoveredProjectIds, managedProjectIds, mountProjectIds);
 }
 
+/** Compose 备份每项目保留份数:maintenance.pruneComposeBackups 与这里共用同一常量,防止两处漂移。 */
+export const COMPOSE_BACKUP_KEEP = 20;
+
 export function addComposeBackup(projectId, filePath, content, reason = 'save') {
   const result = db.prepare(
     'INSERT INTO compose_backups(project_id, file_path, content, reason) VALUES(?, ?, ?, ?)'
@@ -1022,7 +1057,7 @@ export function addComposeBackup(projectId, filePath, content, reason = 'save') 
   db.prepare(`
     DELETE FROM compose_backups
     WHERE project_id = ? AND id NOT IN (
-      SELECT id FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT 20
+      SELECT id FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT ${COMPOSE_BACKUP_KEEP}
     )
   `).run(projectId, projectId);
   return Number(result.lastInsertRowid);
@@ -1032,7 +1067,7 @@ export function listComposeBackups(projectId) {
   return db.prepare(`
     SELECT id, project_id AS projectId, file_path AS filePath, reason, created_at AS createdAt,
            length(content) AS size
-    FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT 20
+    FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT ${COMPOSE_BACKUP_KEEP}
   `).all(projectId);
 }
 
@@ -1147,8 +1182,10 @@ export function interruptRunningBackgroundJobs() {
 }
 
 export function exportUserData() {
+  // docker.hosts 必须整键排除(而非脱敏后导出):SSH 密码/私钥/TLS 证书是明文落库的,
+  // 脱敏导出再导入会把无凭据条目回灌覆盖真实凭据;导入侧 allowlist 本就不含该键。
   const settings = Object.fromEntries(
-    db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('ai.api_key', 'auth.password_hash', 'notifications.config')").all()
+    db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('ai.api_key', 'auth.password_hash', 'notifications.config', 'docker.hosts')").all()
       .map((row) => [row.key, row.value])
   );
   return {

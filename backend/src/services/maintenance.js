@@ -1,14 +1,17 @@
-import docker from './docker.js';
+import { getActivityDocker } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
-import db, { pruneAgentPlans, pruneOperationHistory } from '../lib/db.js';
+import db, { pruneAgentPlans, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
+import { pruneEvents } from './event-center.js';
 
 function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
 }
 
 export async function getDockerUsage() {
+  // 跟随当前活跃节点:此前固定本地 daemon,切到远程宿主后清理/检查仍操作面板本机。
+  const docker = await getActivityDocker();
   const data = await docker.df();
   const imagesTotal = sum(data.Images, 'Size');
   const imagesReclaimable = sum((data.Images || []).filter((item) => Number(item.Containers) <= 0), 'Size');
@@ -28,11 +31,12 @@ export async function getDockerUsage() {
   };
 }
 
-async function imageId(image) {
+async function imageId(docker, image) {
   try { return (await docker.getImage(image).inspect()).Id; } catch { return null; }
 }
 
 export async function checkImageUpdates(onProgress = () => {}) {
+  const docker = await getActivityDocker();
   const projects = await scanProjects();
   const images = [...new Set(projects
     .filter((project) => project.managed)
@@ -40,14 +44,14 @@ export async function checkImageUpdates(onProgress = () => {}) {
     .filter(Boolean))];
   const results = [];
   for (const image of images) {
-    const before = await imageId(image);
+    const before = await imageId(docker, image);
     onProgress(`拉取 ${image}`);
     try {
       const stream = await docker.pull(image);
       await new Promise((resolve, reject) => {
         docker.modem.followProgress(stream, (error) => error ? reject(error) : resolve());
       });
-      const after = await imageId(image);
+      const after = await imageId(docker, image);
       results.push({ image, status: before && after && before !== after ? 'updated' : 'current', before, after });
     } catch (error) {
       results.push({ image, status: 'failed', error: error.message });
@@ -62,6 +66,7 @@ export async function checkImageUpdates(onProgress = () => {}) {
 }
 
 export async function pruneDocker({ images = true, buildCache = true, containers = false, volumes = false }) {
+  const docker = await getActivityDocker();
   const result = {};
   if (images) result.images = await docker.pruneImages({ filters: { dangling: ['false'] } });
   if (buildCache) result.buildCache = await docker.pruneBuilds();
@@ -80,7 +85,7 @@ const DATA_DEFAULTS = {
   agentPlansDays: 90,        // agent_plans(含 CASCADE agent_executions)保留天数
   operationHistoryDays: 30,  // operation_history 保留天数
   aiHistoryDays: 30,         // ai_history 保留天数
-  composeBackupKeep: 5,      // 每个项目保留的最新备份份数(0 = 不清理)
+  composeBackupKeep: COMPOSE_BACKUP_KEEP, // 与 addComposeBackup 共用同一常量,避免"写入留 20 份、清理裁 5 份"的漂移
   runIntervalMs: 6 * 60 * 60 * 1000, // 每 6 小时
 };
 
@@ -112,7 +117,7 @@ export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPla
 
 /** 每个项目只保留最新 N 份 compose_backups。 */
 export function pruneComposeBackups(keep = DATA_DEFAULTS.composeBackupKeep) {
-  const safeKeep = Math.max(1, Math.min(Math.floor(Number(keep) || 5), 100));
+  const safeKeep = Math.max(1, Math.min(Math.floor(Number(keep) || COMPOSE_BACKUP_KEEP), 100));
   return db.prepare(`
     DELETE FROM compose_backups
     WHERE id NOT IN (
@@ -128,9 +133,13 @@ export function pruneComposeBackups(keep = DATA_DEFAULTS.composeBackupKeep) {
 export function runDataMaintenance() {
   const history = pruneDataHistory();
   const backups = pruneComposeBackups();
+  // event_records 此前无任何调度方调用,只增不删;纳入周期清理。
+  let events = 0;
+  try { events = pruneEvents().changes; } catch { /* 事件表缺失等异常不阻断其他清理。 */ }
   return {
     ...history,
     composeBackupsDeleted: backups.changes,
+    eventRecordsDeleted: events,
     at: new Date().toISOString(),
   };
 }

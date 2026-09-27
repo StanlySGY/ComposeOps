@@ -76,6 +76,15 @@
       <button @click="loadTemplates" class="btn-secondary btn-retry">重试</button>
     </div>
 
+    <EmptyState
+      v-else-if="!filteredTemplates.length"
+      icon="Search"
+      title="没有匹配的模板"
+      description="调整搜索关键字或分类筛选,或通过 AI 找应用创建自定义模板。"
+    >
+      <button class="btn-secondary" @click="clearFilters">清除筛选条件</button>
+    </EmptyState>
+
     <!-- 模板列表 -->
     <section v-else class="templates-grid">
       <div
@@ -268,6 +277,7 @@ import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import EmptyState from '../components/common/EmptyState.vue';
 import { Bot, LoaderCircle, Rocket } from 'lucide-vue-next';
 
 const toast = useToastStore();
@@ -325,6 +335,15 @@ async function loadTemplates() {
   } finally {
     loading.value = false;
   }
+}
+
+/** 清空全部筛选条件并重新加载(空态"清除筛选"入口)。 */
+function clearFilters() {
+  searchQuery.value = '';
+  selectedCategory.value = 'all';
+  selectedSource.value = 'all';
+  onlyFavorites.value = false;
+  void loadTemplates();
 }
 
 let searchTimeout = null;

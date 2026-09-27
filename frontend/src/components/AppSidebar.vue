@@ -1,7 +1,7 @@
 <template>
   <aside class="app-sidebar fixed md:static bottom-0 left-0 right-0 z-40 h-16 md:h-auto md:w-[216px] shrink-0 flex flex-col">
     <nav class="hidden md:flex md:flex-col flex-1 md:px-3 md:py-4 overflow-y-auto">
-      <div class="hidden md:block px-2 pb-1 pt-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">运行</div>
+      <div class="hidden md:block px-2 pb-1 pt-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-500">运行</div>
       <router-link
         v-for="item in primaryItems"
         :key="item.to"
@@ -14,7 +14,7 @@
         <span class="nav-indicator hidden md:block w-1.5 h-1.5 rounded-full bg-accent opacity-0"></span>
       </router-link>
       <section v-for="group in desktopGroups" :key="group.label" class="mt-3 first:mt-4">
-        <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">{{ group.label }}</div>
+        <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-500">{{ group.label }}</div>
         <router-link
           v-for="item in group.items"
           :key="item.to"
@@ -62,7 +62,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, Workflow, ServerCog, Database, BellRing } from 'lucide-vue-next';
+import { Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
 const primaryItems = [
   { to: '/dashboard', icon: Activity, label: '总览' },
   { to: '/services', icon: Boxes, label: '服务' },
@@ -78,6 +78,7 @@ const navGroups = [
       { to: '/monitor', icon: ChartNoAxesCombined, label: '实时监控' },
       { to: '/events', icon: BellRing, label: '事件中心' },
       { to: '/inspection', icon: ShieldCheck, label: 'AI 巡检' },
+      { to: '/agent/history', icon: History, label: 'Agent 执行历史' },
     ],
   },
   {

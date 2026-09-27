@@ -5,6 +5,7 @@ import { parseDotenv, serializeDotenv, validateDotenv } from '../lib/dotenv.js';
 import { spawnComposeCommand } from './compose-runner.js';
 import { withRunner, execInRunner, readArchiveFile, putArchiveFile, runWorkspaceComposeArgs } from './compose-workspace.js';
 import { addOperation } from '../lib/db.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 
 const ENV_FILE = '.env';
 const ENV_EXAMPLE = '.env.example';
@@ -172,20 +173,23 @@ export async function saveProjectEnv(project, { raw, entries }, fileName = ENV_F
 /**
  * 触发 .env 生效:执行 docker compose up -d --force-recreate。
  * 返回 Promise<number>(退出码),onOutput 流式回调。
+ * 持项目操作锁:force-recreate 与 stop/restart/升级并发会互相踩踏。
  */
 export async function applyProjectEnv(project, { onOutput = () => {}, onChild = () => {} } = {}) {
   if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
-  if (project.mounted) {
-    return new Promise((resolve, reject) => {
-      const child = spawnComposeCommand(project, ['up', '-d', '--force-recreate']);
-      onChild(child);
-      child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
-      child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
-      child.on('error', reject);
-      child.on('close', (code) => resolve(code ?? 1));
-    });
-  }
-  return runWorkspaceComposeArgs(project, ['up', '-d', '--force-recreate'], onOutput);
+  return withProjectOperationLock(project.id, async () => {
+    if (project.mounted) {
+      return new Promise((resolve, reject) => {
+        const child = spawnComposeCommand(project, ['up', '-d', '--force-recreate']);
+        onChild(child);
+        child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
+        child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
+        child.on('error', reject);
+        child.on('close', (code) => resolve(code ?? 1));
+      });
+    }
+    return runWorkspaceComposeArgs(project, ['up', '-d', '--force-recreate'], onOutput);
+  });
 }
 
 /** 供项目 action 校验复用:env.apply 需要 editable。 */

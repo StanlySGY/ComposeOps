@@ -33,6 +33,8 @@ export function toPublicAgentEvent(event) {
       toolCallId: String(event.toolCallId || ''),
       tool: String(event.tool || ''),
       params: redactValue(event.params || {}),
+      // risk 透出给前端:critical 操作"本会话不再询问"不生效,弹窗要据此隐藏记忆按钮。
+      risk: String(event.risk || ''),
       description: cleanText(event.description) || '该操作会修改系统状态,请确认是否继续。',
     };
   }
@@ -103,6 +105,8 @@ export function toPublicAgentEvent(event) {
   }
   if (event.type === 'tool_rejected') return { type: 'tool_rejected', tool: String(event.tool || '') };
   if (event.type === 'tool_error') return { type: 'tool_error', tool: String(event.tool || ''), error: cleanError(event.error) };
+  // 达到最大循环次数:此前被本层丢弃,前端只看到流关闭无任何提示。
+  if (event.type === 'max_loops_reached') return { type: 'max_loops_reached', maxLoops: Number(event.maxLoops) || 0 };
   // 后台任务搭车通知:一行式任务摘要,已脱敏(drainTaskNotifications 只给状态与尾部预览)
   if (event.type === 'task_notice') return { type: 'task_notice', content: cleanText(String(event.content || '')).slice(0, 1000) };
   if (event.type === 'error') return { type: 'error', content: cleanError(event.error || event.content) || 'Agent 执行失败' };

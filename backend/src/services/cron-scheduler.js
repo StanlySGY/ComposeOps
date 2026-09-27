@@ -86,7 +86,9 @@ export function nextRunTime(expr, from = new Date()) {
       cron.hour(cursor.getHours()) &&
       cron.day(cursor.getDate()) &&
       cron.month(cursor.getMonth() + 1) &&
-      cron.weekday(cursor.getDay())
+      // weekday 字段合法范围是 0..7(7 = 周日,部分 cron 方言),而 getDay() 只返回
+      // 0-6:周日额外按 7 再测一次,否则写 7 的任务永不执行。
+      (cron.weekday(cursor.getDay()) || (cursor.getDay() === 0 && cron.weekday(7)))
     ) {
       return cursor;
     }
@@ -336,8 +338,13 @@ async function executeJob(job) {
 
 function runStepSpawn(child) {
   return new Promise((resolve, reject) => {
-    child.on('error', reject);
-    child.on('close', (code) => resolve(code ?? 1));
+    // 定时 pull 大镜像可能很慢:15 分钟兜底超时杀进程,防止任务悬挂占住 running 槽。
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('compose pull 超时(15 分钟)'));
+    }, 15 * 60 * 1000);
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('close', (code) => { clearTimeout(timer); resolve(code ?? 1); });
     child.stdout.resume();
     child.stderr.resume();
   });
@@ -367,8 +374,10 @@ async function tick() {
   const now = Date.now();
   for (const job of jobs) {
     if (!job.enabled || running.has(job.id)) continue;
-    const last = job.lastRunAt || 0;
-    const next = nextRunTime(job.cron, new Date(last));
+    // lastRunAt 为 null 的新任务必须从当前时间起算:从 1970 起算会让首个匹配点
+    // 必然落在过去,任务创建 15 秒内被立即补跑一次,与 enrich() 展示的
+    // "从现在起算的下次执行时间"自相矛盾。已有 lastRunAt 的任务保持追跑语义。
+    const next = nextRunTime(job.cron, job.lastRunAt ? new Date(job.lastRunAt) : new Date());
     if (!next || next.getTime() > now) continue;
     running.add(job.id);
     const started = Date.now();

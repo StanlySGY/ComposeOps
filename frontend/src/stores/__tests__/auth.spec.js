@@ -68,16 +68,28 @@ describe('useAuthStore', () => {
   describe('submit()', () => {
     it('calls setup API when setupRequired is true', async () => {
       api.setup.mockResolvedValue({});
-      
+
       const store = useAuthStore();
       store.setupRequired = true;
-      
+
       await store.submit('password123');
-      
-      expect(api.setup).toHaveBeenCalledWith('password123');
+
+      // 未填引导令牌时以空串透传(服务端设置 SETUP_TOKEN 才强制要求)
+      expect(api.setup).toHaveBeenCalledWith('password123', '');
       expect(api.login).not.toHaveBeenCalled();
       expect(store.authenticated).toBe(true);
       expect(store.setupRequired).toBe(false);
+    });
+
+    it('passes setupToken to setup API when provided', async () => {
+      api.setup.mockResolvedValue({});
+
+      const store = useAuthStore();
+      store.setupRequired = true;
+
+      await store.submit('password123', 'bootstrap-token');
+
+      expect(api.setup).toHaveBeenCalledWith('password123', 'bootstrap-token');
     });
 
     it('calls login API when setupRequired is false', async () => {

@@ -125,6 +125,9 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     state.nextId = 0;
     state.controller?.abort();
     state.controller = null;
+    // 队列残留消息若不清,会在新会话里被 sendMessage 的"自动发送下一条"带出去,
+    // 造成用户以为已丢弃的内容发进了全新会话。
+    state.pendingQueue.value = [];
   }
 
   async function sendMessage(text, extraPayload = {}) {
@@ -269,6 +272,12 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       // 后台任务完成通知:模型侧已搭车注入,界面侧以提示条同步展示,用户不必翻思考过程。
       assistant.taskNotices = [...(assistant.taskNotices || []), event.content || ''];
     }
+    else if (event.type === 'max_loops_reached') {
+      // 此前该事件被公共事件层丢弃,达到 20 轮上限时前端只看到流关闭、无任何提示。
+      flushTokens();
+      assistant.confirmation = null;
+      assistant.content += `${assistant.content ? '\n\n' : ''}已达最大工具循环次数(${Number(event.maxLoops) || 20} 轮),本次执行终止。可发送"继续"接续处理,或拆小任务后重试。`;
+    }
     else if (event.type.startsWith('tool_')) { trackTool(assistant, event); }
     else if (event.type === 'interrupted') {
       flushTokens();
@@ -323,7 +332,8 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       for (const item of state.subscribers) { if (item.active !== false) item.onApproval?.(message, 'approved'); }
     } catch (error) {
       confirmation.busy = false;
-      message.content = `确认失败：${error.message}`;
+      // 追加而不是覆盖:此时回复正文可能已经流式输出了一部分,覆盖会吃掉已有内容。
+      message.content += `${message.content ? '\n\n' : ''}确认失败：${error.message}`;
     }
   }
 
@@ -337,7 +347,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       for (const item of state.subscribers) { if (item.active !== false) item.onApproval?.(message, 'rejected'); }
     } catch (error) {
       confirmation.busy = false;
-      message.content = `拒绝失败：${error.message}`;
+      message.content += `${message.content ? '\n\n' : ''}拒绝失败：${error.message}`;
     }
   }
 

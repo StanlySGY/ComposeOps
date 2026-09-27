@@ -10,6 +10,17 @@
     <p v-if="error" class="alert-error">{{ error }}</p>
     <p v-if="message" class="alert-success">{{ message }}</p>
 
+    <div v-if="loading && !jobs.length" class="mt-2 space-y-2" aria-busy="true">
+      <div v-for="i in 3" :key="i" class="card p-3 flex items-center gap-3">
+        <div class="h-9 w-9 shrink-0 animate-pulse rounded-lg bg-surface-800"></div>
+        <div class="min-w-0 flex-1 space-y-2">
+          <div class="h-3.5 w-1/3 animate-pulse rounded bg-surface-800"></div>
+          <div class="h-3 w-1/2 animate-pulse rounded bg-surface-800/70"></div>
+        </div>
+        <div class="h-8 w-20 shrink-0 animate-pulse rounded bg-surface-800"></div>
+      </div>
+    </div>
+
     <div v-if="!jobs.length && !loading" class="flex flex-1 flex-col items-center justify-center gap-6 py-12">
       <div class="space-y-1.5 text-center">
         <h2 class="text-base font-semibold tracking-tight text-surface-100">还没有定时任务</h2>

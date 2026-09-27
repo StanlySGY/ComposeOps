@@ -27,6 +27,7 @@ import { idField, limitField, numericId } from '../lib/schemas.js';
 import { redactRows, redactValue } from '../lib/redaction.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
 import { buildCompactSummary } from '../services/agent/compaction.js';
+import { randomUUID } from 'node:crypto';
 
 export default async function agentRoutes(fastify) {
   // POST /api/v1/ai/agent/sessions —— 创建聊天会话
@@ -136,7 +137,10 @@ export default async function agentRoutes(fastify) {
     };
 
     const agent = getAgent();
-    const context = { projectId, containerId, sessionId, role, webSearchEnabled, attachedLogs, history, pageContext };
+    // 审批门会话键:无 sessionId 的直连流每次生成独立键,防止"本会话不再询问"
+    // 授权经由共享 default 桶泄漏到其他匿名流。
+    const gateKey = sessionId != null && sessionId !== '' ? String(sessionId) : `stream-${randomUUID()}`;
+    const context = { projectId, containerId, sessionId, gateKey, role, webSearchEnabled, attachedLogs, history, pageContext };
 
     // 客户端断开时中断执行
     const abortController = new AbortController();
@@ -253,8 +257,10 @@ export default async function agentRoutes(fastify) {
     const sessionId = Number(request.body?.sessionId);
     const keepRecent = Math.max(Number(request.body?.keepRecent) || 6, 2);
     const boundary = getAiSessionCompaction(sessionId);
-    // 可压缩行 = 分界点之后、去掉最近 keepRecent 条的活跃区
-    const evictable = getAiHistory(200, sessionId).filter((item) => Number(item.id) > boundary);
+    // 可压缩行 = 分界点之后、去掉最近 keepRecent 条的活跃区。
+    // 必须拉全量(而不是最近 200 条):超过窗口的更早消息如果既不进摘要、
+    // 又被分界点排除在活跃区之外,就会永久丢失。
+    const evictable = getAiHistory(100000, sessionId).filter((item) => Number(item.id) > boundary);
     const candidates = evictable.slice(0, Math.max(evictable.length - keepRecent, 0));
     if (candidates.length < 2) {
       return reply.code(400).send({ error: 'nothing_to_compact', message: '活跃区历史太少,无需压缩' });

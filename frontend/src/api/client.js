@@ -110,7 +110,8 @@ export function bumpHostEpoch() {
 
 export const api = {
   getAuthStatus: () => request('/auth/status'),
-  setup: (password) => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password }) }),
+  // setupToken:服务端设置 SETUP_TOKEN 环境变量时,首次初始化必须携带该引导令牌
+  setup: (password, setupToken = '') => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password, setupToken }) }),
   login: (password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { method: 'POST', body: JSON.stringify(payload) }),

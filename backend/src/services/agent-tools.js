@@ -15,6 +15,7 @@ import { registerMemoryTools } from './tools/memory-tools.js';
 import { registerInspectionTools } from './tools/inspection-tools.js';
 import { registerGitopsTools } from './tools/gitops-tools.js';
 import { registerTaskTools } from './tools/task-tools.js';
+import { MACRO_TOOLS } from './agent-tool-categories.js';
 
 /** 工具风险等级:低/中/高/极高,前端据此决定确认强度。单一事实来源。 */
 export const RISK_LEVELS = {
@@ -41,7 +42,9 @@ export const RISK_LEVELS = {
  * @returns {string} 动态评估后的风险等级
  */
 export function assessRisk(toolName, params, context) {
-  const baseRisk = RISK_LEVELS[toolName] || 'low';
+  // 宏工具不在 RISK_LEVELS 里:必须读宏注册表自带的 risk(如 macro.full_cleanup = critical),
+  // 否则会落到默认 'low',在 full/allow_writes 模式下绕过审批门直接执行 critical 级宏。
+  const baseRisk = RISK_LEVELS[toolName] || MACRO_TOOLS[toolName]?.risk || 'low';
 
   // 生产项目提升风险等级
   const project = context?.project;

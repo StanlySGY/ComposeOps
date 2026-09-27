@@ -5,6 +5,7 @@ import { setSetting, addComposeBackup, addOperation } from '../lib/db.js';
 import { readCompose } from './compose-runner.js';
 import { getActivityDocker } from './docker-hosts.js';
 import { withRunner, readArchiveFile, putArchiveFile } from './compose-workspace.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h,避免 Registry Rate Limit
 const cache = new Map(); // projectId -> { ts, data }
@@ -202,11 +203,16 @@ async function writeUpgradeBackups(project) {
 /**
  * 平滑升级:备份 -> compose pull -> up -d -> 健康轮询(15s)。
  * 返回 { code, upgraded, degraded, rollbackAvailable, backups }。
+ * 持项目操作锁:升级的 pull/up 与停止/重启/env.apply 并发会互相踩踏。
  */
-export async function upgradeProject(project, { onOutput = () => {}, onChild = () => {} } = {}) {
+export async function upgradeProject(project, options = {}) {
   if (!project?.managed || !project.editable) {
     throw Object.assign(new Error('当前节点下该项目不支持平滑升级(需要 Compose 能力)'), { statusCode: 403 });
   }
+  return withProjectOperationLock(project.id, () => upgradeProjectLocked(project, options));
+}
+
+async function upgradeProjectLocked(project, { onOutput = () => {}, onChild = () => {} } = {}) {
   const backups = await writeUpgradeBackups(project);
   const { spawnComposeCommand } = await import('./compose-runner.js');
   const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
@@ -260,17 +266,22 @@ function runStep(child, onOutput, onChild) {
   });
 }
 
-/** 从最近一次 upgrade 备份恢复 compose/.env 并 up -d。 */
-export async function rollbackProject(project, { onOutput = () => {}, onChild = () => {} } = {}) {
-  const { listComposeBackups } = await import('../lib/db.js');
+/** 从最近一次 upgrade 备份恢复 compose/.env 并 up -d。持项目操作锁,与升级/重启互斥。 */
+export async function rollbackProject(project, options = {}) {
   if (!project?.managed || !project.editable) {
     throw Object.assign(new Error('当前节点下该项目不支持回滚'), { statusCode: 403 });
   }
+  return withProjectOperationLock(project.id, () => rollbackProjectLocked(project, options));
+}
+
+async function rollbackProjectLocked(project, { onOutput = () => {}, onChild = () => {} } = {}) {
+  const { listComposeBackups, getComposeBackup } = await import('../lib/db.js');
   const backups = listComposeBackups(project.id).filter((item) => item.reason === 'upgrade');
   if (!backups.length && !cache.get(project.id)?.data) {
     throw Object.assign(new Error('没有可用的升级备份'), { statusCode: 409 });
   }
-  // 恢复 compose 备份(最近一份)
+  // 恢复 compose 备份(最近一份)。listComposeBackups 不返回 content(只有 size),
+  // 必须经 getComposeBackup 取正文,否则写入 undefined 恒抛错被吞、回滚恒 409。
   let restored = 0;
   if (project.mounted) {
     for (const backup of backups.slice(0, 1)) {
@@ -278,21 +289,29 @@ export async function rollbackProject(project, { onOutput = () => {}, onChild = 
         const filePath = backup.filePath;
         const index = project.composeFiles.indexOf(filePath);
         if (index < 0) continue;
-        await writeFile(filePath, backup.content, 'utf8');
+        const full = getComposeBackup(project.id, backup.id);
+        if (typeof full?.content !== 'string') continue;
+        await writeFile(filePath, full.content, 'utf8');
         restored += 1;
-      } catch { /* 单个项目恢复失败时继续处理其他项目。 */ }
+      } catch (error) {
+        console.warn(`[image-updater] 恢复 compose 备份失败(${backup.filePath}):`, error.message);
+      }
     }
   } else {
     for (const backup of backups.slice(0, 1)) {
       try {
         const index = project.composeFiles.indexOf(backup.filePath);
         if (index < 0) continue;
+        const full = getComposeBackup(project.id, backup.id);
+        if (typeof full?.content !== 'string') continue;
         await withRunner(project, async (container) => {
           const previous = await readArchiveFile(container, backup.filePath);
-          await putArchiveFile(container, path.posix.dirname(backup.filePath), path.posix.basename(backup.filePath), backup.content, previous.header);
+          await putArchiveFile(container, path.posix.dirname(backup.filePath), path.posix.basename(backup.filePath), full.content, previous.header);
         });
         restored += 1;
-      } catch { /* 单个环境文件恢复失败时继续处理其他文件。 */ }
+      } catch (error) {
+        console.warn(`[image-updater] 容器内恢复 compose 备份失败(${backup.filePath}):`, error.message);
+      }
     }
   }
   if (!restored) throw Object.assign(new Error('未找到可恢复的 Compose 备份'), { statusCode: 409 });

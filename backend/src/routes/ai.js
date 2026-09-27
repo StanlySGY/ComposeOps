@@ -24,6 +24,7 @@ import { readCompose } from '../services/compose-runner.js';
 import { readWorkspaceCompose } from '../services/compose-workspace.js';
 import { readContainerLogs } from '../lib/docker-exec.js';
 import { idField, limitField, numericId } from '../lib/schemas.js';
+import { harvestSecretValues, redactSecrets } from '../lib/secret-redactor.js';
 
 /** 统一的 exec/日志读写来自 ../lib/docker-exec.js,见其中实现与白名单说明。 */
 /**
@@ -79,6 +80,8 @@ export default async function aiRoutes(fastify) {
 
   // POST /api/v1/ai/fetch-models  body: { baseUrl?, apiKey? } —— 拉取远程可用模型列表
   // 两者都可省:fetchAiModels 缺参时回落到已保存配置。
+  // SSRF 防护:强制 http(s) 协议并封禁云元数据端点;刻意不封全部私网段——
+  // 本面板面向 homelab,LAN 内自建 LLM 端点(如 Ollama)是合法主场景。
   fastify.post('/fetch-models', {
     schema: {
       body: {
@@ -92,6 +95,18 @@ export default async function aiRoutes(fastify) {
     },
   }, async (request, reply) => {
     const { baseUrl, apiKey } = request.body || {};
+    if (baseUrl) {
+      try {
+        const parsed = new URL(String(baseUrl));
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('仅支持 http/https');
+        const host = parsed.hostname.replace(/^\[|\]$/g, '');
+        if (host === '169.254.169.254' || host === '168.63.129.16' || host.startsWith('169.254.')) {
+          throw new Error('baseUrl 不允许指向云元数据端点');
+        }
+      } catch (error) {
+        return reply.code(400).send({ error: 'invalid_base_url', message: `baseUrl 不合法:${error.message}` });
+      }
+    }
     try {
       const models = await fetchAiModels({ baseUrl, apiKey });
       return { models, count: models.length };
@@ -275,13 +290,17 @@ export default async function aiRoutes(fastify) {
       }
     }
 
-    // 优先使用前端传入的失败上下文(rawLogs),否则回退拉取最近 200 行日志
+    // 优先使用前端传入的失败上下文(rawLogs),否则回退拉取最近 200 行日志。
+    // 日志可能携带 KEY=VALUE 形态的真实密钥:先收割进脱敏集合,再抹掉后进 prompt;
+    // 此前这里是脱敏管线的旁路,明文密钥可经诊断直进 LLM。
     const { rawLogs, failedCommand, exitCode, envKeys, webSearch } = request.body || {};
     let logs = String(rawLogs || '').slice(-50000);
     if (!logs) {
       const container = getActivityDocker().getContainer(match.container.id);
       logs = await readContainerLogs(container, 200);
     }
+    harvestSecretValues(logs);
+    logs = redactSecrets(logs);
     let sources = [];
     if (webSearch) {
       try {
@@ -340,8 +359,11 @@ ${evidence}`;
         onToken: (t) => send('token', t),
         signal: controller.signal,
       });
-      addAiMessage('assistant', full.content, { projectId, containerId: match.container.id }, resolvedSessionId);
-      send('done', full.content);
+      // 回复同样过值级脱敏再落库/返回:与 agent 循环的标准一致,
+      // 防止模型复述工具结果里的明文密钥并持久化进会话历史。
+      const replyContent = redactSecrets(full.content || '');
+      addAiMessage('assistant', replyContent, { projectId, containerId: match.container.id }, resolvedSessionId);
+      send('done', replyContent);
       if (sources.length) send('sources', sources);
     } catch (e) {
       send('error', e.message);

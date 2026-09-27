@@ -59,8 +59,37 @@ function parseComposeFiles(raw, workingDir) {
   return files.length ? files : (workingDir ? [`${workingDir}/docker-compose.yml`] : []);
 }
 
+// 短 TTL 缓存:scanProjects 是几乎所有 /projects/:id/* 请求、WS 日志与 Agent 工具的
+// 入口,每次都是"全容器列表 + 逐项目可达性探测 + 2N 次同步 SQLite 查询";Docker
+// 事件(尤其 health_status 抖动)还会逐事件再触发。3 秒内复用同一份快照足以削峰,
+// 对动作后的验收窗口(runGate 自己直接查 Docker)没有可感知影响。
+const SCAN_CACHE_TTL_MS = 3000;
+let scanCache = { client: null, at: 0, data: null };
+let scanInFlight = null;
+
+/** 主动失效扫描缓存(节点切换/需要强制刷新时调用)。 */
+export function invalidateScanCache() {
+  scanCache = { client: null, at: 0, data: null };
+  scanInFlight = null;
+}
+
 export async function scanProjects() {
   const activeDocker = getActivityDocker();
+  const now = Date.now();
+  // 以 dockerode 客户端实例作缓存键:切换节点后客户端实例不同,天然隔离,无需感知宿主实现。
+  if (scanCache.client === activeDocker && scanCache.data && now - scanCache.at < SCAN_CACHE_TTL_MS) {
+    return scanCache.data.map((project) => ({ ...project }));
+  }
+  if (scanInFlight) return scanInFlight;
+  scanInFlight = (async () => {
+    const data = await scanProjectsUncached(activeDocker);
+    scanCache = { client: activeDocker, at: Date.now(), data };
+    return data.map((project) => ({ ...project }));
+  })().finally(() => { scanInFlight = null; });
+  return scanInFlight;
+}
+
+async function scanProjectsUncached(activeDocker) {
   const containers = await activeDocker.listContainers({ all: true });
   // 远程节点无法访问本机 compose 目录,标记为容器控制模式。
   const nodeType = getActiveHostType();

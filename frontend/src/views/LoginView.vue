@@ -18,6 +18,10 @@
         <span class="text-xs text-surface-400">确认密码</span>
         <input v-model="confirm" class="input w-full mt-1" type="password" autocomplete="new-password" />
       </label>
+      <label v-if="auth.setupRequired" class="block">
+        <span class="text-xs text-surface-400">引导令牌(仅服务端设置了 SETUP_TOKEN 时需要,见启动日志)</span>
+        <input v-model="setupToken" class="input w-full mt-1" type="password" autocomplete="one-time-code" />
+      </label>
       <p v-if="error" class="text-sm text-rose-400">{{ error }}</p>
       <button class="btn-primary w-full justify-center" :disabled="loading">
         <LogIn class="w-4 h-4" /> {{ loading ? '处理中...' : (auth.setupRequired ? '完成初始化' : '登录') }}
@@ -34,6 +38,7 @@ import { useAuthStore } from '../stores/auth.js';
 const auth = useAuthStore();
 const password = ref('');
 const confirm = ref('');
+const setupToken = ref('');
 const loading = ref(false);
 const error = ref('');
 
@@ -42,7 +47,7 @@ async function submit() {
   if (password.value.length < 10) return (error.value = '密码至少需要 10 个字符');
   if (auth.setupRequired && password.value !== confirm.value) return (error.value = '两次输入的密码不一致');
   loading.value = true;
-  try { await auth.submit(password.value); }
+  try { await auth.submit(password.value, setupToken.value.trim()); }
   catch (e) { error.value = e.message; }
   finally { loading.value = false; }
 }

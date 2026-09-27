@@ -16,8 +16,8 @@ export const useAuthStore = defineStore('auth', () => {
       ready.value = true;
     }
   }
-  async function submit(password) {
-    if (setupRequired.value) await api.setup(password);
+  async function submit(password, setupToken = '') {
+    if (setupRequired.value) await api.setup(password, setupToken);
     else await api.login(password);
     authenticated.value = true;
     setupRequired.value = false;

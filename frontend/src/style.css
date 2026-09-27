@@ -357,6 +357,13 @@ body[data-density='compact'] .data-table td { @apply !py-1.5 !px-2; }
   .progress span { @apply block h-full bg-accent; }
   .progress-muted span { @apply bg-surface-600; }
   .progress-muted span { transition: width 0.4s ease; }
+  /* 状态徽标基类:与 StatusBadge 组件的 sm 档外观一致。
+     CMDBView/RollbackView 等页面以 class="status-badge" 复用,此前缺少基类
+     导致渲染成无圆角/内边距的裸文字色块;放在 components 层,md/lg 的
+     utilities 覆盖仍能生效。 */
+  .status-badge {
+    @apply inline-flex items-center rounded-full border border-transparent px-2 py-0.5 text-[11px] font-medium leading-normal whitespace-nowrap;
+  }
 }
 
 /* ---- 状态徽标(StatusBadge)呼吸光晕 ---- */
@@ -768,7 +775,7 @@ body {
 }
 .agent-activity-top { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
 .agent-activity-label { color: var(--text-strong); font-size: 11px; font-weight: 600; letter-spacing: 0.01em; }
-.agent-activity-time { margin-left: auto; color: var(--text-faintest); font-size: 9.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agent-activity-time { margin-left: auto; color: var(--text-faint); font-size: 9.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .agent-activity-detail { margin-top: 2px; color: var(--text-faint); font-size: 10.5px; line-height: 1.55; word-break: break-word; white-space: pre-wrap; max-height: 4.8em; overflow: hidden; }
 .agent-activity-meta { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; }
 .agent-activity-chip {

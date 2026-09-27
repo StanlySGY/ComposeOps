@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">节点组管理</h1>
-        <p class="page-subtitle">将 Docker 节点分组管理,支持批量部署、巡检与更新</p>
+        <p class="page-subtitle">将 Docker 节点分组管理,快速归置与切换节点</p>
       </div>
       <div class="page-actions">
         <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
@@ -38,11 +38,6 @@
             <button class="icon-btn" :title="host.active ? '当前活跃节点' : '切换到此节点'" :disabled="host.active" @click="switchHost(host)"><ArrowLeftRight class="w-4 h-4" /></button>
           </div>
         </div>
-
-        <div class="mt-4 flex gap-2 border-t border-surface-800 pt-3">
-          <button class="btn-secondary flex-1 !px-2 !py-1.5 text-xs" :disabled="!groupHosts(group.id).length" @click="batchAction(group.id, 'inspection')"><ShieldCheck class="w-3.5 h-3.5" />巡检</button>
-          <button class="btn-secondary flex-1 !px-2 !py-1.5 text-xs" :disabled="!groupHosts(group.id).length" @click="batchAction(group.id, 'updates')"><RefreshCw class="w-3.5 h-3.5" />检查更新</button>
-        </div>
       </section>
     </div>
 
@@ -76,7 +71,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { ArrowLeftRight, RefreshCw, ShieldCheck } from 'lucide-vue-next';
+import { ArrowLeftRight, RefreshCw } from 'lucide-vue-next';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 
@@ -111,11 +106,6 @@ function switchHost(host) {
   hostsStore.switchHost(host.id).then(() => {
     toast.success(`已切换到节点 ${host.name}`);
   }).catch((e) => toast.error(e.message));
-}
-function batchAction(groupId, action) {
-  const groupHostsList = groupHosts(groupId);
-  const names = groupHostsList.map((h) => h.name).join('、');
-  toast.info(`${groups.find((g) => g.id === groupId)?.label}(${names}) 已发起${action === 'inspection' ? '巡检' : '更新检查'}`);
 }
 
 async function load() {

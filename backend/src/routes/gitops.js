@@ -13,6 +13,15 @@ import {
 } from '../services/gitops.js';
 import { planAllRepoDrift } from '../services/gitops-drift.js';
 import { addOperation, getSetting } from '../lib/db.js';
+import { timingSafeEqual } from 'node:crypto';
+
+/** 常数时间比较:长度不同直接不等,同长度走 timingSafeEqual 防侧信道逐字节猜 token。 */
+function safeTokenCompare(provided, expected) {
+  const a = Buffer.from(String(provided || ''), 'utf8');
+  const b = Buffer.from(String(expected || ''), 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 const repoIdParam = {
   type: 'object',
@@ -115,12 +124,13 @@ export default async function gitopsRoutes(fastify) {
 
   // POST /webhook/:id —— Git 平台 push 事件触发同步。
   // 安全模型:全局 token(setting gitops.webhook_token)经 X-ComposeOps-Token 头或
-  // ?token= 校验;未配置 token 时 webhook 一律关闭(403),避免裸端点暴露。
+  // ?token= 校验(query 保留是为了兼容不支持自定义头的 git 平台,但推荐用 header);
+  // 未配置 token 时 webhook 一律关闭(403),避免裸端点暴露。
   fastify.post('/webhook/:id', { schema: { params: repoIdParam } }, async (request, reply) => {
     const expected = getSetting('gitops.webhook_token', '');
     const provided = String(request.headers['x-composeops-token'] || request.query?.token || '');
     if (!expected) return reply.code(403).send({ error: 'webhook_disabled', message: '未配置 gitops.webhook_token,webhook 处于关闭状态' });
-    if (provided !== expected) return reply.code(401).send({ error: 'invalid_token', message: 'webhook token 不匹配' });
+    if (!safeTokenCompare(provided, expected)) return reply.code(401).send({ error: 'invalid_token', message: 'webhook token 不匹配' });
     try {
       const result = await syncGitOpsRepo(request.params.id);
       addOperation({

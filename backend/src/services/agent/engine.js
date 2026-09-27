@@ -173,10 +173,25 @@ export class OperationsAgent {
       validateParams(macro.parameters, params);
       const expanded = expandMacro(toolName, params, _context);
       this.addThought('planning', `宏工具 ${toolName} 展开为 ${expanded.length} 步`, { steps: expanded }, trace);
-      // 递归执行宏的每一步
+      // 递归执行宏的每一步。宏整体已在主循环过一次审批门,步骤级审批由宏确认
+      // 覆盖(用户确认的是"停止→回滚→重启"这个组合动作);但审计与死循环检测
+      // 必须逐步进行,否则宏内一次失败的清理在事后无法追溯。
       const results = [];
       for (const step of expanded) {
+        const audit = this._loopAudit;
+        const stepExecId = audit ? recordAgentExecution(audit.planId, step.tool, step.params, 'executing') : null;
         const stepResult = await this.executeTool(step.tool, step.params, _context, trace);
+        if (stepExecId) {
+          updateAgentExecution(stepExecId, { status: stepResult.success ? 'success' : 'failed', result: stepResult.result, error: stepResult.error, durationMs: stepResult.durationMs });
+        }
+        if (audit) {
+          audit.runawayGuard.observe({
+            toolName: step.tool,
+            params: step.params,
+            result: stepResult.success ? stepResult.result : null,
+            error: stepResult.success ? null : stepResult.error,
+          });
+        }
         results.push(stepResult);
         if (!stepResult.success) break; // 宏中任一步失败即停止
       }
@@ -347,7 +362,12 @@ export class OperationsAgent {
       const maxLoops = 20; // 防止无限循环
       const runawayGuard = new RunawayGuard();
       const approvalGate = getApprovalGate();
-      onEvent({ type: 'approval_mode', mode: approvalGate.getMode(context.sessionId) });
+      // 审批门会话键:优先用路由层生成的 gateKey(无 sessionId 的直连流彼此隔离),
+      // 避免落进共享 'default' 桶导致"不再询问"授权跨流泄漏。
+      const approvalSessionId = context.gateKey || context.sessionId;
+      // 宏展开的逐步审计与死循环检测需要 planId/runawayGuard,挂到实例上供 executeTool 读取。
+      this._loopAudit = { planId, runawayGuard };
+      onEvent({ type: 'approval_mode', mode: approvalGate.getMode(approvalSessionId) });
       let silentRetryUsed = false;
       let silentNudge = '';
       let pendingTaskNotice = '';
@@ -384,7 +404,10 @@ export class OperationsAgent {
             }
           }
           const systemWithNudge = silentNudge ? `${messages[0].content}${silentNudge}` : messages[0].content;
-          const callMessages = [{ ...messages[0], content: systemWithNudge }, ...messages.slice(1)];
+          // 逐条浅拷贝:后台任务通知会改写最后一条 user 消息的 content,
+          // 若直接引用原对象,每次 drain 都会把 <background-task-update> 前置到
+          // 同一条持久化消息上,并随 resultJson 进入审计。
+          const callMessages = [{ ...messages[0], content: systemWithNudge }, ...messages.slice(1).map((item) => ({ ...item }))];
           if (pendingTaskNotice) {
             const lastUser = [...callMessages].reverse().find((item) => item.role === 'user');
             if (lastUser) lastUser.content = `${pendingTaskNotice}\n\n${lastUser.content}`;
@@ -424,8 +447,9 @@ export class OperationsAgent {
           return { success: false, messages, finalContent: `错误: ${error.message}` };
         }
 
-        // 检查 stop_reason
-        if (stopReason === 'stop' || stopReason === 'end_turn') {
+        // 检查 stop_reason。部分模型/代理会以 stop/end_turn 附带原生 tool_calls,
+        // 此时应按工具调用处理——按纯文本收场会把工具调用静默丢弃。
+        if ((stopReason === 'stop' || stopReason === 'end_turn') && toolCalls.length === 0) {
           if (isSilentTurn(responseText, toolCalls)) {
             // 静默轮次恢复:剔掉空轮,追加一次性 nudge 重跑;第二次静默按失败收场。
             if (!silentRetryUsed) {
@@ -451,7 +475,7 @@ export class OperationsAgent {
           return { success: true, messages, finalContent, trace };
         }
 
-        if (stopReason === 'tool_calls' && toolCalls.length > 0) {
+        if (toolCalls.length > 0) {
           messages.push({ role: 'assistant', content: responseText || null, tool_calls: toolCalls });
           // LLM 请求调用工具
           for (const toolCall of toolCalls) {
@@ -494,7 +518,7 @@ export class OperationsAgent {
             let effectiveParams = toolParams;
             let confirmationStatus = 'not_required';
 
-            const needsConfirm = approvalGate.needsConfirmation(context.sessionId, toolName, toolParams, dynamicRisk, tool.confirmationRequired);
+            const needsConfirm = approvalGate.needsConfirmation(approvalSessionId, toolName, toolParams, dynamicRisk, tool.confirmationRequired);
             if (needsConfirm) {
               // 需要用户确认
               onEvent({ 
@@ -534,9 +558,11 @@ export class OperationsAgent {
                   ? { ...toolParams, ...approval.input }
                   : toolParams;
 
-              // "本会话不再询问":按工具或按工具+参数指纹记忆
-              if (approval.remember === 'tool' || approval.remember === 'call') {
-                approvalGate.allowForSession(context.sessionId, toolName, toolParams, approval.remember);
+              // "本会话不再询问":按工具或按工具+参数指纹记忆。
+              // 指纹必须用"实际执行参数"(含弹窗编辑后的值),否则记住的是原始参数、
+              // 放行的却是编辑后参数;critical 风险不记忆——critical 每次都要确认。
+              if ((approval.remember === 'tool' || approval.remember === 'call') && dynamicRisk !== 'critical') {
+                approvalGate.allowForSession(approvalSessionId, toolName, effectiveParams, approval.remember, dynamicRisk);
               }
             }
 
@@ -610,8 +636,9 @@ export class OperationsAgent {
       return { success: false, messages, finalContent: `达到最大循环次数 ${maxLoops}`, maxLoopsReached: true };
 
     } finally {
-      // 清理 AbortController
+      // 清理 AbortController 与宏审计挂钩,避免跨执行残留引用
       this.activeExecutions.delete(planId);
+      this._loopAudit = null;
     }
   }
 
@@ -625,23 +652,30 @@ export class OperationsAgent {
   async _waitForApproval(planId, toolCallId, signal) {
     return new Promise((resolve) => {
       const key = `${planId}:${toolCallId}`;
-      const timeout = setTimeout(() => {
+      if (!this.pendingApprovals) this.pendingApprovals = new Map();
+
+      // abort 监听器必须在所有收场路径(批准/拒绝/超时/中断)里移除,
+      // 否则每次确认等待都会在共享 signal 上残留一个永久监听器。
+      let timeout = null;
+      const onAbort = () => {
+        clearTimeout(timeout);
         this.pendingApprovals?.delete(key);
-        resolve({ approved: false, reason: 'timeout' }); // 兜底超时视为拒绝
+        finish({ approved: false, reason: 'interrupted' });
+      };
+      const finish = (value) => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve(value);
+      };
+      timeout = setTimeout(() => {
+        this.pendingApprovals?.delete(key);
+        finish({ approved: false, reason: 'timeout' }); // 兜底超时视为拒绝
       }, 10 * 60 * 1000);
 
-      // 保存 resolve 函数供外部调用
-      if (!this.pendingApprovals) this.pendingApprovals = new Map();
-      this.pendingApprovals.set(key, { resolve, timeout });
+      // 保存 resolve/cleanup 供外部 approve 调用
+      this.pendingApprovals.set(key, { resolve: finish, timeout, cleanup: () => signal?.removeEventListener('abort', onAbort) });
 
       // 监听中断信号
-      if (signal) {
-        signal.addEventListener('abort', () => {
-          clearTimeout(timeout);
-          this.pendingApprovals?.delete(key);
-          resolve({ approved: false, reason: 'interrupted' });
-        });
-      }
+      if (signal) signal.addEventListener('abort', onAbort);
     });
   }
 
@@ -654,8 +688,9 @@ export class OperationsAgent {
     const pending = this.pendingApprovals?.get(key);
     if (pending) {
       clearTimeout(pending.timeout);
-      pending.resolve({ approved, input, remember });
+      pending.cleanup?.();
       this.pendingApprovals.delete(key);
+      pending.resolve({ approved, input, remember });
       return true;
     }
     return false;

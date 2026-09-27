@@ -80,7 +80,7 @@ function toggleDensity() { density.value = density.value === 'compact' ? 'comfor
 function asArray(value) { return Array.isArray(value) ? value : []; }
 const allProjects = ref([]);
 const quickProjects = computed(() => asArray(allProjects.value).slice(0, 12));
-const pageNames = { services: '服务总览', compose: 'Compose 配置', logs: '实时日志', shell: '容器终端', agent: 'AI 智能运维 Agent', 'agent-history': 'Agent 执行历史', inspection: 'AI 巡检中心', monitor: '实时监控', review: '变更与回滚', events: '事件中心', resources: '存储清理', cron: '定时任务', gitops: 'GitOps', cost: '成本分析', marketplace: '应用市场', settings: '系统设置' };
+const pageNames = { services: '服务总览', compose: 'Compose 配置', logs: '实时日志', shell: '容器终端', agent: 'AI 智能运维 Agent', 'agent-history': 'Agent 执行历史', inspection: 'AI 巡检中心', monitor: '实时监控', review: '变更与回滚', events: '事件中心', resources: '存储清理', cron: '定时任务', gitops: 'GitOps', cost: '成本分析', topology: '服务拓扑', 'ops-center': '运维任务', 'node-groups': '节点组管理', cmdb: '资产中心', workflows: '工作流', marketplace: '应用市场', settings: '系统设置' };
 const currentPage = computed(() => pageNames[route.name] || '运维控制台');
 const envProjects = ref([]);
 const appBlueprints = ref([]);

@@ -107,7 +107,7 @@
           <tbody>
             <tr v-for="project in rollbackableProjects" :key="project.id" class="hover:bg-surface-800/25">
               <td class="font-medium text-surface-100">{{ project.projectName }}</td>
-              <td><span class="status-badge" :class="project.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'">{{ project.status === 'running' ? '运行中' : '异常' }}</span></td>
+              <td><span class="status-badge" :class="project.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : project.status === 'stopped' ? 'bg-surface-800/40 text-surface-400' : project.status === 'partial' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'">{{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'partial' ? '部分异常' : '异常' }}</span></td>
               <td class="text-right">
                 <button class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />回滚升级</button>
               </td>
