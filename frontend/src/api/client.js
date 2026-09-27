@@ -178,6 +178,15 @@ export const api = {
   deleteCronJob: (id) => request(`/cron/${id}`, { method: 'DELETE' }),
   runCronJob: (id) => request(`/cron/${id}/run`, { method: 'POST' }),
   getCronHistory: (limit = 50) => request(`/cron/history?limit=${limit}`),
+  // gitops
+  getGitOpsRepos: () => request('/gitops'),
+  getGitOpsDrift: () => request('/gitops/drift'),
+  addGitOpsRepo: (payload) => request('/gitops', { method: 'POST', body: JSON.stringify(payload) }),
+  updateGitOpsRepo: (id, payload) => request(`/gitops/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteGitOpsRepo: (id) => request(`/gitops/${id}`, { method: 'DELETE' }),
+  syncGitOpsRepo: (id) => request(`/gitops/${id}/sync`, { method: 'POST' }),
+  getGitOpsHistory: (id, limit = 50) => request(`/gitops/${id}/history?limit=${limit}`),
+  rollbackGitOpsRepo: (id, commitHash) => request(`/gitops/${id}/rollback`, { method: 'POST', body: JSON.stringify({ commitHash }) }),
   // db dump
   streamDbDump: (projectId, containerId, dbName = '') =>
     fetch(`${BASE}/projects/${projectId}/db-dump`, {
