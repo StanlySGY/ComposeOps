@@ -12,13 +12,14 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { getActiveHost, getDockerForHost, getHost } from './docker-hosts.js';
 import { readCompose } from './compose-runner.js';
 import { readWorkspaceCompose } from './compose-workspace.js';
 import { demuxStream } from '../lib/docker-streams.js';
-import { getSetting, addOperation, addVolumeBackup, listVolumeBackups, getVolumeBackup, deleteVolumeBackupRow, pruneVolumeBackups } from '../lib/db.js';
+import { getSetting, addOperation, addVolumeBackup, listVolumeBackups, getVolumeBackup, deleteVolumeBackupRow, pruneVolumeBackups, updateVolumeBackupVerify } from '../lib/db.js';
 
 const HELPER_IMAGE = 'busybox:1.36';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -269,6 +270,60 @@ export async function restoreVolumeBackup(id) {
   }
   addOperation({ action: 'volume.restore', status: 'success', detail: `${record.projectName}/${record.volume} ← ${record.file}` });
   return { ok: true, volume: record.volume };
+}
+
+/**
+ * 还原演练(备份自证):不动原卷,把备份真实地解进一个一次性临时卷验证可用性。
+ * 两步法:① tar tzf 读完整个压缩包(gzip CRC + tar 结构全量校验)并统计条目;
+ * ② 解进一次性卷统计文件数。任何一步失败都把 verify_status 落库为 failed。
+ * "能还原的备份才叫备份"——演练结果随备份记录持久化,供 UI 展示可信度。
+ */
+export async function verifyVolumeBackup(id) {
+  const record = getVolumeBackup(id);
+  if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+  const file = assertBackupFileName(record.file);
+  const host = hostForId(record.host);
+  const docker = getDockerForHost(host.id);
+  const started = Date.now();
+  const fail = (message) => {
+    updateVolumeBackupVerify(record.id, { status: 'failed', files: null });
+    addOperation({ action: 'volume.verify', status: 'failed', detail: `${record.projectName}/${record.volume} ← ${record.file}: ${message}` });
+    return Object.assign(new Error(message), { statusCode: 502 });
+  };
+
+  // ① 压缩包完整性:列出全部条目(gzip CRC 校验贯穿整个解压过程)
+  const listing = await runHelper(
+    docker,
+    `tar tzf "/backup/${file}" | wc -l`,
+    [`${getBackupDir(host)}:/backup:ro`],
+  ).catch((error) => { throw fail(`helper 容器执行失败:${error.message}`); });
+  if (listing.exitCode !== 0) {
+    throw fail(`备份已损坏(exit ${listing.exitCode}):${listing.output.slice(0, 200)}`);
+  }
+  const entries = Number(listing.output.split('\n').pop()) || 0;
+
+  // ② 还原演练:解进一次性临时卷并统计文件数
+  const tmpVolume = `composeops-verify-${randomBytes(4).toString('hex')}`;
+  await docker.createVolume({ Name: tmpVolume, Labels: { 'composeops.role': 'volume-verify' } });
+  try {
+    const restore = await runHelper(
+      docker,
+      `tar xzf "/backup/${file}" -C /src && find /src -type f | wc -l && du -sh /src | cut -f1`,
+      [`${tmpVolume}:/src:rw`, `${getBackupDir(host)}:/backup:ro`],
+    ).catch((error) => { throw fail(`helper 容器执行失败:${error.message}`); });
+    if (restore.exitCode !== 0) {
+      throw fail(`还原演练失败(exit ${restore.exitCode}):${restore.output.slice(0, 200)}`);
+    }
+    const lines = restore.output.split('\n').filter((line) => line.trim() !== '');
+    const files = Number(lines[lines.length - 2]) || 0;
+    const sizeHuman = lines[lines.length - 1] || '';
+    const status = files > 0 ? 'verified' : 'empty';
+    updateVolumeBackupVerify(record.id, { status, files });
+    addOperation({ action: 'volume.verify', status: 'success', detail: `${record.projectName}/${record.volume} ← ${file}:${files} 个文件` });
+    return { ok: true, status, entries, files, sizeHuman, durationMs: Date.now() - started };
+  } finally {
+    await docker.getVolume(tmpVolume).remove().catch(() => {});
+  }
 }
 
 export async function deleteVolumeBackup(id) {

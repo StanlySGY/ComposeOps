@@ -22,6 +22,7 @@ import costAnalysisRoutes from './routes/cost-analysis.js';
 import cmdbRoutes from './routes/cmdb.js';
 import workflowRoutes from './routes/workflow.js';
 import eventCenterRoutes from './routes/event-center.js';
+import mcpRoutes from './routes/mcp.js';
 import docker from './services/docker.js';
 import { isAuthenticated, isConfigured, setPassword, validateOrigin } from './lib/auth.js';
 import { stopAlertMonitor } from './services/alert-monitor.js';
@@ -139,6 +140,9 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
 
   // WebSocket 路由前缀（不经过 /api/v1，便于代理区分）
   await fastify.register(wsRoutes, { prefix: '/ws' });
+
+  // MCP 协议端点(不经过 /api/v1 会话鉴权:使用独立 token,见 routes/mcp.js 安全模型)
+  await fastify.register(mcpRoutes, { prefix: '/mcp' });
 
   // 健康检查:探测 Docker socket 连通性,失败返回 503 便于编排层重启/摘流。
   fastify.get('/health', async (request, reply) => {

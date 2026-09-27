@@ -45,7 +45,7 @@
       <div v-for="channel in notifications.channels || []" :key="channel.type" class="space-y-3 rounded-xl border border-surface-800 p-3">
         <label class="toggle-label"><input v-model="channel.enabled" type="checkbox" />{{ channelLabel(channel.type) }}</label>
         <div v-if="channel.enabled" class="form-grid">
-          <template v-if="['bark','wecom','webhook'].includes(channel.type)"><label class="md:col-span-2">通知地址<input v-model="channel.endpoint" class="input" placeholder="https://..." /></label></template>
+          <template v-if="['bark','wecom','dingtalk','feishu','webhook'].includes(channel.type)"><label class="md:col-span-2">通知地址<input v-model="channel.endpoint" class="input" placeholder="https://..." /></label></template>
           <template v-if="channel.type === 'telegram'"><label>Bot Token<input v-model="channel.token" type="password" class="input" placeholder="已配置时显示 configured" /></label><label>Chat ID<input v-model="channel.chatId" class="input" /></label></template>
           <template v-if="channel.type === 'email'"><label>SMTP 主机<input v-model="channel.smtpHost" class="input" /></label><label>端口<input v-model.number="channel.smtpPort" type="number" class="input" /></label><label>用户名<input v-model="channel.smtpUser" class="input" /></label><label>密码<input v-model="channel.smtpPassword" type="password" class="input" /></label><label>发件人<input v-model="channel.emailFrom" class="input" /></label><label>收件人<input v-model="channel.emailTo" class="input" /></label><label class="toggle-label"><input v-model="channel.smtpSecure" type="checkbox" />TLS/SSL</label></template>
         </div>
@@ -166,6 +166,35 @@
     <StoragePruneModal v-if="storageModal" @close="storageModal = false" @reclaimed="loadUsage" />
     <ConfirmDialog :show="!!removeHostTarget" title="删除 Docker 节点" :message="`确认删除节点 ${removeHostTarget?.name || ''}?删除后不会影响远程主机本身。`" tone="danger" confirm-text="删除节点" @confirm="confirmRemoveHost" @cancel="removeHostTarget = null" />
     <ConfirmDialog :show="managementConfirm" title="取消项目纳管" :message="`将取消 ${removedProjectCount} 个项目的管理权限,相关控制与编辑入口会立即关闭。确认继续?`" tone="warning" confirm-text="确认应用" @confirm="confirmSaveManagement" @cancel="managementConfirm = false" />
+    <section v-if="tab === 'mcp'" class="settings-section space-y-4">
+      <div class="flex items-center justify-between">
+        <div><h2 class="section-title">MCP 服务</h2><p class="mt-1 text-sm text-surface-400">把面板的运维工具通过 MCP 协议暴露给 Claude Desktop、Cursor 等客户端</p></div>
+        <label class="toggle-label"><input v-model="mcp.enabled" type="checkbox" @change="saveMcp" />启用</label>
+      </div>
+      <template v-if="mcp.enabled">
+        <div class="form-grid">
+          <label>暴露范围
+            <select v-model="mcp.mode" class="input" @change="saveMcp">
+              <option value="readonly">只读工具(推荐)</option>
+              <option value="all">包含高风险工具(不含 critical)</option>
+            </select>
+          </label>
+          <label>当前可调用工具数
+            <input class="input" :value="`${mcp.toolsExported} 个`" disabled />
+          </label>
+        </div>
+        <div class="space-y-2 rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-xs">
+          <p class="text-surface-300">SSE 地址:<code class="font-mono text-accent">{{ mcp.sseUrl }}</code><span class="ml-2 text-surface-600">认证:Authorization: Bearer &lt;token&gt; 或 ?token=</span></p>
+          <p class="text-surface-500">当前连接会话:{{ mcp.sessionCount }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="btn-secondary !py-1.5 text-xs" @click="copyMcpConfig">复制客户端配置</button>
+            <button class="btn-secondary !py-1.5 text-xs" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" />重置 Token</button>
+            <button class="btn-secondary !py-1.5 text-xs" @click="showMcpToken">查看 Token</button>
+          </div>
+        </div>
+      </template>
+      <p v-else class="text-sm text-surface-500">启用后,外部 MCP 客户端可以用独立 Token 安全调用面板工具(默认只读:状态查询、日志、巡检等)。</p>
+    </section>
     <section v-if="tab === 'about'" class="settings-section"><h2 class="section-title">ComposeOps</h2><p class="text-sm text-surface-400">单用户 Docker Compose 运维台。默认建议仅监听本机或通过 Tailscale 访问。</p><div class="text-sm space-y-1"><p>Web Shell：{{ capabilities.shellEnabled ? '已启用' : '未启用' }}</p><p>环境指标范围：{{ capabilities.hostMetricsScope === 'host' ? '宿主机' : 'ComposeOps 容器' }}</p></div></section>
   </div>
 </template>
@@ -173,13 +202,13 @@
 <script setup>
 import { computed, markRaw, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Activity, Bell, Bot, Check, Download, FolderCog, HardDrive, Info, KeyRound, Pencil, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
+import { Activity, Bell, Bot, Check, Download, FolderCog, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
 import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import { useToastStore } from '../stores/toast.js'; import StatCard from '../components/StatCard.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import StoragePruneModal from '../components/settings/StoragePruneModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
-const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'personal', label: '偏好', icon: markRaw(SlidersHorizontal) }, { id: 'notifications', label: '通知', icon: markRaw(Bell) }, { id: 'maintenance', label: '维护', icon: markRaw(Wrench) }, { id: 'mounts', label: '项目纳管', icon: markRaw(FolderCog) }, { id: 'hosts', label: 'Docker 节点', icon: markRaw(Server) }, { id: 'about', label: '关于', icon: markRaw(Info) }];
+const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'personal', label: '偏好', icon: markRaw(SlidersHorizontal) }, { id: 'notifications', label: '通知', icon: markRaw(Bell) }, { id: 'maintenance', label: '维护', icon: markRaw(Wrench) }, { id: 'mounts', label: '项目纳管', icon: markRaw(FolderCog) }, { id: 'hosts', label: 'Docker 节点', icon: markRaw(Server) }, { id: 'mcp', label: 'MCP', icon: markRaw(Plug) }, { id: 'about', label: '关于', icon: markRaw(Info) }];
 const route = useRoute();
 const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';
@@ -324,7 +353,29 @@ async function savePreferences() { try { preferences.value = await api.savePrefe
 async function changePassword() { try { if (password.value.nextPassword.length < 10) throw new Error('新密码至少需要 10 个字符'); await api.changePassword(password.value); password.value = { currentPassword: '', nextPassword: '' }; ok('管理员密码已修改，其他会话已退出'); } catch (e) { fail(e); } }
 async function importData(event) { try { const file = event.target.files?.[0]; if (!file) return; await api.importData(JSON.parse(await file.text())); ok('设置与项目备注已导入，刷新页面后生效'); event.target.value = ''; } catch (e) { fail(e); } }
 function channelLabel(type) {
-  return { bark: 'Bark', telegram: 'Telegram', wecom: '企业微信', email: '邮件 SMTP', webhook: '通用 Webhook' }[type] || type;
+  return { bark: 'Bark', telegram: 'Telegram', wecom: '企业微信', dingtalk: '钉钉', feishu: '飞书', email: '邮件 SMTP', webhook: '通用 Webhook' }[type] || type;
+}
+const mcp = ref({ enabled: false, mode: 'readonly', token: '', configured: false, sseUrl: '/mcp/sse', sessionCount: 0, toolsExported: 0 });
+async function loadMcp() {
+  try { mcp.value = { ...mcp.value, ...(await api.getMcpConfig()) }; } catch (e) { /* MCP 配置读取失败时保持默认 */ }
+}
+async function saveMcp() {
+  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ enabled: mcp.value.enabled, mode: mcp.value.mode })) }; ok(mcp.value.enabled ? 'MCP 服务已启用' : 'MCP 服务已关闭'); } catch (e) { fail(e); }
+}
+async function regenerateMcpToken() {
+  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ regenerateToken: true })) }; ok('Token 已重置,旧 Token 立即失效'); } catch (e) { fail(e); }
+}
+async function showMcpToken() {
+  try { const { token } = await api.revealMcpToken(); if (token) { await navigator.clipboard.writeText(token).catch(() => {}); ok(`Token 已复制到剪贴板:${token.slice(0, 6)}••••`); } } catch (e) { fail(e); }
+}
+async function copyMcpConfig() {
+  try {
+    const { token } = await api.revealMcpToken();
+    const origin = window.location.origin;
+    const config = { mcpServers: { composeops: { url: `${origin}/mcp/sse`, headers: { Authorization: `Bearer ${token}` } } } };
+    await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
+    ok('MCP 客户端配置 JSON 已复制');
+  } catch (e) { fail(e); }
 }
 async function saveNotifications() { try { notifications.value = await api.saveNotifications({ ...notifications.value, events: alertEvents.value }); await api.saveNotificationEvents(alertEvents.value); ok('通知配置已保存'); } catch (e) { fail(e); } }
 async function testNotifications() { try { await api.testNotifications(notifications.value); ok('测试通知已发送'); } catch (e) { fail(e); } }
@@ -363,6 +414,7 @@ function setTab(next) {
   if (next === 'ai') delete query.tab;
   else query.tab = next;
   router.replace({ query });
+  if (next === 'mcp') loadMcp();
 }
 watch(() => route.query.tab, (value) => { tab.value = tabs.some((item) => item.id === value) ? value : 'ai'; });
 watch(selectedProjectIds, (ids) => { selectedMountProjectIds.value = selectedMountProjectIds.value.filter((id) => ids.includes(id)); }, { deep: true });

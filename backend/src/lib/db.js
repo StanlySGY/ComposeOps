@@ -499,6 +499,26 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 14,
+    name: '卷备份还原演练字段',
+    up(database) {
+      const hasTable = !!database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'volume_backups'").get();
+      if (!hasTable) return;
+      addColumn(database, 'volume_backups', 'verify_status', "TEXT NOT NULL DEFAULT ''");
+      addColumn(database, 'volume_backups', 'verify_files', 'INTEGER');
+      addColumn(database, 'volume_backups', 'verify_at', 'TEXT');
+    },
+  },
+  {
+    version: 15,
+    name: '告警事件 AI 诊断(守护模式)',
+    up(database) {
+      const hasTable = !!database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alert_events'").get();
+      if (!hasTable) return;
+      addColumn(database, 'alert_events', 'diagnosis', 'TEXT');
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -979,6 +999,12 @@ export function pruneAlertEvents(days = 7) {
   return db.prepare("DELETE FROM alert_events WHERE julianday('now') - julianday(created_at) > ?").run(safeDays);
 }
 
+/** 守护模式:写入某条告警事件的 AI 诊断结果。 */
+export function setAlertEventDiagnosis(id, diagnosis) {
+  return db.prepare("UPDATE alert_events SET diagnosis = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(String(diagnosis || '').slice(0, 20000), Number(id)).changes > 0;
+}
+
 export function createSession(tokenHash, expiresAt) {
   db.prepare("DELETE FROM sessions WHERE julianday(expires_at) <= julianday('now')").run();
   db.prepare('INSERT INTO sessions(token_hash, expires_at) VALUES(?, ?)').run(tokenHash, expiresAt);
@@ -1240,7 +1266,11 @@ export function listVolumeBackups(projectId = '') {
   const rows = projectId
     ? db.prepare('SELECT * FROM volume_backups WHERE project_id = ? ORDER BY id DESC LIMIT 200').all(projectId)
     : db.prepare('SELECT * FROM volume_backups ORDER BY id DESC LIMIT 500').all();
-  return rows.map((row) => ({
+  return rows.map(mapVolumeBackupRow);
+}
+
+function mapVolumeBackupRow(row) {
+  return {
     id: Number(row.id),
     projectId: row.project_id,
     projectName: row.project_name,
@@ -1248,13 +1278,25 @@ export function listVolumeBackups(projectId = '') {
     file: row.file,
     bytes: Number(row.bytes) || 0,
     host: row.host,
+    verifyStatus: row.verify_status || '',
+    verifyFiles: row.verify_files == null ? null : Number(row.verify_files),
+    verifyAt: row.verify_at || '',
     createdAt: row.created_at,
-  }));
+  };
 }
 
 export function getVolumeBackup(id) {
   const row = db.prepare('SELECT * FROM volume_backups WHERE id = ?').get(Number(id));
-  return row ? { id: Number(row.id), projectId: row.project_id, projectName: row.project_name, volume: row.volume, file: row.file, bytes: Number(row.bytes) || 0, host: row.host, createdAt: row.created_at } : null;
+  return row ? mapVolumeBackupRow(row) : null;
+}
+
+/** 记录还原演练结果(status: verified | empty | failed)。 */
+export function updateVolumeBackupVerify(id, { status, files = null }) {
+  return db.prepare(`
+    UPDATE volume_backups
+    SET verify_status = ?, verify_files = ?, verify_at = datetime('now')
+    WHERE id = ?
+  `).run(String(status || ''), files == null ? null : Number(files) || 0, Number(id)).changes > 0;
 }
 
 export function deleteVolumeBackupRow(id) {

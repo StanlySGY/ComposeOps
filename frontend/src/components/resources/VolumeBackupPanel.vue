@@ -34,7 +34,7 @@
       <div class="max-h-72 overflow-y-auto">
         <table v-if="backups.length" class="w-full text-left text-xs">
           <thead class="sticky top-0 bg-surface-950/95 text-[10px] uppercase tracking-wide text-zinc-600">
-            <tr><th class="px-3 py-2 font-medium">项目 / 卷</th><th class="px-3 py-2 font-medium">文件</th><th class="px-3 py-2 font-medium">大小</th><th class="px-3 py-2 font-medium">时间</th><th class="px-3 py-2 font-medium">宿主</th><th class="px-3 py-2"></th></tr>
+            <tr><th class="px-3 py-2 font-medium">项目 / 卷</th><th class="px-3 py-2 font-medium">文件</th><th class="px-3 py-2 font-medium">大小</th><th class="px-3 py-2 font-medium">时间</th><th class="px-3 py-2 font-medium">宿主</th><th class="px-3 py-2 font-medium">演练</th><th class="px-3 py-2"></th></tr>
           </thead>
           <tbody>
             <tr v-for="backup in backups" :key="backup.id" class="border-t border-surface-800/60 hover:bg-surface-900/40">
@@ -43,8 +43,15 @@
               <td class="px-3 py-2 text-zinc-400">{{ formatBytes(backup.bytes) }}</td>
               <td class="px-3 py-2 text-zinc-500">{{ formatTime(backup.createdAt) }}</td>
               <td class="px-3 py-2"><span class="rounded bg-surface-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">{{ backup.host }}</span></td>
+              <td class="px-3 py-2">
+                <span v-if="backup.verifyStatus === 'verified'" class="status-badge bg-emerald-500/10 text-emerald-400" :title="`演练通过 · ${backup.verifyFiles ?? '—'} 个文件 · ${formatTime(backup.verifyAt)}`">✓ {{ backup.verifyFiles ?? '?' }} 文件</span>
+                <span v-else-if="backup.verifyStatus === 'empty'" class="status-badge bg-surface-800 text-surface-400" title="备份可解压,但内容为空">空备份</span>
+                <span v-else-if="backup.verifyStatus === 'failed'" class="status-badge bg-rose-500/10 text-rose-400" title="还原演练失败,备份不可用">损坏</span>
+                <span v-else class="text-[10px] text-zinc-600">未演练</span>
+              </td>
               <td class="whitespace-nowrap px-3 py-2 text-right">
                 <a :href="api.volumeBackupDownloadUrl(backup.id)" class="mr-2 inline-flex text-cyan-400 hover:text-cyan-300" title="下载"><Download class="h-3.5 w-3.5" /></a>
+                <button class="mr-2 inline-flex text-emerald-400 hover:text-emerald-300 disabled:opacity-40" title="还原演练:解进一次性临时卷验证可用性,不动原卷" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
                 <button class="mr-2 text-amber-400 hover:text-amber-300" title="恢复到卷(覆盖现有内容)" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" /></button>
                 <button class="text-zinc-500 hover:text-rose-300" title="删除备份" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
               </td>
@@ -62,7 +69,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue';
-import { Ban, Download, HardDriveDownload, RefreshCw, Trash2, Undo2 } from 'lucide-vue-next';
+import { Ban, Download, HardDriveDownload, RefreshCw, ShieldCheck, Trash2, Undo2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import { useToastStore } from '../../stores/toast.js';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
@@ -78,6 +85,7 @@ const loadingVolumes = ref(false);
 const backing = ref(false);
 const restoreTarget = ref(null);
 const deleteTarget = ref(null);
+const verifyingId = ref('');
 
 function formatBytes(bytes) {
   if (!bytes) return '—';
@@ -124,6 +132,21 @@ async function backupSelected() {
   await loadBackups();
 }
 function askRestore(backup) { restoreTarget.value = backup; }
+async function doVerify(backup) {
+  if (verifyingId.value) return;
+  verifyingId.value = backup.id;
+  try {
+    const result = await api.verifyVolumeBackup(backup.id);
+    if (result.status === 'verified') toast.success(`演练通过:还原出 ${result.files} 个文件(${(result.durationMs / 1000).toFixed(1)}s)`);
+    else if (result.status === 'empty') toast.info('备份可正常解压,但内容为空');
+    else toast.error('演练失败:备份疑似损坏');
+  } catch (error) {
+    toast.error(`演练失败:${error.message}`);
+  } finally {
+    verifyingId.value = '';
+    await loadBackups();
+  }
+}
 async function doRestore() {
   const backup = restoreTarget.value;
   restoreTarget.value = null;

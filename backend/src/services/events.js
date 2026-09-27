@@ -46,6 +46,13 @@ export function recordAlertEvent({ key, title, detail, priority = 'warning', to 
 export function recordAlertEventAndNotify({ key, title, detail, priority = 'warning', to = null, logs = '' }) {
   const event = recordAlertEvent({ key, title, detail, priority, to, logs });
   emitEvent({ type: 'alert', ...event });
+  // 守护模式:开关开启时 fire-and-forget AI 自动诊断(带冷却,绝不影响告警主链路)
+  void (async () => {
+    try {
+      const { maybeDiagnose } = await import('./guardian.js');
+      maybeDiagnose(event);
+    } catch { /* 守护模块加载失败不影响告警 */ }
+  })();
   return event;
 }
 

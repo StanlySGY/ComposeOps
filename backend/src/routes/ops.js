@@ -6,11 +6,14 @@ import { getNotificationConfig, saveNotificationConfig, sendNotification } from 
 import { getAlertEventConfig } from '../services/health-alerter.js';
 import {
   listProjectVolumes, createVolumeBackup, restoreVolumeBackup, deleteVolumeBackup,
-  listBackups, streamBackupToReply,
+  listBackups, streamBackupToReply, verifyVolumeBackup,
 } from '../services/volume-backup.js';
 import { findProject } from '../services/scanner.js';
+import { previewDeploy } from '../services/deploy-preview.js';
 import { addOperation } from '../lib/db.js';
 import { listAlertEvents, updateAlertEvent, pruneAlertEvents } from '../services/events.js';
+import { isGuardianEnabled, setGuardianEnabled, diagnoseAlertEvent } from '../services/guardian.js';
+import { getAiConfig } from '../services/ai.js';
 import { notificationConfigBody } from '../lib/schemas.js';
 
 /**
@@ -162,6 +165,17 @@ export default async function opsRoutes(fastify) {
     }
   });
 
+  // 还原演练:不动原卷,把备份解进一次性临时卷验证可用性(只读安全,无需确认门)
+  fastify.post('/storage/volume-backups/:id/verify', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'integer', minimum: 1 } } } },
+  }, async (request, reply) => {
+    try {
+      return await verifyVolumeBackup(request.params.id);
+    } catch (error) {
+      return reply.code(error.statusCode || 502).send({ error: 'volume_verify_failed', message: error.message });
+    }
+  });
+
   fastify.delete('/storage/volume-backups/:id', {
     schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'integer', minimum: 1 } } } },
   }, async (request, reply) => {
@@ -188,6 +202,29 @@ export default async function opsRoutes(fastify) {
 
   // ---- 应用模板市场 ----
   fastify.get('/blueprints', async () => ({ blueprints: await listBlueprints() }));
+
+  // ---- 部署预言:up 前静态推演会发生什么(只读,无需确认门) ----
+  fastify.post('/deploy-preview', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['projectId'],
+        properties: {
+          projectId: { type: 'string', maxLength: 128 },
+          ai: { type: 'boolean' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const project = await findProject(request.body?.projectId);
+      if (!project) return reply.code(404).send({ error: 'project_not_found', message: '项目不存在或当前不可见' });
+      return await previewDeploy(project, { ai: request.body?.ai === true });
+    } catch (error) {
+      return reply.code(error.statusCode || 502).send({ error: 'deploy_preview_failed', message: error.message });
+    }
+  });
 
   // values 刻意不声明子属性:蓝图变量名由蓝图自己定义,一旦收紧就会被剥空。
   // blueprintId 缺失仍由处理函数返回 missing_blueprint_id,故这里不设 required。
@@ -322,5 +359,37 @@ export default async function opsRoutes(fastify) {
     const days = Math.max(1, Math.min(Number(request.body?.days) || 7, 90));
     const result = pruneAlertEvents(days);
     return { ok: true, removed: result.changes };
+  });
+
+  // ---- 守护模式:告警事件的 AI 自动诊断 ----
+  fastify.get('/guardian', async () => ({
+    enabled: isGuardianEnabled(),
+    aiConfigured: !!getAiConfig().apiKey,
+  }));
+
+  fastify.put('/guardian', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['enabled'],
+        properties: { enabled: { type: 'boolean' } },
+      },
+    },
+  }, async (request) => ({ ok: true, enabled: setGuardianEnabled(request.body?.enabled === true) }));
+
+  // 手动触发单条事件的 AI 诊断(自动触发同样走这里的服务函数,带脱敏与落库)
+  fastify.post('/alert-events/:id/diagnose', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', maxLength: 32 } } } },
+  }, async (request, reply) => {
+    const id = Number(request.params?.id);
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'invalid_event_id', message: '无效的事件 ID' });
+    const event = listAlertEvents(200).find((item) => Number(item.id) === id);
+    if (!event) return reply.code(404).send({ error: 'event_not_found', message: '事件不存在或已清理' });
+    try {
+      return await diagnoseAlertEvent(event);
+    } catch (error) {
+      return reply.code(error.statusCode || 502).send({ error: 'guardian_diagnosis_failed', message: error.message });
+    }
   });
 }

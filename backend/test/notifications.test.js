@@ -47,3 +47,24 @@ test('notifications: 脱敏后的 token 再次保存不会覆盖真实值', () =
   const stored = getNotificationConfig(false);
   assert.equal(stored.channels.find((channel) => channel.type === 'telegram').token, 'secret-token');
 });
+
+test('notifications: 钉钉与飞书渠道保存且互不串扰', () => {
+  saveNotificationConfig({
+    channels: [
+      { type: 'dingtalk', enabled: true, endpoint: 'https://oapi.dingtalk.com/robot/send?access_token=abc' },
+      { type: 'feishu', enabled: true, endpoint: 'https://open.feishu.cn/open-apis/bot/v2/hook/xyz' },
+      { type: 'wecom', enabled: false },
+    ],
+  });
+  const config = getNotificationConfig(false);
+  const dingtalk = config.channels.find((channel) => channel.type === 'dingtalk');
+  const feishu = config.channels.find((channel) => channel.type === 'feishu');
+  const wecom = config.channels.find((channel) => channel.type === 'wecom');
+  assert.equal(dingtalk.enabled, true);
+  assert.match(dingtalk.endpoint, /access_token=abc/);
+  assert.equal(feishu.enabled, true);
+  assert.match(feishu.endpoint, /hook\/xyz/);
+  assert.equal(wecom.enabled, false);
+  // 新渠道加入后,旧渠道(bark/webhook)配置不丢
+  assert.equal(config.channels.find((channel) => channel.type === 'bark').endpoint, 'https://bark.example/a');
+});

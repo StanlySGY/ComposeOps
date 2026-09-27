@@ -91,6 +91,56 @@
         </div>
       </section>
 
+      <!-- 部署预言(宿主实况) -->
+      <section class="section-panel">
+        <div class="mb-4 flex items-center justify-between">
+          <div><h2 class="section-title">部署预言 · 宿主实况</h2><p class="mt-1 text-muted">对照宿主真实状态推演 up:镜像是否在位、端口是否被占、卷与 bind 路径是否存在、哪些容器会重建</p></div>
+          <button class="btn-secondary" :disabled="hostPreview.loading" @click="runHostPreview"><Telescope class="w-4 h-4" :class="{ 'animate-spin': hostPreview.loading }" />{{ hostPreview.loading ? '推演中...' : '生成预言' }}</button>
+        </div>
+        <p v-if="hostPreview.error" class="alert-error">{{ hostPreview.error }}</p>
+        <template v-if="hostPreview.data">
+          <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold text-emerald-300">{{ hostPreview.data.summary.create }}</div><div class="text-xs text-surface-500">将新建</div></div>
+            <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold text-amber-300">{{ hostPreview.data.summary.recreate }}</div><div class="text-xs text-surface-500">将重建</div></div>
+            <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold text-surface-200">{{ hostPreview.data.summary.keep }}</div><div class="text-xs text-surface-500">预计不动</div></div>
+            <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold text-sky-300">{{ hostPreview.data.summary.pulls }}</div><div class="text-xs text-surface-500">需拉取镜像</div></div>
+            <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold" :class="hostPreview.data.summary.conflicts ? 'text-rose-300' : 'text-surface-200'">{{ hostPreview.data.summary.conflicts }}</div><div class="text-xs text-surface-500">端口冲突</div></div>
+            <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold" :class="hostPreview.data.summary.orphan ? 'text-amber-300' : 'text-surface-200'">{{ hostPreview.data.summary.orphan }}</div><div class="text-xs text-surface-500">孤儿容器</div></div>
+          </div>
+          <div class="mt-3 grid gap-3 md:grid-cols-2">
+            <div v-if="hostPreview.data.pullsNeeded.length" class="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3">
+              <div class="text-sm font-semibold text-amber-300">本地缺少镜像(up 时将拉取)</div>
+              <div class="mt-1.5 flex flex-wrap gap-1.5"><span v-for="img in hostPreview.data.pullsNeeded" :key="img" class="count-badge font-mono text-amber-300">{{ img }}</span></div>
+            </div>
+            <div v-if="hostPreview.data.conflicts.length" class="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3">
+              <div class="text-sm font-semibold text-rose-300">宿主端口已被其他容器占用</div>
+              <p v-for="item in hostPreview.data.conflicts" :key="item.port" class="mt-1 text-xs text-surface-300">端口 <b class="font-mono">{{ item.port }}</b> 被 <span class="font-mono">{{ item.holder }}</span> 占用(服务 {{ item.service }})</p>
+            </div>
+            <div v-if="hostPreview.data.volumeRisks.length" class="rounded-xl border border-violet-900/40 bg-violet-950/20 p-3">
+              <div class="text-sm font-semibold text-violet-300">卷风险</div>
+              <p v-for="item in hostPreview.data.volumeRisks" :key="item.volume" class="mt-1 text-xs text-surface-300"><span class="font-mono">{{ item.volume }}</span>({{ item.service }}):{{ item.risk }}</p>
+            </div>
+            <div v-if="hostPreview.data.bindRisks.length" class="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3">
+              <div class="text-sm font-semibold text-amber-300">Bind 路径风险</div>
+              <p v-for="item in hostPreview.data.bindRisks" :key="item.path" class="mt-1 text-xs text-surface-300"><span class="font-mono">{{ item.path }}</span>({{ item.service }}):{{ item.risk }}</p>
+            </div>
+          </div>
+          <details v-if="hostPreview.data.services?.length" class="mt-3">
+            <summary class="cursor-pointer text-xs text-surface-400">逐服务明细({{ hostPreview.data.services.length }})</summary>
+            <div class="mt-2 space-y-1">
+              <p v-for="item in hostPreview.data.services" :key="item.name" class="flex flex-wrap items-center gap-2 rounded-lg border border-surface-800/60 bg-surface-950/40 px-2.5 py-1.5 text-xs">
+                <span class="count-badge" :class="item.action === 'create' ? 'text-emerald-300' : item.action === 'recreate' ? 'text-amber-300' : item.action === 'orphan' ? 'text-rose-300' : 'text-surface-400'">{{ { create: '新建', recreate: '重建', keep: '不动', orphan: '孤儿' }[item.action] || item.action }}</span>
+                <b class="font-mono text-surface-200">{{ item.name }}</b>
+                <span class="text-surface-500">{{ item.reason }}</span>
+              </p>
+            </div>
+          </details>
+          <p v-if="hostPreview.data.aiSummary" class="mt-3 rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-3 text-sm leading-6 text-emerald-200"><Bot class="mr-1.5 inline h-4 w-4" />{{ hostPreview.data.aiSummary }}</p>
+          <p class="mt-2 text-[11px] text-surface-600">静态推演基于 compose config 与宿主实况,容器级最终行为以实际 up 输出为准。</p>
+        </template>
+        <div v-else-if="!hostPreview.loading && !hostPreview.error" class="rounded-xl border border-dashed border-surface-700 p-4 text-center text-sm text-surface-500">点击"生成预言"对照宿主实况推演本次部署</div>
+      </section>
+
       <!-- 语义校验 -->
       <section class="section-panel">
         <div class="mb-4"><h2 class="section-title">语义校验</h2><p class="mt-1 text-muted">静态分析 depends_on、links、端口冲突、镜像声明等</p></div>
@@ -180,7 +230,7 @@
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';
-import { Bot, RefreshCw, Rocket } from 'lucide-vue-next';
+import { Bot, RefreshCw, Rocket, Telescope } from 'lucide-vue-next';
 import { api, streamComposeControl } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -198,6 +248,19 @@ const showDeployConfirm = ref(false);
 const deploying = ref(false);
 const deployOutput = ref({ open: false, text: '', running: false });
 let deployController = null;
+const hostPreview = ref({ loading: false, error: '', data: null });
+
+async function runHostPreview() {
+  if (!selectedProjectId.value || hostPreview.value.loading) return;
+  hostPreview.value = { loading: true, error: '', data: null };
+  try {
+    hostPreview.value.data = await api.previewDeploy(selectedProjectId.value, true);
+  } catch (e) {
+    hostPreview.value.error = `部署预言失败:${e.message}`;
+  } finally {
+    hostPreview.value.loading = false;
+  }
+}
 
 const project = computed(() => store.projects.find((p) => p.id === selectedProjectId.value));
 const volumeImpact = computed(() => {
@@ -255,6 +318,7 @@ async function loadProject() {
   issues.value = [];
   preview.value = { added: [], changed: [], restarted: [], removed: [], portConflicts: [] };
   services.value = [];
+  hostPreview.value = { loading: false, error: '', data: null };
   try {
     const data = await api.getComposeFile(selectedProjectId.value, 0);
     const content = data.content || '';

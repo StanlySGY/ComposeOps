@@ -8,6 +8,7 @@
     <section v-if="open" class="event-panel z-[50]">
       <header class="flex items-center justify-between border-b border-surface-800 px-4 py-3">
         <div><h2 class="text-sm font-semibold text-surface-100">事件中心</h2><p class="mt-0.5 text-muted">需要关注的运行状态与系统操作</p></div>
+        <label class="toggle-label !gap-1.5 text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="!w-8 !h-[18px]" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
         <label class="toggle-label !gap-1.5 text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="!w-8 !h-[18px]" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
       </header>
       <div class="max-h-[min(68vh,32rem)] overflow-y-auto p-2">
@@ -20,11 +21,16 @@
             </span>
           </router-link>
           <div class="flex shrink-0 items-center gap-1">
+            <button v-if="event.persisted" class="icon-btn !h-6 !w-6" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-accent': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
             <button v-if="event.logs" class="icon-btn !h-6 !w-6" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
             <button v-if="event.persisted && !event.read" class="icon-btn !h-6 !w-6" title="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
             <button v-if="event.persisted" class="icon-btn !h-6 !w-6" title="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
           </div>
           <div v-if="event.logs && expandedLogEventId === event.id" class="w-full basis-full"><pre class="event-logs">{{ event.logs }}</pre></div>
+          <div v-if="expandedDiagnosisId === event.id" class="w-full basis-full rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5">
+            <p class="mb-1 flex items-center gap-1 text-[11px] font-medium text-violet-300"><Sparkles class="h-3 w-3" />AI 诊断(守护模式)</p>
+            <pre class="max-h-56 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-surface-200">{{ event.diagnosis || '正在诊断...' }}</pre>
+          </div>
         </div>
         <EmptyState icon="CircleCheckBig" icon-class="text-emerald-400" compact title="当前没有待处理事件" description="异常与告警事件会出现在这里" />
       </div>
@@ -45,13 +51,14 @@ import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 import { useToastStore } from '../stores/toast.js';
-import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, VolumeX } from 'lucide-vue-next';
+import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, Sparkles, VolumeX } from 'lucide-vue-next';
 import { api, wsUrl } from '../api/client.js';
 import EmptyState from './common/EmptyState.vue';
 import ConfirmDialog from './common/ConfirmDialog.vue';
 
 const open = ref(false);
 const loading = ref(false);
+const toast = useToastStore();
 const projects = ref([]);
 const operations = ref([]);
 const updates = ref({ lastResults: [] });
@@ -92,8 +99,41 @@ function notifyDesktop(item) {
 }
 const alertEvents = ref([]);
 const expandedLogEventId = ref(null);
+const expandedDiagnosisId = ref(null);
+const diagnosingId = ref('');
+const guardian = ref({ enabled: false, aiConfigured: false });
 const pruneDialog = ref(false);
 let timer;
+
+async function loadGuardian() {
+  try { guardian.value = await api.getGuardian(); } catch { /* 状态获取失败按默认关闭 */ }
+}
+async function toggleGuardian() {
+  try {
+    guardian.value = await api.setGuardian(!guardian.value.enabled);
+    toast.success(guardian.value.enabled ? '守护模式已开启:新告警将自动触发 AI 诊断' : '守护模式已关闭');
+  } catch (e) {
+    toast.error(e.message);
+  }
+}
+async function diagnose(eventItem) {
+  if (diagnosingId.value) return;
+  // 已有诊断结果时只做展开/收起,不重复请求
+  if (eventItem.diagnosis && expandedDiagnosisId.value !== eventItem.id) { expandedDiagnosisId.value = eventItem.id; return; }
+  if (expandedDiagnosisId.value === eventItem.id) { expandedDiagnosisId.value = null; return; }
+  diagnosingId.value = eventItem.id;
+  expandedDiagnosisId.value = eventItem.id;
+  try {
+    const result = await api.diagnoseAlertEvent(eventItem.id);
+    const idx = alertEvents.value.findIndex((item) => item.id === eventItem.id);
+    if (idx >= 0) alertEvents.value[idx] = { ...alertEvents.value[idx], diagnosis: result.diagnosis };
+  } catch (e) {
+    toast.error(`AI 诊断失败:${e.message}`);
+    expandedDiagnosisId.value = null;
+  } finally {
+    diagnosingId.value = '';
+  }
+}
 
 /** 事件推送为后台常驻流,断开后持续重连(退避到 30s),不打扰前台交互。 */
 const eventStream = useWebSocket(() => wsUrl('/ws/events'), {
@@ -182,6 +222,7 @@ const persistedEvents = computed(() => alertEvents.value
     read: !!event.read,
     createdAt: event.created_at,
     logs: event.logs || '',
+    diagnosis: event.diagnosis || '',
     persisted: true,
   })));
 
@@ -222,6 +263,7 @@ async function load() {
     // 事件中心允许显示已有缓存,加载失败由下一次刷新或重连补偿。
   }
   finally { loading.value = false; }
+  loadGuardian();
 }
 function connectEventStream() {
   eventStream.connect();

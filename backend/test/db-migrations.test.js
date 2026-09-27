@@ -40,7 +40,9 @@ test('db-migrations: runMigrations 对空库应用全部迁移并更新 user_ver
   assert.ok(applied.includes(11));
   assert.ok(applied.includes(12));
   assert.ok(applied.includes(13));
-  assert.equal(db.pragma('user_version', { simple: true }), 13);
+  assert.ok(applied.includes(14));
+  assert.ok(applied.includes(15));
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'volume_backups'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'event_records'").get());
@@ -99,7 +101,7 @@ test('db-migrations: v6 创建 inspections 表', () => {
   `);
   const applied = runMigrations(db);
   assert.ok(applied.includes(6));
-  assert.equal(db.pragma('user_version', { simple: true }), 13);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inspections'").get());
   // 验证 inspections 表列结构
   const cols = db.prepare('PRAGMA table_info(inspections)').all();
@@ -120,7 +122,7 @@ test('db-migrations: v6 前创建 inspections 表后跳过(列不重复添加)',
   db.pragma('user_version = 6');
   const applied = runMigrations(db);
   assert.ok(!applied.includes(6));
-  assert.equal(db.pragma('user_version', { simple: true }), 13);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
 });
 
 test('db-migrations: 已应用版本跳过,重放返回空数组', () => {
@@ -134,8 +136,8 @@ test('db-migrations: 已应用版本跳过,重放返回空数组', () => {
   `);
   db.pragma('user_version = 9');
   const applied = runMigrations(db);
-  assert.deepEqual(applied, [10, 11, 12, 13]);
-  assert.equal(db.pragma('user_version', { simple: true }), 13);
+  assert.deepEqual(applied, [10, 11, 12, 13, 14, 15]);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
   // v10 未越界:compacted_before_id 只在 v10 加过一次
   assert.ok(db.prepare('PRAGMA table_info(ai_sessions)').all().filter((c) => c.name === 'compacted_before_id').length === 1);
 });
@@ -160,7 +162,7 @@ test('db-migrations: 真实 user_version=0 历史库(列已在)幂等升到 v4',
   assert.ok(applied.includes(2));
   assert.ok(applied.includes(3));
   assert.ok(applied.includes(4));
-  assert.equal(reopened.pragma('user_version', { simple: true }), 13);
+  assert.equal(reopened.pragma('user_version', { simple: true }), 15);
   assert.ok(reopened.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_memories'").get());
   reopened.close();
   rmSync(dir, { recursive: true, force: true });

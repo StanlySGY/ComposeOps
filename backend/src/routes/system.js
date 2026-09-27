@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import os from 'os';
 import { getActivityDocker } from '../services/docker-hosts.js';
 import { parseContainerStat } from '../services/stats.js';
+import { getMcpStatus, saveMcpConfig, revealMcpToken } from './mcp.js';
 
 /**
  * 宿主机指标：CPU / 内存 / 磁盘 / 网络
@@ -143,4 +144,22 @@ export default async function systemRoutes(fastify) {
     }
     return { host, disk, network: net, containers };
   });
+
+  // ---- MCP 服务管理(token/模式/开关) ----
+  fastify.get('/mcp', async () => getMcpStatus());
+  fastify.post('/mcp', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          enabled: { type: 'boolean' },
+          mode: { type: 'string', enum: ['readonly', 'all'] },
+          regenerateToken: { type: 'boolean' },
+        },
+      },
+    },
+  }, async (request) => saveMcpConfig(request.body || {}));
+  // token 只经此端点明文返回一次,供粘贴进 MCP 客户端
+  fastify.post('/mcp/reveal-token', async () => revealMcpToken());
 }

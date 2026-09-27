@@ -205,6 +205,7 @@ export const api = {
   getVolumeBackups: (projectId = '') => request(`/ops/storage/volume-backups${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
   createVolumeBackup: (projectId, volume) => request('/ops/storage/volume-backups', { method: 'POST', body: JSON.stringify({ projectId, volume }) }),
   restoreVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}/restore`, { method: 'POST' }),
+  verifyVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}/verify`, { method: 'POST' }),
   deleteVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}`, { method: 'DELETE' }),
   volumeBackupDownloadUrl: (id) => `/api/v1/ops/storage/volume-backups/${id}/download`,
   removeStorageResource: (kind, id) => request(`/ops/storage/resources/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -217,6 +218,10 @@ export const api = {
   getAlertEvents: (limit = 50) => request(`/ops/alert-events?limit=${limit}`),
   updateAlertEvent: (id, patch) => request(`/ops/alert-events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   pruneAlertEvents: (days = 7) => request('/ops/alert-events/prune', { method: 'POST', body: JSON.stringify({ days }) }),
+  // 守护模式:告警事件 AI 自动诊断
+  getGuardian: () => request('/ops/guardian'),
+  setGuardian: (enabled) => request('/ops/guardian', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  diagnoseAlertEvent: (id) => request(`/ops/alert-events/${id}/diagnose`, { method: 'POST' }),
   // AI 巡检
   getInspectionOverview: (limit = 20) => request(`/ops/inspection/overview?limit=${limit}`),
   getInspectionReport: (id) => request(`/ops/inspection/reports/${id}`),
@@ -265,6 +270,12 @@ export const api = {
   getUpdateSettings: () => request('/personal/updates'),
   saveUpdateSettings: (payload) => request('/personal/updates', { method: 'PUT', body: JSON.stringify(payload) }),
   checkUpdates: () => request('/personal/updates/check', { method: 'POST' }),
+  // MCP 服务管理
+  getMcpConfig: () => request('/system/mcp'),
+  saveMcpConfig: (payload) => request('/system/mcp', { method: 'POST', body: JSON.stringify(payload) }),
+  revealMcpToken: () => request('/system/mcp/reveal-token', { method: 'POST' }),
+  // 部署预言:up 前静态推演(会重建什么/端口冲突/卷风险)
+  previewDeploy: (projectId, ai = false) => request('/ops/deploy-preview', { method: 'POST', body: JSON.stringify({ projectId, ai }) }),
   exportUrl: `${BASE}/personal/export`,
   importData: (payload) => request('/personal/import', { method: 'POST', body: JSON.stringify(payload) }),
   // marketplace

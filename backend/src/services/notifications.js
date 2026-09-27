@@ -1,6 +1,6 @@
 import { getSetting, setSetting } from '../lib/db.js';
 
-const CHANNEL_TYPES = ['bark', 'telegram', 'wecom', 'email', 'webhook'];
+const CHANNEL_TYPES = ['bark', 'telegram', 'wecom', 'dingtalk', 'feishu', 'email', 'webhook'];
 
 const DEFAULTS = {
   enabled: false,
@@ -183,6 +183,12 @@ async function deliver(type, config, title, body) {
   } else if (type === 'wecom') {
     if (!config.endpoint) throw new Error('未配置企业微信 Webhook');
     await postJson(config.endpoint, { msgtype: 'text', text: { content: `${title}\n${body}` } });
+  } else if (type === 'dingtalk') {
+    if (!config.endpoint) throw new Error('未配置钉钉 Webhook');
+    await postJson(config.endpoint, { msgtype: 'text', text: { content: `${title}\n${body}` } });
+  } else if (type === 'feishu') {
+    if (!config.endpoint) throw new Error('未配置飞书 Webhook');
+    await postJson(config.endpoint, { msg_type: 'text', content: { text: `${title}\n${body}` } });
   } else if (type === 'webhook') {
     if (!config.endpoint) throw new Error('未配置 Webhook');
     await postJson(config.endpoint, { title, body, source: 'ComposeOps', timestamp: new Date().toISOString() });
