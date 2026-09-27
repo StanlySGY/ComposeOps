@@ -70,11 +70,29 @@ ComposeOps 解决的是：
 | 平滑升级 → 健康轮询 → 自动回滚 | ✅ | ❌ | ❌ | 部分 |
 | GitOps 漂移检测 + 版本回滚 | ✅ | ❌ | ❌ | ✅ |
 | 备份还原演练(自证可用) | ✅ | ❌ | ❌ | ❌ |
-| MCP Server(接入 Claude/Cursor) | ✅ | ❌ | ❌ | ❌ |
+| MCP Server(接入 Claude/Cursor/Codex 等) | ✅ | ❌ | ❌ | ❌ |
 | 多宿主(SSH/TCP/Local) | ✅ | 单机 | ✅ | ✅ |
 | 中文优先 + 国内镜像构建 | ✅ | ❌ | ❌ | ❌ |
 
 > 2026 年主流面板对比中,这类工具的共同点是"看见问题";ComposeOps 的差异是"分析问题并在你确认后解决问题"。详细对比见:`docs/public/WHY_COMPOSEOPS.md`
+
+### 🔌 MCP 通用接入:任何 Agent 都能调用面板工具
+
+面板内置 MCP Server(独立 Token,默认只读白名单,critical 工具永不暴露),三种传输覆盖全部主流客户端:
+
+| 传输 | 端点 | 适用客户端 |
+|------|------|-----------|
+| Streamable HTTP(现行标准) | `POST /mcp` | Codex CLI、Gemini CLI、新版 harness、Claude Code |
+| SSE(经典) | `GET /mcp/sse` | Claude Desktop、Cursor、Cline |
+| stdio 桥 | `node mcp/stdio-bridge.mjs` | 仅支持 stdio 的客户端(DeepSeek 系 harness 等) |
+
+启用方式:**设置 → MCP → 启用 → 复制客户端配置**,粘贴进任意客户端的 `mcpServers` 即可。32 个只读运维工具(状态/日志/指标/巡检/GitOps 漂移/告警)即刻可被你常用的 AI 编码助手调用。
+
+### 📱 手机远程操控
+
+移动端浏览器直接访问即是完整操控台:响应式布局、底部 Tab 导航、触摸适配。并且是 **PWA**——手机浏览器打开后"添加到主屏幕",即可像原生 App 一样全屏运行(含桌面快捷方式:服务/AI 助手/事件中心/日志)。
+
+> ⚠️ 安全提醒:面板等价宿主 root。手机远程访问请走 Tailscale/WireGuard 或自建 HTTPS 反代,不要把 `0.0.0.0` 端口直接暴露公网;配合告警推送(Bark/Telegram/钉钉/飞书),手机端"收告警 → 看诊断 → 一键处置"的闭环已就绪。
 
 ### 📚 公开文档
 

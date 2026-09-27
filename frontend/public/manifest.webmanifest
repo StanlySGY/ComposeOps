@@ -1,0 +1,23 @@
+{
+  "name": "ComposeOps · Docker Compose 运维台",
+  "short_name": "ComposeOps",
+  "description": "AI 原生的 Docker Compose 运维面板:守护模式、部署预言、GitOps 与备份自证",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    { "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "服务总览", "url": "/#/services" },
+    { "name": "AI 助手", "url": "/#/agent" },
+    { "name": "事件中心", "url": "/#/events" },
+    { "name": "实时日志", "url": "/#/logs" }
+  ]
+}

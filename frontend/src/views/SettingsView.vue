@@ -184,8 +184,12 @@
           </label>
         </div>
         <div class="space-y-2 rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-xs">
-          <p class="text-surface-300">SSE 地址:<code class="font-mono text-accent">{{ mcp.sseUrl }}</code><span class="ml-2 text-surface-600">认证:Authorization: Bearer &lt;token&gt; 或 ?token=</span></p>
-          <p class="text-surface-500">当前连接会话:{{ mcp.sessionCount }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
+          <div class="space-y-1.5">
+            <p class="text-surface-300">Streamable HTTP(现行标准,推荐):<code class="font-mono text-accent">POST {{ mcp.httpUrl }}</code><span class="ml-2 text-surface-600">Codex CLI / Gemini CLI / 新版 harness</span></p>
+            <p class="text-surface-300">SSE(经典传输):<code class="font-mono text-accent">{{ mcp.sseUrl }}</code><span class="ml-2 text-surface-600">Claude Desktop / Cursor</span></p>
+            <p class="text-surface-300">stdio 桥(仅 stdio 的客户端):<code class="font-mono text-accent">node mcp/stdio-bridge.mjs</code><span class="ml-2 text-surface-600">环境变量 COMPOSEOPS_URL / COMPOSEOPS_TOKEN</span></p>
+          </div>
+          <p class="text-surface-500">认证:Authorization: Bearer &lt;token&gt;(HTTP 端点也可 ?token=)· 会话数:{{ mcp.sessionCount }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
           <div class="flex flex-wrap items-center gap-2">
             <button class="btn-secondary !py-1.5 text-xs" @click="copyMcpConfig">复制客户端配置</button>
             <button class="btn-secondary !py-1.5 text-xs" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" />重置 Token</button>
@@ -372,9 +376,9 @@ async function copyMcpConfig() {
   try {
     const { token } = await api.revealMcpToken();
     const origin = window.location.origin;
-    const config = { mcpServers: { composeops: { url: `${origin}/mcp/sse`, headers: { Authorization: `Bearer ${token}` } } } };
+    const config = { mcpServers: { composeops: { url: `${origin}${mcp.value.httpUrl || '/mcp'}`, headers: { Authorization: `Bearer ${token}` } } } };
     await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
-    ok('MCP 客户端配置 JSON 已复制');
+    ok('MCP 客户端配置 JSON 已复制(Streamable HTTP)');
   } catch (e) { fail(e); }
 }
 async function saveNotifications() { try { notifications.value = await api.saveNotifications({ ...notifications.value, events: alertEvents.value }); await api.saveNotificationEvents(alertEvents.value); ok('通知配置已保存'); } catch (e) { fail(e); } }

@@ -1,14 +1,19 @@
 /**
  * MCP(Model Context Protocol)Server:把 ComposeOps 的 Agent 工具暴露给
- * 外部 MCP 客户端(Claude Desktop / Cursor 等),让"面板里的运维能力"变成
- * 生态入口。
+ * 外部 MCP 客户端(Claude Desktop / Claude Code / Cursor / Codex CLI /
+ * Gemini CLI / 各类 agent harness 等),让"面板里的运维能力"变成生态入口。
  *
- * 传输:SSE(经典传输,兼容面最广)
- *  - GET  /mcp/sse                建立 SSE 流,下发 endpoint 事件(message URL)
- *  - POST /mcp/message?sessionId= 接收 JSON-RPC 请求,响应经 SSE 推回
+ * 双传输,覆盖全部主流客户端:
+ *  1. Streamable HTTP(2025-03-26 起的现行标准,Codex/Gemini CLI/新 harness 主推):
+ *     POST /mcp —— 单端点,无状态,请求即 JSON-RPC,响应即 application/json;
+ *     通知(无 id)返回 202;GET/DELETE /mcp 返回 405(不提供服务端-initiated 流)。
+ *  2. 经典 SSE(向后兼容,Claude Desktop/Cursor 早期配置沿用):
+ *     GET /mcp/sse 建立 SSE 流 + POST /mcp/message?sessionId= 接收请求。
+ *  3. stdio-only 客户端:仓库 mcp/stdio-bridge.mjs 把 stdio 转发到上面任一 HTTP 端点。
  *
  * 安全模型:
  *  - 独立 token(setting mcp.token)鉴权,与面板会话体系隔离;未启用时端点关闭;
+ *  - Origin 校验:浏览器型客户端必须同源(防 DNS rebinding),桌面客户端不带 Origin 直接放行;
  *  - mode=readonly(默认)只暴露低/中风险且不需确认的工具;mode=all 追加高风险;
  *    critical 工具(maintenance.clean / app.deploy)在任何模式下都不经 MCP 暴露
  *    ——MCP 调用方没有人工确认门,critical 必须 fail-closed;
@@ -19,6 +24,7 @@ import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { getSetting, setSetting } from '../lib/db.js';
 import { getAgent } from '../services/agent.js';
 import { assessRisk } from '../services/agent-tools.js';
+import { validateOrigin } from '../lib/auth.js';
 
 const sessions = new Map(); // sessionId -> { write, heartbeat, agent }
 
@@ -110,6 +116,35 @@ async function handleRpc(agent, mode, message) {
 export default async function mcpRoutes(fastify) {
   // ---- 管理面:配置读写挂在 /api/v1/system/mcp(受登录鉴权保护),见 system.js ----
 
+  // ---- Streamable HTTP(现行标准,无状态):POST /mcp ----
+  fastify.post('/', async (request, reply) => {
+    const { enabled, mode } = getConfig();
+    const provided = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.query?.token || '';
+    if (!enabled) return reply.code(403).send({ error: 'mcp_disabled', message: 'MCP 服务未启用(设置中开启)' });
+    if (!checkToken(provided)) return reply.code(401).send({ error: 'invalid_token', message: 'MCP token 不匹配' });
+    // DNS rebinding 防护:浏览器型客户端一定带 Origin 且必须同源;
+    // 桌面/CLI 客户端不带 Origin,直接放行(与面板 validateOrigin 同一取舍)。
+    if (!validateOrigin(request)) {
+      return reply.code(403).send({ error: 'origin_mismatch', message: 'Origin 与服务主机不匹配' });
+    }
+    const message = request.body;
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      return reply.code(400).send({ error: 'invalid_request', message: '请求体必须是单个 JSON-RPC 对象' });
+    }
+    const agent = getAgent();
+    const response = await handleRpc(agent, mode, message);
+    if (!response) return reply.code(202).send(); // 通知:无响应体
+    return reply.header('Content-Type', 'application/json').send(response);
+  });
+
+  fastify.get('/', async (request, reply) => {
+    // 本服务器不提供服务端-initiated 流;按规范返回 405 让客户端走 POST。
+    return reply.code(405).send({ error: 'method_not_allowed', message: '本服务为无状态 Streamable HTTP,仅支持 POST /mcp' });
+  });
+  fastify.delete('/', async (request, reply) => {
+    return reply.code(405).send({ error: 'method_not_allowed', message: '无状态模式无会话可终止' });
+  });
+
   fastify.get('/sse', async (request, reply) => {
     const { enabled } = getConfig();
     const provided = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.query?.token || '';
@@ -167,6 +202,7 @@ export function getMcpStatus() {
     token: config.token ? '••••' + config.token.slice(-4) : '',
     configured: !!config.token,
     sseUrl: '/mcp/sse',
+    httpUrl: '/mcp',
     sessionCount: sessions.size,
     toolsExported: config.enabled ? exportableTools(config.mode).length : 0,
   };
