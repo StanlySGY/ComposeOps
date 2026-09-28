@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-09-28
+
+### Fixed
+- **拓扑页节点被裁切**: 依赖关系图的层内节点以固定 y=60 为中心展开,同层节点较多时
+  顶部节点纵坐标变负,整体被 SVG viewBox 上沿裁掉——用户看到"节点被面板盖住",
+  7 个服务只显示 5 个。现在每层以画布垂直中点居中展开,画布高度按层内最多节点数
+  实算(计入节点自身高度与上下边距),任何层数的首尾节点都完整可见
+- 布局计算抽为纯函数 `lib/topology-layout.js` 并补 7 例单测(含用户实测的
+  1 依赖 4 共 7 节点场景、12 节点单层、环依赖、单节点不放大画布)
+
 ## [1.3.0] - 2026-09-28
 
 ### Added

@@ -47,7 +47,7 @@
         <Skeleton v-if="loading" variant="table" :rows="4" label="拓扑加载中" />
         <EmptyState v-else-if="!services.length" icon="Network" title="该项目没有可解析的服务" description="项目可能没有 Compose 配置,或配置中未定义 services" />
         <div v-else class="overflow-auto rounded-2xl border border-surface-800 bg-surface-950/60">
-          <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="min-w-[720px] w-full" role="img" aria-label="服务拓扑图">
+          <svg :viewBox="`0 0 ${layout.width} ${layout.height}`" class="min-w-[720px] w-full" role="img" aria-label="服务拓扑图">
             <defs>
               <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
                 <polygon points="0 0, 8 3, 0 6" fill="#475569" />
@@ -58,8 +58,8 @@
               <path :d="edgePath(edge)" fill="none" stroke="#334155" stroke-width="1.5" marker-end="url(#arrowhead)" />
             </g>
             <!-- 节点 -->
-            <g v-for="node in nodes" :key="node.name" :transform="`translate(${node.x}, ${node.y})`">
-              <rect :x="-nodeW/2" :y="-nodeH/2" :width="nodeW" :height="nodeH" rx="12" :fill="nodeFill(node)" :stroke="nodeStroke(node)" stroke-width="1.5" />
+            <g v-for="node in layout.nodes" :key="node.name" :transform="`translate(${node.x}, ${node.y})`">
+              <rect :x="-TOPO.nodeW/2" :y="-TOPO.nodeH/2" :width="TOPO.nodeW" :height="TOPO.nodeH" rx="12" :fill="nodeFill(node)" :stroke="nodeStroke(node)" stroke-width="1.5" />
               <text :x="0" :y="-4" text-anchor="middle" class="topo-node-name" fill="#E2E8F0">{{ node.name }}</text>
               <text :x="0" :y="14" text-anchor="middle" class="topo-node-sub" :fill="nodeSubColor(node)">{{ nodeSub(node) }}</text>
             </g>
@@ -96,6 +96,7 @@ import { Boxes, Container, GitBranch, HardDrive, Network, RefreshCw } from 'luci
 import * as YAML from 'yaml';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
+import { computeTopologyLayout, TOPO_DEFAULTS } from '../lib/topology-layout.js';
 import Skeleton from '../components/common/Skeleton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 
@@ -109,10 +110,7 @@ const networks = ref([]);
 const volumes = ref([]);
 const composeProjects = computed(() => store.projects.filter((project) => project.editable));
 
-const nodeW = 150;
-const nodeH = 52;
-const levelGap = 220;
-const nodeGap = 90;
+const TOPO = TOPO_DEFAULTS;
 
 const project = computed(() => composeProjects.value.find((p) => p.id === selectedProjectId.value));
 const containerCount = computed(() => (crossProject.value ? store.projects.reduce((n, p) => n + (p.containers?.length || 0), 0) : project.value?.containers?.length || 0));
@@ -121,17 +119,9 @@ const networkCount = computed(() => networks.value.length);
 const volumeCount = computed(() => volumes.value.length);
 const edgeCount = computed(() => services.value.reduce((n, s) => n + s.dependsOn.length, 0));
 
-// 计算分层布局
-const nodes = computed(() => {
-  const levels = computeLevels(services.value);
-  const result = [];
-  for (const item of levels) {
-    const x = 80 + item.level * levelGap;
-    const y = 60 + (item.count > 1 ? (item.index - (item.count - 1) / 2) * nodeGap : 0);
-    result.push({ name: item.name, x, y, level: item.level });
-  }
-  return result;
-});
+// 布局计算收敛到 lib/topology-layout.js(纯函数,有单测):
+ // 层内节点以画布垂直中点居中,任何层数都不会再被 viewBox 上沿裁掉。
+const layout = computed(() => computeTopologyLayout(services.value));
 const edges = computed(() => {
   const list = [];
   for (const svc of services.value) {
@@ -141,63 +131,17 @@ const edges = computed(() => {
   }
   return list;
 });
-const svgWidth = computed(() => {
-  const maxLevel = Math.max(0, ...nodes.value.map((n) => n.level));
-  // 下限与容器 min-w 对齐,避免节点少时 viewBox 被拉伸放大(单节点时曾放大数倍)
-  return Math.max(160 + maxLevel * levelGap + nodeW, 720);
-});
-const svgHeight = computed(() => {
-  const maxCount = Math.max(1, ...groupByLevel(nodes.value).map((g) => g.length));
-  return Math.max(120 + maxCount * nodeGap, 420);
-});
 
-function groupByLevel(nodeList) {
-  const map = new Map();
-  for (const n of nodeList) {
-    if (!map.has(n.level)) map.set(n.level, []);
-    map.get(n.level).push(n);
-  }
-  return [...map.values()];
-}
-function computeLevels(serviceList) {
-  const levelMap = new Map();
-  const visit = (name, visiting) => {
-    if (levelMap.has(name)) return levelMap.get(name);
-    if (visiting.has(name)) return 0;
-    visiting.add(name);
-    const svc = serviceList.find((s) => s.name === name);
-    let level = 0;
-    if (svc) {
-      for (const dep of svc.dependsOn) {
-        level = Math.max(level, visit(dep, visiting) + 1);
-      }
-    }
-    visiting.delete(name);
-    levelMap.set(name, level);
-    return level;
-  };
-  for (const svc of serviceList) visit(svc.name, new Set());
-  const byLevel = new Map();
-  for (const [name, level] of levelMap) {
-    if (!byLevel.has(level)) byLevel.set(level, []);
-    byLevel.get(level).push(name);
-  }
-  const result = [];
-  for (const [level, names] of byLevel) {
-    names.forEach((name, index) => result.push({ name, level, index, count: names.length }));
-  }
-  return result;
-}
 function nodePos(name) {
-  return nodes.value.find((n) => n.name === name);
+  return layout.value.nodes.find((n) => n.name === name);
 }
 function edgePath(edge) {
   const from = nodePos(edge.from);
   const to = nodePos(edge.to);
   if (!from || !to) return '';
-  const x1 = from.x + nodeW / 2;
+  const x1 = from.x + TOPO.nodeW / 2;
   const y1 = from.y;
-  const x2 = to.x - nodeW / 2;
+  const x2 = to.x - TOPO.nodeW / 2;
   const y2 = to.y;
   const mx = (x1 + x2) / 2;
   return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
