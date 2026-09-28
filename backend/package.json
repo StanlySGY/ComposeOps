@@ -21,7 +21,7 @@
     "nodemailer": "^10.0.11",
     "ssh2": "^1.17.0",
     "tar-stream": "^3.2.1",
-    "yaml": "^2.5.1"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
