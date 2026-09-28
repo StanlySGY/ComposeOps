@@ -12,7 +12,7 @@
     <p v-if="flash" class="alert-info">{{ flash }}</p>
 
     <!-- 批量删除进度:逐项删除可能较慢,实时显示已完成数与当前目标 -->
-    <section v-if="busy && batchProgress.total > 0" class="section-panel !py-3">
+    <section v-if="busy && batchProgress.total > 0" class="section-panel py-3!">
       <div class="flex items-center justify-between gap-3 text-sm">
         <span class="text-surface-200">正在批量删除 <b class="text-sky-300 tabular-nums">{{ batchProgress.done }}</b> / {{ batchProgress.total }}</span>
         <span class="min-w-0 flex-1 truncate text-right font-mono text-xs text-surface-500">{{ batchProgress.current }}</span>
@@ -21,19 +21,19 @@
     </section>
 
     <div class="flex flex-wrap items-center gap-2 text-xs text-surface-400">
-      <span v-if="data" class="rounded border border-surface-800 bg-surface-950/50 px-2 py-0.5">悬空镜像 <b class="text-amber-300">{{ data.counts.danglingImages }}</b></span>
-      <span v-if="data" class="rounded border border-surface-800 bg-surface-950/50 px-2 py-0.5">孤儿卷 <b class="text-amber-300">{{ data.counts.orphanVolumes }}</b></span>
-      <span v-if="data" class="rounded border border-surface-800 bg-surface-950/50 px-2 py-0.5">闲置网络 <b class="text-amber-300">{{ data.counts.unusedNetworks }}</b></span>
+      <span v-if="data" class="rounded-sm border border-surface-800 bg-surface-950/50 px-2 py-0.5">悬空镜像 <b class="text-amber-300">{{ data.counts.danglingImages }}</b></span>
+      <span v-if="data" class="rounded-sm border border-surface-800 bg-surface-950/50 px-2 py-0.5">孤儿卷 <b class="text-amber-300">{{ data.counts.orphanVolumes }}</b></span>
+      <span v-if="data" class="rounded-sm border border-surface-800 bg-surface-950/50 px-2 py-0.5">闲置网络 <b class="text-amber-300">{{ data.counts.unusedNetworks }}</b></span>
     </div>
 
     <div class="flex items-center justify-between gap-3 border-b border-surface-800 pb-0">
       <div class="flex items-center gap-1">
-        <button v-for="tab in tabs" :key="tab.key" class="nav-link !flex-none px-3 py-2 text-sm" :class="{ 'nav-link-active': activeTab === tab.key }" @click="switchTab(tab.key)">{{ tab.label }}<span v-if="tab.countKey !== '__none__'" class="ml-2 count-badge">{{ (data?.counts?.[tab.countKey] ?? 0) }}</span></button>
+        <button v-for="tab in tabs" :key="tab.key" class="nav-link flex-none! px-3 py-2 text-sm" :class="{ 'nav-link-active': activeTab === tab.key }" @click="switchTab(tab.key)">{{ tab.label }}<span v-if="tab.countKey !== '__none__'" class="ml-2 count-badge">{{ (data?.counts?.[tab.countKey] ?? 0) }}</span></button>
       </div>
       <div class="flex items-center gap-2 pb-2">
         <span v-if="searchQuery || filterStatus" class="text-xs text-surface-400">显示 <b class="text-sky-300">{{ filteredRows.length }}</b> / {{ rows.length }}</span>
-        <input v-model="searchQuery" type="text" class="input !py-1 !text-sm w-48" placeholder="搜索..." />
-        <select v-model="filterStatus" class="input !py-1 !text-sm w-32">
+        <input v-model="searchQuery" type="text" class="input py-1! text-sm! w-48" placeholder="搜索..." />
+        <select v-model="filterStatus" class="input py-1! text-sm! w-32">
           <option value="">全部状态</option>
           <option v-for="status in statusOptions" :key="status.value" :value="status.value">{{ status.label }}</option>
         </select>

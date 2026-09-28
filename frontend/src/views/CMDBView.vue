@@ -44,7 +44,7 @@
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div><h2 class="section-title">资产清单</h2><p class="mt-1 text-muted">按类型过滤,查看资产状态与归属</p></div>
         <div class="flex flex-wrap gap-2">
-          <button v-for="k in kinds" :key="k.value" class="btn-secondary !px-3 !py-1.5 text-xs" :class="{ '!border-accent !text-accent': kindFilter === k.value }" @click="kindFilter = k.value">{{ k.label }}</button>
+          <button v-for="k in kinds" :key="k.value" class="btn-secondary px-3! py-1.5! text-xs" :class="{ 'border-accent! text-accent!': kindFilter === k.value }" @click="kindFilter = k.value">{{ k.label }}</button>
         </div>
       </div>
       <div class="table-wrap">

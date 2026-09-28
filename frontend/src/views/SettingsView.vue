@@ -62,7 +62,7 @@
       <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>
         <div class="card p-3">
           <div class="flex items-center justify-between text-sm"><span class="text-surface-300">磁盘占用</span><span v-if="usage" class="text-muted">{{ formatBytes(usageTotal) }} · 可释放 {{ formatBytes(usageReclaimable) }}</span></div>
-          <div v-if="usage" class="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-800"><span class="block h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500" :style="{ width: usagePercent }"></span></div>
+          <div v-if="usage" class="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-800"><span class="block h-full rounded-full bg-linear-to-r from-emerald-500 to-teal-400 transition-all duration-500" :style="{ width: usagePercent }"></span></div>
           <p class="mt-2 flex flex-wrap gap-3 text-[11px] text-surface-400"><span>镜像 {{ usage ? formatBytes(usage.images.total) : '—' }}</span><span>缓存 {{ usage ? formatBytes(usage.buildCache.total) : '—' }}</span><span>卷 {{ usage ? formatBytes(usage.volumes.total) : '—' }} · 停止容器 {{ usage ? usage.containers.count : '—' }}</span></p>
         </div>
         <p class="text-sm text-surface-400">打开清理 Hub 可查看分段占用、一键极速安全清理,或深度清理孤儿卷与构建缓存(需二次确认)。</p></div></section>
@@ -192,9 +192,9 @@
           <p class="text-surface-500">认证:Authorization: Bearer &lt;token&gt;(HTTP 端点也可 ?token=)· 会话数:{{ mcp.sessionCount }} · 协议:{{ mcp.protocolVersion || '2026-07-28' }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
           <p class="text-surface-500">高危工具(重建容器、改 Compose、回滚等)在 MCP 通道必须由调用方显式传 <code class="font-mono text-surface-400">confirm: true</code> 才会执行——这条通道没有确认弹窗,用显式开关代替。</p>
           <div class="flex flex-wrap items-center gap-2">
-            <button class="btn-secondary !py-1.5 text-xs" @click="copyMcpConfig">复制客户端配置</button>
-            <button class="btn-secondary !py-1.5 text-xs" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" />重置 Token</button>
-            <button class="btn-secondary !py-1.5 text-xs" @click="showMcpToken">查看 Token</button>
+            <button class="btn-secondary py-1.5! text-xs" @click="copyMcpConfig">复制客户端配置</button>
+            <button class="btn-secondary py-1.5! text-xs" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" />重置 Token</button>
+            <button class="btn-secondary py-1.5! text-xs" @click="showMcpToken">查看 Token</button>
           </div>
         </div>
       </template>

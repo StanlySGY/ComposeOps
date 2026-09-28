@@ -8,7 +8,7 @@
           <div class="flex items-center gap-2"><component :is="step.icon" class="h-4 w-4 shrink-0 text-surface-300" /><h3 class="text-sm font-semibold text-surface-100">{{ step.title }}</h3></div>
           <p class="mt-1 text-xs leading-5 text-surface-400">{{ step.desc }}</p>
         </div>
-        <router-link :to="step.to" class="btn-secondary shrink-0 !px-2.5 !py-1 text-xs" @click="dismiss">前往</router-link>
+        <router-link :to="step.to" class="btn-secondary shrink-0 px-2.5! py-1! text-xs" @click="dismiss">前往</router-link>
       </li>
     </ol>
     <template #footer>

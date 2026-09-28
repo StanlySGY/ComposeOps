@@ -9,7 +9,7 @@
     <template #header-actions>
       <KeyRound class="h-4 w-4 shrink-0 text-accent" />
       <span class="hidden font-mono text-[11px] text-surface-500 sm:inline">{{ data.path || '.env' }}</span>
-      <select v-if="envFiles.length > 1 || activeFile !== '.env'" class="input !min-h-8 !w-auto !py-1 text-xs" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
+      <select v-if="envFiles.length > 1 || activeFile !== '.env'" class="input min-h-8! w-auto! py-1! text-xs" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
       <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
     </template>
 
@@ -43,16 +43,16 @@
                   spellcheck="false"
                 />
                 <div v-if="entry.isSecret" class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-                  <button class="icon-btn !h-7 !w-7" :title="revealed.has(entry._uid) ? '隐藏' : '显示'" @click="toggleReveal(entry._uid)"><Eye v-if="!revealed.has(entry._uid)" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
-                  <button class="icon-btn !h-7 !w-7" title="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
+                  <button class="icon-btn h-7! w-7!" :title="revealed.has(entry._uid) ? '隐藏' : '显示'" @click="toggleReveal(entry._uid)"><Eye v-if="!revealed.has(entry._uid)" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
+                  <button class="icon-btn h-7! w-7!" title="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               <input v-model="entry.comment" class="input text-xs" placeholder="说明注释(可选)" />
             </div>
             <div class="flex shrink-0 items-center gap-1 self-end sm:self-center">
-              <button class="icon-btn !h-7 !w-7" title="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn !h-7 !w-7" title="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn !h-7 !w-7 hover:text-rose-400" title="删除" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn h-7! w-7!" title="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn h-7! w-7!" title="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn h-7! w-7! hover:text-rose-400" title="删除" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
             </div>
           </div>
           <div v-if="!filteredEntries.length" class="py-8 text-center text-sm text-surface-500">暂无变量{{ keyword ? '与过滤条件匹配' : ',点击下方添加' }}</div>
@@ -62,7 +62,7 @@
         <div v-else class="flex min-h-[40vh] flex-col">
           <textarea
             v-model="rawText"
-            class="flex-1 resize-none rounded-lg border border-surface-800 bg-[#0b0d10] p-3 font-mono text-xs leading-5 text-emerald-200/90 outline-none focus:border-surface-600"
+            class="flex-1 resize-none rounded-lg border border-surface-800 bg-surface-1000 p-3 font-mono text-xs leading-5 text-emerald-200/90 outline-hidden focus:border-surface-600"
             spellcheck="false"
             placeholder="# KEY=value&#10;SECRET_TOKEN=••••••••"
           ></textarea>

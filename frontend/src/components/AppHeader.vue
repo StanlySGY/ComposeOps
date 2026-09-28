@@ -22,12 +22,12 @@
         <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span class="hidden sm:inline">服务离线</span>
       </span>
       <div class="relative">
-        <button class="btn-secondary !min-h-8 !px-2.5 !py-1 text-xs" title="快速切换项目" aria-label="快速切换项目" @click="projectSwitcherOpen = !projectSwitcherOpen">
+        <button class="btn-secondary min-h-8! px-2.5! py-1! text-xs" title="快速切换项目" aria-label="快速切换项目" @click="projectSwitcherOpen = !projectSwitcherOpen">
           <Layers class="w-3.5 h-3.5" /><span class="hidden md:inline">项目</span>
           <ChevronDown class="w-3 h-3" />
         </button>
         <div v-if="projectSwitcherOpen" class="command-backdrop" @click.self="projectSwitcherOpen = false"></div>
-        <div v-if="projectSwitcherOpen" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-[60]">
+        <div v-if="projectSwitcherOpen" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60">
           <div class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
           <div class="max-h-80 overflow-y-auto p-1.5">
             <button v-for="p in quickProjects" :key="p.id" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-800/60" @click="goProject(p)">

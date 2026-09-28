@@ -4,12 +4,12 @@
       <Bell class="h-4 w-4" />
       <span v-if="unreadCount" class="event-count">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
     </button>
-    <div v-if="open" class="fixed inset-0 z-[50]" @click="open = false"></div>
-    <section v-if="open" class="event-panel z-[50]">
+    <div v-if="open" class="fixed inset-0 z-50" @click="open = false"></div>
+    <section v-if="open" class="event-panel z-50">
       <header class="flex items-center justify-between border-b border-surface-800 px-4 py-3">
         <div><h2 class="text-sm font-semibold text-surface-100">事件中心</h2><p class="mt-0.5 text-muted">需要关注的运行状态与系统操作</p></div>
-        <label class="toggle-label !gap-1.5 text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="!w-8 !h-[18px]" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
-        <label class="toggle-label !gap-1.5 text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="!w-8 !h-[18px]" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
+        <label class="toggle-label gap-1.5! text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="w-8! h-[18px]!" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
+        <label class="toggle-label gap-1.5! text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="w-8! h-[18px]!" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
       </header>
       <div class="max-h-[min(68vh,32rem)] overflow-y-auto p-2">
         <div v-for="event in events" :key="event.key" class="event-item" :class="{ 'event-read': event.read }">
@@ -21,10 +21,10 @@
             </span>
           </router-link>
           <div class="flex shrink-0 items-center gap-1">
-            <button v-if="event.persisted" class="icon-btn !h-6 !w-6" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-accent': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
-            <button v-if="event.logs" class="icon-btn !h-6 !w-6" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
-            <button v-if="event.persisted && !event.read" class="icon-btn !h-6 !w-6" title="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
-            <button v-if="event.persisted" class="icon-btn !h-6 !w-6" title="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
+            <button v-if="event.persisted" class="icon-btn h-6! w-6!" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-accent': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
+            <button v-if="event.logs" class="icon-btn h-6! w-6!" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
+            <button v-if="event.persisted && !event.read" class="icon-btn h-6! w-6!" title="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
+            <button v-if="event.persisted" class="icon-btn h-6! w-6!" title="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
           </div>
           <div v-if="event.logs && expandedLogEventId === event.id" class="w-full basis-full"><pre class="event-logs">{{ event.logs }}</pre></div>
           <div v-if="expandedDiagnosisId === event.id" class="w-full basis-full rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5">

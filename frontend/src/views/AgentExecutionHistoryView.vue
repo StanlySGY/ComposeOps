@@ -34,7 +34,7 @@
               <span v-if="exec.executedAt">执行: {{ formatTime(exec.executedAt) }}</span>
             </div>
           </div>
-          <button class="btn-secondary !px-3 !py-1.5 !text-xs" @click="toggleDetail(exec.planId)">
+          <button class="btn-secondary px-3! py-1.5! text-xs!" @click="toggleDetail(exec.planId)">
             <ChevronDown :class="{ 'rotate-180': expandedPlan === exec.planId }" class="h-3.5 w-3.5 transition-transform" />
             {{ expandedPlan === exec.planId ? '收起' : '详情' }}
           </button>
@@ -45,7 +45,7 @@
           <div v-if="exec.steps && exec.steps.length">
             <h4 class="mb-2 text-sm font-medium text-zinc-300">工作流步骤</h4>
             <div class="space-y-2">
-              <div v-for="(step, idx) in exec.steps" :key="idx" class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+              <div v-for="(step, idx) in exec.steps" :key="idx" class="rounded-sm border border-zinc-800 bg-zinc-900/40 p-3">
                 <div class="mb-2 flex items-start justify-between">
                   <div class="flex items-center gap-2">
                     <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-medium text-zinc-400">{{ idx + 1 }}</span>
@@ -57,7 +57,7 @@
                 <div v-if="step.reason" class="mb-2 text-xs text-zinc-400">{{ step.reason }}</div>
                 <div v-if="step.params && Object.keys(step.params).length" class="text-xs">
                   <span class="text-zinc-500">参数:</span>
-                  <code class="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-300">{{ formatParams(step.params) }}</code>
+                  <code class="ml-2 rounded-sm bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-300">{{ formatParams(step.params) }}</code>
                 </div>
               </div>
             </div>
@@ -67,7 +67,7 @@
           <div v-if="exec.results && exec.results.length">
             <h4 class="mb-2 text-sm font-medium text-zinc-300">执行结果</h4>
             <div class="space-y-2">
-              <div v-for="(result, idx) in exec.results" :key="idx" class="rounded border p-3" :class="resultBorderClass(result.status)">
+              <div v-for="(result, idx) in exec.results" :key="idx" class="rounded-sm border p-3" :class="resultBorderClass(result.status)">
                 <div class="mb-2 flex items-start justify-between">
                   <div class="flex items-center gap-2">
                     <component :is="resultIcon(result.status)" :class="resultIconClass(result.status)" class="h-4 w-4 shrink-0" />
@@ -76,7 +76,7 @@
                   <span v-if="result.durationMs" class="text-xs text-zinc-500">{{ result.durationMs }}ms</span>
                 </div>
                 <div v-if="result.error" class="mb-2 text-sm text-rose-300">{{ result.error }}</div>
-                <div v-if="result.result" class="max-h-32 overflow-auto rounded bg-zinc-900 p-2 text-xs">
+                <div v-if="result.result" class="max-h-32 overflow-auto rounded-sm bg-zinc-900 p-2 text-xs">
                   <pre class="whitespace-pre-wrap text-zinc-400">{{ stringifyResult(result.result) }}</pre>
                 </div>
               </div>
@@ -295,6 +295,7 @@ onActivated(() => { if (historyActivatedOnce) void load(); historyActivatedOnce 
 </script>
 
 <style scoped>
+@reference '../style.css';
 .status-badge {
   @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium;
 }

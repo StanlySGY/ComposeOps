@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="show" class="modal-backdrop z-[60]" @click.self="close">
+      <div v-if="show" class="modal-backdrop z-60" @click.self="close">
         <Transition name="modal-pop" appear>
           <div class="command-palette">
             <div class="command-input-wrapper">
@@ -139,6 +139,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+@reference '../../style.css';
 .command-palette {
   @apply relative mx-4 w-full max-w-xl overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl;
 }

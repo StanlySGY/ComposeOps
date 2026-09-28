@@ -3,16 +3,16 @@
     <div class="agent-inspector-title"><span>日志上下文</span><em v-if="lines.length">{{ lines.length }} 条已挂载</em></div>
     <p class="text-[11px] leading-5 text-zinc-600">勾选容器日志挂载给 Agent 作为排障证据,与问题一起发送。</p>
     <div class="mt-2 flex flex-col gap-1.5">
-      <select v-model="projectId" class="input !min-h-8 !py-1 text-xs" @change="onProjectChange"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
+      <select v-model="projectId" class="input min-h-8! py-1! text-xs" @change="onProjectChange"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
       <div class="flex gap-1.5">
-        <select v-model="containerId" class="input !min-h-8 !py-1 text-xs" :disabled="!projectId" @change="onContainerChange"><option value="">选择容器</option><option v-for="container in containers" :key="container.id" :value="container.id">{{ container.name }}</option></select>
-        <button class="btn-secondary !min-h-8 !px-2 !py-1 text-xs" :disabled="!projectId || !containerId || loading" @click="loadLogs"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />加载</button>
+        <select v-model="containerId" class="input min-h-8! py-1! text-xs" :disabled="!projectId" @change="onContainerChange"><option value="">选择容器</option><option v-for="container in containers" :key="container.id" :value="container.id">{{ container.name }}</option></select>
+        <button class="btn-secondary min-h-8! px-2! py-1! text-xs" :disabled="!projectId || !containerId || loading" @click="loadLogs"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />加载</button>
       </div>
       <div v-if="logLines.length" class="flex items-center justify-between text-[11px] text-zinc-500">
         <span>{{ filteredLines.length }} 行</span>
         <button class="text-cyan-400 hover:text-cyan-300" :disabled="!errorLines.length" @click="toggleAllErrors">{{ allErrorsSelected ? '取消全选异常' : '全选异常行' }}</button>
       </div>
-      <label v-if="logLines.length" class="search-field !min-h-8"><Search class="h-3.5 w-3.5" /><input v-model="query" class="!py-1 text-xs" placeholder="检索日志..." /></label>
+      <label v-if="logLines.length" class="search-field min-h-8!"><Search class="h-3.5 w-3.5" /><input v-model="query" class="py-1! text-xs" placeholder="检索日志..." /></label>
     </div>
     <div class="mt-1.5 max-h-64 overflow-y-auto">
       <p v-if="!projectId" class="px-1 py-4 text-center text-[11px] text-zinc-600">选择容器后加载最近日志</p>

@@ -1,178 +1,880 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
-html, body, #app { height: 100%; }
-:root {
-  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
-  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
-  /* ---- 颜色变量集中定义(替换原散落的裸 hex;尽量对齐 tailwind surface/cyan 色阶) ---- */
-  /* 画布与深面板(比 surface-950 更深的一档,渐变端点/终端底) */
-  --canvas-deep: #0b0e13;
-  --canvas-mid: #151920;
-  --canvas-mid-2: #181c23;
-  /* surface-975/1000 与 tailwind.config.js 中新增的 surface.975 / surface.1000 保持一致 */
-  --panel-deep: #10141a;
-  --panel-deepest: #0b0d10;
-  --panel-kbd: #0f1319;
-  --fill-shape: #1a2029;
-  --fill-shape-2: #262c37;
-  --icon-tile: #191e26;
-  --track-line: #1f242e;
-  --track-line-2: #272c35;
-  /* 描边/滚动条(≈ surface-700/800 附近微调) */
-  --line-strong: #303641;
-  --line-hover: #3f4653;
-  --scroll-thumb: #2c333f;
-  --scroll-thumb-hover: #3b4452;
-  --scroll-thumb-legacy: #3a414f;
-  --scroll-thumb-legacy-hover: #4b5463;
-  --toggle-off: #3a4150;
-  --toggle-on: #30d158;
-  /* cyan 语义色 = tailwind cyan-300/400/600/800 */
-  --cyan-strong: #67e8f9;
-  --cyan-main: #22d3ee;
-  --cyan-deep: #0891b2;
-  --cyan-border: #155e75;
-  /* 中性文字 = tailwind zinc 色阶 */
-  --text-bright: #f4f4f5;
-  --text-strong: #e4e4e7;
-  --text-body: #d4d4d8;
-  --text-soft: #a1a1aa;
-  --text-faint: #8b919c;
-  --text-dim: #71717a;
-  --text-faintest: #52525b;
-  --text-empty: #4b5563;
-  /* 状态色(尽量对齐 emerald/rose/amber/cyan 色阶) */
-  --ok: #34d399;
-  --ok-soft: #6ee7b7;
-  --danger: #fb7185;
-  --danger-soft: #fda4af;
-  --danger-hot: #f87171;
-  --danger-deep: #dc2626;
-  --danger-dim: #7f1d1d;
-  --warn: #fbbf24;
-  --warn-soft: #fcd34d;
-  --cyan-faint: #a5f3fc;
-  --info-bg: #082f49;
-  --mark-text: #fef08a;
-  /* 品牌/主色 */
-  --brand-from: #2563eb;
-  --brand-to: #1d4ed8;
-  --brand-fallback: #3b82f6;
-  /* 骨架屏微光 */
-  --skeleton-hi: #2f3541;
+@theme {
+  --color-surface-50: #f6f7f9;
+  --color-surface-100: #eceef2;
+  --color-surface-200: #d7dbe3;
+  --color-surface-300: #b6bdc9;
+  --color-surface-400: #8f99a8;
+  --color-surface-500: #6f7a8a;
+  --color-surface-600: #576071;
+  --color-surface-700: #454c5b;
+  --color-surface-800: #363c48;
+  --color-surface-900: #262b34;
+  --color-surface-950: #1a1e25;
+  --color-surface-975: #10141a;
+  --color-surface-1000: #0b0d10;
+
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+
+  --font-sans: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --shadow-glow-emerald: 0 0 8px rgba(52, 211, 153, 0.4);
+  --shadow-glow-rose: 0 0 8px rgba(251, 113, 133, 0.4);
+  --shadow-glow-accent: 0 0 8px rgba(37, 99, 235, 0.4);
 }
 
-/* iOS-style interaction baseline: quiet surfaces, predictable touch targets, and native-feeling motion. */
-html { color-scheme: dark; }
-*, *::before, *::after { -webkit-tap-highlight-color: transparent; }
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
 
-body {
-  margin: 0;
-  letter-spacing: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  background: var(--canvas-mid);
-}
-
-button, a, input, textarea, select { touch-action: manipulation; }
-button, a { -webkit-user-select: none; user-select: none; }
-:focus-visible { outline: 2px solid rgba(96, 165, 250, 0.9); outline-offset: 2px; }
-
-.app-header {
-  position: relative;
-  z-index: 45;
-  background: rgba(26, 30, 37, 0.94);
-  border-bottom: 1px solid rgba(69, 76, 91, 0.58);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.015);
-}
-.app-header {
-  box-sizing: border-box;
-  min-height: 4rem;
-  height: calc(4rem + env(safe-area-inset-top));
-  padding-top: env(safe-area-inset-top);
-}
-.app-sidebar {
-  background: linear-gradient(180deg, rgba(27, 32, 40, 0.98), rgba(22, 26, 33, 0.99));
-  border-top: 1px solid rgba(69, 76, 91, 0.55);
-}
-.app-main {
-  background: linear-gradient(180deg, var(--canvas-mid-2) 0%, var(--canvas-mid) 100%);
-}
-.brand-mark {
-  @apply grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-surface-700/60 bg-gradient-to-b from-surface-800 to-surface-950 text-accent;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-.status-pill { @apply inline-flex h-8 items-center gap-2 rounded-full border border-surface-700/50 bg-surface-900/60 px-2.5 text-xs text-surface-300; }
-.agent-task-notice { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(37, 99, 235, 0.45); border-radius: 8px; color: #bfdbfe; background: rgba(37, 99, 235, 0.12); font-size: 11px; line-height: 1.5; }
-.agent-task-notice p { margin: 0; word-break: break-all; }
-.agent-task-notice p + p { margin-top: 4px; }
-.command-trigger { @apply inline-flex h-9 items-center gap-2 rounded-lg border border-surface-800 bg-surface-950/60 px-2.5 text-xs text-surface-400 transition-colors hover:border-surface-700 hover:bg-surface-800 hover:text-surface-100; }
-.command-backdrop { @apply fixed inset-0 z-[60] grid place-items-start bg-black/60 px-4 pt-[12vh] backdrop-blur-sm; }
-.command-dialog { @apply w-full max-w-xl overflow-hidden rounded-xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md; }
-.command-search { @apply flex h-14 items-center gap-3 border-b border-surface-800 px-4; }
-.command-search input { @apply min-w-0 flex-1 bg-transparent text-base text-surface-100 outline-none placeholder:text-surface-500; }
-.command-results { @apply max-h-[min(60vh,28rem)] overflow-y-auto p-2; }
-.command-section-label { @apply px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600; }
-.command-item { @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-surface-800; }
-.command-item.active { @apply bg-surface-800; }
-.command-icon { @apply grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-950 text-surface-400; }
-.command-item.active .command-icon { @apply bg-accent/15 text-accent; }
-.event-count { @apply absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-surface-900; }
-.event-panel { @apply fixed right-3 top-[4.5rem] z-[50] w-[calc(100vw-1.5rem)] max-w-md overflow-hidden rounded-xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md sm:right-5; }
-.event-item { @apply flex flex-wrap items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-surface-800; }
-.event-item strong { @apply block truncate text-sm font-medium text-surface-200; }
-.event-item small { @apply mt-0.5 block truncate text-muted; }
-.event-icon { @apply grid h-9 w-9 shrink-0 place-items-center rounded-lg; }
-.event-icon.warning { @apply bg-amber-950/50 text-amber-300; }
-.event-icon.danger { @apply bg-rose-950/50 text-rose-300; }
-.event-icon.info { @apply bg-blue-950/50 text-blue-300; }
-.event-item.event-read { @apply opacity-60; }
-.event-item.event-read strong { @apply text-surface-400; }
-.event-priority { @apply rounded bg-rose-500/15 px-1 py-px text-[9px] font-semibold text-rose-400; }
-.event-logs { @apply mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-surface-800 bg-surface-950/70 p-2 font-mono text-[10px] leading-relaxed text-surface-400; }
-.runtime-error-bar { @apply fixed bottom-4 left-1/2 z-[70] flex w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-xl border border-rose-800/60 bg-rose-950/90 px-4 py-2.5 text-xs text-rose-200 shadow-2xl backdrop-blur; }
-/* 视图密度:紧凑模式收紧卡片/表格间距 */
-body[data-density='compact'] .card { @apply !p-3; }
-body[data-density='compact'] .page-shell { @apply !py-3; }
-body[data-density='compact'] .event-item { @apply !py-2; }
-body[data-density='compact'] .data-table th,
-body[data-density='compact'] .data-table td { @apply !py-1.5 !px-2; }
-.drawer-backdrop { @apply fixed inset-0 z-[55] bg-black/55 backdrop-blur-[2px]; }
-.activity-drawer { @apply absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md; }
-.activity-list { @apply relative space-y-1 before:absolute before:bottom-4 before:left-[17px] before:top-4 before:w-px before:bg-surface-800; }
-.activity-item { @apply relative flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-surface-800/70; }
-.activity-item strong { @apply truncate text-sm font-medium text-surface-200; }
-.activity-item time { @apply shrink-0 text-[11px] text-surface-600; }
-.activity-item small { @apply mt-1 block truncate text-muted; }
-.timeline-dot { @apply z-10 h-3 w-3 shrink-0 rounded-full border-2 border-surface-900 ring-2 ring-surface-700; }
-.timeline-dot.success { @apply bg-emerald-400 ring-emerald-900/70; }
-.timeline-dot.failed { @apply bg-rose-400 ring-rose-900/70; }
-.version-card { @apply rounded-xl border border-surface-800 bg-surface-950/35 p-4; }
-.version-card strong { @apply text-sm font-medium text-surface-200; }
-.version-icon { @apply grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-950/50 text-blue-300; }
-.nav-link { @apply relative rounded-none md:rounded-lg transition-all duration-150 hover:bg-surface-800/70 hover:text-surface-100; }
-.nav-link-active { @apply bg-surface-800 text-white shadow-sm; }
-.nav-link-active .nav-indicator { opacity: 1; }
-.loading-mark { @apply h-8 w-8 rounded-xl border-2 border-surface-700 border-t-accent animate-spin; }
-
-@media (min-width: 768px) {
-  .app-sidebar { border-top: 0; border-right: 1px solid rgba(69, 76, 91, 0.55); }
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
 }
 
-/* 滚动条美化 */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--scroll-thumb-legacy); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-legacy-hover); }
-::-webkit-scrollbar-corner { background: transparent; }
-/* 兼容 Firefox 深色细轨滚动条 */
-* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb-legacy) transparent; }
+@utility btn {
+  @apply inline-flex min-h-9 items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 active:scale-[0.98] disabled:shadow-none;
+}
 
-/* ---- z-index 统一阶梯 ----
+@utility btn-primary {
+  @apply btn bg-accent text-white hover:bg-accent-hover shadow-[0_6px_18px_rgba(37,99,235,0.18)];
+
+  /* 禁用态：不可编辑/不可控制的项目按钮 */
+  &:disabled {
+    @apply opacity-40 cursor-not-allowed hover:bg-inherit;
+  }
+}
+
+@utility btn-secondary {
+  @apply btn border border-surface-700 bg-surface-800 text-surface-100 hover:border-surface-600 hover:bg-surface-700;
+  &:disabled {
+    @apply opacity-40 cursor-not-allowed hover:bg-inherit;
+  }
+}
+
+@utility btn-danger {
+  @apply btn bg-rose-600 text-white hover:bg-rose-500 shadow-[0_6px_18px_rgba(220,38,38,0.12)];
+  &:disabled {
+    @apply opacity-40 cursor-not-allowed hover:bg-inherit;
+  }
+}
+
+@utility btn-ghost {
+  @apply btn text-surface-300 hover:bg-surface-800 hover:text-white;
+  &:disabled {
+    @apply opacity-40 cursor-not-allowed hover:bg-inherit;
+  }
+}
+
+@utility icon-btn {
+  @apply inline-grid place-items-center w-9 h-9 shrink-0 rounded-lg text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition-all duration-150 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+@utility card {
+  @apply bg-surface-900/80 border border-surface-800 rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.08)];
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+  &:hover {
+    border-color: rgba(52, 65, 85, 0.9);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 0 0 1px rgba(34, 211, 238, 0.04);
+  }
+}
+
+@utility input {
+  @apply min-h-9 bg-surface-950/70 border border-surface-700 rounded-lg px-3 py-2 text-sm text-surface-100 transition-colors focus:outline-hidden focus:border-accent focus:ring-2 focus:ring-accent/20;
+  &::placeholder {
+    @apply text-surface-500;
+  }
+  .page-actions & {
+    @apply min-w-0 flex-1 sm:flex-none;
+  }
+}
+
+@utility page-shell {
+  @apply flex min-h-full w-full flex-col gap-5;
+}
+
+@utility page-shell-workspace {
+  @apply h-full min-h-[560px] gap-4;
+}
+
+@utility text-muted {
+  /* ---- 语义化设计 Token（设计基座） ---- */
+  /* 次要说明文字：页面/区块副标题、元信息、辅助说明 */
+  @apply text-xs text-surface-500 font-normal leading-relaxed;
+}
+
+@utility section-eyebrow {
+  /* 区块微眉标：分区分组的小写大写标签，不可选中 */
+  @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400 select-none;
+}
+
+@utility panel-card {
+  /* 通用面板卡片：卡片式内容容器 */
+  @apply bg-surface-900/60 border border-surface-800/80 rounded-xl p-4 transition-colors;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+@utility page-header {
+  /* 页首：页面标题（H1）与副标题，斜对角布局由调用方控制 */
+  @apply flex w-full flex-col justify-between gap-4 border-b border-surface-800/70 pb-5 lg:flex-row lg:items-end;
+  & h1 {
+    @apply text-2xl font-semibold tracking-tight text-surface-50;
+  }
+  & > div:first-child > p {
+    @apply text-xs text-surface-400 mt-1;
+  }
+  & .page-subtitle {
+    @apply text-xs text-surface-400 mt-1;
+  }
+}
+
+@utility page-subtitle {
+  .page-header & {
+    @apply text-xs text-surface-400 mt-1;
+  }
+  @apply text-sm text-surface-400 mt-1.5 leading-5;
+}
+
+@utility page-actions {
+  @apply flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end;
+  & .input {
+    @apply min-w-0 flex-1 sm:flex-none;
+  }
+}
+
+@utility page-title {
+  @apply text-2xl font-semibold tracking-tight text-surface-50;
+}
+
+@utility section-title {
+  @apply text-sm font-semibold tracking-wide text-surface-100;
+}
+
+@utility section-panel {
+  @apply card p-4 sm:p-5;
+}
+
+@utility metric-grid {
+  @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5;
+}
+
+@utility metric-tile {
+  @apply card flex min-h-24 items-center gap-3 p-4 text-left transition-all duration-150 active:scale-[0.99] hover:-translate-y-0.5 hover:border-surface-700 hover:bg-surface-900;
+  &.active {
+    @apply border-accent/70 bg-accent/5 ring-1 ring-accent/20;
+  }
+  & strong {
+    @apply block text-xl font-semibold tracking-tight text-surface-50;
+  }
+  & small {
+    @apply block text-xs text-surface-400;
+  }
+}
+
+@utility active {
+  &.metric-tile {
+    @apply border-accent/70 bg-accent/5 ring-1 ring-accent/20;
+  }
+  .tabs &button {
+    @apply text-surface-100 border-accent;
+  }
+}
+
+@utility metric-icon {
+  @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-950/70;
+}
+
+@utility metric-meta {
+  @apply ml-auto hidden text-right text-[11px] leading-4 text-surface-600 xl:block;
+}
+
+@utility toolbar-panel {
+  @apply card flex flex-col gap-2 p-3 sm:flex-row sm:items-center;
+}
+
+@utility bulk-bar {
+  @apply flex flex-col gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 sm:flex-row sm:items-center;
+}
+
+@utility search-field {
+  @apply flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-surface-700 bg-surface-950/70 px-3 text-surface-500 transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20;
+  & input {
+    @apply min-w-0 flex-1 bg-transparent py-2 text-sm text-surface-100 outline-hidden placeholder:text-surface-500;
+  }
+}
+
+@utility project-attention {
+  @apply border-amber-900/60;
+}
+
+@utility action-label {
+  @apply inline-flex rounded-md bg-surface-800/80 px-2 py-1 text-xs font-medium text-surface-300;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+@utility count-badge {
+  @apply text-xs px-1.5 py-0.5 bg-surface-800 text-surface-400 rounded-sm font-mono tabular-nums;
+}
+
+@utility status-dot {
+  @apply w-2 h-2 rounded-full shrink-0;
+}
+
+@utility toggle-label {
+  @apply inline-flex items-center gap-1.5 text-sm text-surface-400;
+  & input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 38px;
+    height: 23px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--toggle-off);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.22s ease;
+  }
+  & input::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 19px;
+    height: 19px;
+    border-radius: 999px;
+    background: #fff /* 纯白色块,非主题色 */;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    transition: transform 0.22s ease;
+  }
+  & input:checked {
+    background: var(--toggle-on);
+  }
+  & input:checked::after {
+    transform: translateX(15px);
+  }
+  & input:active::after {
+    width: 21px;
+  }
+}
+
+@utility agent-toggle {
+  & input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 38px;
+    height: 23px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--toggle-off);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.22s ease;
+  }
+  & input::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 19px;
+    height: 19px;
+    border-radius: 999px;
+    background: #fff /* 纯白色块,非主题色 */;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    transition: transform 0.22s ease;
+  }
+  & input:checked {
+    background: var(--toggle-on);
+  }
+  & input:checked::after {
+    transform: translateX(15px);
+  }
+  & input:active::after {
+    width: 21px;
+  }
+}
+
+@utility alert-error {
+  @apply text-sm text-rose-300 border border-rose-900/60 bg-rose-950/30 rounded-sm px-3 py-2;
+}
+
+@utility alert-warning {
+  @apply text-sm text-amber-300 border border-amber-900/60 bg-amber-950/20 rounded-sm px-3 py-2;
+}
+
+@utility alert-success {
+  @apply text-sm text-emerald-300 border border-emerald-900/60 bg-emerald-950/20 rounded-sm px-3 py-2;
+}
+
+@utility alert-info {
+  @apply text-sm text-sky-300 border border-sky-900/60 bg-sky-950/20 rounded-sm px-3 py-2;
+}
+
+@utility empty-state {
+  @apply min-h-48 border border-dashed border-surface-700 rounded-xl grid place-content-center justify-items-center gap-3 text-sm text-surface-500 bg-surface-900/25;
+}
+
+@utility table-wrap {
+  @apply overflow-x-auto border border-surface-800/80 rounded-xl bg-surface-900/65 shadow-[0_12px_40px_rgba(0,0,0,0.06)];
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+@utility data-table {
+  @apply w-full text-sm;
+  & th {
+    @apply h-11 text-left text-[11px] uppercase tracking-wider font-semibold text-surface-500 px-4 py-2 bg-surface-950/50;
+  }
+  & td {
+    @apply h-12 px-4 py-2.5 border-t border-surface-800/80 text-surface-300 font-mono tabular-nums text-[13px];
+  }
+  & tbody tr {
+    @apply transition-colors hover:bg-surface-800/25;
+  }
+}
+
+@utility modal-backdrop {
+  @apply fixed inset-0 z-55 bg-black/70 grid place-items-center p-4 backdrop-blur-[2px];
+}
+
+@utility modal {
+  @apply w-full max-w-[calc(100vw-1.5rem)] sm:max-w-2xl bg-surface-900/95 border border-surface-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-md;
+  box-shadow:
+    0 25px 60px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+@utility modal-header {
+  @apply h-11 flex items-center justify-between gap-3 px-3 border-b border-surface-800 text-sm font-medium;
+}
+
+@utility drawer {
+  @apply fixed z-51 bottom-0 right-0 w-full md:w-[720px] max-w-[calc(100vw-1rem)] h-[min(70vh,36rem)] bg-surface-900/95 border border-surface-700 flex flex-col shadow-2xl backdrop-blur-md;
+  box-shadow:
+    -18px 0 50px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+@utility batch-task {
+  @apply flex min-w-0 items-center gap-2 rounded-lg bg-surface-950/55 px-3 py-2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+@utility terminal-output {
+  @apply overflow-auto p-3 bg-surface-1000 text-xs font-mono whitespace-pre-wrap wrap-break-word;
+}
+
+@utility log-line {
+  @apply whitespace-pre-wrap wrap-break-word min-h-4;
+}
+
+@utility diff-pane {
+  @apply bg-surface-950 p-4 text-xs font-mono whitespace-pre-wrap overflow-auto min-h-72;
+}
+
+@utility diff-line {
+  @apply block whitespace-pre-wrap break-all leading-relaxed text-surface-300;
+}
+
+@utility diff-same {
+  @apply text-surface-300;
+}
+
+@utility diff-add {
+  @apply bg-emerald-950/40 text-emerald-300;
+}
+
+@utility diff-remove {
+  @apply bg-rose-950/40 text-rose-300 line-through;
+}
+
+@utility message {
+  @apply max-w-[88%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap wrap-break-word;
+}
+
+@utility message-user {
+  @apply bg-accent text-white;
+}
+
+@utility message-assistant {
+  @apply bg-surface-800 text-surface-100;
+}
+
+@utility agent-rich-markdown {
+  @apply leading-7;
+  & p {
+    @apply mb-3 last:mb-0;
+  }
+  & h1 {
+    @apply mb-2 mt-4 font-semibold leading-snug text-surface-50 first:mt-0;
+  }
+  & h2 {
+    @apply mb-2 mt-4 font-semibold leading-snug text-surface-50 first:mt-0;
+  }
+  & h3 {
+    @apply mb-2 mt-4 font-semibold leading-snug text-surface-50 first:mt-0;
+  }
+  & h4 {
+    @apply mb-2 mt-4 font-semibold leading-snug text-surface-50 first:mt-0;
+  }
+  & h1 {
+    @apply text-lg;
+  }
+  & h2 {
+    @apply text-base;
+  }
+  & h3 {
+    @apply text-sm;
+  }
+  & h4 {
+    @apply text-sm;
+  }
+  & ul {
+    @apply mb-3 mt-2 list-outside pl-6;
+  }
+  & ol {
+    @apply mb-3 mt-2 list-outside pl-6;
+  }
+  & ul {
+    @apply list-disc;
+  }
+  & ol {
+    @apply list-decimal;
+  }
+  & li {
+    @apply my-1;
+  }
+  & blockquote {
+    @apply my-3 border-l-2 border-cyan-700 bg-surface-950/40 px-3 py-2 text-surface-300;
+  }
+  & code {
+    @apply rounded-sm bg-surface-950 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200;
+  }
+  & pre {
+    @apply my-3 max-w-full overflow-x-auto rounded-lg border border-surface-700 bg-surface-1000 p-3 text-xs leading-5;
+  }
+  & pre code {
+    @apply bg-transparent p-0 text-emerald-200;
+  }
+  & table {
+    @apply my-3 w-full min-w-152 border-collapse text-left text-xs;
+  }
+  & th {
+    @apply border border-surface-700 bg-surface-950/80 px-2.5 py-2 font-semibold text-surface-200;
+  }
+  & td {
+    @apply border border-surface-800 px-2.5 py-2 align-top text-surface-300;
+  }
+  & tr:nth-child(even) td {
+    @apply bg-surface-950/30;
+  }
+  & a {
+    @apply text-cyan-300 underline decoration-cyan-700 underline-offset-2 hover:text-cyan-200;
+  }
+  & hr {
+    @apply my-4 border-surface-700;
+  }
+}
+
+@utility tabs {
+  @apply flex shrink-0 gap-1 border-b border-surface-800 overflow-x-auto;
+  & button {
+    @apply inline-flex items-center gap-1.5 px-3 py-2 text-sm text-surface-400 border-b-2 border-transparent whitespace-nowrap;
+  }
+  & button.active {
+    @apply text-surface-100 border-accent;
+  }
+}
+
+@utility settings-section {
+  @apply card space-y-5 p-4 sm:p-6;
+}
+
+@utility form-grid {
+  @apply grid md:grid-cols-2 gap-4;
+  & label {
+    @apply text-xs font-medium text-surface-400 flex flex-col gap-2;
+  }
+}
+
+@utility progress {
+  @apply h-2 rounded-sm bg-surface-800 overflow-hidden;
+  & span {
+    @apply block h-full bg-accent;
+  }
+}
+
+@utility progress-muted {
+  & span {
+    @apply bg-surface-600;
+  }
+  & span {
+    transition: width 0.4s ease;
+  }
+}
+
+@utility status-badge {
+  /* 状态徽标基类:与 StatusBadge 组件的 sm 档外观一致。
+     CMDBView/RollbackView 等页面以 class="status-badge" 复用,此前缺少基类
+     导致渲染成无圆角/内边距的裸文字色块;放在 components 层,md/lg 的
+     utilities 覆盖仍能生效。 */
+  @apply inline-flex items-center rounded-full border border-transparent px-2 py-0.5 text-[11px] font-medium leading-normal whitespace-nowrap;
+}
+
+@layer utilities {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+  :root {
+    --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+    --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+    /* ---- 颜色变量集中定义(替换原散落的裸 hex;尽量对齐 tailwind surface/cyan 色阶) ---- */
+    /* 画布与深面板(比 surface-950 更深的一档,渐变端点/终端底) */
+    --canvas-deep: #0b0e13;
+    --canvas-mid: #151920;
+    --canvas-mid-2: #181c23;
+    /* surface-975/1000 与 tailwind.config.js 中新增的 surface.975 / surface.1000 保持一致 */
+    --panel-deep: #10141a;
+    --panel-deepest: #0b0d10;
+    --panel-kbd: #0f1319;
+    --fill-shape: #1a2029;
+    --fill-shape-2: #262c37;
+    --icon-tile: #191e26;
+    --track-line: #1f242e;
+    --track-line-2: #272c35;
+    /* 描边/滚动条(≈ surface-700/800 附近微调) */
+    --line-strong: #303641;
+    --line-hover: #3f4653;
+    --scroll-thumb: #2c333f;
+    --scroll-thumb-hover: #3b4452;
+    --scroll-thumb-legacy: #3a414f;
+    --scroll-thumb-legacy-hover: #4b5463;
+    --toggle-off: #3a4150;
+    --toggle-on: #30d158;
+    /* cyan 语义色 = tailwind cyan-300/400/600/800 */
+    --cyan-strong: #67e8f9;
+    --cyan-main: #22d3ee;
+    --cyan-deep: #0891b2;
+    --cyan-border: #155e75;
+    /* 中性文字 = tailwind zinc 色阶 */
+    --text-bright: #f4f4f5;
+    --text-strong: #e4e4e7;
+    --text-body: #d4d4d8;
+    --text-soft: #a1a1aa;
+    --text-faint: #8b919c;
+    --text-dim: #71717a;
+    --text-faintest: #52525b;
+    --text-empty: #4b5563;
+    /* 状态色(尽量对齐 emerald/rose/amber/cyan 色阶) */
+    --ok: #34d399;
+    --ok-soft: #6ee7b7;
+    --danger: #fb7185;
+    --danger-soft: #fda4af;
+    --danger-hot: #f87171;
+    --danger-deep: #dc2626;
+    --danger-dim: #7f1d1d;
+    --warn: #fbbf24;
+    --warn-soft: #fcd34d;
+    --cyan-faint: #a5f3fc;
+    --info-bg: #082f49;
+    --mark-text: #fef08a;
+    /* 品牌/主色 */
+    --brand-from: #2563eb;
+    --brand-to: #1d4ed8;
+    --brand-fallback: #3b82f6;
+    /* 骨架屏微光 */
+    --skeleton-hi: #2f3541;
+  }
+
+  /* iOS-style interaction baseline: quiet surfaces, predictable touch targets, and native-feeling motion. */
+  html {
+    color-scheme: dark;
+  }
+  *,
+  *::before,
+  *::after {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    letter-spacing: 0;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto,
+      'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Helvetica Neue',
+      sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background: var(--canvas-mid);
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    touch-action: manipulation;
+  }
+  button,
+  a {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  :focus-visible {
+    outline: 2px solid rgba(96, 165, 250, 0.9);
+    outline-offset: 2px;
+  }
+
+  .app-header {
+    position: relative;
+    z-index: 45;
+    background: rgba(26, 30, 37, 0.94);
+    border-bottom: 1px solid rgba(69, 76, 91, 0.58);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.015);
+  }
+  .app-header {
+    box-sizing: border-box;
+    min-height: 4rem;
+    height: calc(4rem + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+  .app-sidebar {
+    background: linear-gradient(
+      180deg,
+      rgba(27, 32, 40, 0.98),
+      rgba(22, 26, 33, 0.99)
+    );
+    border-top: 1px solid rgba(69, 76, 91, 0.55);
+  }
+  .app-main {
+    background: linear-gradient(
+      180deg,
+      var(--canvas-mid-2) 0%,
+      var(--canvas-mid) 100%
+    );
+  }
+  .brand-mark {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-surface-700/60 bg-linear-to-b from-surface-800 to-surface-950 text-accent;
+    box-shadow:
+      0 6px 18px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .status-pill {
+    @apply inline-flex h-8 items-center gap-2 rounded-full border border-surface-700/50 bg-surface-900/60 px-2.5 text-xs text-surface-300;
+  }
+  .agent-task-notice {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(37, 99, 235, 0.45);
+    border-radius: 8px;
+    color: #bfdbfe;
+    background: rgba(37, 99, 235, 0.12);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .agent-task-notice p {
+    margin: 0;
+    word-break: break-all;
+  }
+  .agent-task-notice p + p {
+    margin-top: 4px;
+  }
+  .command-trigger {
+    @apply inline-flex h-9 items-center gap-2 rounded-lg border border-surface-800 bg-surface-950/60 px-2.5 text-xs text-surface-400 transition-colors hover:border-surface-700 hover:bg-surface-800 hover:text-surface-100;
+  }
+  .command-backdrop {
+    @apply fixed inset-0 z-60 grid place-items-start bg-black/60 px-4 pt-[12vh] backdrop-blur-xs;
+  }
+  .command-dialog {
+    @apply w-full max-w-xl overflow-hidden rounded-xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md;
+  }
+  .command-search {
+    @apply flex h-14 items-center gap-3 border-b border-surface-800 px-4;
+  }
+  .command-search input {
+    @apply min-w-0 flex-1 bg-transparent text-base text-surface-100 outline-hidden placeholder:text-surface-500;
+  }
+  .command-results {
+    @apply max-h-[min(60vh,28rem)] overflow-y-auto p-2;
+  }
+  .command-section-label {
+    @apply px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600;
+  }
+  .command-item {
+    @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-surface-800;
+  }
+  .command-item.active {
+    @apply bg-surface-800;
+  }
+  .command-icon {
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-950 text-surface-400;
+  }
+  .command-item.active .command-icon {
+    @apply bg-accent/15 text-accent;
+  }
+  .event-count {
+    @apply absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-surface-900;
+  }
+  .event-panel {
+    @apply fixed right-3 top-18 z-50 w-[calc(100vw-1.5rem)] max-w-md overflow-hidden rounded-xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md sm:right-5;
+  }
+  .event-item {
+    @apply flex flex-wrap items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-surface-800;
+  }
+  .event-item strong {
+    @apply block truncate text-sm font-medium text-surface-200;
+  }
+  .event-item small {
+    @apply mt-0.5 block truncate text-muted;
+  }
+  .event-icon {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-lg;
+  }
+  .event-icon.warning {
+    @apply bg-amber-950/50 text-amber-300;
+  }
+  .event-icon.danger {
+    @apply bg-rose-950/50 text-rose-300;
+  }
+  .event-icon.info {
+    @apply bg-blue-950/50 text-blue-300;
+  }
+  .event-item.event-read {
+    @apply opacity-60;
+  }
+  .event-item.event-read strong {
+    @apply text-surface-400;
+  }
+  .event-priority {
+    @apply rounded-sm bg-rose-500/15 px-1 py-px text-[9px] font-semibold text-rose-400;
+  }
+  .event-logs {
+    @apply mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-surface-800 bg-surface-950/70 p-2 font-mono text-[10px] leading-relaxed text-surface-400;
+  }
+  .runtime-error-bar {
+    @apply fixed bottom-4 left-1/2 z-70 flex w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-xl border border-rose-800/60 bg-rose-950/90 px-4 py-2.5 text-xs text-rose-200 shadow-2xl backdrop-blur-sm;
+  }
+  /* 视图密度:紧凑模式收紧卡片/表格间距 */
+  body[data-density='compact'] .card {
+    @apply p-3!;
+  }
+  body[data-density='compact'] .page-shell {
+    @apply py-3!;
+  }
+  body[data-density='compact'] .event-item {
+    @apply py-2!;
+  }
+  body[data-density='compact'] .data-table th,
+  body[data-density='compact'] .data-table td {
+    @apply py-1.5! px-2!;
+  }
+  .drawer-backdrop {
+    @apply fixed inset-0 z-55 bg-black/55 backdrop-blur-[2px];
+  }
+  .activity-drawer {
+    @apply absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md;
+  }
+  .activity-list {
+    @apply relative space-y-1 before:absolute before:bottom-4 before:left-[17px] before:top-4 before:w-px before:bg-surface-800;
+  }
+  .activity-item {
+    @apply relative flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-surface-800/70;
+  }
+  .activity-item strong {
+    @apply truncate text-sm font-medium text-surface-200;
+  }
+  .activity-item time {
+    @apply shrink-0 text-[11px] text-surface-600;
+  }
+  .activity-item small {
+    @apply mt-1 block truncate text-muted;
+  }
+  .timeline-dot {
+    @apply z-10 h-3 w-3 shrink-0 rounded-full border-2 border-surface-900 ring-2 ring-surface-700;
+  }
+  .timeline-dot.success {
+    @apply bg-emerald-400 ring-emerald-900/70;
+  }
+  .timeline-dot.failed {
+    @apply bg-rose-400 ring-rose-900/70;
+  }
+  .version-card {
+    @apply rounded-xl border border-surface-800 bg-surface-950/35 p-4;
+  }
+  .version-card strong {
+    @apply text-sm font-medium text-surface-200;
+  }
+  .version-icon {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-950/50 text-blue-300;
+  }
+  .nav-link {
+    @apply relative rounded-none md:rounded-lg transition-all duration-150 hover:bg-surface-800/70 hover:text-surface-100;
+  }
+  .nav-link-active {
+    @apply bg-surface-800 text-white shadow-xs;
+  }
+  .nav-link-active .nav-indicator {
+    opacity: 1;
+  }
+  .loading-mark {
+    @apply h-8 w-8 rounded-xl border-2 border-surface-700 border-t-accent animate-spin;
+  }
+
+  @media (min-width: 768px) {
+    .app-sidebar {
+      border-top: 0;
+      border-right: 1px solid rgba(69, 76, 91, 0.55);
+    }
+  }
+
+  /* 滚动条美化 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb-legacy);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-thumb-legacy-hover);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* 兼容 Firefox 深色细轨滚动条 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb-legacy) transparent;
+  }
+
+  /* ---- z-index 统一阶梯 ----
  * z-0      基准内容区
  * z-40     移动端底部 Tab / 侧边栏 Sidebar
  * z-45     AppHeader 顶部导航
@@ -184,185 +886,81 @@ body[data-density='compact'] .data-table td { @apply !py-1.5 !px-2; }
  * 打开 Drawer / Modal 时 body 锁定滚动,由 useEscapeKey 统一管理。
  */
 
-/* ---- Vue <Transition> 动效（弹层与抽屉进出场） ---- */
-/* Modal 遮罩淡入淡出 */
-.modal-fade-enter-active { transition: opacity 0.2s ease; }
-.modal-fade-leave-active { transition: opacity 0.18s ease; }
-.modal-fade-enter-from,
-.modal-fade-leave-to { opacity: 0; }
-/* Modal 弹窗主体：轻微缩放 + 下移上浮 */
-.modal-pop-enter-active { transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
-.modal-pop-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
-.modal-pop-enter-from { opacity: 0; transform: scale(0.97) translateY(0.5rem); }
-.modal-pop-leave-to { opacity: 0; transform: scale(0.98) translateY(0.25rem); }
-/* 右侧抽屉滑入滑出 */
-.drawer-slide-enter-active,
-.drawer-slide-leave-active { transition: transform 0.2s ease-out; }
-.drawer-slide-enter-from,
-.drawer-slide-leave-to { transform: translateX(100%); }
-/* 命令面板下拉展开 + 淡入 */
-.command-drop-enter-active { transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
-.command-drop-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.command-drop-enter-from { opacity: 0; transform: translateY(-0.5rem) scale(0.98); }
-.command-drop-leave-to { opacity: 0; transform: translateY(-0.25rem); }
+  /* ---- Vue <Transition> 动效（弹层与抽屉进出场） ---- */
+  /* Modal 遮罩淡入淡出 */
+  .modal-fade-enter-active {
+    transition: opacity 0.2s ease;
+  }
+  .modal-fade-leave-active {
+    transition: opacity 0.18s ease;
+  }
+  .modal-fade-enter-from,
+  .modal-fade-leave-to {
+    opacity: 0;
+  }
+  /* Modal 弹窗主体：轻微缩放 + 下移上浮 */
+  .modal-pop-enter-active {
+    transition:
+      opacity 0.22s ease,
+      transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .modal-pop-leave-active {
+    transition:
+      opacity 0.16s ease,
+      transform 0.16s ease;
+  }
+  .modal-pop-enter-from {
+    opacity: 0;
+    transform: scale(0.97) translateY(0.5rem);
+  }
+  .modal-pop-leave-to {
+    opacity: 0;
+    transform: scale(0.98) translateY(0.25rem);
+  }
+  /* 右侧抽屉滑入滑出 */
+  .drawer-slide-enter-active,
+  .drawer-slide-leave-active {
+    transition: transform 0.2s ease-out;
+  }
+  .drawer-slide-enter-from,
+  .drawer-slide-leave-to {
+    transform: translateX(100%);
+  }
+  /* 命令面板下拉展开 + 淡入 */
+  .command-drop-enter-active {
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .command-drop-leave-active {
+    transition:
+      opacity 0.15s ease,
+      transform 0.15s ease;
+  }
+  .command-drop-enter-from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.98);
+  }
+  .command-drop-leave-to {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
 
-/* Toast 进度条收缩动画（与自动消失时长同步） */
-@keyframes toast-bar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  /* Toast 进度条收缩动画（与自动消失时长同步） */
+  @keyframes toast-bar {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
+  }
 
-/* xterm 容器 */
-.terminal-host {
-  padding: 8px;
-  background: var(--panel-deepest);
-  border-radius: 6px;
-}
-
-@layer components {
-  .btn { @apply inline-flex min-h-9 items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 active:scale-[0.98] disabled:shadow-none; }
-  .btn-primary { @apply btn bg-accent text-white hover:bg-accent-hover shadow-[0_6px_18px_rgba(37,99,235,0.18)]; }
-  .btn-secondary { @apply btn border border-surface-700 bg-surface-800 text-surface-100 hover:border-surface-600 hover:bg-surface-700; }
-  .btn-danger { @apply btn bg-rose-600 text-white hover:bg-rose-500 shadow-[0_6px_18px_rgba(220,38,38,0.12)]; }
-  .btn-ghost { @apply btn text-surface-300 hover:bg-surface-800 hover:text-white; }
-  .icon-btn { @apply inline-grid place-items-center w-9 h-9 shrink-0 rounded-lg text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition-all duration-150 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed; }
-
-  /* 禁用态：不可编辑/不可控制的项目按钮 */
-  .btn-primary:disabled,
-  .btn-secondary:disabled,
-  .btn-ghost:disabled,
-  .btn-danger:disabled { @apply opacity-40 cursor-not-allowed hover:bg-inherit; }
-
-  .card { @apply bg-surface-900/80 border border-surface-800 rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.08)]; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
-  .input { @apply min-h-9 bg-surface-950/70 border border-surface-700 rounded-lg px-3 py-2 text-sm text-surface-100 transition-colors focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20; }
-  .input::placeholder { @apply text-surface-500; }
-  .page-shell { @apply flex min-h-full w-full flex-col gap-5; }
-  .page-shell-workspace { @apply h-full min-h-[560px] gap-4; }
-
-  /* ---- 语义化设计 Token（设计基座） ---- */
-  /* 次要说明文字：页面/区块副标题、元信息、辅助说明 */
-  .text-muted { @apply text-xs text-surface-500 font-normal leading-relaxed; }
-  /* 区块微眉标：分区分组的小写大写标签，不可选中 */
-  .section-eyebrow { @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400 select-none; }
-  /* 通用面板卡片：卡片式内容容器 */
-  .panel-card { @apply bg-surface-900/60 border border-surface-800/80 rounded-xl p-4 transition-colors; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }
-  /* 页首：页面标题（H1）与副标题，斜对角布局由调用方控制 */
-  .page-header { @apply flex w-full flex-col justify-between gap-4 border-b border-surface-800/70 pb-5 lg:flex-row lg:items-end; }
-  .page-header h1 { @apply text-2xl font-semibold tracking-tight text-surface-50; }
-  .page-header > div:first-child > p,
-  .page-header .page-subtitle { @apply text-xs text-surface-400 mt-1; }
-  .page-actions { @apply flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end; }
-  .page-actions .input { @apply min-w-0 flex-1 sm:flex-none; }
-  .page-title { @apply text-2xl font-semibold tracking-tight text-surface-50; }
-  .page-subtitle { @apply text-sm text-surface-400 mt-1.5 leading-5; }
-  .section-title { @apply text-sm font-semibold tracking-wide text-surface-100; }
-  .section-panel { @apply card p-4 sm:p-5; }
-  .metric-grid { @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5; }
-  .metric-tile { @apply card flex min-h-24 items-center gap-3 p-4 text-left transition-all duration-150 active:scale-[0.99] hover:-translate-y-0.5 hover:border-surface-700 hover:bg-surface-900; }
-  .metric-tile.active { @apply border-accent/70 bg-accent/5 ring-1 ring-accent/20; }
-  .metric-icon { @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-950/70; }
-  .metric-tile strong { @apply block text-xl font-semibold tracking-tight text-surface-50; }
-  .metric-tile small { @apply block text-xs text-surface-400; }
-  .metric-meta { @apply ml-auto hidden text-right text-[11px] leading-4 text-surface-600 xl:block; }
-  .toolbar-panel { @apply card flex flex-col gap-2 p-3 sm:flex-row sm:items-center; }
-  .bulk-bar { @apply flex flex-col gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 sm:flex-row sm:items-center; }
-  .search-field { @apply flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-surface-700 bg-surface-950/70 px-3 text-surface-500 transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20; }
-  .search-field input { @apply min-w-0 flex-1 bg-transparent py-2 text-sm text-surface-100 outline-none placeholder:text-surface-500; }
-  .project-attention { @apply border-amber-900/60; }
-  .action-label { @apply inline-flex rounded-md bg-surface-800/80 px-2 py-1 text-xs font-medium text-surface-300; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
-  .count-badge { @apply text-xs px-1.5 py-0.5 bg-surface-800 text-surface-400 rounded font-mono tabular-nums; }
-  .status-dot { @apply w-2 h-2 rounded-full shrink-0; }
-  .toggle-label { @apply inline-flex items-center gap-1.5 text-sm text-surface-400; }
-  .toggle-label input, .agent-toggle input {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 38px;
-  height: 23px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--toggle-off);
-  position: relative;
-  cursor: pointer;
-  transition: background 0.22s ease;
-}
-.toggle-label input::after, .agent-toggle input::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 19px;
-  height: 19px;
-  border-radius: 999px;
-  background: #fff /* 纯白色块,非主题色 */;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  transition: transform 0.22s ease;
-}
-.toggle-label input:checked, .agent-toggle input:checked { background: var(--toggle-on); }
-.toggle-label input:checked::after, .agent-toggle input:checked::after { transform: translateX(15px); }
-.toggle-label input:active::after, .agent-toggle input:active::after { width: 21px; }
-  .alert-error { @apply text-sm text-rose-300 border border-rose-900/60 bg-rose-950/30 rounded px-3 py-2; }
-  .alert-warning { @apply text-sm text-amber-300 border border-amber-900/60 bg-amber-950/20 rounded px-3 py-2; }
-  .alert-success { @apply text-sm text-emerald-300 border border-emerald-900/60 bg-emerald-950/20 rounded px-3 py-2; }
-  .alert-info { @apply text-sm text-sky-300 border border-sky-900/60 bg-sky-950/20 rounded px-3 py-2; }
-  .empty-state { @apply min-h-48 border border-dashed border-surface-700 rounded-xl grid place-content-center justify-items-center gap-3 text-sm text-surface-500 bg-surface-900/25; }
-  .table-wrap { @apply overflow-x-auto border border-surface-800/80 rounded-xl bg-surface-900/65 shadow-[0_12px_40px_rgba(0,0,0,0.06)]; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
-  .data-table { @apply w-full text-sm; }
-  .data-table th { @apply h-11 text-left text-[11px] uppercase tracking-wider font-semibold text-surface-500 px-4 py-2 bg-surface-950/50; }
-  .data-table td { @apply h-12 px-4 py-2.5 border-t border-surface-800/80 text-surface-300 font-mono tabular-nums text-[13px]; }
-  .data-table tbody tr { @apply transition-colors hover:bg-surface-800/25; }
-  .modal-backdrop { @apply fixed inset-0 z-[55] bg-black/70 grid place-items-center p-4 backdrop-blur-[2px]; }
-  .modal { @apply w-full max-w-[calc(100vw-1.5rem)] sm:max-w-2xl bg-surface-900/95 border border-surface-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-md; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
-  .modal-header { @apply h-11 flex items-center justify-between gap-3 px-3 border-b border-surface-800 text-sm font-medium; }
-  .drawer { @apply fixed z-[51] bottom-0 right-0 w-full md:w-[720px] max-w-[calc(100vw-1rem)] h-[min(70vh,36rem)] bg-surface-900/95 border border-surface-700 flex flex-col shadow-2xl backdrop-blur-md; box-shadow: -18px 0 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
-  .batch-task { @apply flex min-w-0 items-center gap-2 rounded-lg bg-surface-950/55 px-3 py-2; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03); }
-  .terminal-output { @apply overflow-auto p-3 bg-surface-1000 text-xs font-mono whitespace-pre-wrap break-words; }
-  .log-line { @apply whitespace-pre-wrap break-words min-h-4; }
-  .diff-pane { @apply bg-surface-950 p-4 text-xs font-mono whitespace-pre-wrap overflow-auto min-h-72; }
-  .diff-line { @apply block whitespace-pre-wrap break-all leading-relaxed text-surface-300; }
-  .diff-same { @apply text-surface-300; }
-  .diff-add { @apply bg-emerald-950/40 text-emerald-300; }
-  .diff-remove { @apply bg-rose-950/40 text-rose-300 line-through; }
-  .message { @apply max-w-[88%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words; }
-  .message-user { @apply bg-accent text-white; }
-  .message-assistant { @apply bg-surface-800 text-surface-100; }
-  .agent-rich-markdown { @apply leading-7; }
-  .agent-rich-markdown p { @apply mb-3 last:mb-0; }
-  .agent-rich-markdown h1,
-  .agent-rich-markdown h2,
-  .agent-rich-markdown h3,
-  .agent-rich-markdown h4 { @apply mb-2 mt-4 font-semibold leading-snug text-surface-50 first:mt-0; }
-  .agent-rich-markdown h1 { @apply text-lg; }
-  .agent-rich-markdown h2 { @apply text-base; }
-  .agent-rich-markdown h3,
-  .agent-rich-markdown h4 { @apply text-sm; }
-  .agent-rich-markdown ul,
-  .agent-rich-markdown ol { @apply mb-3 mt-2 list-outside pl-6; }
-  .agent-rich-markdown ul { @apply list-disc; }
-  .agent-rich-markdown ol { @apply list-decimal; }
-  .agent-rich-markdown li { @apply my-1; }
-  .agent-rich-markdown blockquote { @apply my-3 border-l-2 border-cyan-700 bg-surface-950/40 px-3 py-2 text-surface-300; }
-  .agent-rich-markdown code { @apply rounded bg-surface-950 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200; }
-  .agent-rich-markdown pre { @apply my-3 max-w-full overflow-x-auto rounded-lg border border-surface-700 bg-surface-1000 p-3 text-xs leading-5; }
-  .agent-rich-markdown pre code { @apply bg-transparent p-0 text-emerald-200; }
-  .agent-rich-markdown table { @apply my-3 w-full min-w-[38rem] border-collapse text-left text-xs; }
-  .agent-rich-markdown th { @apply border border-surface-700 bg-surface-950/80 px-2.5 py-2 font-semibold text-surface-200; }
-  .agent-rich-markdown td { @apply border border-surface-800 px-2.5 py-2 align-top text-surface-300; }
-  .agent-rich-markdown tr:nth-child(even) td { @apply bg-surface-950/30; }
-  .agent-rich-markdown a { @apply text-cyan-300 underline decoration-cyan-700 underline-offset-2 hover:text-cyan-200; }
-  .agent-rich-markdown hr { @apply my-4 border-surface-700; }
-  .tabs { @apply flex shrink-0 gap-1 border-b border-surface-800 overflow-x-auto; }
-  .tabs button { @apply inline-flex items-center gap-1.5 px-3 py-2 text-sm text-surface-400 border-b-2 border-transparent whitespace-nowrap; }
-  .tabs button.active { @apply text-surface-100 border-accent; }
-  .settings-section { @apply card space-y-5 p-4 sm:p-6; }
-  .form-grid { @apply grid md:grid-cols-2 gap-4; }
-  .form-grid label { @apply text-xs font-medium text-surface-400 flex flex-col gap-2; }
-  .progress { @apply h-2 rounded bg-surface-800 overflow-hidden; }
-  .progress span { @apply block h-full bg-accent; }
-  .progress-muted span { @apply bg-surface-600; }
-  .progress-muted span { transition: width 0.4s ease; }
-  /* 状态徽标基类:与 StatusBadge 组件的 sm 档外观一致。
-     CMDBView/RollbackView 等页面以 class="status-badge" 复用,此前缺少基类
-     导致渲染成无圆角/内边距的裸文字色块;放在 components 层,md/lg 的
-     utilities 覆盖仍能生效。 */
-  .status-badge {
-    @apply inline-flex items-center rounded-full border border-transparent px-2 py-0.5 text-[11px] font-medium leading-normal whitespace-nowrap;
+  /* xterm 容器 */
+  .terminal-host {
+    padding: 8px;
+    background: var(--panel-deepest);
+    border-radius: 6px;
   }
 }
 
@@ -411,33 +1009,33 @@ body[data-density='compact'] .data-table td { @apply !py-1.5 !px-2; }
 .skeleton-fade-enter-from,
 .skeleton-fade-leave-to { opacity: 0; }
 .host-switch { @apply inline-flex min-h-8 items-center gap-1.5 rounded-full border border-surface-700/50 bg-surface-900/60 px-2.5 text-xs text-surface-300 hover:border-surface-600 hover:bg-surface-800/60 hover:text-surface-100 transition-colors; }
-.host-dropdown { @apply fixed right-3 top-[4.5rem] z-[50] w-72 overflow-hidden rounded-xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md; }
+.host-dropdown { @apply fixed right-3 top-18 z-50 w-72 overflow-hidden rounded-xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur-md; }
 .host-item { @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-800; }
 .host-item.active { @apply bg-surface-800/70; }
 .sparkline { @apply shrink-0 overflow-visible; }
 .spark-area { @apply opacity-25; }
 .metric-chip { @apply ml-1 inline-flex shrink-0 items-center rounded-full bg-surface-800/80 px-2 py-0.5 text-[10px] font-medium tabular-nums; }
-.ai-diagnosis { @apply min-w-0 break-words text-[13px] leading-relaxed text-surface-200; }
+.ai-diagnosis { @apply min-w-0 wrap-break-word text-[13px] leading-relaxed text-surface-200; }
 .ai-diagnose-bar { @apply flex shrink-0 flex-wrap items-center gap-2 border-t border-surface-800 bg-surface-900/80 px-3 py-2.5; }
 .storage-bar { @apply flex h-3 w-full gap-px overflow-hidden rounded-full bg-surface-800; }
 .storage-seg { @apply h-full transition-all duration-300; }
 .blueprint-icon { @apply grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-surface-700/70 bg-surface-950/60 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]; }
 .update-badge { @apply inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-950/40 px-2 py-0.5 text-[10px] font-medium text-amber-300 transition-colors hover:bg-amber-900/50; }
 .webui-badge { @apply inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-medium text-emerald-300 transition-colors hover:bg-emerald-900/50; }
-.webui-menu { @apply absolute right-0 top-full z-[60] mt-1 w-56 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 py-1 shadow-lg shadow-black/40; }
+.webui-menu { @apply absolute right-0 top-full z-60 mt-1 w-56 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 py-1 shadow-lg shadow-black/40; }
 .webui-menu-item { @apply flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-surface-800; }
-.aggregate-line { @apply flex items-start gap-2 rounded px-1.5 py-0.5 font-mono text-[12px] leading-relaxed hover:bg-surface-800/40; }
-.container-badge { @apply mt-0.5 inline-flex shrink-0 items-center rounded border px-1.5 py-px text-[10px] font-semibold whitespace-nowrap; }
+.aggregate-line { @apply flex items-start gap-2 rounded-sm px-1.5 py-0.5 font-mono text-[12px] leading-relaxed hover:bg-surface-800/40; }
+.container-badge { @apply mt-0.5 inline-flex shrink-0 items-center rounded-sm border px-1.5 py-px text-[10px] font-semibold whitespace-nowrap; }
 .line-ts { @apply shrink-0 text-[10px] text-surface-600 tabular-nums; }
-.level-badge { @apply mt-0.5 inline-flex shrink-0 items-center rounded border px-1 py-px text-[9px] font-bold leading-none whitespace-nowrap; }
+.level-badge { @apply mt-0.5 inline-flex shrink-0 items-center rounded-sm border px-1 py-px text-[9px] font-bold leading-none whitespace-nowrap; }
 .line-data { @apply min-w-0 flex-1 whitespace-nowrap overflow-x-auto; }
 .line-error { @apply -ml-px border-l-2 border-rose-500/70 bg-rose-950/20; }
-.log-mark { @apply bg-rose-500/20 text-rose-300 rounded-sm px-px; }
+.log-mark { @apply bg-rose-500/20 text-rose-300 rounded-xs px-px; }
 .json-block { @apply min-w-0 flex-1 whitespace-nowrap overflow-x-auto text-emerald-200; }
 .json-block.open { @apply text-emerald-100 whitespace-pre-wrap; }
 .json-toggle { @apply shrink-0 text-[10px] text-accent hover:underline; }
-.scroll-resume-chip { @apply fixed bottom-24 right-6 z-[60] rounded-full border border-accent/50 bg-surface-900 px-3 py-1.5 text-xs text-accent shadow-lg shadow-black/40 transition-colors hover:bg-surface-800; }
-.shortcut-key { @apply inline-flex min-w-[22px] items-center justify-center rounded border border-surface-600 bg-surface-800 px-1.5 py-0.5 font-mono text-[11px] leading-none text-surface-200 shadow-sm; }
+.scroll-resume-chip { @apply fixed bottom-24 right-6 z-60 rounded-full border border-accent/50 bg-surface-900 px-3 py-1.5 text-xs text-accent shadow-lg shadow-black/40 transition-colors hover:bg-surface-800; }
+.shortcut-key { @apply inline-flex min-w-[22px] items-center justify-center rounded-sm border border-surface-600 bg-surface-800 px-1.5 py-0.5 font-mono text-[11px] leading-none text-surface-200 shadow-xs; }
 /* AI 助手底部悬浮输入栏(Linear 风格) */
 .ai-composer {
   @apply flex shrink-0 items-end gap-2 rounded-2xl border border-surface-700/70 bg-surface-900/90 px-3 py-2 shadow-[0_-8px_30px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.05)];
@@ -453,10 +1051,10 @@ body[data-density='compact'] .data-table td { @apply !py-1.5 !px-2; }
 }
 /* AI 模型 Combobox 下拉 */
 .model-dropdown {
-  @apply absolute left-0 right-0 top-full z-[60] mt-1 max-h-64 overflow-y-auto rounded-lg border border-surface-700 bg-surface-900 p-1 shadow-2xl shadow-black/40 backdrop-blur-md;
+  @apply absolute left-0 right-0 top-full z-60 mt-1 max-h-64 overflow-y-auto rounded-lg border border-surface-700 bg-surface-900 p-1 shadow-2xl shadow-black/40 backdrop-blur-md;
 }
 .model-dropdown-search {
-  @apply mb-1 w-full rounded-md border border-surface-700 bg-surface-950/70 px-2 py-1.5 text-xs text-surface-100 outline-none focus:border-accent;
+  @apply mb-1 w-full rounded-md border border-surface-700 bg-surface-950/70 px-2 py-1.5 text-xs text-surface-100 outline-hidden focus:border-accent;
 }
 .model-option {
   @apply flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-surface-300 transition-colors hover:bg-surface-800 hover:text-surface-100;
@@ -543,10 +1141,6 @@ body {
 *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 /* 卡片:悬浮光效过渡 */
-@layer components {
-  .card { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
-  .card:hover { border-color: rgba(52, 65, 85, 0.9); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 0 1px rgba(34, 211, 238, 0.04); }
-}
 
 /* 侧栏激活项:渐变底 + 左侧光条 + 图标点亮 */
 .nav-link-active {
@@ -633,7 +1227,7 @@ body {
 .agent-rich-markdown svg :is(rect, circle, ellipse, polygon, path)[fill="black"],
 .agent-rich-markdown svg :is(rect, circle, ellipse, polygon, path)[fill="#000"],
 .agent-rich-markdown svg :is(rect, circle, ellipse, polygon, path)[fill="#000000"] { fill: var(--fill-shape-2); stroke: var(--text-empty); }
-/* SVG 内残留 class(其 <style> 被剥除)的元素:给出基础可见性 */
+/* SVG 内残留 class(其 \3c style> 被剥除)的元素:给出基础可见性 */
 .agent-markdown svg [class]:not([fill]):not([stroke]),
 .agent-drawer-markdown svg [class]:not([fill]):not([stroke]),
 .agent-rich-markdown svg [class]:not([fill]):not([stroke]) { fill: var(--fill-shape-2); stroke: var(--text-empty); }

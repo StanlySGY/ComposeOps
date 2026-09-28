@@ -14,10 +14,10 @@
       <div v-for="i in 3" :key="i" class="card p-3 flex items-center gap-3">
         <div class="h-9 w-9 shrink-0 animate-pulse rounded-lg bg-surface-800"></div>
         <div class="min-w-0 flex-1 space-y-2">
-          <div class="h-3.5 w-1/3 animate-pulse rounded bg-surface-800"></div>
-          <div class="h-3 w-1/2 animate-pulse rounded bg-surface-800/70"></div>
+          <div class="h-3.5 w-1/3 animate-pulse rounded-sm bg-surface-800"></div>
+          <div class="h-3 w-1/2 animate-pulse rounded-sm bg-surface-800/70"></div>
         </div>
-        <div class="h-8 w-20 shrink-0 animate-pulse rounded bg-surface-800"></div>
+        <div class="h-8 w-20 shrink-0 animate-pulse rounded-sm bg-surface-800"></div>
       </div>
     </div>
 
@@ -81,7 +81,7 @@
 
     <BaseModal :show="!!editor" title="新建定时任务" size-class="max-w-[calc(100vw-2rem)] sm:max-w-lg flex max-h-[88vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-3" @close="closeEditor">
       <template #header-actions>
-        <button class="btn-secondary !px-2.5 !py-1.5 text-xs" title="让 Agent 根据当前表单创建任务" @click="openCronAgent"><Bot class="h-3.5 w-3.5" />让 Agent 创建</button>
+        <button class="btn-secondary px-2.5! py-1.5! text-xs" title="让 Agent 根据当前表单创建任务" @click="openCronAgent"><Bot class="h-3.5 w-3.5" />让 Agent 创建</button>
       </template>
       <template v-if="editor">
         <p v-if="editorError" class="alert-error">{{ editorError }}</p>

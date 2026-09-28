@@ -576,6 +576,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 </script>
 
 <style scoped>
+@reference '../style.css';
 /* 页面级配色/按钮/页眉改用全站 token(surface / accent / btn / page-header / input / modal),
    scoped 内只保留市场页布局与局部语义类的微调。 */
 .marketplace-view {
@@ -651,7 +652,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 
 .card-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .card-actions .btn-secondary,
-.card-actions .btn-danger { @apply min-w-fit flex-1 !rounded-lg px-3 py-2 !text-[13px]; }
+.card-actions .btn-danger { @apply min-w-fit flex-1 rounded-lg! px-3 py-2 !text-[13px]; }
 
 .btn-deploy {
   border-color: color-mix(in srgb, var(--market-accent-2) 35%, transparent) !important;

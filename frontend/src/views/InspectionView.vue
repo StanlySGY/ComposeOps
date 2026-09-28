@@ -74,7 +74,7 @@
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-3">
-        <select v-model="intervalHours" class="input !w-40 !min-h-8 !py-1.5 text-xs" :disabled="!schedule.enabled" title="自动巡检间隔">
+        <select v-model="intervalHours" class="input w-40! min-h-8! py-1.5! text-xs" :disabled="!schedule.enabled" title="自动巡检间隔">
           <option v-for="option in intervalOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
         <label class="toggle-label"><input type="checkbox" :checked="schedule.enabled" @change="toggleSchedule" /><span>{{ schedule.enabled ? '关闭自动巡检' : '开启自动巡检' }}</span></label>
@@ -85,7 +85,7 @@
     <div>
       <div class="mb-2 flex items-center justify-between">
         <h2 class="section-title">报告历史</h2>
-        <button v-if="reports.length" class="btn-ghost !px-2 !py-1 text-xs" @click="pruneReports"><Trash2 class="h-3.5 w-3.5" />清理 180 天前</button>
+        <button v-if="reports.length" class="btn-ghost px-2! py-1! text-xs" @click="pruneReports"><Trash2 class="h-3.5 w-3.5" />清理 180 天前</button>
       </div>
       <div v-if="reports.length" class="table-wrap">
         <table class="data-table">
@@ -130,7 +130,7 @@
     <!-- 报告明细抽屉 -->
     <BaseModal :show="!!detail" :title="detail ? `${formatTime(detail.createdAt)} · ${sourceLabel(detail.source)} · 评分 ${detail.score} / ${GRADE_LABELS[detail.grade]}` : ''" size-class="max-h-[88vh] max-w-3xl flex flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4" @close="closeDetail">
       <template #header-actions>
-        <button class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="detailLoading" @click="askAgentForReport">交给 Agent</button>
+        <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="detailLoading" @click="askAgentForReport">交给 Agent</button>
       </template>
       <p v-if="detailLoading" class="text-sm text-muted">加载中...</p>
       <template v-else-if="detail?.report">
@@ -159,7 +159,7 @@
               </div>
               <div v-if="item.tool" class="flex shrink-0 flex-col items-end gap-1.5">
                 <span class="count-badge text-accent">{{ item.tool }}</span>
-                <button class="btn-secondary !px-2 !py-1 text-xs" @click="handoffToAgent(item)"><Bot class="h-3.5 w-3.5" />让 Agent 处理</button>
+                <button class="btn-secondary px-2! py-1! text-xs" @click="handoffToAgent(item)"><Bot class="h-3.5 w-3.5" />让 Agent 处理</button>
               </div>
             </div>
           </article>

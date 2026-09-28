@@ -147,7 +147,7 @@
         <div v-if="!issues.length" class="rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-4 text-sm text-emerald-300">✓ 未发现语义问题,配置结构健康</div>
         <div v-else class="space-y-2">
           <div v-for="(issue, idx) in issues" :key="idx" class="flex items-start gap-3 rounded-xl border p-3" :class="issue.level === 'error' ? 'border-rose-900/40 bg-rose-950/20' : issue.level === 'warn' ? 'border-amber-900/40 bg-amber-950/20' : 'border-sky-900/40 bg-sky-950/20'">
-            <span class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold" :class="issue.level === 'error' ? 'bg-rose-500/20 text-rose-300' : issue.level === 'warn' ? 'bg-amber-500/20 text-amber-300' : 'bg-sky-500/20 text-sky-300'">{{ issue.level === 'error' ? '错误' : issue.level === 'warn' ? '警告' : '提示' }}</span>
+            <span class="mt-0.5 shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold" :class="issue.level === 'error' ? 'bg-rose-500/20 text-rose-300' : issue.level === 'warn' ? 'bg-amber-500/20 text-amber-300' : 'bg-sky-500/20 text-sky-300'">{{ issue.level === 'error' ? '错误' : issue.level === 'warn' ? '警告' : '提示' }}</span>
             <div class="min-w-0 flex-1">
               <p class="text-sm text-surface-200">{{ issue.message }}</p>
               <p v-if="issue.service" class="mt-0.5 font-mono text-xs text-surface-500">服务:{{ issue.service }}</p>
@@ -189,7 +189,7 @@
         <div class="mb-4 flex items-center gap-2"><h2 class="section-title">AI 评审建议</h2><Bot class="h-4 w-4 text-emerald-400" /></div>
         <div class="space-y-2">
           <div v-for="(advice, idx) in aiAdvice" :key="idx" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
-            <span class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold" :class="advice.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : advice.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ advice.tag }}</span>
+            <span class="mt-0.5 shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold" :class="advice.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : advice.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ advice.tag }}</span>
             <p class="text-sm text-surface-200">{{ advice.text }}</p>
           </div>
         </div>

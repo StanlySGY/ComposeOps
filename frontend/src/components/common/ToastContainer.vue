@@ -1,10 +1,10 @@
 <template>
-  <div class="toast-container pointer-events-none fixed bottom-6 right-6 z-[70] flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2">
+  <div class="toast-container pointer-events-none fixed bottom-6 right-6 z-70 flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2">
     <TransitionGroup name="toast">
       <div
         v-for="toast in toasts.visible"
         :key="toast.id"
-        class="pointer-events-auto flex items-center gap-2.5 rounded-lg border border-surface-700/80 bg-surface-900/95 p-3 text-xs text-surface-100 shadow-xl backdrop-blur-sm"
+        class="pointer-events-auto flex items-center gap-2.5 rounded-lg border border-surface-700/80 bg-surface-900/95 p-3 text-xs text-surface-100 shadow-xl backdrop-blur-xs"
         role="status"
         :aria-live="toast.type === 'error' ? 'assertive' : 'polite'"
         @mouseenter="toasts.pause(toast.id)"
@@ -13,9 +13,9 @@
         <span class="shrink-0" :class="toneFor(toast.type).icon">
           <component :is="iconFor(toast.type)" class="h-4 w-4" />
         </span>
-        <span class="min-w-0 flex-1 leading-snug break-words">{{ toast.message }}</span>
+        <span class="min-w-0 flex-1 leading-snug wrap-break-word">{{ toast.message }}</span>
         <button
-          class="icon-btn !h-7 !w-7 shrink-0"
+          class="icon-btn h-7! w-7! shrink-0"
           title="关闭"
           aria-label="关闭提示"
           @click="toasts.dismiss(toast.id)"

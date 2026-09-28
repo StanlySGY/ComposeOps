@@ -15,7 +15,7 @@
 
     <div v-if="loadError" class="alert-error flex items-center justify-between gap-3">
       <span>{{ loadError }}</span>
-      <button class="btn-secondary !px-2.5 !py-1 text-xs" :disabled="loading" @click="load">重试</button>
+      <button class="btn-secondary px-2.5! py-1! text-xs" :disabled="loading" @click="load">重试</button>
     </div>
 
     <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="4" label="总览数据加载中" />

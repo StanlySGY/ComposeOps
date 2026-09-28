@@ -1,5 +1,5 @@
 <template>
-  <div class="drawer max-w-[calc(100vw-2rem)] sm:max-w-[720px] z-[51]">
+  <div class="drawer max-w-[calc(100vw-2rem)] sm:max-w-[720px] z-51">
     <div class="modal-header"><span>{{ label }} · {{ name }}</span><button class="icon-btn" title="关闭输出面板" @click="$emit('close')"><X class="w-4 h-4" /></button></div>
     <div v-if="batchTasks.length" class="border-b border-surface-800 p-3">
       <div class="mb-2 flex items-center justify-between text-muted"><span>任务进度</span><span>{{ completedCount }} / {{ batchTasks.length }}</span></div>

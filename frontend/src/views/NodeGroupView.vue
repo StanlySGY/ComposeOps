@@ -20,15 +20,15 @@
     </div>
 
     <!-- 批量动作 -->
-    <div class="section-panel !py-3 flex flex-wrap items-center gap-2">
+    <div class="section-panel py-3! flex flex-wrap items-center gap-2">
       <span class="text-xs font-medium text-surface-300">批量动作</span>
-      <button class="btn-secondary !py-1.5 text-xs" :disabled="batchBusy || !hosts.length" @click="pingAll">
+      <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="pingAll">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'ping' }" />探测全部节点
       </button>
-      <button class="btn-secondary !py-1.5 text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchInspection">
+      <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchInspection">
         <ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'inspection' }" />巡检(当前节点项目)
       </button>
-      <button class="btn-secondary !py-1.5 text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchUpdateCheck">
+      <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchUpdateCheck">
         <SearchCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'updates' }" />镜像更新检查(全部项目)
       </button>
       <span class="ml-auto text-xs text-surface-500">巡检作用于当前活跃节点:{{ activeHost?.name || '—' }}</span>
@@ -41,7 +41,7 @@
           <div class="flex items-center gap-2">
             <span class="grid h-8 w-8 place-items-center rounded-lg border" :class="group.tone">{{ group.icon }}</span>
             <div>
-              <h2 class="section-title !mb-0">{{ group.label }}</h2>
+              <h2 class="section-title mb-0!">{{ group.label }}</h2>
               <p class="text-xs text-surface-500">{{ group.description }}</p>
             </div>
           </div>
@@ -77,7 +77,7 @@
               <td><span class="count-badge text-sky-300">{{ host.type.toUpperCase() }}</span></td>
               <td class="font-mono text-xs text-surface-400">{{ host.type === 'local' ? '本机' : `${host.host}:${host.port}` }}</td>
               <td>
-                <select class="input !py-1 text-xs" :value="groupOf(host.id)" @change="assignGroup(host, $event.target.value)">
+                <select class="input py-1! text-xs" :value="groupOf(host.id)" @change="assignGroup(host, $event.target.value)">
                   <option value="production">生产</option>
                   <option value="staging">测试</option>
                   <option value="edge">边缘</option>

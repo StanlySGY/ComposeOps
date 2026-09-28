@@ -1,6 +1,6 @@
 <template>
-  <div v-if="project" class="drawer-backdrop z-[55]" @click.self="$emit('close')">
-    <aside class="activity-drawer z-[51]">
+  <div v-if="project" class="drawer-backdrop z-55" @click.self="$emit('close')">
+    <aside class="activity-drawer z-51">
       <header class="flex items-start gap-3 border-b border-surface-800 px-4 py-4">
         <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent"><History class="h-5 w-5" /></div>
         <div class="min-w-0 flex-1"><h2 class="truncate font-mono text-base font-semibold text-surface-100">{{ project.projectName }}</h2><p class="mt-0.5 text-muted">活动记录与配置版本</p></div>

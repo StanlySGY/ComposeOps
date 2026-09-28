@@ -14,7 +14,7 @@
     <div class="card relative flex-1 min-h-[420px] overflow-hidden terminal-host">
       <Skeleton v-if="!termReady" class="skeleton-workspace" rows="10" label="终端加载中" />
       <div ref="termEl" class="h-full w-full" :class="{ invisible: !termReady }"></div>
-      <div v-if="termReady && !connected" class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-[#0b0d10]/95 px-6">
+      <div v-if="termReady && !connected" class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-surface-1000/95 px-6">
         <div class="flex items-center gap-1.5">
           <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
           <span class="h-3 w-3 rounded-full bg-[#febc2e]"></span>

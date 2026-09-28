@@ -1,15 +1,15 @@
 <template>
   <div class="space-y-4">
-    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份。</p>
+    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份。</p>
     <div class="flex flex-wrap items-end gap-2">
       <label class="form-grid-label"><span>项目</span>
-        <select v-model="projectId" class="input !min-h-9 w-56 text-xs" @change="loadVolumes">
+        <select v-model="projectId" class="input min-h-9! w-56 text-xs" @change="loadVolumes">
           <option value="">选择项目</option>
           <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option>
         </select>
       </label>
-      <button class="btn-secondary !min-h-9 text-xs" :disabled="!projectId || loadingVolumes" @click="loadVolumes"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingVolumes }" />读取卷</button>
-      <button class="btn-primary !min-h-9 text-xs" :disabled="!selected.length || backing" @click="backupSelected"><HardDriveDownload class="h-3.5 w-3.5" />备份选中 {{ selected.length }} 个卷</button>
+      <button class="btn-secondary min-h-9! text-xs" :disabled="!projectId || loadingVolumes" @click="loadVolumes"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingVolumes }" />读取卷</button>
+      <button class="btn-primary min-h-9! text-xs" :disabled="!selected.length || backing" @click="backupSelected"><HardDriveDownload class="h-3.5 w-3.5" />备份选中 {{ selected.length }} 个卷</button>
     </div>
 
     <div v-if="projectId && volumes.length" class="grid gap-1.5 sm:grid-cols-2">
@@ -28,7 +28,7 @@
       <div class="flex items-center justify-between border-b border-surface-800/80 px-3 py-2 text-xs text-zinc-400">
         <span>备份记录<button class="ml-2 text-cyan-400 hover:text-cyan-300" @click="loadBackups">刷新</button></span>
         <label class="flex items-center gap-1.5">仅看项目
-          <select v-model="filterProjectId" class="input !min-h-7 !py-0.5 text-[11px]" @change="loadBackups"><option value="">全部</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
+          <select v-model="filterProjectId" class="input min-h-7! py-0.5! text-[11px]" @change="loadBackups"><option value="">全部</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
         </label>
       </div>
       <div class="max-h-72 overflow-y-auto">
@@ -42,7 +42,7 @@
               <td class="max-w-52 truncate px-3 py-2 font-mono text-[11px] text-zinc-400">{{ backup.file }}</td>
               <td class="px-3 py-2 text-zinc-400">{{ formatBytes(backup.bytes) }}</td>
               <td class="px-3 py-2 text-zinc-500">{{ formatTime(backup.createdAt) }}</td>
-              <td class="px-3 py-2"><span class="rounded bg-surface-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">{{ backup.host }}</span></td>
+              <td class="px-3 py-2"><span class="rounded-sm bg-surface-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">{{ backup.host }}</span></td>
               <td class="px-3 py-2">
                 <span v-if="backup.verifyStatus === 'verified'" class="status-badge bg-emerald-500/10 text-emerald-400" :title="`演练通过 · ${backup.verifyFiles ?? '—'} 个文件 · ${formatTime(backup.verifyAt)}`">✓ {{ backup.verifyFiles ?? '?' }} 文件</span>
                 <span v-else-if="backup.verifyStatus === 'empty'" class="status-badge bg-surface-800 text-surface-400" title="备份可解压,但内容为空">空备份</span>

@@ -57,7 +57,7 @@
                 <p class="text-sm font-medium text-surface-100">{{ step.title }}</p>
                 <p class="mt-0.5 text-xs text-surface-400">{{ step.description }}</p>
               </div>
-              <span class="shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold" :class="step.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : step.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ step.tag }}</span>
+              <span class="shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold" :class="step.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : step.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ step.tag }}</span>
             </div>
             <div class="flex gap-2 pt-2">
               <button class="btn-primary flex-1" :disabled="creating" @click="createFlowJobs"><Rocket class="w-4 h-4" :class="{ 'animate-pulse': creating }" />{{ creating ? '创建中...' : '创建定时任务' }}</button>
@@ -109,7 +109,7 @@
             <p class="mt-0.5 text-sm text-surface-300">{{ latestInspection.summary }}</p>
             <p class="mt-0.5 text-xs text-surface-500">{{ formatTime(latestInspection.createdAt) }}</p>
           </div>
-          <router-link to="/inspection" class="btn-secondary !px-2.5 !py-1.5 text-xs">查看报告</router-link>
+          <router-link to="/inspection" class="btn-secondary px-2.5! py-1.5! text-xs">查看报告</router-link>
         </div>
       </div>
       <div v-else class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无巡检报告。前往 <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link> 生成第一份报告。</div>

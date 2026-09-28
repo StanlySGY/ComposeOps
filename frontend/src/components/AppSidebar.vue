@@ -43,7 +43,7 @@
     </div>
   </aside>
   <teleport to="body">
-    <div v-if="moreOpen" class="fixed inset-0 z-[51] bg-black/55 md:hidden" @click.self="moreOpen = false">
+    <div v-if="moreOpen" class="fixed inset-0 z-51 bg-black/55 md:hidden" @click.self="moreOpen = false">
       <section class="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-2xl border-t border-surface-700 bg-surface-950 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl" role="dialog" aria-modal="true" aria-label="更多功能">
         <div class="mb-3 flex items-center justify-between"><div><h2 class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" title="关闭" @click="moreOpen = false">×</button></div>
         <div v-for="group in mobileGroups" :key="group.label" class="mb-4 last:mb-0">

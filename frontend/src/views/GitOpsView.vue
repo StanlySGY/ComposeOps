@@ -11,7 +11,7 @@
     </div>
 
     <!-- 漂移状态条 -->
-    <div v-if="drift && drift.repos?.length" class="section-panel !py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div v-if="drift && drift.repos?.length" class="section-panel py-3! flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="font-medium text-surface-300">漂移检测</span>
         <span class="count-badge text-emerald-300">一致 {{ drift.counts?.clean || 0 }}</span>
@@ -20,7 +20,7 @@
         <span v-if="drift.counts?.detached" class="count-badge text-rose-300">游离提交 {{ drift.counts.detached }}</span>
         <span v-if="drift.scannedAt" class="text-surface-500">扫描于 {{ new Date(drift.scannedAt).toLocaleString('zh-CN') }}</span>
       </div>
-      <button class="btn-secondary !py-1.5 text-xs" @click="loadDrift">
+      <button class="btn-secondary py-1.5! text-xs" @click="loadDrift">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': driftLoading }" />重新检测
       </button>
     </div>
@@ -57,7 +57,7 @@
           <div v-if="driftMap[repo.id].drifts?.length" class="space-y-1">
             <p v-for="item in driftMap[repo.id].drifts.slice(0, 5)" :key="item.file"
               class="flex items-center gap-2 truncate font-mono text-[11px]" :class="item.type === 'deleted' ? 'text-rose-400' : 'text-amber-300'">
-              <span class="shrink-0 rounded border border-current/20 px-1">{{ item.type === 'deleted' ? '删除' : '修改' }}</span>
+              <span class="shrink-0 rounded-sm border border-current/20 px-1">{{ item.type === 'deleted' ? '删除' : '修改' }}</span>
               <span class="truncate">{{ item.file }}</span>
             </p>
             <p v-if="driftMap[repo.id].drifts.length > 5" class="text-[11px] text-surface-500">等共 {{ driftMap[repo.id].drifts.length }} 处</p>
@@ -67,7 +67,7 @@
           </div>
           <div v-if="driftMap[repo.id].repairs?.length" class="flex flex-wrap gap-1.5">
             <span v-for="(repair, index) in driftMap[repo.id].repairs" :key="index"
-              class="count-badge !text-[11px]">{{ repair.action === 'none' ? '无需处理' : repair.action }}</span>
+              class="count-badge text-[11px]!">{{ repair.action === 'none' ? '无需处理' : repair.action }}</span>
           </div>
         </div>
 
@@ -87,14 +87,14 @@
         </div>
 
         <div class="mt-auto flex flex-wrap gap-2 border-t border-surface-800 pt-3">
-          <button class="btn-secondary !px-2.5 !py-1.5 text-xs flex-1" :disabled="syncingId === repo.id" @click="syncRepo(repo.id)">
+          <button class="btn-secondary px-2.5! py-1.5! text-xs flex-1" :disabled="syncingId === repo.id" @click="syncRepo(repo.id)">
             <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncingId === repo.id }" />同步
           </button>
-          <button class="btn-secondary !px-2.5 !py-1.5 text-xs flex-1" @click="loadHistory(repo.id)">
+          <button class="btn-secondary px-2.5! py-1.5! text-xs flex-1" @click="loadHistory(repo.id)">
             <History class="h-3.5 w-3.5" />历史
           </button>
-          <button class="btn-secondary !px-2.5 !py-1.5 text-xs" @click="openEditModal(repo)">编辑</button>
-          <button class="btn-danger !px-2.5 !py-1.5 text-xs" @click="deleteRepo(repo.id)">删除</button>
+          <button class="btn-secondary px-2.5! py-1.5! text-xs" @click="openEditModal(repo)">编辑</button>
+          <button class="btn-danger px-2.5! py-1.5! text-xs" @click="deleteRepo(repo.id)">删除</button>
         </div>
       </article>
     </div>
@@ -103,7 +103,7 @@
     <BaseModal
       :show="showAddModal || showEditModal"
       :title="showAddModal ? '添加仓库' : '编辑仓库'"
-      size-class="!max-w-lg"
+      size-class="max-w-lg!"
       body-class="p-6"
       @close="showAddModal = showEditModal = false"
     >
@@ -143,7 +143,7 @@
         </label>
 
         <label class="flex items-center gap-2 text-sm text-surface-300">
-          <input v-model="formData.autoSync" type="checkbox" class="h-4 w-4 rounded border-surface-700 bg-surface-900 accent-accent" />
+          <input v-model="formData.autoSync" type="checkbox" class="h-4 w-4 rounded-sm border-surface-700 bg-surface-900 accent-accent" />
           启用自动同步
         </label>
 
@@ -158,7 +158,7 @@
     <BaseModal
       :show="showHistoryModal"
       :title="`提交历史 · ${currentRepo?.name || ''}`"
-      size-class="!max-w-2xl"
+      size-class="max-w-2xl!"
       body-class="flex h-[65vh] flex-col overflow-hidden p-0"
       @close="showHistoryModal = false"
     >
@@ -169,7 +169,7 @@
           <article v-for="commit in commitHistory" :key="commit.hash" class="flex items-start gap-4 rounded-lg border border-surface-800 bg-surface-950/40 p-4">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <code class="rounded bg-surface-800 px-2 py-0.5 text-xs font-mono text-accent">{{ commit.hash.substring(0, 7) }}</code>
+                <code class="rounded-sm bg-surface-800 px-2 py-0.5 text-xs font-mono text-accent">{{ commit.hash.substring(0, 7) }}</code>
                 <span class="text-xs text-surface-500">{{ commit.date }}</span>
               </div>
               <p class="mt-2 text-sm text-surface-300">{{ commit.message }}</p>
@@ -177,7 +177,7 @@
             </div>
             <button
               v-if="commit.hash !== currentRepo?.lastCommit"
-              class="btn-secondary flex-none !px-2.5 !py-1.5 text-xs text-amber-300"
+              class="btn-secondary flex-none px-2.5! py-1.5! text-xs text-amber-300"
               @click="rollback(commit.hash)"
             >
               回滚

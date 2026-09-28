@@ -64,7 +64,7 @@
           <div v-if="service.ports?.length" class="pt-2 border-t border-surface-800">
             <div class="text-xs font-medium text-surface-300 mb-1.5">端口映射</div>
             <div class="flex flex-wrap gap-2">
-              <span v-for="(port, idx) in service.ports" :key="idx" class="text-xs px-2 py-1 rounded bg-surface-900 text-emerald-300 font-mono">{{ port }}</span>
+              <span v-for="(port, idx) in service.ports" :key="idx" class="text-xs px-2 py-1 rounded-sm bg-surface-900 text-emerald-300 font-mono">{{ port }}</span>
             </div>
           </div>
         </div>

@@ -340,6 +340,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void l
 </script>
 
 <style scoped>
+@reference '../style.css';
 /* 页面级配色/按钮/页眉改用全站 token(surface / accent / btn / page-header / card / data-table),
    scoped 内只保留本页布局与局部语义类的微调。 */
 .cost-analysis-view {
@@ -383,7 +384,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void l
 .trends-section,
 .projects-section,
 .images-section,
-.storage-section { @apply section-panel !p-5 sm:!p-6; }
+.storage-section { @apply section-panel p-5! sm:!p-6; }
 
 section h2 { @apply section-title mb-5 !text-lg; }
 

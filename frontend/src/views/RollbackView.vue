@@ -46,7 +46,7 @@
               <td class="max-w-56 truncate font-mono text-xs text-surface-400" :title="backup.filePath">{{ backup.filePath }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(backup.createdAt) }}</td>
               <td class="text-right">
-                <button class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="busy" @click="restoreCompose(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
+                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="restoreCompose(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
               </td>
             </tr>
           </tbody>
@@ -68,7 +68,7 @@
               <td class="font-mono text-xs text-surface-400">{{ formatBytes(backup.bytes) }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(backup.createdAt) }}</td>
               <td class="text-right">
-                <button class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="busy" @click="restoreVolume(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
+                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="restoreVolume(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
               </td>
             </tr>
           </tbody>
@@ -89,7 +89,7 @@
               <td class="font-mono text-xs text-surface-400">{{ repo.branch || 'main' }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ repo.lastSync ? formatTime(repo.lastSync) : '—' }}</td>
               <td class="text-right">
-                <button class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="busy" @click="openGitopsHistory(repo)"><History class="h-3.5 w-3.5" />历史</button>
+                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="openGitopsHistory(repo)"><History class="h-3.5 w-3.5" />历史</button>
               </td>
             </tr>
           </tbody>
@@ -109,7 +109,7 @@
               <td class="font-medium text-surface-100">{{ project.projectName }}</td>
               <td><span class="status-badge" :class="project.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : project.status === 'stopped' ? 'bg-surface-800/40 text-surface-400' : project.status === 'partial' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'">{{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'partial' ? '部分异常' : '异常' }}</span></td>
               <td class="text-right">
-                <button class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />回滚升级</button>
+                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />回滚升级</button>
               </td>
             </tr>
           </tbody>
@@ -121,12 +121,12 @@
     <BaseModal :show="showGitopsHistory" :title="`提交历史 · ${currentGitopsRepo?.name || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex-1 overflow-auto p-4 space-y-2" @close="showGitopsHistory = false">
       <div v-if="!gitopsCommits.length" class="text-sm text-surface-400">暂无提交历史</div>
       <div v-for="commit in gitopsCommits" :key="commit.hash" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
-        <code class="shrink-0 rounded bg-surface-800 px-2 py-0.5 font-mono text-xs text-sky-300">{{ commit.hash.substring(0, 7) }}</code>
+        <code class="shrink-0 rounded-sm bg-surface-800 px-2 py-0.5 font-mono text-xs text-sky-300">{{ commit.hash.substring(0, 7) }}</code>
         <div class="min-w-0 flex-1">
           <p class="text-sm text-surface-200">{{ commit.message }}</p>
           <p class="mt-0.5 text-xs text-surface-500">{{ commit.author }} · {{ commit.date }}</p>
         </div>
-        <button v-if="commit.hash !== currentGitopsRepo?.lastCommit" class="btn-secondary !px-2.5 !py-1.5 text-xs" :disabled="busy" @click="rollbackGitops(commit.hash)"><RotateCcw class="h-3.5 w-3.5" />回滚</button>
+        <button v-if="commit.hash !== currentGitopsRepo?.lastCommit" class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="rollbackGitops(commit.hash)"><RotateCcw class="h-3.5 w-3.5" />回滚</button>
         <span v-else class="count-badge text-emerald-300">当前</span>
       </div>
       <template #footer>

@@ -6,7 +6,7 @@
         <p class="page-subtitle">统一关联 Host、项目、容器、卷、网络、告警与 AI 分析,支撑智能运维决策</p>
       </div>
       <div class="page-actions">
-        <button class="btn-secondary" :class="{ '!border-accent !text-accent': useCmdb }" @click="toggleSource"><Database class="w-4 h-4" />{{ useCmdb ? '资产中心数据' : '实时数据' }}</button>
+        <button class="btn-secondary" :class="{ 'border-accent! text-accent!': useCmdb }" @click="toggleSource"><Database class="w-4 h-4" />{{ useCmdb ? '资产中心数据' : '实时数据' }}</button>
         <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
       </div>
     </div>

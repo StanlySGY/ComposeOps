@@ -24,8 +24,8 @@
           </span>
         </button>
         <template v-if="!inspectionCollapsed">
-          <button class="btn-secondary !px-2.5 !py-1.5 text-xs shrink-0" @click="askAgentReviewInspection"><Bot class="h-3.5 w-3.5" />让 Agent 分析</button>
-          <button class="btn-primary !px-2.5 !py-1.5 text-xs shrink-0" @click="router.push('/inspection')">查看巡检</button>
+          <button class="btn-secondary px-2.5! py-1.5! text-xs shrink-0" @click="askAgentReviewInspection"><Bot class="h-3.5 w-3.5" />让 Agent 分析</button>
+          <button class="btn-primary px-2.5! py-1.5! text-xs shrink-0" @click="router.push('/inspection')">查看巡检</button>
         </template>
       </div>
       <button v-if="!inspectionCollapsed" class="mt-3 flex w-full min-w-0 items-start gap-3 text-left" @click="router.push('/inspection')" title="查看完整巡检报告">

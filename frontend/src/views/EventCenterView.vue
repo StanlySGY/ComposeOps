@@ -45,7 +45,7 @@
 
       <!-- 过滤 -->
       <div class="flex flex-wrap gap-2">
-        <button v-for="t in typeFilters" :key="t.value" class="btn-secondary !px-3 !py-1.5 text-xs" :class="{ '!border-accent !text-accent': typeFilter === t.value }" @click="typeFilter = t.value">{{ t.label }}</button>
+        <button v-for="t in typeFilters" :key="t.value" class="btn-secondary px-3! py-1.5! text-xs" :class="{ 'border-accent! text-accent!': typeFilter === t.value }" @click="typeFilter = t.value">{{ t.label }}</button>
       </div>
 
       <!-- 事件列表 -->
@@ -64,8 +64,8 @@
               <p class="mt-1 text-[11px] text-surface-600">{{ formatTime(event.createdAt) }} · {{ event.source }}</p>
             </div>
             <div class="flex shrink-0 items-center gap-2">
-              <button class="btn-secondary !px-2 !py-1 text-xs" @click="setStatus(event, 'resolved')">解决</button>
-              <button class="btn-secondary !px-2 !py-1 text-xs" @click="setStatus(event, 'closed')">关闭</button>
+              <button class="btn-secondary px-2! py-1! text-xs" @click="setStatus(event, 'resolved')">解决</button>
+              <button class="btn-secondary px-2! py-1! text-xs" @click="setStatus(event, 'closed')">关闭</button>
             </div>
           </div>
           <div v-if="!events.length" class="rounded-xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-500">暂无事件</div>
