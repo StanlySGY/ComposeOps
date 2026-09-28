@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-28
+
+### Added
+- **守护模式(半自动自愈)**: 告警入库后自动触发 AI 诊断(读容器状态/日志 → 根因假设 + 风险标注的处置建议),结果落事件中心;事件级 10 分钟冷却,AI 侧只读 fail-closed
+- **部署预言**: `up` 之前对照宿主实况推演——新建/重建/不动/孤儿容器、需拉取镜像、端口冲突、卷与 bind 路径就绪度 + AI 三句话解读
+- **备份自证(还原演练)**: 卷备份 tar 全量完整性校验 + 解进一次性临时卷统计文件数,备份可信度随记录持久化,全程不碰原卷
+- **舰队视图**: 节点组页新增多宿主聚合总览卡、全节点并行探测与真实批量动作(巡检/全局镜像检查)
+- **通知渠道补齐**: 钉钉、飞书 webhook(与 bark/telegram/企业微信/email/通用 webhook 同一多渠道架构)
+- **MCP Server(三传输)**: 把 50 个 Agent 工具暴露给外部 MCP 客户端——Streamable HTTP(`POST /mcp`)、经典 SSE(`/mcp/sse`)、stdio 桥(`mcp/stdio-bridge.mjs`);独立 token 鉴权,默认只读白名单,critical 工具任何模式不暴露
+- **MCP 双时代协议(2026-07-28)**: modern 按每请求 `_meta` 协商版本、实现强制的 `server/discover`、不支持的版本回 `-32022`、头↔体一致性校验(`-32020`)、工具注解(`readOnlyHint`/`destructiveHint`)与 `structuredContent`;legacy `initialize` 握手 2024-11-05 → 2025-11-25 全线支持
+- **MCP 确认门与防泄漏**: 高危工具必须显式 `confirm: true` 才执行;工具结果先值级脱敏再截断(24K 保留首尾);旧式客户端的下划线工具名别名兼容
+- **PWA 手机远控**: manifest(standalone + 桌面快捷方式)、PWA 192/512/maskable 图标、iOS meta;手机"添加到主屏幕"即全屏 App 化
+- **审批模式接入工作台**: 逐次确认 / 放行非高危 / 仅极高危确认三档模式此前是后端孤岛,现工作台页头可直接切换并以 `approval_mode` 事件同步
+- **镜像手动发布工作流**: Actions 手动触发产出 `edge` + `sha-<7位>` 标签,不动 `latest`(版本可追)
+
+### Changed
+- **依赖全量升级到当代版本**: 后端 fastify 4→5、@fastify/static 7→10、@fastify/websocket 10→11、better-sqlite3 11→13、dockerode 4→5、nodemailer 7→10、tar-stream 2→3;前端 vite 5→7、vitest 3→5、pinia 2→4、vue-router 4→5、@xterm/xterm 5→6、lucide-vue-next 0.468→1.0
+- **Tailwind CSS 3→4**: 配置迁入 CSS-first `@theme`(surface 色阶/状态光晕/字体保留),scoped style 的 `@apply` 上下文补 `@reference`
+- CI actions 升级(checkout@v5 / setup-node@v5 / build-push-action@v7 / setup-qemu@v4 / action-gh-release@v3),消除 Node 20 弃用警告
+- monaco-editor 刻意保持在 0.52(0.57 改了 exports 结构,编辑器为核心编辑面,待专项验证后单独升级)
+
+### Fixed
+- **平滑升级回滚失效**: `rollbackProject` 引用列表查询中不存在的 `content` 列,写入 `undefined` 被空 catch 吞掉,回滚恒 409;改经 `getComposeBackup` 取正文
+- **审批门"本会话不再询问"可越过 critical**: 记忆授权集合命中即放行,现在 critical 风险先于授权集合判定,任何模式都强制确认;匿名流使用独立 gateKey 防授权泄漏
+- **设置导出泄露 SSH 私钥/密码**: `docker.hosts` 整键排除出导出文件(脱敏导出再导入反而会用无凭据条目覆盖真实凭据)
+- **非数字会话 id 撞库**: 路由允许字符串 `sessionId`,`Number('abc')` 为 NaN 被 better-sqlite3 绑成 NULL,抛 `NOT NULL constraint failed: agent_plans.session_id`;现在统一归一到匿名会话 0
+- **达到 20 轮上限前端无感知**: `max_loops_reached` 事件此前被公共事件层丢弃,前端只见流关闭;现在明确提示并可"继续"接续
+- 数据库迁移扩展至 v15(备份演练字段 / 告警 AI 诊断)
+
 ## [1.2.2] - 2026-09-18
 
 ### Changed
