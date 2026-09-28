@@ -1,0 +1,71 @@
+name: Publish Image
+
+# 手动发布预构建镜像到 Docker Hub(供 NAS / homelab 用户 pull 更新,无需本地构建)。
+#
+# 为什么是手动而不是每次推 main 自动发布:镜像一旦推到公共仓库就是对外可见的产物,
+# 每次提交都覆盖 latest 会让"我拉到的到底是哪版"变得不可追。tag 发布已由 release.yml
+# 自动完成(v*.*.* → latest + 语义化版本号 + amd64/arm64);这里补的是两者之间的空档:
+# 「main 上已有新功能,但我还不想打版本号,只想先给自己/朋友一台机器拉一次」。
+#
+# 想改成推 main 自动发布:在 on: 下加
+#   push: { branches: [main], paths: ['backend/**','frontend/**','Dockerfile'] }
+# 并保留下面的 tag 策略(first 7 位 commit sha 会把每个构建区分开)。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '镜像标签(留空则用 commit sha;输入 latest 会覆盖最新标签)'
+        required: false
+        default: ''
+      platforms:
+        description: '目标架构'
+        required: true
+        default: linux/amd64
+        type: choice
+        options:
+          - linux/amd64
+          - linux/amd64,linux/arm64
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Resolve tags
+        id: tags
+        run: |
+          SHA7=$(git rev-parse --short=7 HEAD)
+          EXTRA="${{ inputs.tag }}"
+          if [ -n "$EXTRA" ]; then
+            echo "tags=stanly1997/opsdash:$EXTRA" >> $GITHUB_OUTPUT
+          else
+            echo "tags=stanly1997/opsdash:edge,stanly1997/opsdash:sha-$SHA7" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

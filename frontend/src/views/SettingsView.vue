@@ -189,7 +189,8 @@
             <p class="text-surface-300">SSE(经典传输):<code class="font-mono text-accent">{{ mcp.sseUrl }}</code><span class="ml-2 text-surface-600">Claude Desktop / Cursor</span></p>
             <p class="text-surface-300">stdio 桥(仅 stdio 的客户端):<code class="font-mono text-accent">node mcp/stdio-bridge.mjs</code><span class="ml-2 text-surface-600">环境变量 COMPOSEOPS_URL / COMPOSEOPS_TOKEN</span></p>
           </div>
-          <p class="text-surface-500">认证:Authorization: Bearer &lt;token&gt;(HTTP 端点也可 ?token=)· 会话数:{{ mcp.sessionCount }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
+          <p class="text-surface-500">认证:Authorization: Bearer &lt;token&gt;(HTTP 端点也可 ?token=)· 会话数:{{ mcp.sessionCount }} · 协议:{{ mcp.protocolVersion || '2026-07-28' }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
+          <p class="text-surface-500">高危工具(重建容器、改 Compose、回滚等)在 MCP 通道必须由调用方显式传 <code class="font-mono text-surface-400">confirm: true</code> 才会执行——这条通道没有确认弹窗,用显式开关代替。</p>
           <div class="flex flex-wrap items-center gap-2">
             <button class="btn-secondary !py-1.5 text-xs" @click="copyMcpConfig">复制客户端配置</button>
             <button class="btn-secondary !py-1.5 text-xs" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" />重置 Token</button>
