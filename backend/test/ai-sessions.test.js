@@ -7,7 +7,7 @@ import test from 'node:test';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-ai-sessions-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
-const { addAiMessage, getAiHistory, listAiSessions, clearAiSession, clearAiSessions, clearAiHistory, truncateAiHistoryFrom } = await import('../src/lib/db.js');
+const { addAiMessage, getAiHistory, listAiSessions, clearAiSession, clearAiSessions, clearAiHistory, truncateAiHistoryFrom, createAgentPlan, getAgentPlan } = await import('../src/lib/db.js');
 
 test('ai: 会话消息按 sessionId 隔离', () => {
   clearAiHistory();
@@ -107,4 +107,23 @@ test('ai: 截断某条消息起的历史(编辑并重发)', () => {
   assert.equal(truncateAiHistoryFrom(0, 5), 0);
   assert.equal(truncateAiHistoryFrom(77, -1), 0);
   assert.equal(getAiHistory(50, 77).length, 2, '非法调用后原会话数据保持不变');
+});
+
+test('ai: 非数字 sessionId 归一到匿名会话,不撞 NOT NULL 约束', () => {
+  clearAiHistory();
+  // 路由 schema(numericId)允许字符串 id:Number('smoke-1') 是 NaN,
+  // 此前直接透传会让 better-sqlite3 绑成 NULL,抛 "NOT NULL constraint failed"。
+  const id = addAiMessage('user', '匿名会话消息', null, 'smoke-1');
+  assert.ok(Number.isSafeInteger(id) && id > 0);
+  const anonymous = getAiHistory(50, 0);
+  assert.equal(anonymous.length, 1);
+  assert.equal(anonymous[0].content, '匿名会话消息');
+
+  // 会话列表里不应凭空多出一个 NaN 会话
+  const sessions = listAiSessions(10);
+  assert.ok(sessions.every((session) => Number.isSafeInteger(session.sessionId)));
+
+  // 执行计划走同一条归一(否则落库直接抛 NOT NULL)
+  const planId = createAgentPlan('smoke-1', '非数字会话的执行计划', {}, null, null);
+  assert.equal(getAgentPlan(planId).session_id, 0);
 });

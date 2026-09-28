@@ -6,6 +6,11 @@
       <div class="page-actions flex-wrap">
         <select v-model="projectId" class="input w-full sm:w-auto !min-h-9 max-w-52 !py-1 text-xs" title="可选的当前项目上下文"><option value="">自动识别项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
         <button class="btn-secondary !min-h-9 !px-3 !text-xs" :disabled="loading" title="刷新纳管项目" @click="loadProjects"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />刷新</button>
+        <select class="input w-full sm:w-auto !min-h-9 !py-1 text-xs" :value="approvalMode" title="高危操作确认策略(本会话生效)" @change="changeApprovalMode($event.target.value)">
+          <option value="ask">逐次确认</option>
+          <option value="allow_writes">放行非高危</option>
+          <option value="full">仅极高危确认</option>
+        </select>
         <button v-if="running" class="btn-secondary !border-rose-900/60 !text-rose-300" title="中断当前 Agent 执行" @click="interrupt"><Square class="h-4 w-4" />中断</button>
       </div>
     </div>
@@ -158,7 +163,16 @@ const chat = useAgentChat({
   },
   onApproval: (message, kind) => { if (kind === 'approved') appendActivity('已确认', '变更继续执行', { status: 'done' }); else appendActivity('已拒绝', '变更未执行', { status: 'rejected' }); },
 });
-const { messages, input, running, sessionId, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom, setSubscriberActive } = chat;
+const { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom, setSubscriberActive } = chat;
+// 审批模式是后端会话级设置(ApprovalGate),这里切换后由 approval_mode 事件回执同步。
+async function changeApprovalMode(mode) {
+  try {
+    await setApprovalMode(mode);
+    toast.success({ ask: '已切换为逐次确认', allow_writes: '非高危操作将直接执行', full: '仅极高危操作需要确认' }[mode] || '审批模式已更新');
+  } catch (error) {
+    toast.error(`审批模式切换失败:${error.message}`);
+  }
+}
 const prompts = ['查看我现在可以操作的项目', '搜索 sherpa-onnx-matcha-zh-tts 的 Docker Compose 信息', '记住我偏好先查看日志再执行重启'];
 const sessionQueryLower = computed(() => sessionQuery.value.trim().toLowerCase());
 const messageQuery = ref('');

@@ -105,6 +105,9 @@ export function toPublicAgentEvent(event) {
   }
   if (event.type === 'tool_rejected') return { type: 'tool_rejected', tool: String(event.tool || '') };
   if (event.type === 'tool_error') return { type: 'tool_error', tool: String(event.tool || ''), error: cleanError(event.error) };
+  // 本轮生效的审批模式:此前被本层丢弃,后端 /agent/approval-mode 因此成了无人的孤岛,
+  // 前端也无从显示"现在到底问不问"。透出后工作台据此渲染模式选择器。
+  if (event.type === 'approval_mode') return { type: 'approval_mode', mode: String(event.mode || 'ask') };
   // 达到最大循环次数:此前被本层丢弃,前端只看到流关闭无任何提示。
   if (event.type === 'max_loops_reached') return { type: 'max_loops_reached', maxLoops: Number(event.maxLoops) || 0 };
   // 后台任务搭车通知:一行式任务摘要,已脱敏(drainTaskNotifications 只给状态与尾部预览)

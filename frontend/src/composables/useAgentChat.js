@@ -29,6 +29,8 @@ function createChannel() {
     input: ref(''),
     running: ref(false),
     sessionId: ref(null),
+    // 本轮生效的审批模式,由后端 approval_mode 事件同步(会话级,与 approval-gate 同一维度)
+    approvalMode: ref('ask'),
     pendingQueue: ref([]),
     controller: null,
     starting: false,
@@ -66,6 +68,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   const input = state.input;
   const running = state.running;
   const sessionId = state.sessionId;
+  const approvalMode = state.approvalMode;
   const pendingQueue = state.pendingQueue;
   const scrollEl = ref(null);
   const subscriber = { onEventExtra, onApproval };
@@ -278,6 +281,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       assistant.confirmation = null;
       assistant.content += `${assistant.content ? '\n\n' : ''}已达最大工具循环次数(${Number(event.maxLoops) || 20} 轮),本次执行终止。可发送"继续"接续处理,或拆小任务后重试。`;
     }
+    else if (event.type === 'approval_mode') approvalMode.value = String(event.mode || 'ask');
     else if (event.type.startsWith('tool_')) { trackTool(assistant, event); }
     else if (event.type === 'interrupted') {
       flushTokens();
@@ -396,5 +400,23 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
 
   onBeforeUnmount(() => state.subscribers.delete(subscriber));
 
-  return { messages, input, running, sessionId, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, ensureSession, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom, setSubscriberActive };
+  // 切换本会话审批模式:后端 ApprovalGate 按 sessionId 记忆,这里只负责把
+  // 选择立刻反映到界面(不等下一轮 approval_mode 事件回来)。
+  // 尚未建会话时先建:否则模式会落进匿名 default 桶,而首条消息发出的
+  // 执行流用的是真实 sessionId 桶,选择看起来"没生效"。
+  async function setApprovalMode(mode) {
+    const next = String(mode || '');
+    if (!['ask', 'allow_writes', 'full'].includes(next) || next === approvalMode.value) return;
+    const previous = approvalMode.value;
+    approvalMode.value = next;
+    try {
+      await ensureSession();
+      await api.setAgentApprovalMode({ sessionId: sessionId.value, mode: next });
+    } catch (error) {
+      approvalMode.value = previous;
+      throw error;
+    }
+  }
+
+  return { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, ensureSession, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom, setSubscriberActive };
 }

@@ -572,19 +572,31 @@ export function setSetting(key, value) {
   ).run(key, value);
 }
 
+/**
+ * 会话 id 归一:非数字一律视为匿名会话 0。
+ * 路由 schema(numericId)允许字符串 id,客户端传 "abc" 时 Number() 得到 NaN,
+ * better-sqlite3 会把 NaN 绑成 NULL,撞上 session_id 的 NOT NULL 约束直接抛库错误,
+ * 用户看到的是"NOT NULL constraint failed: agent_plans.session_id"这种无从下手的信息。
+ */
+function toSessionId(value) {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : 0;
+}
+
 export function addAiMessage(role, content, context = null, sessionId = null) {
+  const sid = toSessionId(sessionId);
   db.prepare(
     'INSERT INTO ai_history(role, content, context, session_id) VALUES(?, ?, ?, ?)'
-  ).run(role, content, context ? JSON.stringify(context) : null, sessionId == null ? 0 : sessionId);
+  ).run(role, content, context ? JSON.stringify(context) : null, sid);
   // 必须在下面那次 ai_sessions 写入之前取 rowid:会话行是新建时,后续的
   // last_insert_rowid() 会变成 ai_sessions 的 rowid,返回值就不再是消息 id
   // (调用方拿它做历史截断定位,错位会删到别的区间)。
   const messageId = db.prepare('SELECT last_insert_rowid() AS id').get().id;
-  if (sessionId != null && Number(sessionId) !== 0) {
+  if (sid !== 0) {
     db.prepare(`
       INSERT INTO ai_sessions(session_id, updated_at) VALUES(?, datetime('now'))
       ON CONFLICT(session_id) DO UPDATE SET updated_at = datetime('now')
-    `).run(Number(sessionId));
+    `).run(sid);
   }
   return messageId;
 }
@@ -854,7 +866,7 @@ export function createAgentPlan(sessionId, userMessage, planJson, projectId = nu
     'INSERT INTO agent_plans(id, session_id, user_message, plan_json, status, project_id, container_id) VALUES(?, ?, ?, ?, ?, ?, ?)'
   ).run(
     planId,
-    sessionId == null ? 0 : Number(sessionId),
+    toSessionId(sessionId),
     String(userMessage || ''),
     JSON.stringify(planJson || {}),
     'pending',

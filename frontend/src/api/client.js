@@ -247,6 +247,7 @@ export const api = {
   agentExecuteStream: (payload, onEvent, signal) => streamSse('/ai/agent/execute-stream', payload, onEvent, signal),
   agentApprove: (payload) => request('/ai/agent/approve', { method: 'POST', body: JSON.stringify(payload) }),
   agentFeedback: (payload) => request('/ai/agent/feedback', { method: 'POST', body: JSON.stringify(payload) }),
+  setAgentApprovalMode: (payload) => request('/ai/agent/approval-mode', { method: 'POST', body: JSON.stringify(payload) }),
   getAgentExecutions: (planId = '') => request(`/ai/agent/executions${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
   // compose 语义校验 / 变更预览
   validateCompose: (projectId, fileIndex, content) => request(`/projects/${projectId}/compose/validate`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) }),
