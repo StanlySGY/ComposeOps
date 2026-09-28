@@ -36,10 +36,15 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
-          # Extract changelog for this version
-          awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '1d;$d' > release-notes.md
-          
+
+          # Extract changelog for this version.
+          # 显式状态机而非 awk 区间(/start/,/end/):起始行 "## [x.y.z] - 日期"
+          # 自己也包含 "## [",区间起止同线时只输出这一行,掐头去尾后为空,
+          # 导致每次发版都静默走 git log 兜底(v1.2.0 起一直如此)。
+          # start/end 都用字面量比较(index/substr),避免 -v 传参与正则的
+          # 双重转义问题。
+          awk -v header="## [$VERSION]" 'index($0, header) == 1 {f=1; next} f && substr($0, 1, 3) == "## " {f=0} f' CHANGELOG.md > release-notes.md
+
           # Fallback if no changelog entry
           if [ ! -s release-notes.md ]; then
             echo "Release $VERSION" > release-notes.md
