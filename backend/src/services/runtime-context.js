@@ -13,6 +13,15 @@ import { scanProjects } from './scanner.js';
 const CACHE_TTL_MS = 10_000;
 let cache = { at: 0, text: '' };
 
+function getCachedSnapshot() {
+  return cache.text && Date.now() - cache.at < CACHE_TTL_MS ? cache.text : '';
+}
+
+function writeCache(text) {
+  cache.at = Date.now();
+  cache.text = text;
+}
+
 function formatProject(project, { withContainers = true } = {}) {
   const state = project.status || 'unknown';
   const base = `- ${project.projectName} [${state}]`;
@@ -32,7 +41,10 @@ function formatProject(project, { withContainers = true } = {}) {
  */
 export async function buildRuntimeSnapshot(opts = {}) {
   const force = !!opts.force;
-  if (!force && cache.text && Date.now() - cache.at < CACHE_TTL_MS) return cache.text;
+  if (!force) {
+    const cached = getCachedSnapshot();
+    if (cached) return cached;
+  }
   try {
     const maxProjects = Math.max(1, Math.min(Number(opts.maxProjects) || 20, 50));
     const projects = await scanProjects();
@@ -50,14 +62,16 @@ export async function buildRuntimeSnapshot(opts = {}) {
     ].filter(Boolean);
 
     const text = lines.join('\n').slice(0, 2000);
-    cache = { at: Date.now(), text };
+    // 写缓存收进同步助手:await 之后不直接读写模块状态,规避 require-atomic-updates 竞态
+    writeCache(text);
     return text;
   } catch {
-    return cache.text || '';
+    return getCachedSnapshot() || '';
   }
 }
 
 /** 清空快照缓存(切换主机等场景)。 */
 export function invalidateRuntimeSnapshot() {
-  cache = { at: 0, text: '' };
+  cache.at = 0;
+  cache.text = '';
 }
