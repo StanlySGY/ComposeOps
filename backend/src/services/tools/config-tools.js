@@ -4,6 +4,7 @@
  */
 import { getComposeBackup, listComposeBackups } from '../../lib/db.js';
 import { execReadonly, readContainerLogs } from '../../lib/docker-exec.js';
+import { assertCommandAllowed } from '../../lib/command-guard.js';
 import { callOpenAI, getAiConfig } from '../ai.js';
 import { readCompose, saveCompose } from '../compose-runner.js';
 import { previewComposeChange, validateComposeSemantics } from '../compose-validator.js';
@@ -425,6 +426,8 @@ export function registerConfigTools(agent) {
       },
       execute: async (params, context) => {
         if (!context.container) throw new Error('容器不属于当前项目');
+        // 输出侧护栏:LLM 生成的探测命令也过灾难模式静态检查(白名单之外的纵深防御)
+        assertCommandAllowed(params.command);
         const container = getActivityDocker().getContainer(context.container.id);
         return execReadonly(container, params.command);
       },

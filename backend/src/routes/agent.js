@@ -24,12 +24,27 @@ import {
 } from '../lib/db.js';
 import { getAgent } from '../services/agent.js';
 import { idField, limitField, numericId } from '../lib/schemas.js';
+import { checkRateLimit } from '../lib/rate-limit.js';
 import { redactRows, redactValue } from '../lib/redaction.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
 import { buildCompactSummary } from '../services/agent/compaction.js';
 import { randomUUID } from 'node:crypto';
 
 export default async function agentRoutes(fastify) {
+
+/** AI 端点进程内限流(单用户宽配额,防手滑重放与失控循环刷爆上游)。 */
+function aiRateLimit(limit, windowMs = 60000) {
+  return async (request, reply) => {
+    const verdict = checkRateLimit(`ai:${request.ip || 'local'}`, limit, windowMs);
+    if (!verdict.allowed) {
+      return reply.code(429).send({
+        error: 'rate_limited',
+        message: '请求过于频繁,请稍后再试',
+        retryAfterMs: verdict.retryAfterMs,
+      });
+    }
+  };
+}
   // POST /api/v1/ai/agent/sessions —— 创建聊天会话
   fastify.post('/agent/sessions', async () => ({ sessionId: createAiSession() }));
 
@@ -76,6 +91,7 @@ export default async function agentRoutes(fastify) {
 
   // POST /api/v1/ai/agent/execute-stream —— Tool-calling 原生循环 + SSE 流式推送
   fastify.post('/agent/execute-stream', {
+    preHandler: aiRateLimit(15),
     schema: {
       body: {
         type: 'object',
@@ -194,6 +210,7 @@ export default async function agentRoutes(fastify) {
 
   // POST /api/v1/ai/agent/approve —— 批准工具调用(支持确认弹窗编辑参数)
   fastify.post('/agent/approve', {
+    preHandler: aiRateLimit(60),
     schema: {
       body: {
         type: 'object',
@@ -242,6 +259,7 @@ export default async function agentRoutes(fastify) {
   // POST /api/v1/ai/agent/compact —— 会话压缩:为分界前历史生成交接摘要并推进分界点。
   // 摘要失败(未配 Key/网络异常)自动回退确定性事实拼接,响应里以 fallback 标记。
   fastify.post('/agent/compact', {
+    preHandler: aiRateLimit(10),
     schema: {
       body: {
         type: 'object',

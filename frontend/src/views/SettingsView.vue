@@ -25,6 +25,17 @@
         <label class="md:col-span-2">API Key<input v-model="ai.apiKey" type="password" class="input" :placeholder="aiMasked ? '已配置,留空保持不变' : 'sk-...'" /></label>
         <label class="md:col-span-2">系统 Prompt<textarea v-model="ai.systemPrompt" rows="6" class="input"></textarea></label>
       </div>
+      <div class="form-grid mt-4 border-t border-surface-800 pt-4">
+        <h3 class="section-title md:col-span-2 mb-0!">联网检索 Grounding</h3>
+        <label>检索后端
+          <select v-model="ai.searchProvider" class="input">
+            <option v-for="item in (ai.searchProviders || ['builtin'])" :key="item" :value="item">{{ searchProviderLabel(item) }}</option>
+          </select>
+        </label>
+        <label v-if="ai.searchProvider === 'searxng'">SearXNG Base URL<input v-model="ai.searchBaseUrl" class="input" placeholder="https://searx.example.com" /></label>
+        <label v-else-if="ai.searchProvider !== 'builtin' && ai.searchProvider !== 'duckduckgo'">检索 API Key<input v-model="ai.searchApiKey" type="password" class="input" :placeholder="searchMasked ? '已配置,留空保持不变' : '在此输入 Key'" /></label>
+        <p v-else class="md:col-span-2 text-xs text-surface-500">内置检索(GitHub + DuckDuckGo)无需任何配置;需要更强检索质量时可切换 Tavily / Brave / 自托管 SearXNG,失败自动回退内置。</p>
+      </div>
       <button class="btn-primary" @click="saveAi"><Save class="w-4 h-4" />保存 AI 配置</button>
     </section>
 
@@ -217,7 +228,7 @@ const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'personal', l
 const route = useRoute();
 const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';
-const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({}); const aiMasked = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
+const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({}); const aiMasked = ref(false); const searchMasked = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
 const toast = useToastStore();
 const aiModels = ref([]);
 const aiModelsLoading = ref(false);
@@ -352,8 +363,21 @@ async function confirmRemoveHost() {
   } catch (e) { fail(e); }
 }
 
-onMounted(async () => { try { await aiStore.loadConfig(); const cfg = aiStore.config; ai.value = { baseUrl: cfg.baseUrl, apiKey: '', model: cfg.model, systemPrompt: cfg.systemPrompt }; aiMasked.value = !!cfg.apiKey; if (cfg.baseUrl && cfg.apiKey) void fetchAiModels(); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } });
-async function saveAi() { try { const payload = { ...ai.value }; if (!payload.apiKey) delete payload.apiKey; await aiStore.saveConfig(payload); ai.value.apiKey = ''; aiMasked.value = true; ok('AI 配置已保存'); } catch (e) { fail(e); } }
+onMounted(async () => { try { await aiStore.loadConfig(); const cfg = aiStore.config; ai.value = { baseUrl: cfg.baseUrl, apiKey: '', model: cfg.model, systemPrompt: cfg.systemPrompt, searchProvider: cfg.searchProvider || 'builtin', searchProviders: cfg.searchProviders, searchApiKey: '', searchBaseUrl: cfg.searchBaseUrl || '' }; aiMasked.value = !!cfg.apiKey; searchMasked.value = !!cfg.searchApiKey; if (cfg.baseUrl && cfg.apiKey) void fetchAiModels(); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } });
+async function saveAi() {
+  try {
+    const payload = { ...ai.value };
+    if (!payload.apiKey) delete payload.apiKey;
+    if (!payload.searchApiKey) delete payload.searchApiKey;
+    await aiStore.saveConfig(payload);
+    ai.value.apiKey = ''; aiMasked.value = true;
+    ai.value.searchApiKey = ''; searchMasked.value = true;
+    ok('AI 配置已保存');
+  } catch (e) { fail(e); }
+}
+function searchProviderLabel(value) {
+  return { builtin: '内置(GitHub + DuckDuckGo)', duckduckgo: 'DuckDuckGo', tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG(自托管)' }[value] || value;
+}
 async function savePreferences() { try { preferences.value = await api.savePreferences(preferences.value); ok('个人偏好已保存'); } catch (e) { fail(e); } }
 async function changePassword() { try { if (password.value.nextPassword.length < 10) throw new Error('新密码至少需要 10 个字符'); await api.changePassword(password.value); password.value = { currentPassword: '', nextPassword: '' }; ok('管理员密码已修改，其他会话已退出'); } catch (e) { fail(e); } }
 async function importData(event) { try { const file = event.target.files?.[0]; if (!file) return; await api.importData(JSON.parse(await file.text())); ok('设置与项目备注已导入，刷新页面后生效'); event.target.value = ''; } catch (e) { fail(e); } }

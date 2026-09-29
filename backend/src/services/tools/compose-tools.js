@@ -11,6 +11,7 @@ import { createBackgroundTask } from '../agent/background-tasks.js';
 import { prepareProjectAction } from '../project-action-runner.js';
 import { findProjectContainer, scanProjects } from '../scanner.js';
 import { redactText } from '../../lib/redaction.js';
+import { assertCommandAllowed } from '../../lib/command-guard.js';
 
 function collectOutput() {
   let text = '';
@@ -294,6 +295,9 @@ export function registerComposeTools(agent) {
         if (!context.container) throw new Error('容器不属于当前项目');
         const command = String(params.command || '').trim();
         if (!command) throw new Error('命令不能为空');
+
+        // 输出侧护栏:拦下灾难性命令(rm -rf /、mkfs、fork 炸弹、curl|sh 等)
+        assertCommandAllowed(command);
 
         // 检查 ENABLE_SHELL 全局开关(与 Web Shell 一致的安全边界)
         const enableShell = process.env.ENABLE_SHELL === '1';

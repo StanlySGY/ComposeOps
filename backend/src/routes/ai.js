@@ -23,7 +23,9 @@ import { findProjectContainer } from '../services/scanner.js';
 import { readCompose } from '../services/compose-runner.js';
 import { readWorkspaceCompose } from '../services/compose-workspace.js';
 import { readContainerLogs } from '../lib/docker-exec.js';
+import { getSearchConfig, setSearchConfig, SEARCH_PROVIDERS } from '../services/ai.js';
 import { idField, limitField, numericId } from '../lib/schemas.js';
+import { checkRateLimit } from '../lib/rate-limit.js';
 import { harvestSecretValues, redactSecrets } from '../lib/secret-redactor.js';
 
 /** 统一的 exec/日志读写来自 ../lib/docker-exec.js,见其中实现与白名单说明。 */
@@ -46,16 +48,39 @@ import { harvestSecretValues, redactSecrets } from '../lib/secret-redactor.js';
 
 export default async function aiRoutes(fastify) {
 
+/** AI 端点进程内限流(单用户宽配额,防手滑重放与失控循环刷爆上游)。 */
+function aiRateLimit(limit, windowMs = 60000) {
+  return async (request, reply) => {
+    const verdict = checkRateLimit(`ai:${request.ip || 'local'}`, limit, windowMs);
+    if (!verdict.allowed) {
+      return reply.code(429).send({
+        error: 'rate_limited',
+        message: '请求过于频繁,请稍后再试',
+        retryAfterMs: verdict.retryAfterMs,
+      });
+    }
+  };
+}
+
   // GET /api/v1/ai/config
   fastify.get('/config', async () => {
     const cfg = getAiConfig();
-    return { ...cfg, apiKey: cfg.apiKey ? '••••' + cfg.apiKey.slice(-4) : '' };
+    const search = getSearchConfig();
+    return {
+      ...cfg,
+      apiKey: cfg.apiKey ? '••••' + cfg.apiKey.slice(-4) : '',
+      searchProvider: search.provider,
+      searchApiKey: search.apiKey ? '••••' + search.apiKey.slice(-4) : '',
+      searchBaseUrl: search.baseUrl,
+      searchProviders: SEARCH_PROVIDERS,
+    };
   });
 
   // POST /api/v1/ai/config  body: { baseUrl, apiKey, model, systemPrompt }
   // baseUrl 的协议校验留给 setAiConfig(它 new URL 后返回 invalid_ai_config),
   // schema 不加 format: 'uri',否则错误码会变成 validation_failed。
   fastify.post('/config', {
+    preHandler: aiRateLimit(10),
     schema: {
       body: {
         type: 'object',
@@ -65,13 +90,17 @@ export default async function aiRoutes(fastify) {
           apiKey: { type: 'string', maxLength: 4096 },
           model: { type: 'string', maxLength: 512 },
           systemPrompt: { type: 'string', maxLength: 40000 },
+          searchProvider: { type: 'string', maxLength: 32 },
+          searchApiKey: { type: 'string', maxLength: 4096 },
+          searchBaseUrl: { type: 'string', maxLength: 2048 },
         },
       },
     },
   }, async (request, reply) => {
-    const { baseUrl, apiKey, model, systemPrompt } = request.body || {};
+    const { baseUrl, apiKey, model, systemPrompt, searchProvider, searchApiKey, searchBaseUrl } = request.body || {};
     try {
       setAiConfig({ baseUrl, apiKey, model, systemPrompt });
+      setSearchConfig({ provider: searchProvider, apiKey: searchApiKey, baseUrl: searchBaseUrl });
       return { ok: true };
     } catch (error) {
       return reply.code(400).send({ error: 'invalid_ai_config', message: error.message });
@@ -83,6 +112,7 @@ export default async function aiRoutes(fastify) {
   // SSRF 防护:强制 http(s) 协议并封禁云元数据端点;刻意不封全部私网段——
   // 本面板面向 homelab,LAN 内自建 LLM 端点(如 Ollama)是合法主场景。
   fastify.post('/fetch-models', {
+    preHandler: aiRateLimit(15),
     schema: {
       body: {
         type: 'object',
@@ -118,6 +148,7 @@ export default async function aiRoutes(fastify) {
   // POST /api/v1/ai/logs  body: { projectId, containerId, tail? } —— AI 排障使用的容器日志上下文
   // tail 越界由处理函数 clamp 到 20..2000,schema 只挡非数值。
   fastify.post('/logs', {
+    preHandler: aiRateLimit(60),
     schema: {
       body: {
         type: 'object',
@@ -237,6 +268,7 @@ export default async function aiRoutes(fastify) {
   // 漏一个就会被 removeAdditional 剥掉,诊断证据里静默少一段。
   // rawLogs 上限取服务端 slice(-50000) 的数倍,超出部分本就只保留尾部。
   fastify.post('/diagnose', {
+    preHandler: aiRateLimit(15),
     schema: {
       body: {
         type: 'object',

@@ -412,13 +412,101 @@ export {
 };
 
 /**
- * 轻量联网检索(Grounding)。
- * 优先 DuckDuckGo Instant Answer API(零 Key),失败/无结果时回退 HTML 摘要抽取。
- * 任何异常都返回空数组,绝不阻断主对话流。
+ * 联网检索后端配置:builtin(默认,GitHub+DuckDuckGo 零 Key)之外可切换
+ * Tavily / Brave(商用 API,需 Key)或自托管 SearXNG(需 Base URL + JSON 输出)。
+ * 配置的后端失败或无结果时自动回退 builtin,绝不阻断主对话流。
+ */
+export const SEARCH_PROVIDERS = ['builtin', 'tavily', 'brave', 'searxng'];
+
+export function getSearchConfig() {
+  return {
+    provider: getSetting('ai.search.provider', 'builtin'),
+    apiKey: getSetting('ai.search.api_key', ''),
+    baseUrl: getSetting('ai.search.base_url', ''),
+  };
+}
+
+export function setSearchConfig({ provider, apiKey, baseUrl } = {}) {
+  if (provider !== undefined) {
+    if (!SEARCH_PROVIDERS.includes(provider)) throw new Error(`不支持的检索后端:${provider}`);
+    setSetting('ai.search.provider', String(provider).slice(0, 32));
+  }
+  if (typeof apiKey === 'string') setSetting('ai.search.api_key', apiKey.slice(0, 1000));
+  if (typeof baseUrl === 'string') setSetting('ai.search.base_url', baseUrl.slice(0, 500));
+}
+
+async function searchTavily(q, { apiKey }) {
+  if (!apiKey) throw new Error('未配置 Tavily API Key');
+  const resp = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, query: q, max_results: 5, search_depth: 'basic' }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) throw new Error(`tavily ${resp.status}`);
+  const data = await resp.json().catch(() => ({}));
+  return (Array.isArray(data?.results) ? data.results : [])
+    .map((item) => ({ title: String(item.title || '').slice(0, 120), url: item.url || '', snippet: String(item.content || '').slice(0, 300), sourceType: 'search_summary' }))
+    .filter((item) => item.title || item.snippet)
+    .slice(0, 5);
+}
+
+async function searchBrave(q, { apiKey }) {
+  if (!apiKey) throw new Error('未配置 Brave API Key');
+  const resp = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=5`, {
+    headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) throw new Error(`brave ${resp.status}`);
+  const data = await resp.json().catch(() => ({}));
+  return (Array.isArray(data?.web?.results) ? data.web.results : [])
+    .map((item) => ({ title: String(item.title || '').slice(0, 120), url: item.url || '', snippet: String(item.description || '').slice(0, 300), sourceType: 'search_summary' }))
+    .filter((item) => item.title || item.snippet)
+    .slice(0, 5);
+}
+
+async function searchSearxng(q, { baseUrl }) {
+  const base = String(baseUrl || '').replace(/\/+$/, '');
+  if (!base) throw new Error('未配置 SearXNG Base URL');
+  const resp = await fetch(`${base}/search?q=${encodeURIComponent(q)}&format=json`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) throw new Error(`searxng ${resp.status}`);
+  const data = await resp.json().catch(() => ({}));
+  return (Array.isArray(data?.results) ? data.results : [])
+    .map((item) => ({ title: String(item.title || '').slice(0, 120), url: item.url || '', snippet: String(item.content || '').slice(0, 300), sourceType: 'search_summary' }))
+    .filter((item) => item.title || item.snippet)
+    .slice(0, 5);
+}
+
+/**
+ * 轻量联网检索(Grounding)入口:配置了商用/自托管后端则优先,
+ * 失败或无结果回退内置(GitHub + DuckDuckGo)管线;任何异常都返回空数组。
  * @param {string} query
  * @returns {Promise<Array<{title:string, url:string, snippet:string}>>}
  */
 export async function searchWeb(query) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  const search = getSearchConfig();
+  if (search.provider !== 'builtin') {
+    try {
+      const custom = search.provider === 'tavily'
+        ? await searchTavily(q, search)
+        : search.provider === 'brave'
+          ? await searchBrave(q, search)
+          : await searchSearxng(q, search);
+      if (custom.length) return custom;
+    } catch (error) {
+      console.error(`[ai:search] ${search.provider} 检索失败,回退内置搜索:`, error.message);
+    }
+  }
+  return searchBuiltin(q);
+}
+
+/** 内置检索管线:GitHub 仓库/README + DuckDuckGo 摘要(零 Key)。 */
+async function searchBuiltin(query) {
   const q = String(query || '').trim();
   if (!q) return [];
   const results = [];
