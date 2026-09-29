@@ -1,3 +1,8 @@
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const APP_VERSION = require('../../package.json').version;
+
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import os from 'os';
@@ -127,6 +132,7 @@ const prevNet = {};
 
 export default async function systemRoutes(fastify) {
   fastify.get('/capabilities', async () => ({
+    version: APP_VERSION,
     shellEnabled: process.env.ENABLE_SHELL === '1',
     hostMetricsScope: process.env.HOST_METRICS === '1' ? 'host' : 'container',
   }));

@@ -211,14 +211,24 @@
       </template>
       <p v-else class="text-sm text-surface-500">启用后,外部 MCP 客户端可以用独立 Token 安全调用面板工具(默认只读:状态查询、日志、巡检等)。</p>
     </section>
-    <section v-if="tab === 'about'" class="settings-section"><h2 class="section-title">ComposeOps</h2><p class="text-sm text-surface-400">单用户 Docker Compose 运维台。默认建议仅监听本机或通过 Tailscale 访问。</p><div class="text-sm space-y-1"><p>Web Shell：{{ capabilities.shellEnabled ? '已启用' : '未启用' }}</p><p>环境指标范围：{{ capabilities.hostMetricsScope === 'host' ? '宿主机' : 'ComposeOps 容器' }}</p></div></section>
+    <section v-if="tab === 'about'" class="settings-section">
+      <h2 class="section-title">ComposeOps <span class="count-badge">v{{ capabilities.version || '?' }}</span></h2>
+      <p class="text-sm text-surface-400">单用户 Docker Compose 运维台。默认建议仅监听本机或通过 Tailscale 访问。</p>
+      <div class="text-sm space-y-1"><p>Web Shell：{{ capabilities.shellEnabled ? '已启用' : '未启用' }}</p><p>环境指标范围：{{ capabilities.hostMetricsScope === 'host' ? '宿主机' : 'ComposeOps 容器' }}</p></div>
+      <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-surface-800 pt-4">
+        <a class="btn-secondary inline-flex" href="https://github.com/StanlySGY" target="_blank" rel="noopener noreferrer"><Github class="w-4 h-4" />作者 @StanlySGY</a>
+        <a class="btn-secondary inline-flex" href="https://github.com/StanlySGY/ComposeOps" target="_blank" rel="noopener noreferrer"><Github class="w-4 h-4" />项目仓库</a>
+        <a class="btn-primary inline-flex" href="https://github.com/StanlySGY/ComposeOps/stargazers" target="_blank" rel="noopener noreferrer" title="去 GitHub 给项目点个 Star"><Star class="w-4 h-4" />觉得有用就点个 Star</a>
+      </div>
+      <p class="mt-2 text-xs text-surface-500">遇到问题或有功能建议,欢迎到仓库提 Issue;如果 ComposeOps 帮到了你,一个 Star 就是最好的鼓励。</p>
+    </section>
   </div>
 </template>
 
 <script setup>
 import { computed, markRaw, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Activity, Bell, Bot, Check, Download, FolderCog, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
+import { Activity, Bell, Bot, Check, Download, FolderCog, Github, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Star, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
 import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import { useToastStore } from '../stores/toast.js'; import StatCard from '../components/StatCard.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import StoragePruneModal from '../components/settings/StoragePruneModal.vue';
