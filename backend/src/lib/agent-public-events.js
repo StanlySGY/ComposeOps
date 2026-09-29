@@ -112,6 +112,8 @@ export function toPublicAgentEvent(event) {
   if (event.type === 'max_loops_reached') return { type: 'max_loops_reached', maxLoops: Number(event.maxLoops) || 0 };
   // 后台任务搭车通知:一行式任务摘要,已脱敏(drainTaskNotifications 只给状态与尾部预览)
   if (event.type === 'task_notice') return { type: 'task_notice', content: cleanText(String(event.content || '')).slice(0, 1000) };
+  // 会话自动压缩通知:一行式说明,前端以提示条同步展示(与 task_notice 同款 UI)。
+  if (event.type === 'compaction') return { type: 'compaction', content: cleanText(String(event.content || '')).slice(0, 300), compactedMessages: Number(event.compactedMessages) || 0 };
   if (event.type === 'error') return { type: 'error', content: cleanError(event.error || event.content) || 'Agent 执行失败' };
   if (event.type === 'interrupted') return { type: 'interrupted', reason: cleanText(event.reason || event.content) || '执行已中断' };
   return null;

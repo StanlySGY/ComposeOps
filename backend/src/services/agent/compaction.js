@@ -8,6 +8,7 @@
  *    引擎每轮把摘要注入 system、模型只读分界后的活跃区历史(双视图既有约定)。
  */
 import { UNTRUSTED_GUARD, fenceUntrusted } from '../ai.js';
+import { getAiHistory, getAiSessionCompaction, setAiSessionCompaction, setAiSessionSummary } from '../../lib/db.js';
 
 const FACT_LIMITS = {
   userTurns: 8,
@@ -152,4 +153,31 @@ export async function buildCompactSummary(messages, { callModel = null, signal =
   } catch {
     return { summary: fallback, facts, fallback: true };
   }
+}
+
+/**
+ * 会话压缩编排:从活跃区选出可压缩候选 → 生成交接摘要 → 推进分界点并落库摘要。
+ * 手动入口(POST /ai/agent/compact)与引擎的超阈值自动压缩共用;
+ * 候选不足 2 条时抛 code='nothing_to_compact',调用方各自决定如何呈现。
+ */
+export async function compactSessionHistory(sessionId, { keepRecent = 6, callModel = null } = {}) {
+  const boundary = getAiSessionCompaction(sessionId);
+  // 必须拉全量再裁剪:超过最近窗口的更早消息如果既不进摘要、又落在分界点之外,
+  // 就会永久丢失(与手动压缩路由保持同一语义)。
+  const evictable = getAiHistory(100000, sessionId).filter((item) => Number(item.id) > boundary);
+  const candidates = evictable.slice(0, Math.max(evictable.length - keepRecent, 0));
+  if (candidates.length < 2) {
+    throw Object.assign(new Error('活跃区历史太少,无需压缩'), { code: 'nothing_to_compact' });
+  }
+  const { summary, facts, fallback } = await buildCompactSummary(candidates, { callModel });
+  const newBoundary = Number(candidates[candidates.length - 1].id);
+  setAiSessionCompaction(sessionId, Math.max(newBoundary, boundary));
+  setAiSessionSummary(sessionId, summary);
+  return {
+    summary,
+    facts,
+    fallback,
+    boundary: Math.max(newBoundary, boundary),
+    compactedMessages: candidates.length,
+  };
 }

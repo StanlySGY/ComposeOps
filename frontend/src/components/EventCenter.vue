@@ -30,6 +30,7 @@
           <div v-if="expandedDiagnosisId === event.id" class="w-full basis-full rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5">
             <p class="mb-1 flex items-center gap-1 text-[11px] font-medium text-violet-300"><Sparkles class="h-3 w-3" />AI 诊断(守护模式)</p>
             <pre class="max-h-56 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-surface-200">{{ event.diagnosis || '正在诊断...' }}</pre>
+            <button v-if="event.diagnosis" class="mt-2 inline-flex items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] text-violet-300 hover:bg-violet-500/20" @click="planRepair(event)"><Wand2 class="h-3 w-3" />一键生成修复计划</button>
           </div>
         </div>
         <EmptyState icon="CircleCheckBig" icon-class="text-emerald-400" compact title="当前没有待处理事件" description="异常与告警事件会出现在这里" />
@@ -49,9 +50,10 @@
 <script setup>
 import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
+import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 import { useToastStore } from '../stores/toast.js';
-import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, Sparkles, VolumeX } from 'lucide-vue-next';
+import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, Sparkles, VolumeX, Wand2 } from 'lucide-vue-next';
 import { api, wsUrl } from '../api/client.js';
 import EmptyState from './common/EmptyState.vue';
 import ConfirmDialog from './common/ConfirmDialog.vue';
@@ -115,6 +117,20 @@ async function toggleGuardian() {
   } catch (e) {
     toast.error(e.message);
   }
+}
+/** 一键生成修复计划:把告警与 AI 诊断交给全局 Agent 抽屉,由它出计划、走确认门执行。 */
+function planRepair(eventItem) {
+  const { openAgent, updateAgentContext } = useAgentConsole();
+  const message = [
+    '请基于以下告警事件与 AI 诊断,生成一份修复计划:',
+    `- 告警:${eventItem.title}${eventItem.detail ? ` · ${eventItem.detail}` : ''}`,
+    `- AI 诊断:\n${eventItem.diagnosis || '(暂无诊断内容)'}`,
+    '要求:先做必要的只读诊断(容器状态/日志/资源)核实,再列出分步修复计划;每一步标注风险等级,涉及变更的操作先展示计划等我确认,不要直接执行。',
+  ].join('\n');
+  updateAgentContext({ page: '事件中心', mode: 'alert-repair', summary: '来自事件中心的一条告警,请生成修复计划', state: JSON.stringify({ title: eventItem.title, detail: eventItem.detail, key: eventItem.key }) });
+  openAgent();
+  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: message } }));
+  toast.success('已交给 AI 助手生成修复计划');
 }
 async function diagnose(eventItem) {
   if (diagnosingId.value) return;

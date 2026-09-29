@@ -371,12 +371,16 @@ async function compactCurrentSession() {
   }
 }
 const TOOL_ICONS = {
-  list_projects: FolderKanban,
-  get_project: FolderOpen,
-  update_compose: FileEdit,
-  restart_service: RefreshCw,
-  get_logs: FileText,
-  execute_command: Terminal,
+  'project.list_managed': FolderKanban,
+  'compose.ps': FolderOpen,
+  'compose.up': Play,
+  'compose.restart': RefreshCw,
+  'compose.logs': FileText,
+  'compose.exec': Terminal,
+  'config.edit': FileEdit,
+  'metrics.query': Activity,
+  'web.search': Globe2,
+  'memory.search': Search,
 };
 function getToolIcon(toolName) { return TOOL_ICONS[toolName] || Wrench; }
 function getToolStatusLabel(status) {

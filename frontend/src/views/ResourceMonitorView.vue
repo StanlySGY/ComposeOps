@@ -106,8 +106,8 @@
             <div class="flex items-center gap-3">
               <AlertTriangle :class="['h-4 w-4', getAlertColor(alert.metric)]" />
               <div>
-                <div class="text-sm font-medium text-zinc-200">{{ metricTypes.find(m => m.key === alert.metric)?.label }}</div>
-                <div class="mt-0.5 text-xs text-zinc-400">阈值: {{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : 'B' }}</div>
+                <div class="text-sm font-medium text-zinc-200">{{ alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric }}</div>
+                <div class="mt-0.5 text-xs text-zinc-400">阈值: {{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : ' 次' }}</div>
               </div>
             </div>
             <button @click="deleteAlertRule(alert.id)" class="text-xs text-rose-400 hover:text-rose-300">
@@ -136,7 +136,7 @@
           <div>
             <label class="mb-1 block text-sm text-zinc-300">指标类型</label>
             <select v-model="alertForm.metric" class="input">
-              <option v-for="m in metricTypes" :key="m.key" :value="m.key">{{ m.label }}</option>
+              <option v-for="m in alertMetricTypes" :key="m.key" :value="m.key">{{ m.label }}</option>
             </select>
           </div>
           <div>
@@ -144,18 +144,9 @@
             <input v-model.number="alertForm.threshold" type="number" class="input" placeholder="例如: 80" />
           </div>
           <div>
-            <label class="mb-1 block text-sm text-zinc-300">持续时间</label>
-            <select v-model="alertForm.duration" class="input">
-              <option value="1m">1 分钟</option>
-              <option value="5m">5 分钟</option>
-              <option value="10m">10 分钟</option>
-            </select>
-          </div>
-          <div>
             <label class="mb-1 block text-sm text-zinc-300">动作</label>
             <select v-model="alertForm.action" class="input">
-              <option value="notify">通知</option>
-              <option value="restart">重启容器</option>
+              <option v-for="a in alertActionOptions" :key="a.key" :value="a.key">{{ a.label }}</option>
             </select>
           </div>
         </div>
@@ -199,9 +190,21 @@ let metricsRequestId = 0;
 const alertForm = ref({
   metric: 'cpu',
   threshold: 80,
-  duration: '5m',
   action: 'notify'
 });
+
+// 告警可选指标:与统一告警引擎(alert-monitor)支持的口径一致。
+const alertMetricTypes = [
+  { key: 'cpu', label: 'CPU 占用(%)' },
+  { key: 'memory', label: '内存占用(%)' },
+  { key: 'restart_count', label: '重启次数' }
+];
+
+const alertActionOptions = [
+  { key: 'notify', label: '仅通知' },
+  { key: 'auto_restart', label: '自动重启容器' },
+  { key: 'scale', label: '自动扩容 (+1 副本)' }
+];
 
 const metricTypes = [
   { key: 'cpu', label: 'CPU', icon: Cpu, color: 'text-cyan-400', chartColor: '#06B6D4', unit: '%' },
@@ -219,7 +222,7 @@ const periods = [
 
 const containers = computed(() => projects.value.find(p => p.id === projectId.value)?.containers || []);
 const currentContainer = computed(() => containers.value.find(c => c.id === containerId.value));
-const containerAlerts = computed(() => alerts.value.filter(a => a.container === containerId.value));
+const containerAlerts = computed(() => alerts.value.filter(a => a.containerId === containerId.value));
 
 const chartData = computed(() => {
   return historySeries.value;
@@ -273,8 +276,7 @@ function getAlertColor(metric) {
   const colors = {
     cpu: 'text-cyan-400',
     memory: 'text-emerald-400',
-    network: 'text-amber-400',
-    disk: 'text-rose-400'
+    restart_count: 'text-amber-400'
   };
   return colors[metric] || 'text-zinc-400';
 }

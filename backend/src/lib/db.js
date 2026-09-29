@@ -683,6 +683,15 @@ export function getAiActiveHistory(limit = 50, sessionId = null) {
   return getAiHistory(limit);
 }
 
+/** 统计会话活跃区(分界点之后)的消息数,供自动压缩阈值判断,避免拉全量内容。 */
+export function getAiActiveMessageCount(sessionId) {
+  if (sessionId == null) return 0;
+  const boundary = getAiSessionCompaction(sessionId);
+  return db.prepare(
+    'SELECT COUNT(*) AS count FROM ai_history WHERE session_id = ? AND id > ?'
+  ).get(Number(sessionId), boundary)?.count || 0;
+}
+
 export function createAiSession() {
   let sessionId = Date.now();
   while (db.prepare('SELECT 1 FROM ai_history WHERE session_id = ? LIMIT 1').get(sessionId)) sessionId += 1;

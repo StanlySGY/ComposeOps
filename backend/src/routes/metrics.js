@@ -1,4 +1,5 @@
-import { queryContainerMetrics, configureAlert, listAlerts, deleteAlert, resolveManagedContainer } from '../services/agent-metrics.js';
+import { queryContainerMetrics, resolveManagedContainer } from '../services/agent-metrics.js';
+import { createAlertRule, listAlertRules, deleteAlertRule, ALERT_METRICS, ALERT_ACTIONS } from '../services/alert-rules.js';
 import {
   queryHistoricalMetrics,
   getMetricsStats,
@@ -42,7 +43,7 @@ export default async function metricsRoutes(fastify) {
     }
   );
 
-  // 配置告警规则
+  // 配置告警规则(统一存储 agent.alert_rules,由告警引擎评估)
   fastify.post(
     '/alerts',
     {
@@ -52,17 +53,16 @@ export default async function metricsRoutes(fastify) {
           required: ['container', 'metric', 'threshold'],
           properties: {
             container: { type: 'string', description: '容器 ID 或名称' },
-            metric: { type: 'string', enum: ['cpu', 'memory', 'network', 'disk'] },
-            threshold: { type: 'number', description: '阈值' },
-            duration: { type: 'string', maxLength: 16, pattern: '^[1-9][0-9]*(s|m|h|d)$', description: '持续时间', default: '5m' },
-            action: { type: 'string', enum: ['notify', 'restart', 'scale'], default: 'notify' }
+            metric: { type: 'string', enum: [...ALERT_METRICS] },
+            threshold: { type: 'number', description: '阈值(CPU/内存为百分比,重启次数为次数)' },
+            action: { type: 'string', enum: [...ALERT_ACTIONS, 'restart'], default: 'notify', description: 'restart 会归一化为 auto_restart' }
           }
         }
       }
     },
     async (request) => {
-      const result = await configureAlert(request.body);
-      return result;
+      const rule = await createAlertRule(request.body);
+      return { ruleId: rule.id, rule };
     }
   );
 
@@ -81,7 +81,7 @@ export default async function metricsRoutes(fastify) {
     },
     async (request) => {
       const { container } = request.query;
-      const alerts = await listAlerts(container);
+      const alerts = await listAlertRules({ container });
       return { alerts };
     }
   );
@@ -102,7 +102,7 @@ export default async function metricsRoutes(fastify) {
     },
     async (request) => {
       const { ruleId } = request.params;
-      const result = await deleteAlert(ruleId);
+      const result = await deleteAlertRule(ruleId);
       return result;
     }
   );

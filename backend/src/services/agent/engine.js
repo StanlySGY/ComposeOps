@@ -8,13 +8,16 @@ import {
   updateAgentExecution,
   addAiMessage,
   getAiActiveHistory,
+  getAiActiveMessageCount,
   getAiSessionSummary,
+  getSetting,
   listAiMemories,
 } from '../../lib/db.js';
 import { registerAgentTools, assessRisk, RISK_LEVELS } from '../agent-tools.js';
 import { PreconditionChecker, PostconditionValidator, expandMacro, MACRO_TOOLS } from '../agent-tool-categories.js';
 import { RunawayGuard } from './runaway-guard.js';
 import { drainTaskNotifications } from './background-tasks.js';
+import { compactSessionHistory } from './compaction.js';
 import { getApprovalGate } from './approval-gate.js';
 import { resolveToolContext, assertPermission, validateParams } from './planning.js';
 import { withProjectOperationLock } from '../project-operation-lock.js';
@@ -96,6 +99,22 @@ const SILENT_TURN_NUDGE = `\n\n[系统提示]上一轮你没有输出任何内�
 
 function isSilentTurn(responseText, toolCalls) {
   return !String(responseText || '').trim() && !(Array.isArray(toolCalls) && toolCalls.length);
+}
+
+/** 累计单轮 LLM 用量到执行级汇总(Tool Loop 多轮工具调用时 done 事件需要全程总量)。 */
+function accumulateUsage(total, usage) {
+  if (!usage || typeof usage !== 'object') return;
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens']) {
+    const value = Number(usage[key]);
+    if (Number.isFinite(value)) total[key] = (total[key] || 0) + value;
+  }
+  total.rounds = (total.rounds || 0) + 1;
+}
+
+/** done 事件的 usage:有累计则输出全程总量(保留最后一轮的扩展字段),否则回退最后一轮原值。 */
+function buildDoneUsage(total, lastUsage) {
+  if (!total.rounds) return lastUsage || null;
+  return { ...(lastUsage || {}), ...total };
 }
 
 export class OperationsAgent {
@@ -278,6 +297,27 @@ export class OperationsAgent {
         onEvent({ type: 'trace', trace: thought });
         return thought;
       };
+      // 会话超阈值自动压缩:活跃区消息数超过设定值(agent.auto_compact_messages,0 关闭)
+      // 时,先压缩再加载历史,避免长会话无节制膨胀顶爆上下文;手动压缩入口保留在会话菜单。
+      // 必须在读取 storedMessages / compactSummary 之前完成,本轮即可享受压缩后的视图。
+      if (context.sessionId) {
+        const autoCompactThreshold = Math.max(Math.floor(Number(getSetting('agent.auto_compact_messages', '60')) || 60), 0);
+        if (autoCompactThreshold > 0) {
+          const activeCount = getAiActiveMessageCount(Number(context.sessionId));
+          if (activeCount > autoCompactThreshold) {
+            const compactCfg = getAiConfig();
+            const compactCallModel = compactCfg.apiKey
+              ? ({ messages: compactMessages, signal }) => callOpenAI({ ...compactCfg, messages: compactMessages, stream: false, signal }).then((res) => res.content)
+              : null;
+            try {
+              const compacted = await compactSessionHistory(Number(context.sessionId), { keepRecent: 6, callModel: compactCallModel });
+              const note = `会话历史已达 ${activeCount} 条,已自动压缩 ${compacted.compactedMessages} 条为交接摘要`;
+              publishTrace('auto_compaction', note, { compactedMessages: compacted.compactedMessages });
+              onEvent({ type: 'compaction', content: note, compactedMessages: compacted.compactedMessages });
+            } catch { /* 压缩失败不阻塞本轮对话,下轮达到条件时重试 */ }
+          }
+        }
+      }
       const priorMessages = Array.isArray(context.history)
         ? context.history
           .filter((item) => ['user', 'assistant'].includes(item?.role) && typeof item.content === 'string')
@@ -378,6 +418,9 @@ export class OperationsAgent {
       let silentRetryUsed = false;
       let silentNudge = '';
       let pendingTaskNotice = '';
+      // 执行级用量汇总:工具循环可能跑多轮 LLM 调用,done 事件必须带全程累计,
+      // 否则前端只看到最后一轮的 token 数(工具调用越多失真越大)。
+      const usageTotal = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, rounds: 0 };
 
       while (loopCount < maxLoops) {
         if (abortController.signal.aborted) {
@@ -441,6 +484,7 @@ export class OperationsAgent {
           stopReason = response.finishReason;
           toolCalls = response.toolCalls;
           lastUsage = response.usage || null;
+          accumulateUsage(usageTotal, lastUsage);
           
         } catch (error) {
           if (error.name === 'AbortError') {
@@ -475,7 +519,7 @@ export class OperationsAgent {
           // 最终回复同样过值级脱敏:防止模型把工具结果里的明文密钥复述给用户/持久化。
           const finalContent = redactSecrets(responseText || '');
           // LLM 决定结束对话
-          onEvent({ type: 'done', content: finalContent, usage: lastUsage, planId });
+          onEvent({ type: 'done', content: finalContent, usage: buildDoneUsage(usageTotal, lastUsage), planId });
           publishTrace('loop_completed', 'LLM 决定结束执行', { loopCount });
           updateAgentPlan(planId, { status: 'completed', resultJson: { messages, finalContent }, executedAt: new Date().toISOString(), progressStage: '执行完成', progressPercent: 100, updatedAt: new Date().toISOString() });
           if (context.sessionId) addAiMessage('assistant', finalContent, { agent: true, projectId: context.projectId || null, trace }, Number(context.sessionId));
@@ -629,7 +673,7 @@ export class OperationsAgent {
         // 未知 stop_reason,结束循环
         const unknownContent = redactSecrets(responseText || '');
         messages.push({ role: 'assistant', content: responseText || null });
-        onEvent({ type: 'done', content: unknownContent, usage: lastUsage, planId });
+        onEvent({ type: 'done', content: unknownContent, usage: buildDoneUsage(usageTotal, lastUsage), planId });
         if (context.sessionId) addAiMessage('assistant', unknownContent, { agent: true, projectId: context.projectId || null, trace }, Number(context.sessionId));
         publishTrace('loop_completed', 'Agent 完成回答', { loopCount });
         updateAgentPlan(planId, { status: 'completed', resultJson: { messages, finalContent: unknownContent }, executedAt: new Date().toISOString(), progressStage: '执行完成', progressPercent: 100, updatedAt: new Date().toISOString() });

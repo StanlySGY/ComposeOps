@@ -2,8 +2,9 @@
  * 维护 / 告警 / 指标域工具注册(maintenance.* alert.* metrics.query backup.trigger …)。
  * 由 agent-tools.js 拆分 —— 工具注册链与 helper 逐字节搬运。
  */
-import { addComposeBackup, addPerformanceBaseline, getSetting, setSetting } from '../../lib/db.js';
-import { configureAlert, deleteAlert, listAlerts, queryContainerMetrics } from '../agent-metrics.js';
+import { addComposeBackup, addPerformanceBaseline } from '../../lib/db.js';
+import { createAlertRule, deleteAlertRule, listAlertRules } from '../alert-rules.js';
+import { queryContainerMetrics } from '../agent-metrics.js';
 import { readCompose } from '../compose-runner.js';
 import { createJob, listJobs } from '../cron-scheduler.js';
 import { getActivityDocker } from '../docker-hosts.js';
@@ -35,15 +36,6 @@ function runSafeHostCommand(command) {
     return execFileSync(selected[0], selected[1], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 }).trim();
   } catch (error) {
     throw Object.assign(new Error(`服务器命令执行失败: ${error.message}`), { statusCode: 502 });
-  }
-}
-
-function readAlertRules() {
-  try {
-    const parsed = JSON.parse(getSetting('agent.alert_rules', '[]'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
   }
 }
 
@@ -116,24 +108,18 @@ export function registerMaintenanceTools(agent) {
         required: ['projectId', 'service', 'metric', 'threshold', 'action'],
       },
       execute: async (params) => {
-        const rules = readAlertRules();
-        const rule = {
-          id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        const rule = await createAlertRule({
           projectId: params.projectId,
-          service: String(params.service || ''),
+          service: params.service,
           metric: params.metric,
           threshold: Number(params.threshold),
           action: params.action,
-          createdAt: new Date().toISOString(),
-        };
-        rules.push(rule);
-        setSetting('agent.alert_rules', JSON.stringify(rules));
-        return { created: true, rule, note: '规则已保存;阈值判定由告警引擎按需执行' };
+        });
+        return { ok: true, ruleId: rule.id, rule, note: '规则已保存,由告警引擎按轮询周期评估(内置 10 分钟冷却)' };
       },
       undo: async (params, result) => {
-        const rules = readAlertRules().filter((item) => item.id !== result?.rule?.id);
-        setSetting('agent.alert_rules', JSON.stringify(rules));
-        return { ok: true, removed: result?.rule?.id || null };
+        const outcome = await deleteAlertRule(result?.rule?.id);
+        return { ok: true, removed: result?.rule?.id || null, deleted: outcome.deleted };
       },
     })
     .registerTool('maintenance.clean', {
@@ -210,7 +196,7 @@ export function registerMaintenanceTools(agent) {
       execute: async (params) => queryContainerMetrics(params.container, params.metric || 'cpu', params.period || '5m'),
     })
     .registerTool('alert.configure', {
-      description: '配置容器资源告警规则(超过阈值触发通知或自动操作)',
+      description: '按容器配置资源告警规则(cpu/内存百分比或重启次数阈值,超限触发通知、自动重启或扩容;规则进入统一告警引擎)',
       category: 'maintenance',
       requiredPermission: 'admin',
       confirmationRequired: true,
@@ -219,23 +205,24 @@ export function registerMaintenanceTools(agent) {
         type: 'object',
         properties: {
           container: { type: 'string', description: '容器名称或 ID' },
-          metric: { type: 'string', enum: ['cpu', 'memory', 'network', 'disk'], description: '监控指标' },
-          threshold: { type: 'number', description: '阈值(CPU/内存为百分比,网络/磁盘为 MB/s 或 MB)' },
-          duration: { type: 'string', description: '持续时间(如 5m/10m,默认 5m)' },
-          action: { type: 'string', enum: ['notify', 'restart', 'scale'], description: '触发动作(默认 notify)' },
+          metric: { type: 'string', enum: ['cpu', 'memory', 'restart_count'], description: '监控指标' },
+          threshold: { type: 'number', description: '阈值(cpu/内存为 0-100 百分比,重启次数为次数)' },
+          action: { type: 'string', enum: ['notify', 'auto_restart', 'scale'], description: '触发动作(默认 notify)' },
         },
         required: ['container', 'metric', 'threshold'],
       },
-      execute: async (params) => configureAlert({
-        container: params.container,
-        metric: params.metric,
-        threshold: Number(params.threshold),
-        duration: params.duration || '5m',
-        action: params.action || 'notify',
-      }),
+      execute: async (params) => {
+        const rule = await createAlertRule({
+          container: params.container,
+          metric: params.metric,
+          threshold: Number(params.threshold),
+          action: params.action || 'notify',
+        });
+        return { ok: true, ruleId: rule.id, rule, note: '规则已保存,由告警引擎按轮询周期评估(内置 10 分钟冷却)' };
+      },
     })
     .registerTool('alert.list', {
-      description: '列出已配置的告警规则',
+      description: '列出已配置的告警规则(含 Agent 创建的规则,附项目/容器可读名)',
       category: 'maintenance',
       requiredPermission: 'readonly',
       confirmationRequired: false,
@@ -246,7 +233,7 @@ export function registerMaintenanceTools(agent) {
           container: { type: 'string', description: '容器名称或 ID(可选,用于过滤)' },
         },
       },
-      execute: async (params) => listAlerts(params.container),
+      execute: async (params) => ({ rules: await listAlertRules({ container: params.container }) }),
     })
     .registerTool('alert.delete', {
       description: '删除告警规则',
@@ -261,7 +248,7 @@ export function registerMaintenanceTools(agent) {
         },
         required: ['ruleId'],
       },
-      execute: async (params) => deleteAlert(params.ruleId),
+      execute: async (params) => deleteAlertRule(params.ruleId),
     })
     .registerTool('backup.trigger', {
       description: '手动为项目 Compose 配置创建备份快照',
@@ -304,7 +291,7 @@ export function registerMaintenanceTools(agent) {
       },
     })
     .registerTool('cron.create', {
-      description: '创建定时任务(如镜像检查/数据库备份/清理)',
+      description: '创建定时任务(镜像检查/数据库备份/数据卷备份/安全或深度清理/定时拉取镜像/AI 巡检)',
       category: 'maintenance',
       requiredPermission: 'managed',
       confirmationRequired: true,
@@ -313,7 +300,7 @@ export function registerMaintenanceTools(agent) {
         type: 'object',
         properties: {
           name: { type: 'string', description: '任务名称' },
-          type: { type: 'string', enum: ['db-backup', 'prune-safe', 'prune-all', 'images-check', 'pull-images'], description: '任务类型' },
+          type: { type: 'string', enum: ['db-backup', 'prune-safe', 'prune-all', 'images-check', 'pull-images', 'volume-backup', 'inspection'], description: '任务类型' },
           cron: { type: 'string', description: '5 段 cron 表达式(分 时 日 月 周)' },
         },
         required: ['name', 'type', 'cron'],

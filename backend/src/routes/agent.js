@@ -16,18 +16,15 @@ import {
   renameAiSession,
   listAiMemories,
   recordAgentFeedback,
-  setAiSessionCompaction,
-  setAiSessionSummary,
   getAiSessionCompaction,
   getAiSessionSummary,
-  getAiHistory,
 } from '../lib/db.js';
 import { getAgent } from '../services/agent.js';
 import { idField, limitField, numericId } from '../lib/schemas.js';
 import { checkRateLimit } from '../lib/rate-limit.js';
 import { redactRows, redactValue } from '../lib/redaction.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
-import { buildCompactSummary } from '../services/agent/compaction.js';
+import { compactSessionHistory } from '../services/agent/compaction.js';
 import { randomUUID } from 'node:crypto';
 
 export default async function agentRoutes(fastify) {
@@ -274,32 +271,28 @@ function aiRateLimit(limit, windowMs = 60000) {
   }, async (request, reply) => {
     const sessionId = Number(request.body?.sessionId);
     const keepRecent = Math.max(Number(request.body?.keepRecent) || 6, 2);
-    const boundary = getAiSessionCompaction(sessionId);
-    // 可压缩行 = 分界点之后、去掉最近 keepRecent 条的活跃区。
-    // 必须拉全量(而不是最近 200 条):超过窗口的更早消息如果既不进摘要、
-    // 又被分界点排除在活跃区之外,就会永久丢失。
-    const evictable = getAiHistory(100000, sessionId).filter((item) => Number(item.id) > boundary);
-    const candidates = evictable.slice(0, Math.max(evictable.length - keepRecent, 0));
-    if (candidates.length < 2) {
-      return reply.code(400).send({ error: 'nothing_to_compact', message: '活跃区历史太少,无需压缩' });
-    }
     const { callOpenAI, getAiConfig } = await import('../services/ai.js');
     const cfg = getAiConfig();
     const callModel = cfg.apiKey
       ? ({ messages, signal }) => callOpenAI({ ...cfg, messages, stream: false, signal }).then((res) => res.content)
       : null;
-    const { summary, facts, fallback } = await buildCompactSummary(candidates, { callModel });
-    const newBoundary = Number(candidates[candidates.length - 1].id);
-    setAiSessionCompaction(sessionId, Math.max(newBoundary, boundary));
-    setAiSessionSummary(sessionId, summary);
+    let result;
+    try {
+      result = await compactSessionHistory(sessionId, { keepRecent, callModel });
+    } catch (error) {
+      if (error.code === 'nothing_to_compact') {
+        return reply.code(400).send({ error: 'nothing_to_compact', message: '活跃区历史太少,无需压缩' });
+      }
+      throw error;
+    }
     return {
       ok: true,
       sessionId,
-      boundary: Math.max(newBoundary, boundary),
-      compactedMessages: candidates.length,
-      fallback,
-      summaryPreview: summary.slice(0, 400),
-      facts: { userGoal: facts.userGoal, projects: facts.projects, containers: facts.containers, errorCount: facts.errorLines.length },
+      boundary: result.boundary,
+      compactedMessages: result.compactedMessages,
+      fallback: result.fallback,
+      summaryPreview: result.summary.slice(0, 400),
+      facts: { userGoal: result.facts.userGoal, projects: result.facts.projects, containers: result.facts.containers, errorCount: result.facts.errorLines.length },
     };
   });
 

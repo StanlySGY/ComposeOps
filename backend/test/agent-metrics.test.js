@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 const tempDir = mkdtempSync(join(tmpdir(), 'composeops-agent-metrics-'));
 process.env.DB_PATH = join(tempDir, 'test.db');
 
-const { configureAlert, parseContainerStats } = await import('../src/services/agent-metrics.js');
+const { parseContainerStats } = await import('../src/services/agent-metrics.js');
+const { createAlertRule, deleteAlertRule, readAlertRules } = await import('../src/services/alert-rules.js');
 const { parseContainerMetrics } = await import('../src/services/metrics-collector.js');
 
 test.after(() => rmSync(tempDir, { recursive: true, force: true }));
@@ -71,26 +72,46 @@ test('metrics-collector: 缺失、大小写差异和无效字段不会写出 NaN
   assert.equal(metrics.some((metric) => metric.metric_type === 'memory'), false);
 });
 
-test('agent-metrics: 告警阈值、持续时间和动作在外部依赖前完成校验', async () => {
-  const base = { container: 'container-1', metric: 'cpu', duration: '5m', action: 'notify' };
+test('alert-rules: 阈值、指标与动作在任何外部依赖前完成校验', async () => {
+  const base = { projectId: 'p1', service: 'web', metric: 'cpu', action: 'notify' };
   await assert.rejects(
-    () => configureAlert({ ...base, threshold: -1 }),
+    () => createAlertRule({ ...base, threshold: -1 }),
     (error) => error.statusCode === 400 && /0 到 100/.test(error.message)
   );
   await assert.rejects(
-    () => configureAlert({ ...base, threshold: 101 }),
+    () => createAlertRule({ ...base, threshold: 101 }),
     (error) => error.statusCode === 400 && /0 到 100/.test(error.message)
   );
   await assert.rejects(
-    () => configureAlert({ ...base, threshold: 50, duration: '0m' }),
-    (error) => error.statusCode === 400 && /持续时间/.test(error.message)
-  );
-  await assert.rejects(
-    () => configureAlert({ ...base, threshold: 50, duration: '5m', action: 'delete' }),
+    () => createAlertRule({ ...base, threshold: 50, action: 'delete' }),
     (error) => error.statusCode === 400 && /告警动作/.test(error.message)
   );
   await assert.rejects(
-    () => configureAlert({ ...base, metric: 'network', threshold: -1 }),
+    () => createAlertRule({ ...base, metric: 'network', threshold: 50 }),
+    (error) => error.statusCode === 400 && /不支持的告警指标/.test(error.message)
+  );
+  await assert.rejects(
+    () => createAlertRule({ ...base, metric: 'restart_count', threshold: -1 }),
     (error) => error.statusCode === 400 && /不能小于 0/.test(error.message)
   );
+  await assert.rejects(
+    () => createAlertRule({ metric: 'cpu', threshold: 50 }),
+    (error) => error.statusCode === 400 && /projectId \+ service 或 container/.test(error.message)
+  );
+});
+
+test('alert-rules: 创建规则落 agent.alert_rules,旧 restart 动作归一化,可删除', async () => {
+  const rule = await createAlertRule({ projectId: 'proj-1', service: 'web', metric: 'cpu', threshold: 85, action: 'restart' });
+  assert.equal(rule.action, 'auto_restart');
+  assert.equal(rule.projectId, 'proj-1');
+  assert.equal(rule.service, 'web');
+  const stored = readAlertRules();
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].id, rule.id);
+
+  const deleted = await deleteAlertRule(rule.id);
+  assert.equal(deleted.deleted, 1);
+  assert.equal(readAlertRules().length, 0);
+  const missing = await deleteAlertRule(rule.id);
+  assert.equal(missing.deleted, 0);
 });

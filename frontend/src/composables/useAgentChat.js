@@ -275,6 +275,10 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       // 后台任务完成通知:模型侧已搭车注入,界面侧以提示条同步展示,用户不必翻思考过程。
       assistant.taskNotices = [...(assistant.taskNotices || []), event.content || ''];
     }
+    else if (event.type === 'compaction') {
+      // 会话超阈值自动压缩:提示条同步展示,避免用户困惑"更早的对话怎么不见了"。
+      assistant.taskNotices = [...(assistant.taskNotices || []), event.content || ''];
+    }
     else if (event.type === 'max_loops_reached') {
       // 此前该事件被公共事件层丢弃,达到 20 轮上限时前端只看到流关闭、无任何提示。
       flushTokens();

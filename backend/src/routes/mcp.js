@@ -42,6 +42,7 @@ import { getAgent } from '../services/agent.js';
 import { assessRisk } from '../services/agent-tools.js';
 import { redactValue } from '../lib/redaction.js';
 import { validateOrigin } from '../lib/auth.js';
+import { checkRateLimit } from '../lib/rate-limit.js';
 
 const sessions = new Map(); // sessionId -> { write, heartbeat, agent }
 
@@ -342,8 +343,18 @@ export async function handleRpc(agent, mode, message, { headers = {} } = {}) {
 export default async function mcpRoutes(fastify) {
   // ---- 管理面:配置读写挂在 /api/v1/system/mcp(受登录鉴权保护),见 system.js ----
 
-  /** 三个端点共用的准入检查:启用 + token + Origin。 */
+  /** 三个端点共用的准入检查:限流 + 启用 + token + Origin。
+   *  限流放在鉴权之前:无效 token 的请求同样计数,防止对 mcp.token 的穷举重放。 */
   function guard(request, reply) {
+    const verdict = checkRateLimit(`mcp:${request.ip || 'local'}`, 120, 60000);
+    if (!verdict.allowed) {
+      reply.code(429).send({
+        error: 'rate_limited',
+        message: 'MCP 请求过于频繁,请稍后再试',
+        retryAfterMs: verdict.retryAfterMs,
+      });
+      return false;
+    }
     const { enabled } = getConfig();
     const provided = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.query?.token || '';
     if (!enabled) {
@@ -386,6 +397,11 @@ export default async function mcpRoutes(fastify) {
 
   fastify.get('/sse', async (request, reply) => {
     if (!guard(request, reply)) return reply;
+    // SSE 是长连接,单独收紧建立频率,防连接洪水拖垮进程。
+    const sseVerdict = checkRateLimit(`mcp-sse:${request.ip || 'local'}`, 10, 60000);
+    if (!sseVerdict.allowed) {
+      return reply.code(429).send({ error: 'rate_limited', message: 'SSE 建立过于频繁,请稍后再试', retryAfterMs: sseVerdict.retryAfterMs });
+    }
 
     const sessionId = randomBytes(12).toString('hex');
     reply.raw.writeHead(200, {

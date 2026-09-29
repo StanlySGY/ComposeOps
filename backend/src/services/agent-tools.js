@@ -10,6 +10,8 @@
 import { registerComposeTools } from './tools/compose-tools.js';
 import { registerConfigTools } from './tools/config-tools.js';
 import { registerMaintenanceTools } from './tools/maintenance-tools.js';
+import { registerStorageTools } from './tools/storage-tools.js';
+import { registerEventTools } from './tools/event-tools.js';
 import { registerContextTools } from './tools/context-tools.js';
 import { registerMemoryTools } from './tools/memory-tools.js';
 import { registerInspectionTools } from './tools/inspection-tools.js';
@@ -32,6 +34,8 @@ export const RISK_LEVELS = {
   'compose.scale': 'medium',
   'cron.create': 'medium',
   'app.deploy': 'critical',
+  // 数据卷恢复会用备份 tar 覆盖卷内现有数据,与 maintenance.clean 同级的破坏性操作。
+  'volume.restore': 'critical',
 };
 
 /**
@@ -61,6 +65,8 @@ export function registerAgentTools(agent) {
   registerComposeTools(agent);
   registerConfigTools(agent);
   registerMaintenanceTools(agent);
+  registerStorageTools(agent);
+  registerEventTools(agent);
   registerContextTools(agent);
   registerMemoryTools(agent);
   registerInspectionTools(agent);

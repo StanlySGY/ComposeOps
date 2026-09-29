@@ -5,23 +5,10 @@
  */
 
 import { getActivityDocker } from './docker-hosts.js';
-import { getSetting, setSetting } from '../lib/db.js';
 import { scanProjects } from './scanner.js';
 
-const ALERT_METRICS = new Set(['cpu', 'memory', 'network', 'disk']);
-const ALERT_ACTIONS = new Set(['notify', 'restart', 'scale']);
-const ALERT_DURATION_PATTERN = /^[1-9]\d*(?:s|m|h|d)$/;
-
-function readAlertRules() {
-  const value = getSetting('alert_rules', '[]');
-  if (Array.isArray(value)) return value;
-  try {
-    const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+// 告警规则的创建/列举/删除已统一收敛到 alert-rules.js(存储 agent.alert_rules,
+// 由 alert-monitor 评估);本文件只保留指标查询与纳管容器解析。
 
 /** 只允许访问当前 Docker 节点上明确纳管的容器。 */
 export async function resolveManagedContainer(containerIdOrName) {
@@ -223,124 +210,4 @@ function calculateTrend(data) {
   if (lastValue > avg * 1.1) return 'increasing';
   if (lastValue < avg * 0.9) return 'decreasing';
   return 'stable';
-}
-
-/**
- * 配置资源告警规则
- */
-export async function configureAlert(config = {}) {
-  const { container, metric, threshold, duration = '5m', action = 'notify' } = config;
-  const numericThreshold = Number(threshold);
-  if (!ALERT_METRICS.has(metric)) {
-    throw Object.assign(new Error('不支持的告警指标类型'), { statusCode: 400 });
-  }
-  if (threshold === '' || threshold === null || threshold === undefined || !Number.isFinite(numericThreshold)) {
-    throw Object.assign(new Error('告警阈值必须是有限数字'), { statusCode: 400 });
-  }
-  if (['cpu', 'memory'].includes(metric) && (numericThreshold < 0 || numericThreshold > 100)) {
-    throw Object.assign(new Error('CPU 和内存告警阈值必须在 0 到 100 之间'), { statusCode: 400 });
-  }
-  if (['network', 'disk'].includes(metric) && numericThreshold < 0) {
-    throw Object.assign(new Error('网络和磁盘告警阈值不能小于 0'), { statusCode: 400 });
-  }
-  if (typeof duration !== 'string' || duration.length > 16 || !ALERT_DURATION_PATTERN.test(duration)) {
-    throw Object.assign(new Error('告警持续时间格式无效,请使用如 5m 的格式'), { statusCode: 400 });
-  }
-  if (!ALERT_ACTIONS.has(action)) {
-    throw Object.assign(new Error('不支持的告警动作'), { statusCode: 400 });
-  }
-  
-  // 验证容器存在
-  const { container: managedContainer } = await resolveManagedContainer(container);
-  const docker = await getActivityDocker();
-  const containerObj = docker.getContainer(managedContainer.id);
-  await containerObj.inspect(); // 抛出异常如果不存在
-  
-  // 创建告警规则
-  const rule = {
-    id: `alert_${Date.now()}`,
-    container: managedContainer.id,
-    metric,
-    threshold: numericThreshold,
-    duration,
-    action,
-    enabled: true,
-    createdAt: new Date().toISOString()
-  };
-  
-  // 保存到数据库
-  const existingRules = readAlertRules();
-  existingRules.push(rule);
-  setSetting('alert_rules', JSON.stringify(existingRules));
-  
-  return { ruleId: rule.id, enabled: true };
-}
-
-/**
- * 列出告警规则
- */
-export async function listAlerts(containerFilter = null) {
-  const rules = readAlertRules();
-  const managedIds = new Set();
-  for (const project of await scanProjects()) {
-    if (project.managed) for (const container of project.containers) managedIds.add(container.id);
-  }
-  const visibleRules = rules.filter((rule) => managedIds.has(rule.container));
-  
-  if (containerFilter) {
-    const { container } = await resolveManagedContainer(containerFilter);
-    return visibleRules.filter(r => r.container === container.id);
-  }
-  
-  return visibleRules;
-}
-
-/**
- * 删除告警规则
- */
-export async function deleteAlert(ruleId) {
-  const rules = readAlertRules();
-  const rule = rules.find((item) => item.id === ruleId);
-  if (!rule) return { deleted: 0 };
-  await resolveManagedContainer(rule.container);
-  const updated = rules.filter(r => r.id !== ruleId);
-  setSetting('alert_rules', JSON.stringify(updated));
-  return { deleted: rules.length - updated.length };
-}
-
-/**
- * 检查告警条件（由后台任务定期调用）
- */
-export async function checkAlerts() {
-  const rules = readAlertRules();
-  const docker = await getActivityDocker();
-  const managedIds = new Set();
-  for (const project of await scanProjects()) {
-    if (project.managed) for (const container of project.containers) managedIds.add(container.id);
-  }
-  const triggered = [];
-  
-  for (const rule of rules.filter(r => r.enabled && managedIds.has(r.container))) {
-    try {
-      const container = docker.getContainer(rule.container);
-      const stats = await container.stats({ stream: false });
-      const parsed = parseContainerStats(stats, rule.metric);
-      
-      const currentValue = parsed.numeric;
-      
-      if (currentValue > rule.threshold) {
-        triggered.push({
-          rule,
-          currentValue,
-          threshold: rule.threshold,
-          container: rule.container,
-          metric: rule.metric
-        });
-      }
-    } catch (error) {
-      console.error(`检查告警规则 ${rule.id} 失败:`, error.message);
-    }
-  }
-  
-  return triggered;
 }
