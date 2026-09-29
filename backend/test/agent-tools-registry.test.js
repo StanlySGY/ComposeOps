@@ -25,6 +25,7 @@ const REQUIRED_TOOLS = [
   'security.audit', 'backup.trigger', 'notification.test', 'cron.create',
   'performance.baseline', 'alert.configure', 'alert.list', 'alert.delete',
   'server.inspect', 'server.command', 'app.list', 'app.deploy', 'cron.list',
+  'skill.list', 'skill.use',
 ];
 
 /** agent-tools.js + tools/*.js 全部源码拼起来扫(注册已拆到 tools/)。 */

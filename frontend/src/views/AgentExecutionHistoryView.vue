@@ -14,6 +14,44 @@
 
     <div v-if="error" class="card border-rose-500/20 bg-rose-500/5 p-4 text-rose-300">{{ error }}</div>
 
+    <section v-if="usage" class="space-y-3">
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div class="card p-4">
+          <p class="text-xs text-zinc-500">总 token</p>
+          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.total_tokens) }}</p>
+          <p class="mt-1 text-xs text-zinc-500">最近 {{ usage.days }} 天</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs text-zinc-500">LLM 调用</p>
+          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.calls) }}</p>
+          <p class="mt-1 text-xs text-zinc-500">Tool Loop 轮次</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs text-zinc-500">输入 token</p>
+          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.prompt_tokens) }}</p>
+          <p class="mt-1 text-xs text-zinc-500">上下文与工具结果</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs text-zinc-500">输出 token</p>
+          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.completion_tokens) }}</p>
+          <p class="mt-1 text-xs text-zinc-500">模型生成内容</p>
+        </div>
+      </div>
+
+      <div v-if="usage.byModel?.length" class="card p-4">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-sm font-medium text-zinc-200">模型用量</h2>
+          <span class="text-xs text-zinc-500">按总 token 排序</span>
+        </div>
+        <div class="mt-3 grid gap-2 md:grid-cols-2">
+          <div v-for="model in usage.byModel" :key="model.model" class="flex items-center justify-between gap-3 rounded-sm border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+            <span class="min-w-0 truncate font-mono text-zinc-300">{{ model.model }}</span>
+            <span class="shrink-0 text-zinc-500">{{ formatNumber(model.total_tokens) }} · {{ formatNumber(model.calls) }} 次</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div v-if="!loading && !executions.length" class="card p-8">
       <EmptyState icon="history" title="暂无执行记录" message="Agent 工作流执行后会在此显示" />
     </div>
@@ -108,13 +146,21 @@ import EmptyState from '../components/common/EmptyState.vue';
 const loading = ref(false);
 const error = ref('');
 const executions = ref([]);
+const usage = ref(null);
 const expandedPlan = ref(null);
 
 async function load() {
   loading.value = true;
   error.value = '';
+  usage.value = null;
   try {
-    const response = await api.getAgentExecutions();
+    const [executionResult, usageResult] = await Promise.allSettled([
+      api.getAgentExecutions(),
+      api.getAgentUsage(30),
+    ]);
+    if (executionResult.status === 'rejected') throw executionResult.reason;
+    if (usageResult.status === 'fulfilled') usage.value = usageResult.value;
+    const response = executionResult.value;
     const rowsByPlan = new Map();
     for (const row of response.executions || []) {
       const rows = rowsByPlan.get(row.plan_id) || [];
@@ -127,6 +173,10 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function formatNumber(value) {
+  return (Number(value) || 0).toLocaleString('zh-CN');
 }
 
 function toggleDetail(planId) {

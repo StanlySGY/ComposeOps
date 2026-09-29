@@ -37,3 +37,20 @@
 - 沙箱内 `.git` 只读:commit 需 `sandbox_permissions=require_escalated`,`prefix_rule:["git","commit","-m"]` 已批准。
 - `git push origin main` HTTPS 在沙箱握手失败;直接提升权限走已批准 `["git","push"]` 即可成功;SSH 地址 `git@github.com:StanlySGY/ComposeOps.git` 沙箱内 DNS 解析失败,需同样提升权限。
 - 提交信息用中文结构话术(标题 + `-` 分节)。
+
+## CodeGraph
+
+Use CodeGraph to understand or locate code BEFORE grep/find or reading files, when the repo is indexed (a `.codegraph/` directory exists at the repo root).
+
+**Indexing lifecycle (handle this first):**
+- If there is no `.codegraph/` directory at the repo root → run `codegraph init [path]` to initialize the project and build the initial index.
+- If `.codegraph/` exists but may be out of date → run `codegraph status [path]` to check index freshness:
+  - Run `codegraph sync [path]` for incremental updates since the last index (fast, preferred).
+  - Run `codegraph index [path]` to rebuild the full index from scratch when a full rebuild is needed.
+- If indexing is not possible (CLI missing, user declined), fall back to grep/reading files.
+
+**Querying:**
+- **MCP tool** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them, including dynamic-dispatch hops grep can't follow. Name a file or symbol in the query to read its current line-numbered source. If it is listed but deferred, load it by name via tool search.
+- **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
+
+**Other useful commands:** `codegraph query` (symbol search), `codegraph node` (one symbol's source + caller/callee trail), `codegraph callers` / `codegraph callees` / `codegraph impact` (dependency analysis), `codegraph files` (project structure).

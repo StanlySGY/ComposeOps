@@ -601,6 +601,98 @@ export function addAiMessage(role, content, context = null, sessionId = null) {
   return messageId;
 }
 
+function normalizeTokenCount(value) {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+/** 记录一次 LLM 调用的 token 用量;无有效 usage 时不写空行。 */
+export function recordAiUsage({ sessionId = 0, model = 'unknown', usage = {} } = {}) {
+  if (!usage || typeof usage !== 'object') return null;
+  const promptTokens = normalizeTokenCount(usage.prompt_tokens);
+  const completionTokens = normalizeTokenCount(usage.completion_tokens);
+  const reportedTotal = normalizeTokenCount(usage.total_tokens);
+  if (promptTokens === null && completionTokens === null && reportedTotal === null) return null;
+
+  const prompt = promptTokens ?? 0;
+  const completion = completionTokens ?? 0;
+  const total = reportedTotal ?? prompt + completion;
+  const result = db.prepare(`
+    INSERT INTO ai_usage(session_id, model, prompt_tokens, completion_tokens, total_tokens)
+    VALUES(?, ?, ?, ?, ?)
+  `).run(
+    toSessionId(sessionId),
+    String(model || 'unknown').trim().slice(0, 200) || 'unknown',
+    prompt,
+    completion,
+    total,
+  );
+  return Number(result.lastInsertRowid);
+}
+
+export function pruneAiUsage(days = 30) {
+  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
+  return db.prepare(
+    "DELETE FROM ai_usage WHERE julianday('now') - julianday(created_at) > ?"
+  ).run(safeDays);
+}
+
+/**
+ * 汇总 Agent LLM 用量,只返回统计值,不暴露会话内容或 session id。
+ * days 是滚动窗口,同时提供模型与自然日维度,供历史页和后续评测/成本统计复用。
+ */
+export function getAiUsageSummary(days = 30) {
+  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 365));
+  const modifier = `-${safeDays} days`;
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) AS calls,
+      COUNT(DISTINCT CASE WHEN session_id > 0 THEN session_id END) AS sessions,
+      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+      COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens
+    FROM ai_usage
+    WHERE datetime(created_at) >= datetime('now', ?)
+  `).get(modifier);
+  const byModel = db.prepare(`
+    SELECT
+      model,
+      COUNT(*) AS calls,
+      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+      COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens
+    FROM ai_usage
+    WHERE datetime(created_at) >= datetime('now', ?)
+    GROUP BY model
+    ORDER BY total_tokens DESC, model ASC
+    LIMIT 50
+  `).all(modifier);
+  const daily = db.prepare(`
+    SELECT
+      date(created_at) AS day,
+      COUNT(*) AS calls,
+      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+      COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens
+    FROM ai_usage
+    WHERE datetime(created_at) >= datetime('now', ?)
+    GROUP BY date(created_at)
+    ORDER BY day ASC
+  `).all(modifier);
+
+  const numbers = (row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [
+    key,
+    ['model', 'day'].includes(key) ? value : Number(value) || 0,
+  ]));
+  return {
+    days: safeDays,
+    totals: numbers(totals),
+    byModel: byModel.map(numbers),
+    daily: daily.map(numbers),
+  };
+}
+
 export function getAiHistory(limit = 50, sessionId = null, beforeId = null) {
   const hasBeforeId = Number.isSafeInteger(Number(beforeId)) && Number(beforeId) > 0;
   if (sessionId != null) {
@@ -713,6 +805,7 @@ export function renameAiSession(sessionId, title) {
 
 export function clearAiSession(sessionId) {
   db.prepare('DELETE FROM ai_history WHERE session_id = ?').run(sessionId);
+  db.prepare('DELETE FROM ai_usage WHERE session_id = ?').run(toSessionId(sessionId));
   db.prepare('DELETE FROM ai_sessions WHERE session_id = ?').run(sessionId);
 }
 
@@ -721,10 +814,12 @@ export function clearAiSessions(sessionIds = []) {
   if (!ids.length) return 0;
   const remove = db.transaction((values) => {
     const deleteHistory = db.prepare('DELETE FROM ai_history WHERE session_id = ?');
+    const deleteUsage = db.prepare('DELETE FROM ai_usage WHERE session_id = ?');
     const deleteSession = db.prepare('DELETE FROM ai_sessions WHERE session_id = ?');
     let deleted = 0;
     for (const id of values) {
       const history = deleteHistory.run(id).changes;
+      deleteUsage.run(id);
       const session = deleteSession.run(id).changes;
       if (history || session) deleted += 1;
     }
@@ -743,6 +838,7 @@ export function truncateAiHistoryFrom(sessionId, fromMessageId) {
 
 export function clearAiHistory() {
   db.prepare('DELETE FROM ai_history').run();
+  db.prepare('DELETE FROM ai_usage').run();
   db.prepare('DELETE FROM ai_sessions').run();
 }
 
@@ -1793,7 +1889,8 @@ export function pruneAiData(retentionDays = 90) {
     // 反馈(rating/feedback_text)是 agent_plans 的列,随计划一并删除,无独立表
     const oldPlans = db.prepare('DELETE FROM agent_plans WHERE created_at < ?').run(cutoff);
     const history = db.prepare('DELETE FROM ai_history WHERE created_at < ?').run(cutoff);
-    return { plans: oldPlans.changes, executions: plans.changes, history: history.changes };
+    const usage = db.prepare('DELETE FROM ai_usage WHERE created_at < ?').run(cutoff);
+    return { plans: oldPlans.changes, executions: plans.changes, history: history.changes, usage: usage.changes };
   });
   return tx();
 }

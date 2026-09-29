@@ -9,10 +9,12 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const { getAgent } = await import('../src/services/agent.js');
 const { createAiSession, getAiHistory, setSetting } = await import('../src/lib/db.js');
+const db = (await import('../src/lib/db.js')).default;
 
 const STOP_STREAM = [
   `data: ${JSON.stringify({ choices: [{ delta: { content: '收到' } }] })}\n\n`,
   `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+  `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 7 } })}\n\n`,
   'data: [DONE]\n\n',
 ].join('');
 
@@ -36,6 +38,11 @@ test('agent: attachedLogs 以不可信定界块注入 Prompt 且不落入会话�
       (event) => events.push(event),
     );
     assert.equal(result.finalContent, '收到');
+    const done = events.find((event) => event.type === 'done');
+    assert.deepEqual(done.usage, { prompt_tokens: 12, completion_tokens: 7, total_tokens: 19, rounds: 1 });
+    assert.deepEqual(db.prepare('SELECT model, prompt_tokens, completion_tokens, total_tokens FROM ai_usage WHERE session_id = ?').get(sessionId), {
+      model: 'gpt-4o', prompt_tokens: 12, completion_tokens: 7, total_tokens: 19,
+    });
     // 思考/执行进度 trace 进入公开事件流(执行动态面板数据源)
     const traces = events.filter((event) => event.type === 'trace');
     assert.ok(traces.some((event) => event.trace?.phase === 'loop_started'), '应有 loop_started 轨迹');
@@ -52,5 +59,54 @@ test('agent: attachedLogs 以不可信定界块注入 Prompt 且不落入会话�
     assert.equal(history.at(-1).content, '看一下这个报错', '落库历史只存原问题,不存日志原文');
   } finally {
     restoreFetch();
+  }
+});
+
+test('agent: Tool Loop 多轮 usage 累计并逐轮落库', async () => {
+  setSetting('ai.api_key', 'test-key');
+  setSetting('ai.base_url', 'http://ai.test/v1');
+  const agent = getAgent();
+  agent.registerTool('test.noop', {
+    description: '测试用只读工具',
+    requiredPermission: 'readonly',
+    confirmationRequired: false,
+    requiresProject: false,
+    parameters: { type: 'object', properties: {} },
+    execute: async () => ({ ok: true }),
+  });
+  const responses = [
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'test.noop', arguments: '{}' } }] } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 } })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join(''),
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: '完成' } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 } })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join(''),
+  ];
+  const sessionId = createAiSession();
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = async () => new Response(responses[callCount++], { status: 200 });
+  try {
+    const events = [];
+    const result = await agent.executeWithLoop('执行一个只读测试', { sessionId }, (event) => events.push(event));
+    const done = events.find((event) => event.type === 'done');
+    assert.equal(result.finalContent, '完成');
+    assert.deepEqual(done.usage, { prompt_tokens: 150, completion_tokens: 15, total_tokens: 165, rounds: 2 });
+    assert.deepEqual(db.prepare('SELECT prompt_tokens, completion_tokens, total_tokens FROM ai_usage WHERE session_id = ? ORDER BY id').all(sessionId), [
+      { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 },
+      { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 },
+    ]);
+  } finally {
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: originalFetch,
+    });
   }
 });

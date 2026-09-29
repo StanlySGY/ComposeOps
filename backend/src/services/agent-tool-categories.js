@@ -18,7 +18,7 @@ export const TOOL_CATEGORIES = {
     description: '发现已纳管项目和可选的联网资料检索',
     icon: 'globe',
     risk: 'low',
-    tools: ['project.list_managed', 'web.search', 'app.list']
+    tools: ['project.list_managed', 'web.search', 'app.list', 'skill.list', 'skill.use']
   },
   memory: {
     label: '长期记忆',

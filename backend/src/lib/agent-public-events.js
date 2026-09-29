@@ -16,6 +16,17 @@ function cleanError(value) {
   return text.replace(/(?:工具|tool)\s*[：:]?\s*[\w.-]+/gi, '操作');
 }
 
+function cleanUsage(value) {
+  if (!value || typeof value !== 'object') return null;
+  const usage = {};
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'rounds']) {
+    if (value[key] === null || value[key] === undefined || value[key] === '') continue;
+    const number = Number(value[key]);
+    if (Number.isFinite(number) && number >= 0) usage[key] = Math.floor(number);
+  }
+  return Object.keys(usage).length ? usage : null;
+}
+
 export function toPublicAgentEvent(event) {
   if (!event || typeof event !== 'object') return null;
   // token 必须原样透传:分片在 ai.js 发射层已完成全量、有状态的协议剥离,
@@ -24,7 +35,10 @@ export function toPublicAgentEvent(event) {
   if (event.type === 'token') return { type: 'token', content: String(event.content ?? '') };
   if (event.type === 'done') {
     // planId 是本次执行的审计主键,供前端把"点赞/点踩"精确写回对应计划。
-    return { type: event.type, content: cleanText(event.content), planId: event.planId ? String(event.planId) : '' };
+    const publicEvent = { type: event.type, content: cleanText(event.content), planId: event.planId ? String(event.planId) : '' };
+    const usage = cleanUsage(event.usage);
+    if (usage) publicEvent.usage = usage;
+    return publicEvent;
   }
   if (event.type === 'confirmation_required') {
     return {

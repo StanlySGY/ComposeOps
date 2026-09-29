@@ -12,9 +12,11 @@ import {
   getAgentPlan,
   listAgentExecutions,
   listAgentPlans,
+  listAgentFeedback,
   createAiSession,
   renameAiSession,
   listAiMemories,
+  getAiUsageSummary,
   recordAgentFeedback,
   getAiSessionCompaction,
   getAiSessionSummary,
@@ -85,6 +87,26 @@ function aiRateLimit(limit, windowMs = 60000) {
     }
     return { plans: redactRows(listAgentPlans(request.query?.limit)), executions: redactRows(listAgentExecutions(null, request.query?.limit)) };
   });
+
+  // GET /api/v1/ai/agent/usage —— token usage aggregate for observability, without session content
+  fastify.get('/agent/usage', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { days: { type: 'integer', minimum: 1, maximum: 365 } },
+      },
+    },
+  }, async (request) => getAiUsageSummary(request.query?.days));
+
+  // GET /api/v1/ai/agent/feedback —— exportable low-score samples for offline review/evals
+  fastify.get('/agent/feedback', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { limit: limitField(200) },
+      },
+    },
+  }, async (request) => ({ feedback: redactRows(listAgentFeedback(request.query?.limit)) }));
 
   // POST /api/v1/ai/agent/execute-stream —— Tool-calling 原生循环 + SSE 流式推送
   fastify.post('/agent/execute-stream', {

@@ -17,6 +17,7 @@ import { registerMemoryTools } from './tools/memory-tools.js';
 import { registerInspectionTools } from './tools/inspection-tools.js';
 import { registerGitopsTools } from './tools/gitops-tools.js';
 import { registerTaskTools } from './tools/task-tools.js';
+import { registerSkillTools } from './tools/skill-tools.js';
 import { MACRO_TOOLS } from './agent-tool-categories.js';
 
 /** 工具风险等级:低/中/高/极高,前端据此决定确认强度。单一事实来源。 */
@@ -72,5 +73,6 @@ export function registerAgentTools(agent) {
   registerInspectionTools(agent);
   registerGitopsTools(agent);
   registerTaskTools(agent);
+  registerSkillTools(agent);
   return agent;
 }

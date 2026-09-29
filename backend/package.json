@@ -8,6 +8,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test:agent-evals": "node --test --test-concurrency=1 test/agent-evals.test.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "rebuild": "cd node_modules/better-sqlite3 && npx --yes prebuild-install"

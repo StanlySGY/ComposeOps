@@ -259,8 +259,8 @@ export function pruneAiDataOnceDaily() {
   try {
     const result = pruneAiData(retentionDays);
     setSetting('retention.ai_last_pruned_at', new Date().toISOString());
-    if (result.history || result.plans) {
-      console.log(`[retention] 已清理 AI 历史 ${result.history} 条、Agent 计划 ${result.plans} 个、执行记录 ${result.executions} 条`);
+    if (result.history || result.plans || result.usage) {
+      console.log(`[retention] 已清理 AI 历史 ${result.history} 条、Agent 计划 ${result.plans} 个、执行记录 ${result.executions} 条、token 记录 ${result.usage} 条`);
     }
   } catch (error) {
     console.error('[retention] AI 数据清理失败:', error.message);

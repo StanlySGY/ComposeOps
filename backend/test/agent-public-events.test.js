@@ -13,6 +13,10 @@ test('公开 Agent 事件隐藏工具协议和内部工具字段', () => {
   assert.equal(toPublicAgentEvent({ type: 'trace', trace: { phase: 'loop_started', content: '开始' } }).round, 0);
   // done 透出 planId,前端据此把点赞/点踩写回对应执行记录
   assert.equal(toPublicAgentEvent({ type: 'done', content: 'ok', planId: 42 }).planId, '42');
+  assert.deepEqual(toPublicAgentEvent({
+    type: 'done', content: 'ok', planId: 42,
+    usage: { prompt_tokens: 10.8, completion_tokens: 4, total_tokens: 14, rounds: 2, cost: 999 },
+  }).usage, { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14, rounds: 2 });
   // session_meta 透出本次用户消息的落库 id,前端据此截断历史(编辑并重发)
   assert.deepEqual(toPublicAgentEvent({ type: 'session_meta', userMessageId: 42 }), { type: 'session_meta', userMessageId: 42 });
   assert.deepEqual(toPublicAgentEvent({ type: 'session_meta' }), { type: 'session_meta', userMessageId: 0 });

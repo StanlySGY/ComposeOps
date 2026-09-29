@@ -12,7 +12,7 @@ const db = (await import('../src/lib/db.js')).default;
 const {
   addVolumeBackup, pruneVolumeBackups, pruneAiData,
   getVolumeBackup, deleteVolumeBackupRow,
-  createAiSession, addAiMessage, createAgentPlan, recordAgentExecution,
+  createAiSession, addAiMessage, createAgentPlan, recordAgentExecution, recordAiUsage,
 } = await import('../src/lib/db.js');
 const { setSetting } = await import('../src/lib/db.js');
 
@@ -147,12 +147,15 @@ test('retention: pruneAiData 按保留天数清理会话与 Agent 审计', () =>
   const planId = createAgentPlan(sessionId, '旧计划', { steps: [] });
   db.prepare("UPDATE agent_plans SET created_at = datetime('now', '-100 days') WHERE id = ?").run(planId);
   recordAgentExecution(planId, 'compose.ps', {}, 'success');
+  recordAiUsage({ sessionId, model: 'test-model', usage: { total_tokens: 10 } });
+  db.prepare("UPDATE ai_usage SET created_at = datetime('now', '-100 days') WHERE session_id = ?").run(sessionId);
   const freshSession = createAiSession();
   addAiMessage('user', '今天的提问', null, freshSession);
 
   const result = pruneAiData(90);
   assert.ok(result.history >= 1);
   assert.ok(result.plans >= 1);
+  assert.ok(result.usage >= 1);
   const remainingHistory = db.prepare('SELECT content FROM ai_history ORDER BY id').all().map((row) => row.content);
   assert.deepEqual(remainingHistory, ['今天的提问']);
   const remainingPlans = db.prepare('SELECT COUNT(*) c FROM agent_plans').get().c;

@@ -2,7 +2,7 @@ import { getActivityDocker } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
-import db, { pruneAgentPlans, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
+import db, { pruneAgentPlans, pruneAiUsage, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { pruneEvents } from './event-center.js';
 
 function sum(items, key) {
@@ -101,6 +101,7 @@ export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPla
   const ai = db.prepare(
     "DELETE FROM ai_history WHERE julianday('now') - julianday(created_at) > ?"
   ).run(safeDays);
+  const aiUsage = pruneAiUsage(safeDays);
 
   const opDays = clear.operationHistoryDays ?? DATA_DEFAULTS.operationHistoryDays;
   const operations = pruneOperationHistory(opDays);
@@ -110,6 +111,7 @@ export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPla
 
   return {
     aiHistoryDeleted: ai.changes,
+    aiUsageDeleted: aiUsage.changes,
     operationHistoryDeleted: operations.changes,
     agentPlansDeleted: agent.changes,
   };
