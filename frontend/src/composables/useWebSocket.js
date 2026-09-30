@@ -1,4 +1,4 @@
-import { getCurrentInstance, isRef, onUnmounted, ref } from 'vue';
+import { getCurrentInstance, isRef, onUnmounted, ref, shallowRef } from 'vue';
 
 /**
  * WebSocket 连接管理 hook,带指数退避自动重连。
@@ -29,12 +29,13 @@ export function useWebSocket(url, options = {}) {
     maxReconnectAttempts = 5,
   } = options;
 
-  const ws = ref(null);
+  const ws = shallowRef(null);
   const connected = ref(false);
   const reconnecting = ref(false);
   const reconnectAttempts = ref(0);
   let reconnectTimer = null;
   let intentionallyClosed = false;
+  let disposed = false;
   let activeErrorHandler = typeof onError === 'function' ? onError : null;
 
   function setErrorHandler(handler) {
@@ -55,6 +56,7 @@ export function useWebSocket(url, options = {}) {
   }
 
   function open() {
+    if (disposed) return;
     const target = resolveUrl();
     if (!target) return;
     let socket;
@@ -68,6 +70,7 @@ export function useWebSocket(url, options = {}) {
     if (binaryType) socket.binaryType = binaryType;
 
     socket.onopen = () => {
+      if (ws.value !== socket) return;
       connected.value = true;
       reconnecting.value = false;
       const resumed = reconnectAttempts.value > 0;
@@ -76,15 +79,18 @@ export function useWebSocket(url, options = {}) {
     };
 
     socket.onmessage = (event) => {
+      if (ws.value !== socket) return;
       if (onMessage) onMessage(event);
     };
 
     socket.onerror = () => {
+      if (ws.value !== socket) return;
       if (activeErrorHandler) activeErrorHandler(new Error('WebSocket 连接错误'));
     };
 
     socket.onclose = (event) => {
-      if (ws.value === socket) ws.value = null;
+      if (ws.value !== socket) return;
+      ws.value = null;
       connected.value = false;
       if (onClose) onClose(event);
 
@@ -110,6 +116,7 @@ export function useWebSocket(url, options = {}) {
   }
 
   function connect() {
+    if (disposed) return;
     if (ws.value?.readyState === WebSocket.OPEN || ws.value?.readyState === WebSocket.CONNECTING) return;
     intentionallyClosed = false;
     clearTimer();
@@ -130,6 +137,8 @@ export function useWebSocket(url, options = {}) {
       // 主动关闭不应触发重连
       socket.onclose = null;
       socket.onerror = null;
+      socket.onopen = null;
+      socket.onmessage = null;
       try {
         socket.close();
       } catch {
@@ -145,7 +154,7 @@ export function useWebSocket(url, options = {}) {
   }
 
   // 仅在 setup 上下文中自动清理;函数式调用时由调用方负责 close()
-  if (getCurrentInstance()) onUnmounted(close);
+  if (getCurrentInstance()) onUnmounted(() => { disposed = true; close(); });
 
   return { ws, connected, reconnecting, reconnectAttempts, setErrorHandler, connect, close, send };
 }

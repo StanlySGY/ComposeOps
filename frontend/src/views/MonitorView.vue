@@ -36,12 +36,38 @@ function setTab(next) {
 watch(() => route.query.tab, (value) => { tab.value = value === 'history' ? 'history' : 'live'; });
 const data = ref(null); const usage = ref(null); const capabilities = ref({}); const autoRefresh = ref(true); const error = ref(''); const loading = ref(false); const lastUpdated = ref(''); const intervalMs = ref(5000); const histories = ref({}); const trends = monitorTrends; const crossedThreshold = ref(false); let timer;
 const alertThresholds = { cpu: 85, mem: 90 };
+let mounted = false;
+let requestId = 0;
 const scopeLabel = computed(() => capabilities.value.hostMetricsScope === 'host' ? '宿主机与 Docker 容器实时指标' : 'ComposeOps 运行环境与 Docker 容器指标');
-async function refresh() { if (loading.value) return; loading.value = true; try { [data.value, usage.value] = await Promise.all([api.getMetrics(), api.getDockerUsage()]); accumulate(); lastUpdated.value = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`; error.value = ''; } catch (e) { error.value = e.message; } finally { loading.value = false; } }
+async function refresh() {
+  if (!mounted || tab.value !== 'live' || loading.value) return;
+  const currentRequest = ++requestId;
+  loading.value = true;
+  const [metricsResult, usageResult] = await Promise.allSettled([api.getMetrics(), api.getDockerUsage()]);
+  if (!mounted || currentRequest !== requestId) return;
+  const errors = [];
+  if (metricsResult.status === 'fulfilled') {
+    data.value = metricsResult.value;
+    accumulate();
+    lastUpdated.value = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
+  } else {
+    data.value = null;
+    lastUpdated.value = '';
+    crossedThreshold.value = false;
+    errors.push(`实时指标加载失败:${metricsResult.reason?.message || '请重试'}`);
+  }
+  if (usageResult.status === 'fulfilled') usage.value = usageResult.value;
+  else {
+    usage.value = null;
+    errors.push(`Docker 存储加载失败:${usageResult.reason?.message || '请重试'}`);
+  }
+  error.value = errors.join('；');
+  loading.value = false;
+}
 function accumulate() {
-  const next = { ...histories.value };
+  const next = {};
   for (const c of data.value?.containers || []) {
-    const prev = next[c.id] || { cpu: [], mem: [] };
+    const prev = histories.value[c.id] || { cpu: [], mem: [] };
     prev.cpu = [...prev.cpu, c.cpuPercent].slice(-96);
     prev.mem = [...prev.mem, c.memPercent].slice(-96);
     next[c.id] = prev;
@@ -49,32 +75,48 @@ function accumulate() {
   histories.value = next;
   if (data.value) {
     const rx = data.value.network?.rx || 0;
-    pushMonitorTrend({ cpu: data.value.host.cpu.percent, mem: data.value.host.memory.percent, net: Math.max(1, Math.round((rx / 1024 / 1024) * 100) / 100) });
+    pushMonitorTrend({ cpu: data.value.host.cpu.percent, mem: data.value.host.memory.percent, net: Math.max(0, Math.round((rx / 1024 / 1024) * 100) / 100) });
     crossedThreshold.value = data.value.host.cpu.percent >= alertThresholds.cpu || data.value.host.memory.percent >= alertThresholds.mem;
   }
 }
-function setTimer(value) { clearInterval(timer); timer = undefined; if (value) timer = setInterval(refresh, intervalMs.value); }
+function setTimer() {
+  clearInterval(timer);
+  timer = undefined;
+  if (mounted && tab.value === 'live' && autoRefresh.value) timer = setInterval(refresh, intervalMs.value);
+}
 function numberValue(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; } function formatBytes(value = 0) { const units = ['B','KB','MB','GB','TB']; let n = numberValue(value), i = 0; while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; } return `${n.toFixed(i ? 1 : 0)} ${units[i]}`; } function formatRate(n) { return `${formatBytes(n)}/s`; } function formatUptime(s) { const d = Math.floor(numberValue(s) / 86400), h = Math.floor((numberValue(s) % 86400) / 3600), m = Math.floor((numberValue(s) % 3600) / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`; }
-watch(autoRefresh, setTimer); function onHostChanged() { histories.value = {}; resetMonitorTrends(); void refresh(); }
+watch([autoRefresh, intervalMs], setTimer);
+function invalidateRequest() { requestId += 1; loading.value = false; }
+function onHostChanged() {
+  invalidateRequest();
+  data.value = null;
+  usage.value = null;
+  lastUpdated.value = '';
+  error.value = '';
+  crossedThreshold.value = false;
+  histories.value = {};
+  resetMonitorTrends();
+  void refresh();
+}
 function resetTrends() { resetMonitorTrends(); }
-onMounted(async () => {
+async function loadPreferences() {
+  const [caps, prefs] = await Promise.allSettled([api.getCapabilities(), api.getPreferences()]);
+  if (!mounted) return;
+  if (caps.status === 'fulfilled') capabilities.value = caps.value;
+  const seconds = prefs.status === 'fulfilled' ? Number(prefs.value?.refreshInterval) : NaN;
+  if (Number.isFinite(seconds) && seconds > 0) intervalMs.value = Math.max(1, seconds) * 1000;
+}
+onMounted(() => {
+  mounted = true;
   window.addEventListener('composeops:host-changed', onHostChanged);
-  if (tab.value !== 'live') return;
-  const [caps, prefs] = await Promise.all([api.getCapabilities(), api.getPreferences()]);
-  capabilities.value = caps; intervalMs.value = prefs.refreshInterval * 1000;
-  await refresh(); setTimer(true);
+  void loadPreferences();
+  void refresh();
+  setTimer();
 });
-// 切回实时 tab 时补齐初始化(历史指标 tab 挂载时跳过轮询,避免空跑)
-watch(tab, (value, previous) => {
-  if (value !== 'live') { setTimer(false); return; }
-  if (previous === undefined || timer) return;
-  void (async () => {
-    if (!capabilities.value.hostMetricsScope) {
-      const [caps, prefs] = await Promise.all([api.getCapabilities(), api.getPreferences()]);
-      capabilities.value = caps; intervalMs.value = prefs.refreshInterval * 1000;
-    }
-    await refresh(); setTimer(true);
-  })();
+watch(tab, () => {
+  invalidateRequest();
+  setTimer();
+  void refresh();
 });
-onUnmounted(() => { clearInterval(timer); window.removeEventListener('composeops:host-changed', onHostChanged); });
+onUnmounted(() => { mounted = false; invalidateRequest(); clearInterval(timer); window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>

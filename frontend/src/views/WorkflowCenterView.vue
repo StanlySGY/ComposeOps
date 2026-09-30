@@ -140,6 +140,7 @@
 
 <script setup>
 import { onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import { Pencil, Play, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next';
 import { useWorkflowStore } from '../stores/workflow.js';
 import { useToastStore } from '../stores/toast.js';
@@ -154,10 +155,7 @@ const editingId = ref('');
 const form = reactive({ name: '', description: '', triggerType: 'manual', nodes: [] });
 const projects = ref([]);
 
-const definitions = store.definitions;
-const instances = store.instances;
-const loading = store.loading;
-const error = store.error;
+const { definitions, instances, loading, error } = storeToRefs(store);
 
 function nodeLabel(type) {
   return { trigger: '触发', condition: '条件', agent: 'Agent', approval: '审批', action: '执行', verify: '验证' }[type] || type;

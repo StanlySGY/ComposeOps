@@ -549,6 +549,7 @@ async function deployTemplate() {
       }
     });
     if (succeeded) {
+      deploying.value = false;
       closeDeploy();
       await Promise.all([loadTemplates(), loadStats()]);
     }

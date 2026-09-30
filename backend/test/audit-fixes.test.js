@@ -1,17 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApprovalGate } from '../src/services/agent/approval-gate.js';
-import { assessRisk } from '../src/services/agent-tools.js';
-import { nextRunTime } from '../src/services/cron-scheduler.js';
-import { addGitOpsRepo, listGitOpsRepos } from '../src/services/gitops.js';
-import {
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-audit-test-'));
+process.env.DB_PATH = path.join(tempDir, 'test.db');
+test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+const { ApprovalGate } = await import('../src/services/agent/approval-gate.js');
+const { assessRisk } = await import('../src/services/agent-tools.js');
+const { nextRunTime } = await import('../src/services/cron-scheduler.js');
+const { addGitOpsRepo, listGitOpsRepos } = await import('../src/services/gitops.js');
+const {
   addComposeBackup,
   getComposeBackup,
   listComposeBackups,
   setSetting,
   exportUserData,
   COMPOSE_BACKUP_KEEP,
-} from '../src/lib/db.js';
+} = await import('../src/lib/db.js');
 
 /* ---------------- 审批门 fail-closed ---------------- */
 

@@ -6,10 +6,9 @@ const BASE = '/api/v1';
 /**
  * SWR(Stale-While-Revalidate)内存缓存:
  * - GET 命中有效缓存时立即返回旧数据(0ms 秒开),后台静默拉取最新数据;
- * - 默认 TTL 12s;write 请求(POST/PUT/DELETE/PATCH)成功后自动失效相关缓存。
+ * - 每次读取都在后台拉新;write 请求成功后自动失效相关缓存。
  */
-const swrCache = new Map(); // key -> { data, ts, inflight }
-const SWR_TTL = 12000;
+const swrCache = new Map(); // key -> { data, hasData, inflight, promise }
 const CACHEABLE_PATHS = ['/projects', '/hosts', '/personal/preferences', '/system/capabilities', '/ops/blueprints', '/cron'];
 let hostEpoch = 0;
 
@@ -26,8 +25,8 @@ function doFetch(path, opts = {}) {
     headers['Content-Type'] = 'application/json';
   }
   return fetch(`${BASE}${path}`, {
-    headers,
     ...opts,
+    headers,
   }).then(async (res) => {
     if (!res.ok) {
       let msg = res.statusText;
@@ -57,8 +56,11 @@ function revalidate(key, path, opts) {
   if (!entry || entry.inflight) return;
   entry.inflight = true;
   doFetch(path, opts)
-    .then((data) => swrCache.set(key, { data, ts: Date.now(), inflight: false }))
-    .catch(() => swrCache.set(key, { ...entry, inflight: false }));
+    .then((data) => {
+      // 写操作/强刷/切节点会替换或删除 entry,迟到响应不能复活已失效的数据。
+      if (swrCache.get(key) === entry) { entry.data = data; entry.inflight = false; }
+    })
+    .catch(() => { if (swrCache.get(key) === entry) entry.inflight = false; });
 }
 /** SSE/流式响应的非 2xx 错误统一解析为 Error。 */
 async function streamError(res, fallback) {
@@ -68,30 +70,34 @@ async function streamError(res, fallback) {
 async function request(path, opts = {}) {
   if (!isGet(opts)) {
     const data = await doFetch(path, opts);
-    invalidateSwr('/projects');
-    invalidateSwr('/hosts');
-    invalidateSwr('/personal/');
-    invalidateSwr('/ops/');
-    invalidateSwr('/cron');
-    invalidateSwr('/jobs');
+    // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
+    invalidateSwr('/');
     return data;
   }
   const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
   const entry = swrCache.get(key);
-  // 命中新鲜缓存:立即返回,后台 revalidate
-  if (entry && !opts.force && Date.now() - entry.ts < SWR_TTL) {
+  if (entry?.hasData && !opts.force) {
     revalidate(key, path, opts);
     return entry.data;
   }
-  // 命中过期缓存:先回旧值(秒开),后台刷新
-  if (entry && !opts.force) {
-    revalidate(key, path, opts);
-    return entry.data;
-  }
-  // 无缓存:真实拉取,可缓存项落缓存
-  const data = await doFetch(path, opts);
-  if (cacheable(path, opts) && !opts.force) swrCache.set(key, { data, ts: Date.now(), inflight: false });
-  return data;
+  if (entry?.promise && !opts.force) return entry.promise;
+  if (!cacheable(path, opts)) return doFetch(path, opts);
+  // 先登记请求身份,失效操作也能清除尚未返回的首轮请求。强刷同时替换旧缓存。
+  const pending = { hasData: false, inflight: true };
+  swrCache.set(key, pending);
+  pending.promise = doFetch(path, opts).then((data) => {
+    if (swrCache.get(key) === pending) {
+      pending.data = data;
+      pending.hasData = true;
+      pending.inflight = false;
+      pending.promise = null;
+    }
+    return data;
+  }).catch((error) => {
+    if (swrCache.get(key) === pending) swrCache.delete(key);
+    throw error;
+  });
+  return pending.promise;
 }
 /** 使某个路径前缀的 SWR 缓存失效(写操作后调用)。 */
 export function invalidateSwr(prefix) {
@@ -303,13 +309,13 @@ export const api = {
   updateEvent: (id, patch) => request(`/events/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   pruneEvents: (days = 30) => request('/events/events/prune', { method: 'POST', body: JSON.stringify({ days }) }),
   // 工作流中心
-  getWorkflowDefinitions: () => request('/workflows/definitions', { cacheable: true }),
+  getWorkflowDefinitions: (force = false) => request('/workflows/definitions', { cacheable: true, force }),
   getWorkflowDefinition: (id) => request(`/workflows/definitions/${id}`),
   createWorkflowDefinition: (payload) => request('/workflows/definitions', { method: 'POST', body: JSON.stringify(payload) }),
   updateWorkflowDefinition: (id, payload) => request(`/workflows/definitions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteWorkflowDefinition: (id) => request(`/workflows/definitions/${id}`, { method: 'DELETE' }),
   runWorkflow: (id, context = {}) => request(`/workflows/definitions/${id}/run`, { method: 'POST', body: JSON.stringify({ context }) }),
-  getWorkflowInstances: (params = {}) => request(`/workflows/instances?${new URLSearchParams(params)}`, { cacheable: true }),
+  getWorkflowInstances: (params = {}, force = false) => request(`/workflows/instances?${new URLSearchParams(params)}`, { cacheable: true, force }),
   getWorkflowInstance: (id) => request(`/workflows/instances/${id}`),
   approveWorkflowInstance: (id, payload) => request(`/workflows/instances/${id}/approve`, { method: 'POST', body: JSON.stringify(payload) }),
   cancelWorkflowInstance: (id) => request(`/workflows/instances/${id}/cancel`, { method: 'POST' }),

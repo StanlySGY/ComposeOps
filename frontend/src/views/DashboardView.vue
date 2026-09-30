@@ -20,43 +20,42 @@
 
     <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="4" label="总览数据加载中" />
 
-    <EmptyState
-      v-else-if="hasLoaded && !loadError && !projectCount"
-      icon="Boxes"
-      title="暂未发现 Compose 项目"
-      description="Docker 中没有带 Compose 标签的项目,或尚未扫描,可前往服务总览查看"
-    />
-
     <template v-else>
       <div class="metric-grid">
-        <div class="metric-tile">
+        <router-link to="/services" class="metric-tile hover:border-emerald-500/40" aria-label="查看全部项目">
           <span class="metric-icon text-blue-300"><Boxes class="h-5 w-5" /></span>
           <span><strong>{{ projectCount }}</strong><small>项目总数</small></span>
           <span class="metric-meta">健康 {{ healthyProjects }}</span>
-        </div>
-        <div class="metric-tile">
+        </router-link>
+        <router-link to="/services" class="metric-tile hover:border-emerald-500/40" aria-label="查看容器状态">
           <span class="metric-icon text-emerald-300"><Container class="h-5 w-5" /></span>
           <span><strong>{{ containerCount }}</strong><small>容器总数</small></span>
           <span class="metric-meta">运行 {{ runningContainers }}</span>
-        </div>
-        <div class="metric-tile">
+        </router-link>
+        <router-link to="/monitor" class="metric-tile hover:border-emerald-500/40" aria-label="查看 CPU 实时监控">
           <span class="metric-icon" :class="cpuTone"><Cpu class="h-5 w-5" /></span>
-          <span><strong class="font-mono tabular-nums" :class="cpuTone">{{ cpu }}%</strong><small>CPU</small></span>
+          <span><strong class="font-mono tabular-nums" :class="cpuTone">{{ cpu == null ? '—' : `${cpu}%` }}</strong><small>环境 CPU</small></span>
           <SparklineChart :cpu="monitorTrends.cpu" :mem="[]" :width="72" :height="20" />
           <span class="metric-meta">{{ cpuState }}</span>
-        </div>
-        <div class="metric-tile">
+        </router-link>
+        <router-link to="/monitor" class="metric-tile hover:border-emerald-500/40" aria-label="查看内存实时监控">
           <span class="metric-icon" :class="memoryTone"><MemoryStick class="h-5 w-5" /></span>
-          <span><strong class="font-mono tabular-nums" :class="memoryTone">{{ memory }}%</strong><small>内存</small></span>
+          <span><strong class="font-mono tabular-nums" :class="memoryTone">{{ memory == null ? '—' : `${memory}%` }}</strong><small>环境内存</small></span>
           <SparklineChart :cpu="[]" :mem="monitorTrends.mem" :width="72" :height="20" />
           <span class="metric-meta">{{ memoryState }}</span>
-        </div>
-        <div class="metric-tile">
+        </router-link>
+        <router-link to="/inspection" class="metric-tile hover:border-emerald-500/40" aria-label="查看巡检报告">
           <span class="metric-icon" :class="inspectionTone"><Gauge class="h-5 w-5" /></span>
           <span><strong class="font-mono tabular-nums" :class="inspectionTone">{{ inspectionScore }}</strong><small>巡检评分</small></span>
           <span class="metric-meta">{{ inspectionSummary }}</span>
-        </div>
+        </router-link>
       </div>
+
+      <section v-if="hasLoaded && !loadError && !projectCount" class="section-panel text-center">
+        <EmptyState icon="Boxes" title="暂未发现 Compose 项目" description="可前往服务总览扫描项目,或从应用市场开始部署。" />
+        <router-link to="/services" class="btn-secondary">查看服务</router-link>
+        <router-link to="/marketplace" class="btn-primary ml-2">浏览应用市场</router-link>
+      </section>
 
       <section class="section-panel">
           <div class="mb-4 flex items-center justify-between">
@@ -78,7 +77,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { Boxes, Container, Cpu, Gauge, MemoryStick, RefreshCw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
@@ -95,6 +94,8 @@ const loading = ref(false);
 const hasLoaded = ref(false);
 const loadError = ref('');
 const lastUpdated = ref('');
+let requestId = 0;
+let disposed = false;
 
 const projectCount = computed(() => store.projects.length);
 const containerCount = computed(() => store.projects.reduce((n, p) => n + (p.containers?.length || 0), 0));
@@ -102,12 +103,12 @@ const runningContainers = computed(() => store.projects.reduce((n, p) => n + (p.
 const attentionProjects = computed(() => store.projects.filter(p => p.status !== 'running' || (p.containers || []).some(c => c.health === 'unhealthy')).length);
 const healthyProjects = computed(() => projectCount.value - attentionProjects.value);
 
-const cpu = computed(() => metrics.value?.host?.cpu?.percent ?? 0);
-const memory = computed(() => metrics.value?.host?.memory?.percent ?? 0);
-const cpuState = computed(() => cpu.value > 80 ? '负载较高' : '运行正常');
-const memoryState = computed(() => memory.value > 80 ? '内存偏高' : '资源充足');
-const cpuTone = computed(() => cpu.value > 80 ? 'text-amber-300' : 'text-emerald-300');
-const memoryTone = computed(() => memory.value > 80 ? 'text-amber-300' : 'text-emerald-300');
+const cpu = computed(() => metrics.value?.host?.cpu?.percent ?? null);
+const memory = computed(() => metrics.value?.host?.memory?.percent ?? null);
+const cpuState = computed(() => cpu.value == null ? '暂无指标' : cpu.value > 80 ? '负载较高' : '运行正常');
+const memoryState = computed(() => memory.value == null ? '暂无指标' : memory.value > 80 ? '内存偏高' : '资源充足');
+const cpuTone = computed(() => cpu.value == null ? 'text-surface-400' : cpu.value > 80 ? 'text-amber-300' : 'text-emerald-300');
+const memoryTone = computed(() => memory.value == null ? 'text-surface-400' : memory.value > 80 ? 'text-amber-300' : 'text-emerald-300');
 
 const inspectionScore = computed(() => inspection.value?.latest?.score ?? '--');
 const inspectionSummary = computed(() => inspection.value?.latest?.summary ?? '暂无巡检数据');
@@ -174,39 +175,60 @@ async function loadRecentEvents(errors) {
       pushEvent(list, { source: 'cron', id: item.id, timestamp: item.at, level: item.status === 'success' ? 'success' : 'error', title: `定时任务:${item.jobName || ''}`, detail: item.error || '', projectName: '' });
     }
   } else errors.push(cronData.reason);
-  recentEvents.value = list.sort((a, b) => b.ts - a.ts).slice(0, 6);
+  return list.sort((a, b) => b.ts - a.ts).slice(0, 6);
 }
 
 async function load() {
-  if (loading.value) return;
+  if (loading.value || disposed) return;
+  const currentRequest = ++requestId;
   loading.value = true;
   const errors = [];
   try {
-    await store.refresh(false);
-    if (store.error) errors.push(new Error(store.error));
-    const [metricsRes, inspectionRes] = await Promise.allSettled([
+    const [metricsRes, inspectionRes, eventsRes, projectsRes] = await Promise.allSettled([
       api.getMetrics(),
       api.getInspectionOverview(1),
+      loadRecentEvents(errors),
+      store.refresh(true),
     ]);
+    if (disposed || currentRequest !== requestId) return;
+    if (store.error) errors.push(new Error(store.error));
+    if (projectsRes.status === 'rejected') errors.push(projectsRes.reason);
+    if (eventsRes.status === 'fulfilled') recentEvents.value = eventsRes.value;
+    else { recentEvents.value = []; errors.push(eventsRes.reason); }
     if (metricsRes.status === 'fulfilled') {
       metrics.value = metricsRes.value;
       const host = metricsRes.value?.host;
       const rx = metricsRes.value?.network?.rx || 0;
-      if (host) pushMonitorTrend({ cpu: host.cpu?.percent, mem: host.memory?.percent, net: Math.max(1, Math.round((rx / 1024 / 1024) * 100) / 100) });
-    } else errors.push(metricsRes.reason);
-    if (inspectionRes.status === 'fulfilled') inspection.value = inspectionRes.value; else errors.push(inspectionRes.reason);
-    await loadRecentEvents(errors);
+      if (host) pushMonitorTrend({ cpu: host.cpu?.percent, mem: host.memory?.percent, net: Math.max(0, Math.round((rx / 1024 / 1024) * 100) / 100) });
+    } else { metrics.value = null; errors.push(metricsRes.reason); }
+    if (inspectionRes.status === 'fulfilled') inspection.value = inspectionRes.value;
+    else { inspection.value = null; errors.push(inspectionRes.reason); }
     loadError.value = errors.length ? `部分数据加载失败:${errors[0]?.message || '未知错误'}` : '';
     if (!errors.length) {
       lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     }
   } catch (error) {
+    if (disposed || currentRequest !== requestId) return;
     loadError.value = `总览数据加载失败:${error?.message || '未知错误'}`;
   } finally {
-    loading.value = false;
-    hasLoaded.value = true;
+    if (!disposed && currentRequest === requestId) {
+      loading.value = false;
+      hasLoaded.value = true;
+    }
   }
 }
 
-onMounted(load);
+function onHostChanged() {
+  requestId += 1;
+  loading.value = false;
+  hasLoaded.value = false;
+  metrics.value = null;
+  inspection.value = null;
+  recentEvents.value = [];
+  lastUpdated.value = '';
+  loadError.value = '';
+  void load();
+}
+onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void load(); });
+onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>

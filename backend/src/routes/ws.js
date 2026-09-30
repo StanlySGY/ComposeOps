@@ -5,6 +5,8 @@ import { subscribeJobEvents } from '../services/job-events.js';
 import { getActivityDocker } from '../services/docker-hosts.js';
 import { aggregateProjectLogs } from '../services/log-aggregator.js';
 import { subscribeEvents } from '../services/events.js';
+import { followContainerLogs } from '../services/docker-log-stream.js';
+import { subscribeContainerEvents, getContainersSnapshot } from '../services/container-events.js';
 
 /** Web Shell 会话上限与超时(防连接泄漏 / 占坑不操作)。 */
 const MAX_EXEC_SESSIONS = 20;
@@ -39,9 +41,10 @@ export function teardownExecSession(socket) {
 export default async function wsRoutes(fastify) {
   // ---- 容器状态实时推送 ----
   fastify.get('/containers', { websocket: true }, async (socket) => {
-    const { subscribeContainerEvents, getContainersSnapshot } = await import('../services/container-events.js');
-    
-    // 先发送当前快照,避免客户端连接时机导致状态丢失
+    if (socket.readyState !== WebSocket.OPEN) return;
+    const unsubscribe = subscribeContainerEvents(event => safeSend(socket, event));
+    socket.once('close', unsubscribe);
+    // 先登记清理,避免快照请求期间断开后留下订阅。
     try {
       const snapshot = await getContainersSnapshot();
       safeSend(socket, snapshot);
@@ -49,12 +52,6 @@ export default async function wsRoutes(fastify) {
       safeSend(socket, { type: 'error', data: e.message });
     }
 
-    // 订阅实时事件
-    const unsubscribe = subscribeContainerEvents((event) => {
-      safeSend(socket, event);
-    });
-    
-    socket.on('close', unsubscribe);
   });
 
   // ---- 告警事件实时流 ----
@@ -88,101 +85,61 @@ export default async function wsRoutes(fastify) {
 
   // ---- 实时日志流 ----
   fastify.get('/logs', { websocket: true }, async (socket, request) => {
+    const controller = socketAbortController(socket);
     const { projectId, containerId, tail = 200 } = request.query;
-    if (!projectId || !containerId) {
-      socket.send(JSON.stringify({ type: 'error', data: 'missing projectId or containerId' }));
-      return socket.close();
-    }
-    const match = await findProjectContainer(projectId, containerId);
-    if (match.project && !match.project.managed) {
-      socket.send(JSON.stringify({ type: 'error', data: '项目尚未加入管理' }));
-      return socket.close();
-    }
-    if (!match.container) {
-      socket.send(JSON.stringify({ type: 'error', data: 'container not found in project' }));
-      return socket.close();
-    }
-    const container = getActivityDocker().getContainer(match.container.id);
-
-    let logStream;
     try {
-      logStream = await container.logs({
-        follow: true,
-        stdout: true,
-        stderr: true,
-        tail: String(Math.max(0, Math.min(Number(tail) || 200, 5000))),
-        timestamps: true,
+      if (!projectId || !containerId) throw new Error('缺少项目或容器');
+      const match = await findProjectContainer(projectId, containerId);
+      if (controller.signal.aborted) return;
+      if (match.project && !match.project.managed) throw new Error('项目尚未加入管理');
+      if (!match.container) throw new Error('项目中未找到该容器');
+      await followContainerLogs({
+        container: getActivityDocker().getContainer(match.container.id), tail, signal: controller.signal,
+        onLine: line => safeSend(socket, line),
+        onError: error => safeSend(socket, { type: 'error', data: error.message }),
+        onEnd: () => {
+          safeSend(socket, { type: 'end', data: '日志流已结束' });
+          socket.close();
+        },
       });
-    } catch (e) {
-      socket.send(JSON.stringify({ type: 'error', data: e.message }));
-      return socket.close();
-    }
-
-    // Docker log stream 是 multiplexed（stdout/stderr 8 字节头），用 demuxStream 拆分。
-    const inspection = await container.inspect().catch(() => null);
-    const emitLine = (type, text) => {
-      for (const rawLine of text.split('\n')) {
-        if (!rawLine.trim()) continue;
-        let data = rawLine;
-        let ts = null;
-        const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\s?(.*)$/.exec(rawLine);
-        if (m) { ts = m[1]; data = m[2]; }
-        safeSend(socket, { type, data, ts, level: classifyLogLevel(data) });
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        safeSend(socket, { type: 'error', data: error.message });
+        safeSend(socket, { type: 'end', data: '日志连接未建立' });
+        socket.close();
       }
-    };
-    if (inspection?.Config?.Tty) {
-      logStream.on('data', (b) => emitLine('stdout', b.toString('utf8')));
-    } else {
-      const { demuxStream } = await import('../lib/docker-streams.js');
-      const demux = demuxStream();
-      logStream.pipe(demux);
-      demux.stdout.on('data', (b) => emitLine('stdout', b.toString('utf8')));
-      demux.stderr.on('data', (b) => emitLine('stderr', b.toString('utf8')));
     }
-
-    logStream.on('error', (e) => safeSend(socket, { type: 'error', data: e.message }));
-    logStream.on('end', () => {
-      safeSend(socket, { type: 'end', data: 'log stream ended' });
-      try { socket.close(); } catch { /* socket 已关闭时忽略重复 close。 */ }
-    });
-
-    // 客户端断开 -> 停止日志流
-    socket.on('close', () => {
-      try { logStream.destroy(); } catch { /* 日志流已结束时忽略重复销毁。 */ }
-    });
   });
 
   // ---- 多容器聚合日志流 ----
   fastify.get('/aggregated-logs', { websocket: true }, async (socket, request) => {
-    const { projectId, containers } = request.query;
-    if (!projectId) {
-      safeSend(socket, { type: 'error', data: 'missing projectId' });
-      return socket.close();
-    }
-    const { findProject } = await import('../services/scanner.js');
-    const project = await findProject(String(projectId)).catch(() => null);
-    if (!project) {
-      safeSend(socket, { type: 'error', data: 'project not found' });
-      return socket.close();
-    }
-    if (!project.managed) {
-      safeSend(socket, { type: 'error', data: '项目尚未加入管理' });
-      return socket.close();
-    }
-    const ids = String(containers || '').split(',').map((item) => item.trim()).filter(Boolean);
-    let aggregator;
+    const controller = socketAbortController(socket);
+    const { projectId, containers, tail = 200 } = request.query;
     try {
-      aggregator = await aggregateProjectLogs({
-        project,
-        containerIds: ids,
-        onLine: (line) => safeSend(socket, { type: 'line', data: line }),
+      if (!projectId) throw new Error('缺少项目');
+      const { findProject } = await import('../services/scanner.js');
+      const project = await findProject(String(projectId));
+      if (controller.signal.aborted) return;
+      if (!project) throw new Error('项目不存在');
+      if (!project.managed) throw new Error('项目尚未加入管理');
+      const ids = String(containers || '').split(',').map(item => item.trim()).filter(Boolean);
+      const aggregator = await aggregateProjectLogs({
+        project, containerIds: ids, tail, signal: controller.signal,
+        onLine: line => safeSend(socket, { type: 'line', data: line }),
+        onError: error => safeSend(socket, { type: 'error', data: `${error.containerName}: ${error.message}` }),
+        onEnd: () => {
+          safeSend(socket, { type: 'end', data: '所有容器日志流已结束' });
+          socket.close();
+        },
       });
-      safeSend(socket, { type: 'meta', data: { count: ids.length || project.containers.length } });
-    } catch (e) {
-      safeSend(socket, { type: 'error', data: e.message });
-      return socket.close();
+      safeSend(socket, { type: 'meta', data: { count: aggregator.count } });
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        safeSend(socket, { type: 'error', data: error.message });
+        safeSend(socket, { type: 'end', data: '聚合日志连接未建立' });
+        socket.close();
+      }
     }
-    socket.on('close', () => { if (aggregator) aggregator.stop(); });
   });
 
   // ---- 容器 Web Shell ----
@@ -204,101 +161,94 @@ export default async function wsRoutes(fastify) {
       socket.send(JSON.stringify({ type: 'error', data: '只允许 sh 或 bash' }));
       return socket.close();
     }
-    const match = await findProjectContainer(projectId, containerId);
-    if (match.project && !match.project.managed) {
-      socket.send(JSON.stringify({ type: 'error', data: '项目尚未加入管理' }));
-      return socket.close();
-    }
-    if (!match.container) {
-      socket.send(JSON.stringify({ type: 'error', data: 'container not found in project' }));
-      return socket.close();
-    }
-    const container = getActivityDocker().getContainer(match.container.id);
-
-    // 会话上限 + 空闲看门狗:连接成功后占坑,任何活动都刷新空闲计时。
-    activeExecSessions.set(socket, { idleTimer: null, destroyed: false });
-    const refreshIdle = () => {
-      const session = activeExecSessions.get(socket);
-      if (!session || session.destroyed) return;
-      if (session.idleTimer) clearTimeout(session.idleTimer);
-      session.idleTimer = setTimeout(() => {
-        if (session.destroyed) return;
-        safeSend(socket, { type: 'error', data: '会话因超过 30 分钟无操作已自动关闭' });
-        try { socket.close(); } catch { /* socket 已关闭时忽略重复 close。 */ }
-      }, EXEC_SESSION_TIMEOUT_MS);
-    };
-    const teardown = () => {
-      teardownExecSession(socket);
-    };
-    refreshIdle();
-
+    if (socket.readyState !== WebSocket.OPEN) return;
+    // 在第一次 await 前占位并绑定释放,并发初始化也计入上限。
+    const session = { idleTimer: null, destroyed: false };
+    activeExecSessions.set(socket, session);
     let exec;
-    try {
-      exec = await container.exec({
-        AttachStdin: true,
-        AttachStdout: true,
-        AttachStderr: true,
-        Tty: true,
-        Cmd: [cmd],
-      });
-    } catch (e) {
-      socket.send(JSON.stringify({ type: 'error', data: e.message }));
-      teardown();
-      return socket.close();
-    }
-
     let stream;
-    try {
-      stream = await exec.start({ hijack: true, stdin: true, Tty: true });
-    } catch (e) {
-      socket.send(JSON.stringify({ type: 'error', data: e.message }));
-      teardown();
-      return socket.close();
+    let pendingInput = [];
+    let pendingBytes = 0;
+    let pendingResize = null;
+    function teardown() {
+      teardownExecSession(socket);
+      socket.removeListener('message', onMessage);
+      pendingInput = [];
+      pendingBytes = 0;
+      pendingResize = null;
+      stream?.destroy();
     }
-
-    // Tty 模式下 stream 无需 demux，直接透传字节。
-    stream.on('data', (b) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(b);
-    });
-    stream.on('error', (e) => {
-      teardown();
-      safeSend(socket, { type: 'error', data: e.message });
-    });
-    stream.on('end', () => {
-      teardown();
-      try { socket.close(); } catch { /* socket 已关闭时忽略重复 close。 */ }
-    });
-
-    // 统一收消息：JSON 控制帧（resize）走控制路径，二进制/文本走容器 stdin。
-    socket.on('message', (data, isBinary) => {
-      // 仅在文本帧且以 { 开头时尝试解析为控制帧
-      if (!isBinary) {
-        const text = data.toString('utf8');
-        if (text.startsWith('{')) {
-          try {
-            const msg = JSON.parse(text);
-            if (msg.type === 'resize' && msg.cols && msg.rows) {
-              exec.resize({ h: msg.rows, w: msg.cols }).catch(() => {});
-              refreshIdle();
-              return;
-            }
-            // 其它未知控制帧忽略，不写入 stdin
-            return;
-            } catch {
-            // 解析失败视为普通输入
-          }
-        }
-      }
+    function refreshIdle() {
+      if (session.destroyed) return;
+      clearTimeout(session.idleTimer);
+      session.idleTimer = setTimeout(() => {
+        safeSend(socket, { type: 'error', data: '会话因超过 30 分钟无操作已自动关闭' });
+        teardown();
+        socket.close();
+      }, EXEC_SESSION_TIMEOUT_MS);
+      session.idleTimer.unref?.();
+    }
+    function onMessage(data, isBinary) {
+      if (session.destroyed) return;
       refreshIdle();
-      try {
-        if (stream.writable) stream.write(Buffer.isBuffer(data) ? data : Buffer.from(data));
-      } catch { /* 客户端断开时忽略写入失败。 */ }
-    });
-
-    socket.on('close', () => {
+      if (!isBinary) {
+        try {
+          const message = JSON.parse(data.toString());
+          if (message.type === 'resize') {
+            if (Number.isInteger(message.cols) && Number.isInteger(message.rows) && message.cols > 0 && message.rows > 0 && message.cols <= 1000 && message.rows <= 1000) {
+              const size = { w: message.cols, h: message.rows };
+              if (stream) void exec.resize(size).catch(() => {});
+              else pendingResize = size;
+            }
+            return;
+          }
+        } catch { /* 普通终端输入继续按字节透传。 */ }
+      }
+      const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      if (!stream) {
+        if (pendingBytes + bytes.length > 64 * 1024) {
+          safeSend(socket, { type: 'error', data: '终端初始化期间输入过多,请重新连接后再粘贴' });
+          teardown();
+          socket.close();
+          return;
+        }
+        pendingInput.push(bytes);
+        pendingBytes += bytes.length;
+      } else if (stream.writable) stream.write(bytes);
+    }
+    socket.once('close', teardown);
+    socket.on('message', onMessage);
+    refreshIdle();
+    try {
+      const match = await findProjectContainer(projectId, containerId);
+      if (session.destroyed) return;
+      if (match.project && !match.project.managed) throw new Error('项目尚未加入管理');
+      if (!match.container) throw new Error('项目中未找到该容器');
+      const container = getActivityDocker().getContainer(match.container.id);
+      exec = await container.exec({ AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: [cmd] });
+      if (session.destroyed) return;
+      stream = await exec.start({ hijack: true, stdin: true, Tty: true });
+      if (session.destroyed) { stream.destroy(); return; }
+      stream.on('data', bytes => {
+        if (socket.readyState === WebSocket.OPEN) socket.send(bytes);
+      });
+      stream.on('error', error => {
+        safeSend(socket, { type: 'error', data: error.message });
+        teardown();
+        socket.close();
+      });
+      stream.on('end', () => { teardown(); socket.close(); });
+      stream.on('close', () => { teardown(); socket.close(); });
+      if (pendingResize) void exec.resize(pendingResize).catch(() => {});
+      pendingResize = null;
+      for (const bytes of pendingInput) if (stream.writable) stream.write(bytes);
+      pendingInput = [];
+      pendingBytes = 0;
+    } catch (error) {
+      if (!session.destroyed) safeSend(socket, { type: 'error', data: error.message });
       teardown();
-      try { stream.destroy(); } catch { /* stream 已结束时忽略重复销毁。 */ }
-    });
+      socket.close();
+    }
   });
 }
 
@@ -310,10 +260,10 @@ function safeSend(socket, payload) {
   } catch { /* WebSocket 路由清理必须保持幂等。 */ }
 }
 
-/** 日志行级别分类:error / warn / info,供前端过滤与高亮。 */
-function classifyLogLevel(text = '') {
-  const t = String(text);
-  if (/(error|exception|fatal|panic|crash|failed)/i.test(t)) return 'error';
-  if (/(warn|deprecat)/i.test(t)) return 'warn';
-  return 'info';
+/** 在任何异步初始化之前绑定断连,迟到的 Docker 流由同一 signal 回收。 */
+function socketAbortController(socket) {
+  const controller = new AbortController();
+  socket.once('close', () => controller.abort());
+  if (socket.readyState !== WebSocket.OPEN) controller.abort();
+  return controller;
 }

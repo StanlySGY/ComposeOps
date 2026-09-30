@@ -1,4 +1,5 @@
-import { getActivityDocker } from './docker-hosts.js';
+import { getActivityDocker, getActiveHostId, onActiveHostChange } from './docker-hosts.js';
+import { createLineDecoder } from '../lib/line-decoder.js';
 import { scanProjects } from './scanner.js';
 
 /**
@@ -7,8 +8,8 @@ import { scanProjects } from './scanner.js';
  */
 
 const SUBSCRIBERS = new Set(); // Set<Function>
-let eventStream = null;
-let streamActive = false;
+let eventSession = null;
+let unsubscribeHostChange = null;
 
 /**
  * 订阅容器状态变化事件
@@ -16,15 +17,20 @@ let streamActive = false;
  * @returns {Function} 退订函数
  */
 export function subscribeContainerEvents(callback) {
-  if (typeof callback === 'function') SUBSCRIBERS.add(callback);
-  // 首次订阅时启动事件流
-  if (SUBSCRIBERS.size === 1 && !streamActive) {
-    startDockerEventStream();
-  }
+  if (typeof callback !== 'function') return () => {};
+  SUBSCRIBERS.add(callback);
+  if (!unsubscribeHostChange) unsubscribeHostChange = onActiveHostChange(() => {
+    stopDockerEventStream();
+    void startDockerEventStream();
+  });
+  if (eventSession && eventSession.hostId !== getActiveHostId()) stopDockerEventStream();
+  if (!eventSession) void startDockerEventStream();
   return () => {
     SUBSCRIBERS.delete(callback);
     // 无订阅者时停止事件流
     if (SUBSCRIBERS.size === 0) {
+      unsubscribeHostChange?.();
+      unsubscribeHostChange = null;
       stopDockerEventStream();
     }
   };
@@ -48,80 +54,67 @@ function broadcastEvent(event) {
  * 启动 Docker Events 流监听
  */
 async function startDockerEventStream() {
-  if (streamActive) return;
-  streamActive = true;
-
+  if (eventSession || !SUBSCRIBERS.size) return;
+  const session = { hostId: getActiveHostId(), stream: null, timer: null, ending: false };
+  eventSession = session;
+  const current = () => eventSession === session && SUBSCRIBERS.size > 0;
+  function attachStream(stream) {
+    if (!current()) { stream.destroy(); return false; }
+    session.stream = stream;
+    return true;
+  }
+  function reconnect() {
+    if (!current() || session.ending) return;
+    session.ending = true;
+    session.stream?.destroy();
+    session.timer = setTimeout(() => {
+      if (!current()) return;
+      eventSession = null;
+      void startDockerEventStream();
+    }, 3000);
+    session.timer.unref?.();
+  }
   try {
-    const docker = getActivityDocker();
-    
-    // 只监听容器相关事件: start, stop, die, kill, pause, unpause, restart, health_status
-    eventStream = await docker.getEvents({
-      filters: {
-        type: ['container'],
-        event: ['start', 'stop', 'die', 'kill', 'pause', 'unpause', 'restart', 'health_status', 'create', 'destroy'],
-      },
-    });
-
-    console.log('[container-events] Docker 事件流已启动');
-
-    eventStream.on('data', async (chunk) => {
+    const stream = await getActivityDocker().getEvents({ filters: {
+      type: ['container'],
+      event: ['start', 'stop', 'die', 'kill', 'pause', 'unpause', 'restart', 'health_status', 'create', 'destroy'],
+    } });
+    if (!attachStream(stream)) return;
+    let queue = Promise.resolve();
+    const decoder = createLineDecoder(line => {
+      if (!line.trim()) return;
+      // 按完整 JSON 行解析,一条坏事件不应丢弃同 chunk 的其它事件。
       try {
-        const lines = chunk.toString('utf8').trim().split('\n');
-        for (const line of lines) {
-          if (!line) continue;
-          const event = JSON.parse(line);
-          await handleDockerEvent(event);
-        }
-      } catch (error) {
-        console.error('[container-events] 事件解析失败:', error.message);
-      }
+        const event = JSON.parse(line);
+        queue = queue.then(() => current() && handleDockerEvent(event, current))
+          .catch(error => console.error('[container-events] 事件处理失败:', error.message));
+      } catch (error) { console.error('[container-events] 事件解析失败:', error.message); }
     });
-
-    eventStream.on('error', (error) => {
-      console.error('[container-events] Docker 事件流错误:', error.message);
-      streamActive = false;
-      // 3 秒后重连
-      setTimeout(() => {
-        if (SUBSCRIBERS.size > 0) startDockerEventStream();
-      }, 3000);
-    });
-
-    eventStream.on('end', () => {
-      console.log('[container-events] Docker 事件流已结束');
-      streamActive = false;
-      // 尝试重连
-      setTimeout(() => {
-        if (SUBSCRIBERS.size > 0) startDockerEventStream();
-      }, 3000);
-    });
+    stream.on('data', chunk => { if (current()) decoder.write(chunk); });
+    stream.on('end', () => { decoder.end(); reconnect(); });
+    stream.on('error', error => { console.error('[container-events] Docker 事件流错误:', error.message); reconnect(); });
+    stream.on('close', reconnect);
   } catch (error) {
+    if (!current()) return;
     console.error('[container-events] 启动 Docker 事件流失败:', error.message);
-    // eslint-disable-next-line require-atomic-updates
-    streamActive = false;
+    reconnect();
   }
 }
 
-/**
- * 停止 Docker Events 流
- */
+/** 停止期间清除会话身份,迟到的 getEvents 与旧重连定时器都不能重新占用流。 */
 function stopDockerEventStream() {
-  if (eventStream) {
-    try {
-      eventStream.destroy();
-    } catch (error) {
-      console.error('[container-events] 停止事件流失败:', error);
-    }
-    eventStream = null;
-  }
-  streamActive = false;
-  console.log('[container-events] Docker 事件流已停止');
+  const session = eventSession;
+  eventSession = null;
+  if (!session) return;
+  clearTimeout(session.timer);
+  session.stream?.destroy();
 }
 
 /**
  * 处理单个 Docker 事件
  * @param {object} event Docker Events API 返回的事件对象
  */
-async function handleDockerEvent(event) {
+async function handleDockerEvent(event, current = () => true) {
   // 过滤: 只处理容器事件
   if (event.Type !== 'container') return;
 
@@ -138,6 +131,8 @@ async function handleDockerEvent(event) {
     console.error('[container-events] 扫描项目失败:', error.message);
     return;
   }
+
+  if (!current()) return;
 
   // 定位包含此容器的项目
   const matchedProject = projects.find((project) =>
@@ -162,8 +157,8 @@ async function handleDockerEvent(event) {
   };
 
   // 健康检查事件特殊处理
-  if (action === 'health_status') {
-    payload.healthStatus = attributes.health_status; // healthy, unhealthy, starting
+  if (String(action).startsWith('health_status')) {
+    payload.healthStatus = attributes.health_status || action.split(':')[1]?.trim(); // healthy, unhealthy, starting
   }
 
   // 广播给所有订阅者

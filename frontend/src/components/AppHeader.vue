@@ -80,11 +80,12 @@ function toggleDensity() { density.value = density.value === 'compact' ? 'comfor
 function asArray(value) { return Array.isArray(value) ? value : []; }
 const allProjects = ref([]);
 const quickProjects = computed(() => asArray(allProjects.value).slice(0, 12));
-const pageNames = { services: '服务总览', compose: 'Compose 配置', logs: '实时日志', shell: '容器终端', agent: 'AI 智能运维 Agent', 'agent-history': 'Agent 执行历史', inspection: 'AI 巡检中心', monitor: '实时监控', review: '变更与回滚', events: '事件中心', resources: '存储清理', cron: '定时任务', gitops: 'GitOps', cost: '成本分析', topology: '服务拓扑', 'ops-center': '运维任务', 'node-groups': '节点组管理', cmdb: '资产中心', workflows: '工作流', marketplace: '应用市场', settings: '系统设置' };
+const pageNames = { dashboard: '运维总览', services: '服务总览', compose: 'Compose 配置', logs: '实时日志', shell: '容器终端', agent: 'AI 智能运维 Agent', 'agent-history': 'Agent 执行历史', inspection: 'AI 巡检中心', monitor: '实时监控', review: '变更与回滚', events: '事件中心', resources: '存储清理', cron: '定时任务', gitops: 'GitOps', cost: '成本分析', topology: '服务拓扑', 'ops-center': '运维任务', 'node-groups': '节点组管理', cmdb: '资产中心', workflows: '工作流', marketplace: '应用市场', settings: '系统设置' };
 const currentPage = computed(() => pageNames[route.name] || '运维控制台');
 const envProjects = ref([]);
 const appBlueprints = ref([]);
 const baseCommands = [
+  { to: '/dashboard', label: '运维总览', description: '项目健康、环境指标与最近事件', icon: Boxes, category: 'dashboard home 首页 概览' },
   { to: '/services', label: '服务总览', description: '查看项目健康状态并执行生命周期操作', icon: Boxes, category: 'dashboard stack container 项目 容器' },
   { to: '/compose', label: 'Compose 配置', description: '编辑、校验和恢复 Compose 文件', icon: FileCode2, category: 'yaml editor backup 配置 备份' },
   { to: '/logs', label: '实时日志', description: '连接容器输出并搜索、暂停或导出', icon: ScrollText, category: 'stdout stderr search 日志' },
@@ -96,6 +97,17 @@ const baseCommands = [
   { to: '/events?tab=operations', label: '操作与任务', description: '审计 Compose、配置和维护操作,跟踪后台任务', icon: History, category: 'history audit 记录 审计 任务 job' },
   { to: '/events', label: '事件中心', description: '统一查看告警事件、运维时间线与操作任务', icon: BellRing, category: 'alert event timeline 事件 告警 时间线' },
   { to: '/review', label: '变更与回滚', description: '部署前 AI 评审变更,出问题后一键回滚', icon: FileSearch, category: 'review rollback change 变更 评审 回滚' },
+  { to: '/topology', label: '服务拓扑', description: '查看服务依赖、端口和数据卷关系', icon: Layers, category: 'topology dependencies graph 拓扑 依赖' },
+  { to: '/agent/history', label: 'Agent 执行历史', description: '查看工具调用、执行结果与 token 用量', icon: History, category: 'agent history usage 历史 用量' },
+  { to: '/ops-center', label: '运维任务', description: '编排项目升级与自动巡检任务', icon: Play, category: 'operations jobs 运维 任务' },
+  { to: '/workflows', label: '工作流', description: '创建可复用流程并处理待审批任务', icon: Layers, category: 'workflow automation 自动化 审批' },
+  { to: '/cron', label: '定时任务', description: '自动备份、清理与镜像检查', icon: History, category: 'cron schedule 定时 计划 备份' },
+  { to: '/gitops', label: 'GitOps', description: '同步仓库并检查配置漂移', icon: FileCode2, category: 'git repository sync 仓库 同步 漂移' },
+  { to: '/cmdb', label: '资产中心', description: '查看主机、项目与容器资产', icon: Boxes, category: 'cmdb inventory 资产' },
+  { to: '/node-groups', label: '节点组', description: '按组管理 Docker 节点', icon: Layers, category: 'host group fleet 节点 主机 分组' },
+  { to: '/marketplace', label: '应用市场', description: '发现、收藏和部署应用模板', icon: Store, category: 'marketplace app store 模板 应用 市场' },
+  { to: '/resources', label: '存储清理', description: '管理镜像、卷、网络与数据卷备份', icon: Boxes, category: 'storage volume image network 存储 清理 备份' },
+  { to: '/cost', label: '成本分析', description: '分析项目与镜像的资源占用', icon: ChartNoAxesCombined, category: 'cost resource 成本 分析' },
   { to: '/settings', label: '系统设置', description: '配置通知、更新、AI 与项目纳管', icon: Settings, category: 'notification maintenance mounts 设置' },
   { to: '/settings?tab=mounts', label: '项目纳管', description: '选择允许控制和编辑 Compose 的项目', icon: Boxes, category: 'permission mount compose 权限 目录' },
   { to: '/settings?tab=notifications', label: '异常通知', description: '设置容器、内存和存储告警渠道', icon: Settings, category: 'alert webhook telegram email 告警' },
@@ -107,7 +119,7 @@ const commands = computed(() => {
     .map((host) => ({
       id: `node-${host.id}`,
       run: () => void switchNode(host),
-      label: `Switch Node: ${host.name}`,
+      label: `切换节点:${host.name}`,
       description: host.type === 'local' ? '切换到本机 Docker' : `切换到 ${host.type.toUpperCase()} ${host.host}:${host.port}`,
       icon: Layers,
       category: `switch node host docker 节点 切换 ${host.name}`,
@@ -134,14 +146,13 @@ const commands = computed(() => {
     }));
   const actionCommands = asArray(allProjects.value)
     .filter((project) => project.managed)
-    .slice(0, 8)
     .flatMap((project) => ([
       { id: `run-${project.id}-up`, run: () => void runProjectAction(project, 'up'), label: `启动: ${project.projectName}`, description: '通过 Compose 启动项目', icon: Play, category: `start up 启动 运行 ${project.projectName}` },
       { id: `run-${project.id}-restart`, run: () => void runProjectAction(project, 'restart'), label: `重启: ${project.projectName}`, description: '重启项目所有容器', icon: RotateCw, category: `restart reboot 重启 ${project.projectName}` },
       { id: `run-${project.id}-stop`, run: () => void runProjectAction(project, 'stop'), label: `停止: ${project.projectName}`, description: '停止项目所有容器', icon: Square, category: `stop halt 停止 ${project.projectName}` },
       { id: `logs-${project.id}`, to: `/logs?projectId=${project.id}`, label: `日志: ${project.projectName}`, description: '查看项目实时日志', icon: ScrollText, category: `logs 日志 ${project.projectName}` },
     ]));
-  return [...actionCommands, ...nodeCommands, ...envCommands, ...blueprintCommands, ...baseCommands].map((item) =>
+  return [...baseCommands, ...actionCommands, ...nodeCommands, ...envCommands, ...blueprintCommands].map((item) =>
     item.id ? item : { ...item, id: item.to },
   );
 });
@@ -192,19 +203,25 @@ async function switchNode(host) {
   }
 }
 async function reloadHostProjects() {
+  const currentRequest = ++projectRequestId;
   try {
     const data = await api.getProjects(true);
+    if (currentRequest !== projectRequestId) return;
     const list = asArray(data?.projects);
     envProjects.value = list.filter((project) => project.editable);
     allProjects.value = list;
   } catch {
+    if (currentRequest !== projectRequestId) return;
     envProjects.value = [];
     allProjects.value = [];
   }
 }
+let projectRequestId = 0;
 function onHostChanged() {
   bumpHostEpoch();
   projectSwitcherOpen.value = false;
+  envProjects.value = [];
+  allProjects.value = [];
   void reloadHostProjects();
   void api.getBlueprints(true).then((data) => { appBlueprints.value = asArray(data?.blueprints); }).catch(() => {});
 }

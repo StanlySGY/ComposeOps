@@ -60,12 +60,27 @@ function parseComposeFiles(raw, workingDir) {
 }
 
 // 短 TTL 缓存:scanProjects 是几乎所有 /projects/:id/* 请求、WS 日志与 Agent 工具的
-// 入口,每次都是"全容器列表 + 逐项目可达性探测 + 2N 次同步 SQLite 查询";Docker
+// 入口,每次都是"全容器列表 + 逐项目可达性探测";Docker
 // 事件(尤其 health_status 抖动)还会逐事件再触发。3 秒内复用同一份快照足以削峰,
 // 对动作后的验收窗口(runGate 自己直接查 Docker)没有可感知影响。
 const SCAN_CACHE_TTL_MS = 3000;
 let scanCache = { client: null, at: 0, data: null };
 let scanInFlight = null;
+
+function projectSnapshot(data) {
+  // 权限和个人偏好不缓存,授权/撤销必须在下一次访问时立即生效。
+  return structuredClone(data).map(project => {
+    const preference = getProjectPreference(project.id);
+    project.managed = !!preference.managed;
+    project.mountEnabled = getProjectMountEnabled(project.id);
+    project.editable = project.managed && project.mountEnabled && (project.mounted || project.workspaceAvailable);
+    project.composeMode = project.editable ? (project.mounted ? 'direct' : 'workspace') : 'containers';
+    project.favorite = !!preference.favorite;
+    project.note = preference.note || '';
+    return project;
+  }).sort((a, b) => Number(b.managed) - Number(a.managed) || Number(b.favorite) - Number(a.favorite) ||
+    a.owner.localeCompare(b.owner) || a.projectName.localeCompare(b.projectName));
+}
 
 /** 主动失效扫描缓存(节点切换/需要强制刷新时调用)。 */
 export function invalidateScanCache() {
@@ -78,21 +93,23 @@ export async function scanProjects() {
   const now = Date.now();
   // 以 dockerode 客户端实例作缓存键:切换节点后客户端实例不同,天然隔离,无需感知宿主实现。
   if (scanCache.client === activeDocker && scanCache.data && now - scanCache.at < SCAN_CACHE_TTL_MS) {
-    return scanCache.data.map((project) => ({ ...project }));
+    return projectSnapshot(scanCache.data);
   }
-  if (scanInFlight) return scanInFlight;
-  scanInFlight = (async () => {
-    const data = await scanProjectsUncached(activeDocker);
-    scanCache = { client: activeDocker, at: Date.now(), data };
-    return data.map((project) => ({ ...project }));
-  })().finally(() => { scanInFlight = null; });
-  return scanInFlight;
+  if (scanInFlight?.client === activeDocker) return projectSnapshot(await scanInFlight.promise);
+  // 节点类型必须与客户端一起捕获,不能在 listContainers 返回后读取全局活动节点。
+  const nodeType = getActiveHostType();
+  const pending = { client: activeDocker, promise: null };
+  scanInFlight = pending;
+  pending.promise = scanProjectsUncached(activeDocker, nodeType).then(data => {
+    // 主动失效或切节点后,旧请求既不能复活缓存,也不能清除新请求。
+    if (scanInFlight === pending) scanCache = { client: activeDocker, at: Date.now(), data };
+    return data;
+  }).finally(() => { if (scanInFlight === pending) scanInFlight = null; });
+  return projectSnapshot(await pending.promise);
 }
 
-async function scanProjectsUncached(activeDocker) {
+async function scanProjectsUncached(activeDocker, nodeType) {
   const containers = await activeDocker.listContainers({ all: true });
-  // 远程节点无法访问本机 compose 目录,标记为容器控制模式。
-  const nodeType = getActiveHostType();
 
   // 按 compose project 分组（以 workingDir 为 key）
   const projects = new Map();
@@ -167,9 +184,6 @@ async function scanProjectsUncached(activeDocker) {
       .map((file) => file.path);
     project.mounted = nodeType === 'local' && project.workingDirReachable && composeReachability.length > 0 &&
       composeReachability.every((file) => file.reachable);
-    const preference = getProjectPreference(project.id);
-    project.managed = !!preference.managed;
-    project.mountEnabled = getProjectMountEnabled(project.id);
     // 本地未挂载目录走短生命周期 workspace 容器;SSH 节点直接在远端主机上读写,TCP 只有 Docker API。
     const sshHost = nodeType === 'ssh';
     const workspaceRoot = (nodeType === 'local' || sshHost) ? safeProjectMountPath(project.workingDir) : '';
@@ -184,16 +198,8 @@ async function scanProjectsUncached(activeDocker) {
     else if (sshHost && project.workspaceAvailable) project.mountState = 'remote_ssh';
     else if (!project.workingDirReachable) project.mountState = 'directory_unreachable';
     else project.mountState = 'compose_files_unreachable';
-    project.editable = project.managed && project.mountEnabled && (project.mounted || project.workspaceAvailable);
-    project.composeMode = project.editable ? (project.mounted ? 'direct' : 'workspace') : 'containers';
-    project.favorite = !!preference.favorite;
-    project.note = preference.note || '';
   }
-  return [...projects.values()].sort((a, b) =>
-    Number(b.managed) - Number(a.managed) || Number(b.favorite) - Number(a.favorite) ||
-    a.owner.localeCompare(b.owner) ||
-    a.projectName.localeCompare(b.projectName)
-  );
+  return [...projects.values()];
 }
 
 export async function findProject(id) {

@@ -12,6 +12,7 @@ export const useServicesStore = defineStore('services', () => {
   let wsHook = null;
   let refreshPromise = null;
   let containerEventDebounce = null;
+  let refreshId = 0;
 
   /**
    * SWR 语义刷新:
@@ -20,20 +21,31 @@ export const useServicesStore = defineStore('services', () => {
    */
   async function refresh(force = false) {
     if (refreshPromise && !force) return refreshPromise;
+    const currentRefresh = ++refreshId;
     const hasData = projects.value.length > 0;
     if (!hasData) loading.value = true;
     error.value = '';
     const requestPromise = (async () => {
       try {
         const data = await api.getProjects(force);
+        if (currentRefresh !== refreshId) return;
         if (Array.isArray(data?.projects)) projects.value = data.projects;
         lastLoadedAt.value = Date.now();
       } catch (e) {
-        error.value = e.message;
-      } finally { loading.value = false; }
+        if (currentRefresh === refreshId) error.value = e.message;
+      } finally { if (currentRefresh === refreshId) loading.value = false; }
     })();
     refreshPromise = requestPromise;
     try { await requestPromise; } finally { if (refreshPromise === requestPromise) refreshPromise = null; }
+  }
+
+  function refreshForHost() {
+    refreshId += 1;
+    refreshPromise = null;
+    projects.value = [];
+    lastLoadedAt.value = 0;
+    error.value = '';
+    return refresh(true);
   }
 
   /**
@@ -42,7 +54,7 @@ export const useServicesStore = defineStore('services', () => {
   function handleContainerEvent(event) {
     if (event.type === 'snapshot') {
       const snapshot = event.projects || event.data?.projects;
-      if (Array.isArray(snapshot) && (snapshot.length > 0 || projects.value.length === 0)) {
+      if (Array.isArray(snapshot)) {
         projects.value = snapshot;
         lastLoadedAt.value = Date.now();
       }
@@ -105,6 +117,7 @@ export const useServicesStore = defineStore('services', () => {
     wsConnected,
     handleContainerEvent,
     refresh, 
+    refreshForHost,
     startAutoRefresh, 
     stopAutoRefresh,
     startWebSocket,

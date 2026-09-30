@@ -19,13 +19,14 @@
     </div>
 
     <p v-if="error" class="alert-error">{{ error }}</p>
-    <div class="flex items-center gap-3 text-muted">
-      <span :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : '未连接' }}</span>
+    <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
+    <div class="flex flex-wrap items-center gap-3 text-muted">
+      <span :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
       <span v-if="levelCounts.error" class="text-rose-400">ERROR {{ levelCounts.error }}</span>
       <span v-if="levelCounts.warn" class="text-amber-400">WARN {{ levelCounts.warn }}</span>
       <span v-if="paused" class="text-amber-400">已暂停 · {{ pending.length }} 条待显示</span>
-      <span v-if="sawError && !paused" class="text-rose-300">检测到 {{ retainedCount }} 行异常日志,退出后可到事件中心查阅</span>
+      <span v-if="sawError && !paused" class="text-rose-300">当前保留 {{ retainedCount }} 行异常日志</span>
       <label class="toggle-label ml-auto"><input v-model="autoScroll" type="checkbox" />自动滚动</label>
     </div>
 
@@ -62,7 +63,7 @@ const route = useRoute();
 const projects = ref([]);
 const projectId = ref(route.query.projectId || '');
 const containerId = ref(route.query.containerId || '');
-const aggregateMode = ref(false);
+const aggregateMode = ref(!!route.query.projectId && !route.query.containerId);
 const selectedContainers = ref([]);
 const levelFilter = ref('');
 const tail = ref(200);
@@ -70,6 +71,11 @@ const lines = ref([]);
 const pending = ref([]);
 const search = ref('');
 const paused = ref(false);
+const pausedDropped = ref(0);
+const streamEnded = ref(false);
+const MAX_LINES = 5000;
+let disposed = false;
+let loadId = 0;
 const autoScroll = ref(true);
 const autoScrollPaused = ref(false);
 const error = ref('');
@@ -99,7 +105,7 @@ const logSocket = useWebSocket(
 const aggSocket = useWebSocket(
   () => {
     const ids = selectedContainers.value.join(',');
-    return wsUrl(`/ws/aggregated-logs?projectId=${encodeURIComponent(projectId.value)}&containers=${ids ? encodeURIComponent(ids) : ''}`);
+    return wsUrl(`/ws/aggregated-logs?projectId=${encodeURIComponent(projectId.value)}&containers=${ids ? encodeURIComponent(ids) : ''}&tail=${tail.value}`);
   },
   {
     onOpen: onStreamOpen,
@@ -114,7 +120,7 @@ const reconnecting = computed(() => logSocket.reconnecting.value || aggSocket.re
 const containers = computed(() => projects.value.find((p) => p.id === projectId.value)?.containers || []);
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
 const hasErrors = computed(() => errorLines.value > 0);
-const recentErrorLogs = computed(() => lines.value.filter((line) => line.type === 'stderr' || line.type === 'error').map((line) => line.data).join('').slice(-50000));
+const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
 const scrollPadTop = computed(() => viewStart.value * LINE_H);
 const scrollPadBottom = computed(() => Math.max(0, (filtered.value.length - viewEnd.value) * LINE_H));
@@ -137,34 +143,39 @@ const filtered = computed(() => {
   return result;
 });
 
-onMounted(async () => {
+onMounted(() => {
   nextTick(syncViewport);
-  try {
-    projects.value = (await api.getProjects()).projects.filter((project) => project.managed);
-    const prefs = await api.getPreferences();
-    tail.value = prefs.logTail;
-    // 仅当 URL 只有 projectId 时进入聚合模式(带 containerId 则单容器)
-    aggregateMode.value = !!(route.query.projectId && !route.query.containerId);
-    if (containerId.value && projects.value.some((project) => project.id === projectId.value)) connect();
-  } catch (loadError) {
-    error.value = loadError.message || '日志页面加载失败';
-  }
   window.addEventListener('composeops:host-changed', onHostChanged);
   if (boxEl.value) {
-    resizeObserver = new ResizeObserver(() => syncViewport());
+    resizeObserver = new ResizeObserver(syncViewport);
     resizeObserver.observe(boxEl.value);
   }
+  void reloadProjects();
 });
 
 function onHostChanged() { disconnect(); clearLines(); projects.value = []; void reloadProjects(); }
 async function reloadProjects() {
-  try {
-    projects.value = (await api.getProjects()).projects.filter((project) => project.managed);
-    if ((containerId.value || aggregateMode.value) && projects.value.some((project) => project.id === projectId.value)) connect();
-  } catch {
-    error.value = '项目列表刷新失败,请稍后重试';
+  const currentLoad = ++loadId;
+  const [result, prefs] = await Promise.allSettled([api.getProjects(true), api.getPreferences()]);
+  if (disposed || currentLoad !== loadId) return;
+  if (prefs.status === 'fulfilled' && Number.isFinite(Number(prefs.value?.logTail))) tail.value = Number(prefs.value.logTail);
+  if (result.status === 'rejected') {
+    error.value = result.reason?.message || '项目列表刷新失败,请稍后重试';
+    return;
   }
+  projects.value = (result.value?.projects || []).filter(project => project.managed);
+  error.value = '';
+  if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 }
+watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nextContainer]) => {
+  disconnect();
+  clearLines();
+  projectId.value = nextProject || '';
+  containerId.value = nextContainer || '';
+  aggregateMode.value = !!nextProject && !nextContainer;
+  selectedContainers.value = [];
+  if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
+});
 function onProjectChange() { containerId.value = ''; selectedContainers.value = []; disconnect(); clearLines(); }
 function onContainerChange() { disconnect(); clearLines(); }
 function toggleAggregate() {
@@ -175,7 +186,9 @@ function toggleAggregate() {
 }
 
 function connect() {
+  if (disposed || !canConnect.value) return;
   disconnect();
+  streamEnded.value = false;
   error.value = '';
   if (aggregateMode.value) aggSocket.connect();
   else logSocket.connect();
@@ -189,16 +202,20 @@ function onStreamOpen({ resumed } = {}) {
 }
 
 function ingest(event, aggregate) {
+  if (disposed) return;
   try {
     const frame = JSON.parse(event.data);
-    if (aggregate) {
-      if (frame.type === 'line') {
-        pending.value.push({ id: ++sequence.value, ...frame.data });
-        flushPending();
-      } else if (frame.type === 'error') error.value = frame.data;
-      return;
+    if (frame.type === 'error') { error.value = frame.data; return; }
+    if (frame.type === 'end') { streamEnded.value = true; disconnect(); return; }
+    const line = aggregate ? (frame.type === 'line' ? frame.data : null)
+      : (['stdout', 'stderr'].includes(frame.type) ? frame : null);
+    if (!line || typeof line.data !== 'string') return;
+    pending.value.push({ ...line, id: ++sequence.value });
+    if (pending.value.length > MAX_LINES) {
+      const overflow = pending.value.length - MAX_LINES;
+      pending.value.splice(0, overflow);
+      pausedDropped.value += overflow;
     }
-    pending.value.push({ id: ++sequence.value, type: frame.type, data: frame.data });
     flushPending();
   } catch {
     // 非法 WebSocket 帧被丢弃,连接仍可继续接收后续日志。
@@ -214,8 +231,8 @@ function append(item) {
   lines.value.push(item);
   levelCounts.value[level] = (levelCounts.value[level] || 0) + 1;
   if (level === 'error') { errorLines.value += 1; sawError.value = true; retainedCount.value += 1; }
-  if (lines.value.length > 5000) {
-    const removed = lines.value.splice(0, lines.value.length - 5000);
+  if (lines.value.length > MAX_LINES) {
+    const removed = lines.value.splice(0, lines.value.length - MAX_LINES);
     for (const oldLine of removed) {
       const oldLevel = oldLine.level || classifyLevel(oldLine.data);
       levelCounts.value[oldLevel] = Math.max(0, (levelCounts.value[oldLevel] || 0) - 1);
@@ -229,6 +246,8 @@ function append(item) {
 }
 function clearLines() {
   lines.value = [];
+  pending.value = [];
+  pausedDropped.value = 0;
   errorLines.value = 0;
   levelCounts.value = { error: 0, warn: 0, info: 0 };
   sawError.value = false;
@@ -282,6 +301,8 @@ function download() {
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 onBeforeUnmount(() => {
+  disposed = true;
+  loadId += 1;
   disconnect();
   if (followFrame) cancelAnimationFrame(followFrame);
   resizeObserver?.disconnect();

@@ -10,13 +10,13 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   async function loadDefinitions(force = false) {
     if (!force && definitions.value.length) {
-      api.getWorkflowDefinitions().then((data) => { definitions.value = data.definitions || []; error.value = ''; }).catch((e) => { error.value = e.message; });
+      await api.getWorkflowDefinitions(true).then((data) => { definitions.value = data.definitions || []; error.value = ''; }).catch((e) => { error.value = e.message; });
       return;
     }
     loading.value = true;
     error.value = '';
     try {
-      const data = await api.getWorkflowDefinitions();
+      const data = await api.getWorkflowDefinitions(true);
       definitions.value = data.definitions || [];
     } catch (e) {
       error.value = e.message;
@@ -27,7 +27,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   async function loadInstances(params = {}) {
     try {
-      const data = await api.getWorkflowInstances({ limit: 100, ...params });
+      const data = await api.getWorkflowInstances({ limit: 100, ...params }, true);
       instances.value = data.instances || [];
     } catch (e) {
       error.value = e.message;

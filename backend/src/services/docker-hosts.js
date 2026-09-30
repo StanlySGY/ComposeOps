@@ -23,6 +23,19 @@ const DEFAULT_HOSTS = [{
 
 const MASK = '••••••••••••';
 const clientCache = new Map(); // hostId -> { docker, created }
+const activeHostListeners = new Set();
+
+/** 活动节点或其连接配置变化时,让长连接立即迁移。 */
+export function onActiveHostChange(listener) {
+  activeHostListeners.add(listener);
+  return () => activeHostListeners.delete(listener);
+}
+
+function notifyActiveHostChange() {
+  for (const listener of activeHostListeners) {
+    try { listener(); } catch (error) { console.error('[docker-hosts] 节点切换回调失败:', error.message); }
+  }
+}
 
 function readHosts() {
   try {
@@ -82,7 +95,9 @@ export function setActiveHost(id) {
   if (id !== 'local' && !readHosts().some((host) => host.id === id)) {
     throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
   }
+  const previous = getActiveHostId();
   setSetting(ACTIVE_KEY, id);
+  if (previous !== id) notifyActiveHostChange();
   return { ok: true, activeHostId: id };
 }
 
@@ -113,6 +128,7 @@ export function upsertHost(input = {}) {
   else hosts.push(entry);
   writeHosts(hosts);
   invalidateClient(entry.id);
+  if (getActiveHostId() === entry.id) notifyActiveHostChange();
   return sanitizeHost(entry);
 }
 

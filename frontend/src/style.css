@@ -195,7 +195,7 @@
   &.metric-tile {
     @apply border-accent/70 bg-accent/5 ring-1 ring-accent/20;
   }
-  .tabs &button {
+  .tabs button& {
     @apply text-surface-100 border-accent;
   }
 }

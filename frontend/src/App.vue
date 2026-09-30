@@ -71,7 +71,7 @@ function applyDensity() {
   localStorage.setItem('composeops:density', value);
 }
 const expire = () => auth.expire();
-const refreshOnHostChange = () => { void servicesStore.refresh(); };
+const refreshOnHostChange = () => { void servicesStore.refreshForHost(); };
 
 function onGlobalKeydown(event) {
   if (event.key !== '?' || event.metaKey || event.ctrlKey || event.altKey) return;

@@ -18,7 +18,7 @@ import { parse as parseYaml } from 'yaml';
 import { getActiveHost, getDockerForHost, getHost } from './docker-hosts.js';
 import { readCompose } from './compose-runner.js';
 import { readWorkspaceCompose } from './compose-workspace.js';
-import { demuxStream } from '../lib/docker-streams.js';
+import { collectDockerOutput, demuxStream } from '../lib/docker-streams.js';
 import { getSetting, addOperation, addVolumeBackup, listVolumeBackups, getVolumeBackup, deleteVolumeBackupRow, pruneVolumeBackups, updateVolumeBackupVerify } from '../lib/db.js';
 
 const HELPER_IMAGE = 'busybox:1.36';
@@ -190,15 +190,7 @@ async function runHelper(docker, cmd, binds) {
     await container.start();
     const wait = await container.wait();
     const logStream = await container.logs({ stdout: true, stderr: true, follow: false });
-    const demux = demuxStream();
-    let output = '';
-    demux.stdout.on('data', (chunk) => { output += chunk.toString(); });
-    demux.stderr.on('data', (chunk) => { output += chunk.toString(); });
-    logStream.pipe(demux);
-    await new Promise((resolve) => {
-      demux.on('end', resolve);
-      setTimeout(resolve, 5000);
-    });
+    const output = await collectDockerOutput(logStream);
     return { exitCode: wait.StatusCode ?? wait, output: output.trim() };
   } finally {
     await container.remove({ force: true }).catch(() => {});
@@ -237,8 +229,12 @@ export async function createVolumeBackup(project, volumeName) {
   addOperation({ action: 'volume.backup', status: 'success', detail: `${project.projectName}/${volumeName} → ${file}` });
   // 清理同卷超限的旧备份(记录+文件)
   for (const stale of pruneVolumeBackups(project.id, volumeName, { host: hostId })) {
-    await removeBackupFile(stale.file, stale.host).catch(() => {});
-    deleteVolumeBackupRow(stale.id);
+    try {
+      await removeBackupFile(stale.file, stale.host);
+      deleteVolumeBackupRow(stale.id);
+    } catch (error) {
+      console.error('[volume-backup] 旧备份清理失败,保留记录供重试:', error.message);
+    }
   }
   return { id, file, bytes, durationMs: Date.now() - started };
 }
@@ -247,7 +243,8 @@ async function removeBackupFile(file, hostId = 'local') {
   file = assertBackupFileName(file);
   const host = hostForId(hostId);
   const docker = getDockerForHost(host.id);
-  await runHelper(docker, `rm -f "/backup/${file}"`, [`${getBackupDir(host)}:/backup`]);
+  const { exitCode, output } = await runHelper(docker, `rm -f "/backup/${file}"`, [`${getBackupDir(host)}:/backup`]);
+  if (exitCode !== 0) throw Object.assign(new Error(`删除备份文件失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
 }
 
 /** 恢复:把备份 tar 解回卷(覆盖现有内容)。 */
@@ -329,7 +326,7 @@ export async function verifyVolumeBackup(id) {
 export async function deleteVolumeBackup(id) {
   const record = getVolumeBackup(id);
   if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
-  await removeBackupFile(record.file, record.host).catch(() => {});
+  await removeBackupFile(record.file, record.host);
   deleteVolumeBackupRow(id);
   addOperation({ action: 'volume.backup.delete', status: 'success', detail: `${record.projectName}/${record.volume} × ${record.file}` });
   return { ok: true };

@@ -66,3 +66,32 @@ export function demuxStream() {
   input.stderr = stderr;
   return input;
 }
+
+/** Dockerode 非 follow 日志返回 Buffer,部分传输实现返回 Readable;完整消费两种形式。 */
+export function collectDockerOutput(logs) {
+  return new Promise((resolve, reject) => {
+    const demux = demuxStream();
+    let output = '';
+    let ended = 0;
+    function fail(error) {
+      demux.destroy();
+      demux.stdout.destroy();
+      demux.stderr.destroy();
+      logs?.destroy?.();
+      reject(error);
+    }
+    for (const stream of [demux.stdout, demux.stderr]) {
+      stream.setEncoding('utf8');
+      stream.on('data', text => { output += text; });
+      stream.on('error', fail);
+      stream.on('end', () => { if (++ended === 2) resolve(output); });
+    }
+    demux.on('error', fail);
+    if (Buffer.isBuffer(logs) || logs instanceof Uint8Array) demux.end(logs);
+    else if (logs && typeof logs.pipe === 'function') {
+      logs.on('error', fail);
+      logs.on('close', () => { if (!logs.readableEnded) fail(new Error('Docker 输出流未完整结束')); });
+      logs.pipe(demux);
+    } else fail(new TypeError('Docker 日志响应不是 Buffer 或 Readable'));
+  });
+}

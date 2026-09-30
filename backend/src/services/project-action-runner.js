@@ -2,6 +2,7 @@ import { ACTIONS, resolveProjectFile, spawnCompose } from './compose-runner.js';
 import { runWorkspaceCompose } from './compose-workspace.js';
 import { runContainerAction, supportsContainerAction } from './project-control.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
+import { invalidateScanCache } from './scanner.js';
 
 export function assertProjectActionAllowed(project, action) {
   if (!Object.hasOwn(ACTIONS, action)) {
@@ -38,7 +39,7 @@ export async function prepareProjectAction(project, action) {
             clearTimeout(timer);
             resolve(signal ? 124 : code ?? 1);
           });
-        }));
+        })).finally(invalidateScanCache);
       },
     };
   }
@@ -51,10 +52,10 @@ export async function prepareProjectAction(project, action) {
         return withProjectOperationLock(project.id, () => runWorkspaceCompose(project, action, onOutput, {
           timeoutMs: options.timeoutMs,
           onExec: (handle) => onChild(handle),
-        }));
+        })).finally(invalidateScanCache);
       },
     };
   }
   // containers 模式走 dockerode API(无子进程),task.stop 只能标记终止,动作会自然结束。
-  return { mode: 'containers', run: (onOutput = () => {}) => withProjectOperationLock(project.id, () => runContainerAction(project, action, onOutput)) };
+  return { mode: 'containers', run: (onOutput = () => {}) => withProjectOperationLock(project.id, () => runContainerAction(project, action, onOutput)).finally(invalidateScanCache) };
 }
