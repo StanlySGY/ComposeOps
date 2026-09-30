@@ -547,7 +547,12 @@ export class OperationsAgent {
               toolParams = JSON.parse(toolCall.function?.arguments || '{}');
             } catch (error) {
               const errorMsg = `工具参数不是合法 JSON: ${error.message}`;
-              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
+              // 模型吐的坏参数不能留在历史里:部分上游会校验历史 tool_calls 的
+              // arguments 并整请求 400,坏一轮回不掉,后续每一轮都死在同一处。
+              const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && Array.isArray(m.tool_calls));
+              const poisoned = lastAssistant?.tool_calls?.find((c) => c.id === toolCall.id);
+              if (poisoned?.function) poisoned.function.arguments = '{}';
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: `${errorMsg}。请重新发起工具调用,参数必须是合法 JSON(键名用双引号)。` });
               onEvent({ type: 'tool_error', tool: toolName, error: errorMsg });
               continue;
             }
