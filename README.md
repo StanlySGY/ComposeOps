@@ -41,7 +41,9 @@ ComposeOps 解决的是：
 - 🛡 **守护模式**：开启后，每条容器告警自动触发 AI 诊断——读取容器状态与日志、给出根因假设与带风险标注的处置建议，结果落在事件中心，一键展开。面板会自己"值班看告警"，处置决定权仍在你手里。
 - 🔮 **部署预言**：执行 `up` 之前，对照宿主真实状态推演这次部署——哪些容器会新建/重建/原地保留、哪些镜像需要拉取、宿主端口是否被其他容器占用、卷与 bind 路径是否就绪、AI 三句话解读风险。
 
-<img src="docs/screenshots/ai-ops-demo.gif" alt="ComposeOps AI 值守与部署预言：容器退出告警自动 AI 诊断,up 前宿主实况推演" width="960">
+<img src="docs/screenshots/guardian-demo.gif" alt="守护模式实测：容器退出告警自动触发 AI 诊断，点开即见根因假设与处置建议" width="960">
+
+<img src="docs/screenshots/review.png" alt="变更评审与部署预演：配置风险打分，将创建/重建/移除的容器与受影响卷端口一目了然" width="960">
 
 ### 30 秒理解价值
 
@@ -94,6 +96,8 @@ ComposeOps 解决的是：
 - **legacy**(`initialize` 握手):协议版本 2024-11-05 → 2025-11-25 全线支持,旧式网关把点号写成下划线的工具名(`compose_up` 对应 `compose.up`)也能直接调到。
 
 **MCP 通道的确认门**:面板里的高危操作靠确认弹窗把关,MCP 调用方没有 UI,所以高危工具(重建容器、改 Compose、回滚等)必须由调用方显式传 `confirm: true` 才执行,否则只回一句可重试的说明;工具结果先按值级脱敏再截断(24K 保留首尾),容器日志不会灌爆对方上下文。
+
+<img src="docs/screenshots/mcp-settings.png" alt="MCP 服务设置：三种传输端点与只读工具白名单" width="960">
 
 ### 📱 手机远程操控
 
@@ -178,17 +182,34 @@ ComposeOps 解决的是：
 - 📄 全局页面 Agent 抽屉：任意页面唤起，自动携带当前页面上下文
 - 🔁 聊天流式输出、会话自动保存、常用指令库
 
+实测动图：列出纳管项目 → 请求重启 → **弹确认门** → 确认后执行并回报退出码：
+
+<img src="docs/screenshots/agent-ops-demo.gif" alt="Agent 实操：列出纳管项目，请求重启项目，确认门弹出，确认后执行并回报结果" width="960">
+
+执行历史与 token 用量（30 天聚合、模型用量分布、每轮工具轨迹）：
+
+<img src="docs/screenshots/agent-history.png" alt="Agent 执行历史：token 用量统计与工具轨迹" width="960">
+
 ### 💾 数据保护
 
 - 🗂️ **Compose 备份**：每次保存自动留档，最近 20 份，diff 预览与一键回滚
 - 📦 **数据卷备份**：helper 容器把命名卷打包为 tar.gz（存于宿主机 `data/volume-backups`），支持手动备份、恢复、下载与删除；可作为定时任务自动执行，每卷保留最近 20 份
+- 🧪 **备份自证（还原演练）**：备份完不立马信它——tar 完整性校验 + 解进一次性临时卷统计文件数，通过后记录挂"✓ N 文件"标记，全程不碰原卷
 - ⏰ **定时任务**：数据库 Dump、Docker 安全/深度清理、镜像更新检查、定时拉取镜像、数据卷备份
+
+实测动图：勾卷 → 备份 → 还原演练，通过后记录挂"✓ 3 文件"标记：
+
+<img src="docs/screenshots/backup-verify-demo.gif" alt="卷备份与还原演练：备份后一键演练，通过即挂验证标记" width="960">
+
+<img src="docs/screenshots/volume-backup-verified.png" alt="卷备份记录：演练通过后挂 ✓ N 文件标记" width="960">
 
 ### 🔔 告警与通知
 
-- **多渠道推送**：Bark / Telegram / 企业微信 / SMTP / Webhook
+- **多渠道推送**：Bark / Telegram / 企业微信 / 钉钉 / 飞书 / SMTP / Webhook
 - **告警类型**：容器退出 / 内存阈值 / Docker 存储告警
 - **事件中心**：优先级、已读/静默状态、WebSocket 实时推送
+
+<img src="docs/screenshots/events.png" alt="事件中心：告警、巡检、部署、Agent、GitOps 统一事件流" width="960">
 
 ### 🧹 运维工具
 
@@ -203,11 +224,14 @@ ComposeOps 解决的是：
 
 - 🛡️ **AI 巡检**：定时对纳管项目做健康巡检，输出诊断报告
 - 📝 **变更评审 / 自动回滚**：Compose 变更先评审再生效，异常自动回退
+- 🚢 **舰队视图**：节点组聚合总览、全节点并行探测、批量巡检与镜像更新检查
 - 🗃️ **资产中心（CMDB）**：Host / 项目 / 容器 / 卷 / 网络统一资产模型 + 依赖关系
 - 🕸️ **知识图谱 / 拓扑**：实时数据与 CMDB 两种数据源，可视化项目依赖
 - 🔁 **工作流引擎**：trigger / condition / agent / approval / action / verify 节点编排，Agent 可作为工作流节点
 - 🎯 **事件中心**：告警 / 巡检 / 部署 / 回滚 / Agent / GitOps 统一事件流与状态流转
 - 💰 **成本分析**：基于资源用量的估算（个人服务器场景偏参考性质）
+
+<img src="docs/screenshots/node-groups.png" alt="舰队视图：多宿主节点组聚合总览与批量动作" width="960">
 
 ### 💻 交互体验
 

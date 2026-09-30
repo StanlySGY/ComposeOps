@@ -15,11 +15,97 @@ Auto-discover Compose projects, manage services, edit configs, stream logs, diag
 [Features](#-features) • [Quick Start](#-quick-start) • [Security Model](#-security-model) • [Contributing](CONTRIBUTING.md) • [中文文档](README.md)
 
 <img src="docs/screenshots/dashboard.png" alt="ComposeOps dashboard — AI ops decision center" width="900">
+<br>
+<img src="docs/screenshots/services.png" alt="Services overview — auto-discovery and onboarding" width="49.4%">
+<img src="docs/screenshots/monitor.png" alt="Realtime monitoring — container resources & alert thresholds" width="49.4%">
+<br>
+<img src="docs/screenshots/agent.png" alt="AI Ops Agent — tool loop + confirmation gate" width="98.8%">
 </div>
 
 > **What it is**: a single-user ops dashboard for your own server. Docker socket access equals root; UI is currently Chinese-only (English UI is planned).
 > **What it is not**: no multi-tenant or team support (use Portainer for that); not a PaaS — it does not take over your build/release pipeline (see Coolify or Komodo).
 > **Where it stands**: among compose-panel tools, ComposeOps' differentiator is the **AI Ops Agent** — it doesn't just show state, it can investigate and act on your approval.
+
+---
+
+## 🚀 Why ComposeOps
+
+### AI-driven, not just another dashboard
+
+Traditional Docker panels stop at **seeing the problem**.
+
+ComposeOps closes the loop:
+
+**Detect → Analyze → Ask for confirmation → Act → Verify**
+
+### Two things you won't find elsewhere
+
+- 🛡 **Guardian Mode**: every container alert automatically triggers an AI diagnosis — it reads container state and recent logs, returns a root-cause hypothesis with risk-tagged remediation steps, and drops the result into the Event Center. The panel keeps watch; the decision stays yours.
+- 🔮 **Deploy Oracle**: before running `up`, it simulates the deployment against the host's real state — which containers will be created/recreated/kept untouched, which images need pulling, whether host ports are already taken, whether volume & bind paths exist, plus a three-sentence AI risk summary.
+
+<img src="docs/screenshots/guardian-demo.gif" alt="Guardian Mode in action: a container-exit alert automatically triggers an AI diagnosis — root cause and remediation one click away" width="960">
+
+<img src="docs/screenshots/review.png" alt="Change review & deploy preview: config risk score plus containers to create/recreate/remove and affected volumes/ports" width="960">
+
+### Understand the value in 30 seconds
+
+| What you want to do | ComposeOps |
+|---------------------|------------|
+| Check service status | ✅ |
+| Read logs | ✅ |
+| Edit Compose files | ✅ |
+| AI analyzes failures | ✅ |
+| AI performs the fix | ✅ |
+| Alerts auto-diagnosed by AI (Guardian Mode) | ✅ |
+| Deploy simulated against host state | ✅ |
+| Backup restore drills (self-verifying) | ✅ |
+| Call ops tools from Claude/Cursor (MCP) | ✅ |
+| Approval gate for risky actions | ✅ |
+| Long-term memory of your ops preferences | ✅ |
+| Ops workflow orchestration | ✅ |
+
+### How it compares
+
+| Capability | ComposeOps | Dockge | Portainer CE | Komodo |
+|------------|-----------|--------|--------------|--------|
+| AI agent ops (50+ tools, confirmation gate + audit) | ✅ | ❌ | ❌ | ❌ |
+| Alerts auto-diagnosed by AI (Guardian Mode) | ✅ | ❌ | ❌ | ❌ |
+| Deploy Oracle (simulate `up` against host state) | ✅ | ❌ | ❌ | ❌ |
+| Smooth upgrade → health polling → auto rollback | ✅ | ❌ | ❌ | Partial |
+| GitOps drift detection + version rollback | ✅ | ❌ | ❌ | ✅ |
+| Backup restore drills (self-verifying) | ✅ | ❌ | ❌ | ❌ |
+| MCP server (plug in Claude/Cursor/Codex…) | ✅ | ❌ | ❌ | ❌ |
+| Multi-host (SSH/TCP/Local) | ✅ | Single | ✅ | ✅ |
+| Chinese-first + CN mirror-friendly builds | ✅ | ❌ | ❌ | ❌ |
+
+> In the 2026 landscape of compose panels, they all stop at "seeing the problem"; ComposeOps' difference is "analyzing it and — on your approval — fixing it". Detailed comparison: `docs/public/WHY_COMPOSEOPS.md` (Chinese).
+
+### 🔌 MCP access: let any agent call the panel's tools
+
+Built-in MCP server (dedicated token, read-only whitelist by default, critical tools never exposed), with three transports covering all mainstream clients:
+
+| Transport | Endpoint | Clients |
+|-----------|----------|---------|
+| Streamable HTTP (current standard) | `POST /mcp` | Codex CLI, Gemini CLI, modern harnesses, Claude Code |
+| SSE (classic) | `GET /mcp/sse` | Claude Desktop, Cursor, Cline |
+| stdio bridge | `node mcp/stdio-bridge.mjs` | stdio-only clients (DeepSeek-style harnesses) |
+
+Enable via **Settings → MCP → Enable → copy client config**, then paste into any client's `mcpServers`. In read-only mode 32 ops tools (state/logs/metrics/inspection/GitOps drift/alerts) become callable from your AI coding assistant; switching to "include high-risk tools" opens 48, while critical-level tools (cleanup, deploy) never pass through this channel in any mode.
+
+Protocol-wise it serves both eras of clients:
+
+- **modern** (2026-07-28 spec): no `initialize` handshake — versions are declared per-request via `_meta`, `server/discover` returns supported versions and serverInfo in one shot, tools carry `readOnlyHint` / `destructiveHint` annotations so clients can decide on their own whether to confirm;
+- **legacy** (`initialize` handshake): protocol versions 2024-11-05 → 2025-11-25 all supported; older gateways that rewrite dotted tool names to underscores (`compose_up` → `compose.up`) work too.
+
+**Confirmation gate on MCP**: risky panel actions rely on a confirmation dialog, which MCP callers don't have — so high-risk tools (recreating containers, editing Compose, rollback…) require an explicit `confirm: true` from the caller, otherwise they only return a retryable explanation; tool results are value-level redacted then truncated (24K, head+tail kept) so container logs never flood the caller's context.
+
+<img src="docs/screenshots/mcp-settings.png" alt="MCP server settings: three transports and the read-only tool whitelist" width="960">
+
+### 📱 Manage from your phone
+
+Open the panel in a mobile browser and you get the full console: responsive layout, bottom tab navigation, touch-friendly controls. It is also a **PWA** — "Add to Home Screen" and it runs full-screen like a native app (with home-screen shortcuts: Services / AI Assistant / Event Center / Logs).
+
+> ⚠️ Security reminder: the panel equals root on the host. Reach it remotely via Tailscale/WireGuard or your own HTTPS reverse proxy — never expose `0.0.0.0` to the public internet; paired with push notifications (Bark/Telegram/DingTalk/Feishu), the mobile loop of "alert → diagnosis → one-tap action" is ready.
 
 ---
 
@@ -74,21 +160,33 @@ Auto-discover Compose projects, manage services, edit configs, stream logs, diag
 
 Single chat entry (the standalone AI diagnosis page has been merged in), powered by a native tool-loop engine:
 
-- 🛠️ **47 tools**: project discovery / lifecycle / config read-write & rollback / networks & volumes / security audit / diagnostic probes / maintenance / cron / long-term memory
-- ⚠️ **Risk levels + step-by-step confirmation**: high-risk actions require explicit approval, fully audited
+- 🛠️ **50+ tools**: project discovery / lifecycle / config read-write & rollback / networks & volumes / security audit / diagnostic probes / maintenance / cron / long-term memory
+- ⚠️ **Risk levels + step-by-step confirmation**: high-risk actions require explicit approval, fully audited; three approval modes (confirm every risky call / auto-allow non-critical writes / confirm critical only)
+- 🛡 **Command guard**: LLM-generated commands are statically screened before entering containers (rm -rf /, mkfs, fork bombs, curl|sh …)
 - 📎 **Log mounting**: pick container log lines as evidence attached to your message (untrusted-fence guarded)
-- 🌐 **Web search**: optional toggle with cited sources
+- 🌐 **Web search**: optional toggle with cited sources; Tavily / Brave / self-hosted SearXNG backends with built-in fallback
 - 🧠 **Long-term memory**: remembers your ops preferences on request
+- 🗜 **Session compaction**: long sessions auto-collapse into a handoff summary to keep the model context lean
 - 🖼️ **Rich rendering**: markdown tables / embedded HTML / SVG diagrams, with in-page zoom
 - 💬 **Tool traces**: request/execute/result status and duration for every tool call
 - 📄 Global page-agent drawer with automatic page context; streaming output, session history, quick prompts
 
+Live demo: list managed projects → request a restart → **confirmation gate pops** → approve → execute and report the exit code:
+
+<img src="docs/screenshots/agent-ops-demo.gif" alt="Agent in action: listing managed projects, requesting a restart, confirmation gate, executing on approval" width="960">
+
+Execution history & token usage (30-day aggregates, per-model breakdown, per-round tool traces):
+
+<img src="docs/screenshots/agent-history.png" alt="Agent execution history: token usage stats and tool traces" width="960">
+
 ### 🔔 Alerts & Notifications
 
-- **Multi-channel push**: Bark, Telegram, WeChat Work, SMTP, Generic Webhook
+- **Multi-channel push**: Bark, Telegram, WeChat Work, DingTalk, Feishu, SMTP, Generic Webhook
 - **Trigger types**: Container exit, memory threshold, disk space, custom rules
 - **Smart management**: Priority levels, read/mute status, WebSocket real-time push
 - **Event persistence**: Alert history with full-text search
+
+<img src="docs/screenshots/events.png" alt="Event center: alerts, inspections, deployments, Agent and GitOps in one event stream" width="960">
 
 ### 🛠️ Operations Tools
 
@@ -97,6 +195,13 @@ Single chat entry (the standalone AI diagnosis page has been merged in), powered
 - **Health checks**: Service availability monitoring with scoring
 - **Backup & restore**: Config versioning with diff comparison
 - **Volume backup**: tar.gz snapshots of named volumes via helper containers, with restore/download and cron scheduling
+- **Backup self-verification (restore drill)**: don't trust a backup blindly — tar integrity check plus an extraction into a throwaway volume to count files; passing drills get a "✓ N files" badge, and the original volume is never touched
+
+Backup → restore drill → verified badge:
+
+<img src="docs/screenshots/backup-verify-demo.gif" alt="Volume backup and restore drill: one click after backup, verified badge on pass" width="960">
+
+<img src="docs/screenshots/volume-backup-verified.png" alt="Volume backup records: ✓ N files badge after a passing drill" width="960">
 - **GitOps**: keep compose files in sync from a Git repo (polling + webhook trigger), with rollback history
 - **Marketplace**: built-in blueprints + custom templates + AI-assisted app discovery
 - **Scheduled jobs**: DB dumps, safe/deep Docker cleanup, image update checks, scheduled pulls, volume backups
@@ -107,11 +212,14 @@ These modules target power users who want to codify their ops experience. The co
 
 - 🛡️ **AI Inspection**: scheduled health checks across managed projects with diagnostic reports
 - 📝 **Change Review / Auto-Rollback**: review Compose changes before they take effect; automatic rollback on anomalies
+- 🚢 **Fleet View**: node-group aggregate overview, parallel probing across all nodes, batch inspection and image update checks
 - 🗃️ **Asset Center (CMDB)**: unified host/project/container/volume/network asset model with dependency relations
 - 🕸️ **Knowledge Graph / Topology**: realtime or CMDB-backed visualization of project dependencies
 - 🔁 **Workflow Engine**: trigger / condition / agent / approval / action / verify node orchestration; the Agent can act as a workflow node
 - 🎯 **Event Center**: alerts, inspections, deployments, rollbacks, Agent and GitOps unified into one event stream
 - 💰 **Cost Analysis**: resource-based estimation (informative for personal servers)
+
+<img src="docs/screenshots/node-groups.png" alt="Fleet view: multi-host node group overview with batch actions" width="960">
 
 ### 💻 Interaction Experience
 
