@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-30
+
+### Added
+- **Agent 输出侧护栏**: LLM 生成的命令进入容器执行前做灾难模式静态拦截(rm -rf /、mkfs、fork 炸弹、curl|sh 等);AI 端点挂进程内限流(execute-stream/approve/logs/diagnose 宽配额固定窗口),防失控循环刷爆上游
+- **联网检索多后端**: 内置 GitHub+DuckDuckGo 之外支持 Tavily / Brave / 自托管 SearXNG,失败自动回退内置;设置页新增检索配置区
+- **运行环境快照注入**: 引擎系统提示注入活跃主机与纳管项目状态(10s 缓存,只读事实),模型开局即知现状,不必每轮先 list
+- **告警规则库统一**: alert.configure 与 /metrics/alerts 曾写独立存储而评估引擎只读另一份,规则永不生效;收敛到单一模块,指标口径对齐,旧 restart 动作归一化 auto_restart
+- **Agent 工具扩容**: 新增 volume.backup/restore/verify/list_backups(restore 为 critical 永远走确认门)与 event.list/update/diagnose(可读事件流、触发守护诊断、事件中心一键生成修复计划)
+- **长会话自动压缩**: 活跃区超阈值(默认 60 轮消息)自动压缩并向前端发提示,也可在工作台手动压缩;token 用量跨轮累计并带轮数
+- **Agent 可观测性**: 执行历史页展示 30 天 token 用量/模型用量分布/每轮工具轨迹,新增用量与反馈接口、受限 SKILL.md 加载器与离线工具轨迹评测
+- **关于页**: 带版本号、作者与项目仓库链接
+- **MCP 端点限流**: /mcp 120/min、SSE 建立 10/min,置于鉴权前防 token 穷举
+
+### Changed
+- **链路稳定性专项**: 日志流分片与行解码、Web 终端连接、多节点切换竞态、仪表盘/监控页自动刷新、命令面板搜索、工作流响应性与请求缓存整体重构,补一轮流/生命周期回归测试
+- cron.create 枚举补齐 volume-backup/inspection,对齐调度器 7 类
+
+### Fixed
+- **卷备份在 dockerode 5 下必然失败**: helper 容器日志在 follow:false 时返回 Buffer 而非流,.pipe 直接报错"备份自证"不可用;改经 collectDockerOutput 统一兼容,顺带修复超限清理的错误吞没
+- **工具参数解析失败污染会话历史**: 模型吐出非法 JSON 参数时坏参数原样留在 tool_calls 历史,部分上游校验后整请求 400,Tool Loop 后续每轮都死在同一处;现在落历史前归位为 '{}' 并提示模型重试
+- release notes 提取改用字面量状态机,根治 awk 区间起止同线恒空
+- 快照缓存读写收进同步助手,消除 require-atomic-updates 告警
+
 ## [1.3.1] - 2026-09-28
 
 ### Fixed
