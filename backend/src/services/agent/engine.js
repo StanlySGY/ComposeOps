@@ -475,6 +475,10 @@ export class OperationsAgent {
             messages: callMessages,
             tools,
             stream: true,
+            onChannelEvent: (event) => {
+              onEvent(event);
+              publishTrace(event.type, event.content, { channelId: event.channelId, model: event.model });
+            },
             onToken: (token) => {
               onEvent({ type: 'token', content: token });
             },
@@ -494,11 +498,11 @@ export class OperationsAgent {
           accumulateUsage(usageTotal, lastUsage);
           // 观测写入失败不能改变用户可见的 Agent 执行结果;SSE 仍会使用内存汇总。
           try {
-            recordAiUsage({ sessionId: context.sessionId, model: cfg.model, usage: lastUsage });
+            recordAiUsage({ sessionId: context.sessionId, model: response.model || cfg.model, usage: lastUsage });
           } catch { /* token 统计属于旁路能力,数据库异常不阻断运维操作。 */ }
           
         } catch (error) {
-          if (error.name === 'AbortError') {
+          if (abortController.signal.aborted) {
             onEvent({ type: 'interrupted', reason: '用户中断执行' });
             updateAgentPlan(planId, { status: 'cancelled', resultJson: { messages }, executedAt: new Date().toISOString(), progressStage: '执行已中断', updatedAt: new Date().toISOString() });
             return { success: false, messages, finalContent: '执行已中断', interrupted: true };

@@ -1330,7 +1330,7 @@ export function exportUserData() {
   // docker.hosts 必须整键排除(而非脱敏后导出):SSH 密码/私钥/TLS 证书是明文落库的,
   // 脱敏导出再导入会把无凭据条目回灌覆盖真实凭据;导入侧 allowlist 本就不含该键。
   const settings = Object.fromEntries(
-    db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('ai.api_key', 'auth.password_hash', 'notifications.config', 'docker.hosts')").all()
+    db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('ai.api_key', 'ai.channels', 'ai.search.api_key', 'auth.password_hash', 'notifications.config', 'docker.hosts')").all()
       .map((row) => [row.key, row.value])
   );
   return {

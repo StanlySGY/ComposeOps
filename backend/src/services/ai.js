@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { getSetting, setSetting, addAiMessage, getAiHistory, clearAiHistory } from '../lib/db.js';
+import db, { getSetting, setSetting, addAiMessage, getAiHistory, clearAiHistory } from '../lib/db.js';
 import { scanIcallProtocols, stripAgentInternalText } from '../lib/agent-protocol-core.js';
+import { prepareAiChannels, publicAiChannels, readAiChannels, requestWithAiChannels, validateAiBaseUrl, writeAiChannels } from './ai-channels.js';
 
 const DEFAULT_SYSTEM_PROMPT = `你是 ComposeOps 的运维助手，擅长 Docker Compose 与容器排错。
 - 当用户请求"排错"时，先给出问题根因的简短判断，再给出可执行的修复步骤。
@@ -195,23 +196,43 @@ function normalizeToolResponse(content, toolCalls, finishReason) {
 }
 
 export function getAiConfig() {
-  return {
+  const legacy = {
     baseUrl: getSetting('ai.base_url', 'https://api.openai.com/v1'),
     apiKey: getSetting('ai.api_key', ''),
     model: getSetting('ai.model', 'gpt-4o'),
     systemPrompt: getSetting('ai.system_prompt', DEFAULT_SYSTEM_PROMPT),
   };
+  const channels = readAiChannels(legacy);
+  const primary = channels.find((item) => item.enabled && item.apiKey);
+  return { ...legacy, baseUrl: primary?.baseUrl || legacy.baseUrl, apiKey: primary?.apiKey || '', model: primary?.model || legacy.model,
+    channels, failoverEnabled: getSetting('ai.failover_enabled', '1') !== '0' };
 }
 
-export function setAiConfig({ baseUrl, apiKey, model, systemPrompt }) {
-  if (typeof baseUrl === 'string') {
-    const url = new URL(baseUrl);
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Base URL 只支持 HTTP/HTTPS');
-    setSetting('ai.base_url', baseUrl.slice(0, 500));
+export function getPublicAiConfig() {
+  const cfg = getAiConfig();
+  return { ...cfg, apiKey: cfg.apiKey ? `••••${cfg.apiKey.slice(-4)}` : '', channels: publicAiChannels(cfg.channels) };
+}
+
+export function setAiConfig({ baseUrl, apiKey, model, systemPrompt, channels, failoverEnabled }) {
+  const cfg = getAiConfig();
+  let nextChannels = channels === undefined ? undefined : prepareAiChannels(channels, cfg.channels);
+  // 旧 API 调用仍能更新首选渠道；新界面只提交渠道列表，不复制两份密钥。
+  if (channels === undefined && getSetting('ai.channels') !== null && [baseUrl, apiKey, model].some((value) => value !== undefined)) {
+    const primary = cfg.channels.find((item) => item.enabled && item.apiKey) || cfg.channels[0];
+    if (primary) nextChannels = prepareAiChannels(cfg.channels.map((item) => item.id === primary.id
+      ? { ...item, baseUrl: baseUrl ?? item.baseUrl, apiKey: apiKey ?? '', model: model ?? item.model } : item), cfg.channels);
   }
-  if (typeof apiKey === 'string') setSetting('ai.api_key', apiKey.slice(0, 1000));
-  if (typeof model === 'string' && model.trim()) setSetting('ai.model', model.trim().slice(0, 200));
-  if (typeof systemPrompt === 'string') setSetting('ai.system_prompt', systemPrompt.slice(0, 10000));
+  if (typeof baseUrl === 'string') validateAiBaseUrl(baseUrl);
+  db.transaction(() => {
+    if (nextChannels !== undefined) writeAiChannels(nextChannels);
+    if (typeof failoverEnabled === 'boolean') setSetting('ai.failover_enabled', failoverEnabled ? '1' : '0');
+    if (typeof baseUrl === 'string') {
+      setSetting('ai.base_url', validateAiBaseUrl(baseUrl));
+    }
+    if (typeof apiKey === 'string') setSetting('ai.api_key', apiKey.slice(0, 1000));
+    if (typeof model === 'string' && model.trim()) setSetting('ai.model', model.trim().slice(0, 200));
+    if (typeof systemPrompt === 'string') setSetting('ai.system_prompt', systemPrompt.slice(0, 10000));
+  })();
 }
 
 /**
@@ -220,10 +241,13 @@ export function setAiConfig({ baseUrl, apiKey, model, systemPrompt }) {
  * @param {string} apiKey  若不传则读已保存配置
  * @returns {Promise<string[]>} 模型名数组
  */
-export async function fetchAiModels({ baseUrl, apiKey } = {}) {
+export async function fetchAiModels({ baseUrl, apiKey, channelId } = {}) {
   const cfg = getAiConfig();
-  const url = (baseUrl || cfg.baseUrl || '').replace(/\/+$/, '');
-  const key = apiKey || cfg.apiKey;
+  const selected = channelId ? cfg.channels.find((item) => item.id === channelId) : cfg;
+  if (!selected) throw new Error('渠道不存在');
+  const url = validateAiBaseUrl(baseUrl || selected.baseUrl || '');
+  if (!apiKey && url !== validateAiBaseUrl(selected.baseUrl)) throw new Error('地址已变更，请填写该地址的 API Key 后获取模型');
+  const key = apiKey || selected.apiKey;
   if (!url) throw new Error('请先填写 Base URL');
   if (!key) throw new Error('请先填写 API Key');
 
@@ -234,9 +258,9 @@ export async function fetchAiModels({ baseUrl, apiKey } = {}) {
     signal: timeout,
   });
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
+    await resp.body?.cancel();
     const msg = resp.status === 401 ? '鉴权失败(401),请检查 API Key' : `请求失败 ${resp.status}`;
-    throw new Error(`${msg}: ${text.slice(0, 160)}`);
+    throw new Error(msg);
   }
   const data = await resp.json().catch(() => ({}));
   // OpenAI: { data: [{ id }] }  |  Ollama: { models: [{ name }] }
@@ -264,149 +288,130 @@ export async function fetchAiModels({ baseUrl, apiKey } = {}) {
  * @param {AbortSignal} [opts.signal]  取消信号
  * @returns {Promise<{content:string, finishReason:string, toolCalls:Array}>} 结构化响应
  */
-export async function callOpenAI({ baseUrl, apiKey, model, messages, tools, stream = false, onToken, onReasoning, signal }) {
-  if (!apiKey) throw new Error('AI 未配置 API Key');
-  if (!baseUrl) throw new Error('AI 未配置 Base URL');
+export function callOpenAI(options) {
+  return requestWithAiChannels(options, callSingleChannel);
+}
 
-  const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+/** 单次传输不执行重试，响应完整后才把工具调用交还引擎。 */
+async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stream = false, onToken, onReasoning, onActivity, signal, requiredTool, probe }) {
   const body = { model, messages, stream };
   if (stream) body.stream_options = { include_usage: true };
-  if (tools && tools.length > 0) {
-    body.tools = tools;
+  if (tools?.length) body.tools = tools;
+  const resp = await fetch(baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+    method: 'POST', redirect: 'error',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(body), signal,
+  });
+  if (!resp.ok) {
+    const retryAfter = resp.headers.get('retry-after');
+    const retryAfterMs = /^\d+$/.test(retryAfter || '') ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) || 0;
+    await resp.body?.cancel();
+    throw Object.assign(new Error(`AI 请求失败 ${resp.status}`), { status: resp.status, retryAfterMs });
   }
+  const invalid = (code = 'invalid_response') => Object.assign(new Error('AI 响应不完整或格式无效'), { code, retryable: true });
   let fullText = '';
   let fullReasoning = '';
-  // 推理增量上限:异常模型可能无限吐 reasoning(循环/失控),
-  // 无上限会让后端内存与前端 DOM 一起膨胀。超出后停止外发,只保留前段。
   const MAX_REASONING_CHARS = 120000;
   let reasoningTruncated = false;
   let finishReason = '';
   let toolCalls = [];
   let emittedContentLength = 0;
   let usage = null;
-
-  // Node 22 的全局 fetch 已内置对 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 环境变量的支持
-  // （大小写不敏感），无需额外代理库。容器化下把宿主机代理透传进 env，AI 出站
-  // 即走代理；不设则直连。这里保持零配置影响——不手动构造 dispatcher。
-  const timeout = AbortSignal.timeout(120000);
-  const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal: combinedSignal,
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    throw new Error(`AI 请求失败 ${resp.status}: ${errText.slice(0, 300)}`);
-  }
-
+  const normalize = () => {
+    for (const call of toolCalls.filter(Boolean)) {
+      if (!call.id || !call.function?.name) throw invalid();
+      try { JSON.parse(call.function.arguments); } catch { throw invalid(); }
+    }
+    const result = normalizeToolResponse(fullText, toolCalls.filter(Boolean), finishReason);
+    if (requiredTool && !result.toolCalls.some((call) => call.function.name === requiredTool)) {
+      throw Object.assign(new Error('模型未返回测试工具调用'), { code: 'tool_unsupported', retryable: false });
+    }
+    if (probe && !result.content && !result.toolCalls.length) throw invalid();
+    return { ...result, usage };
+  };
   if (!stream) {
-    const data = await resp.json();
-    const message = data?.choices?.[0]?.message || {};
+    let data;
+    try { data = await resp.json(); } catch { signal.throwIfAborted(); throw invalid(); }
+    const message = data?.choices?.[0]?.message;
+    if (!message || data.error) throw invalid();
     fullText = message.content || '';
     fullReasoning = message.reasoning_content || message.reasoning || '';
-    if (onReasoning && fullReasoning) onReasoning(fullReasoning.slice(0, MAX_REASONING_CHARS));
-    finishReason = data?.choices?.[0]?.finish_reason || '';
+    finishReason = data.choices[0].finish_reason || '';
     toolCalls = message.tool_calls || [];
-    const result = normalizeToolResponse(fullText, toolCalls, finishReason);
-    result.usage = data?.usage || null;
+    usage = data.usage || null;
+    const result = normalize();
+    onActivity?.();
+    if (fullReasoning) onReasoning?.(fullReasoning.slice(0, MAX_REASONING_CHARS));
     return result;
   }
 
-  // 流式：解析 SSE
+  if (!resp.body) throw invalid();
   const reader = resp.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() || '';
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t.startsWith('data:')) continue;
-      const payload = t.slice(5).trim();
-      if (payload === '[DONE]') break;
-      try {
-        const json = JSON.parse(payload);
-        const choice = json?.choices?.[0];
-        // OpenAI-compatible 流式接口通常把最终 usage 放在 choices:[] 的独立 chunk;
-        // 不能因为没有 choice 就提前跳过,否则 Tool Loop 的 token 统计永远缺最后一段。
-        if (!choice) {
-          if (json?.usage) usage = json.usage;
-          continue;
-        }
-        
-        // 累积 content
-        const deltaContent = choice.delta?.content || '';
-        const deltaReasoning = choice.delta?.reasoning_content || choice.delta?.reasoning || '';
-        if (deltaReasoning) {
-          fullReasoning += deltaReasoning;
-          if (onReasoning && !reasoningTruncated) {
-            if (fullReasoning.length > MAX_REASONING_CHARS) {
-              reasoningTruncated = true;
-              onReasoning('\n\n…(推理内容过长,后续已省略)');
-            } else {
-              onReasoning(deltaReasoning);
-            }
-          }
-        }
-        const delta = deltaContent;
-        if (delta) {
-          fullText += delta;
-          // 实时计算“剥除文本协议后”的可见回复,只把新增部分推给前端:
-          // 无论协议标签是否跨 chunk、是否畸形/未闭合,内部 JSON 与标签都不会外泄;
-          // 结尾的协议前缀残片按持回处理,避免先发后删导致回缩。
-          if (onToken) {
-            const visible = parseTextToolCalls(fullText).content;
-            const safeLength = visible.length - protocolHoldBackLength(visible);
-            if (safeLength > emittedContentLength) {
-              onToken(visible.slice(emittedContentLength, safeLength));
-              emittedContentLength = safeLength;
-            }
-          }
-        }
-        
-        // 累积 tool_calls (流式返回时分多个 chunk)
-        const deltaToolCalls = choice.delta?.tool_calls;
-        if (Array.isArray(deltaToolCalls)) {
-          for (const dtc of deltaToolCalls) {
-            const index = dtc.index ?? 0;
-            if (!toolCalls[index]) {
-              toolCalls[index] = {
-                id: dtc.id || '',
-                type: dtc.type || 'function',
-                function: { name: '', arguments: '' },
-              };
-            }
-            if (dtc.id) toolCalls[index].id = dtc.id;
-            if (dtc.function?.name) toolCalls[index].function.name = dtc.function.name;
-            if (dtc.function?.arguments) toolCalls[index].function.arguments += dtc.function.arguments;
-          }
-        }
-        
-        // finish_reason 在最后一个 chunk
-        if (choice.finish_reason) {
-          finishReason = choice.finish_reason;
-        }
-        
-        // usage 在最后一个 chunk (需要 stream_options.include_usage)
-        if (json?.usage) {
-          usage = json.usage;
-        }
-      } catch { /* 单条搜索结果解析失败时继续处理其他结果。 */ }
+  let doneMarker = false;
+  const parseLine = (line) => {
+    const text = line.trim();
+    if (!text.startsWith('data:')) return;
+    const payload = text.slice(5).trim();
+    if (payload === '[DONE]') { doneMarker = true; return; }
+    let json;
+    try { json = JSON.parse(payload); } catch { throw invalid(); }
+    if (json.error) throw Object.assign(invalid(), { status: Number(json.error.status) || 502 });
+    if (json.usage) usage = json.usage;
+    const choice = json.choices?.[0];
+    if (!choice) return;
+    const delta = choice.delta?.content || '';
+    const reasoning = choice.delta?.reasoning_content || choice.delta?.reasoning || '';
+    if (delta || reasoning || choice.delta?.tool_calls?.length || choice.finish_reason) onActivity?.();
+    if (reasoning) {
+      fullReasoning += reasoning;
+      if (onReasoning && !reasoningTruncated) {
+        if (fullReasoning.length > MAX_REASONING_CHARS) {
+          reasoningTruncated = true;
+          onReasoning('\n\n…(推理内容过长,后续已省略)');
+        } else onReasoning(reasoning);
+      }
     }
+    if (delta) {
+      fullText += delta;
+      if (onToken) {
+        const visible = parseTextToolCalls(fullText).content;
+        const safeLength = visible.length - protocolHoldBackLength(visible);
+        if (safeLength > emittedContentLength) {
+          onToken(visible.slice(emittedContentLength, safeLength));
+          emittedContentLength = safeLength;
+        }
+      }
+    }
+    for (const dtc of choice.delta?.tool_calls || []) {
+      const index = dtc.index ?? 0;
+      if (!Number.isInteger(index) || index < 0 || index > 127) throw invalid();
+      if (!toolCalls[index]) toolCalls[index] = { id: '', type: 'function', function: { name: '', arguments: '' } };
+      if (dtc.id) toolCalls[index].id = dtc.id;
+      if (dtc.function?.name) toolCalls[index].function.name += dtc.function.name;
+      if (dtc.function?.arguments) toolCalls[index].function.arguments += dtc.function.arguments;
+    }
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+  };
+  try {
+    while (!doneMarker) {
+      const { value, done } = await reader.read();
+      buf += decoder.decode(value, { stream: !done });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) { parseLine(line); if (doneMarker) break; }
+      if (done) { if (buf && !doneMarker) parseLine(buf); break; }
+    }
+    signal.throwIfAborted();
+    if (!finishReason && !doneMarker) throw invalid('incomplete_stream');
+    const result = normalize();
+    if (onToken) flushBufferedVisibleText(fullText, emittedContentLength, onToken);
+    return result;
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  if (onToken) flushBufferedVisibleText(fullText, emittedContentLength, onToken);
-  const normalized = normalizeToolResponse(fullText, toolCalls, finishReason);
-  normalized.usage = usage;
-  return normalized;
 }
 
 export {

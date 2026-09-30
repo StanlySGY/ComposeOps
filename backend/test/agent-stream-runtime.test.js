@@ -10,6 +10,7 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 const { buildApp } = await import('../src/app.js');
 const { getAgent } = await import('../src/services/agent.js');
 const { setSetting, addAiMessage, getAiHistory, getAiActiveHistory } = await import('../src/lib/db.js');
+const { setAiConfig } = await import('../src/services/ai.js');
 const { createBackgroundTask, resetBackgroundTasks } = await import('../src/services/agent/background-tasks.js');
 const app = await buildApp({ logger: false });
 const base = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -78,6 +79,37 @@ async function run(sessionId, onEvent = () => {}, extra = {}, signal = AbortSign
 }
 test.beforeEach(() => { captured.length = 0; executions = []; replies = []; });
 test.after(async () => { resetBackgroundTasks(); await app.close(); fs.rmSync(tempDir, { recursive: true, force: true }); });
+
+test('真实 SSE: 工具完成后主渠道故障，只重试模型请求且公开切换状态', async t => {
+  const { default: db } = await import('../src/lib/db.js');
+  t.after(() => db.prepare("DELETE FROM settings WHERE key = 'ai.channels'").run());
+  const channel = name => ({ id: name, name, baseUrl: `http://${name}.test/v1`, apiKey: `private-${name}`, model: `${name}-model`, enabled: true, supportsTools: true });
+  setAiConfig({ channels: [channel('primary'), channel('backup')] });
+  let primaryCalls = 0, backupCalls = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (String(url).startsWith('http://primary.test/')) {
+      primaryCalls++;
+      return primaryCalls === 1 ? new Response(toolReply()) : new Response('unavailable', { status: 503 });
+    }
+    if (String(url).startsWith('http://backup.test/')) {
+      backupCalls++;
+      const body = JSON.parse(options.body);
+      assert.ok(body.messages.some(message => message.role === 'tool' && message.content.includes('original')));
+      assert.equal(executions.length, 1);
+      return new Response(stream([{ content: '已完成，不再重复操作' }]));
+    }
+    return realFetch(url, options);
+  });
+  const { sessionId } = await request('/agent/sessions', {});
+  const events = await run(sessionId, async event => {
+    if (event.type === 'confirmation_required') await request('/agent/approve', { executionId: event.executionId, toolCallId: event.toolCallId, approved: true });
+  });
+  assert.equal(primaryCalls, 2); assert.equal(backupCalls, 1); assert.equal(executions.length, 1);
+  assert.ok(events.some(event => event.type === 'channel_failed' && event.channelName === 'primary'));
+  assert.ok(events.some(event => event.type === 'channel_selected' && event.channelName === 'backup'));
+  assert.ok(!JSON.stringify(events).includes('private-primary'));
+  assert.equal(getAiHistory(10, sessionId).at(-1).content, '已完成，不再重复操作');
+});
 
 test('真实 SSE: 审批前不执行,修改参数后执行,中文 Markdown 和日志脱敏完整', async t => {
   mockModel(t);

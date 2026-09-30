@@ -7,24 +7,8 @@
     <p v-if="message" class="alert-success">{{ message }}</p><p v-if="error" class="alert-error">{{ error }}</p>
 
     <section v-if="tab === 'ai'" class="settings-section">
-      <h2 class="section-title">OpenAI 兼容接口</h2>
-      <div class="form-grid">
-        <label>Base URL<input v-model="ai.baseUrl" class="input" placeholder="https://api.openai.com/v1" /></label>
-        <label>模型
-          <div class="relative">
-            <div class="flex items-center gap-1.5">
-              <input v-model="ai.model" class="input w-full" placeholder="选择或输入模型名称" @focus="openModelList" />
-              <button class="icon-btn shrink-0" title="获取可用模型列表" :disabled="aiModelsLoading" @click="fetchAiModels"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': aiModelsLoading }" /></button>
-            </div>
-            <div v-if="modelListOpen && filteredAiModels.length" class="model-dropdown">
-              <input v-model="aiModelQuery" class="model-dropdown-search" placeholder="搜索模型..." @click.stop />
-              <button v-for="name in filteredAiModels" :key="name" class="model-option" :class="{ 'bg-accent/10 text-accent': name === ai.model }" @click="selectAiModel(name)"><span class="truncate">{{ name }}</span><Check v-if="name === ai.model" class="h-3.5 w-3.5 shrink-0 text-accent" /></button>
-            </div>
-          </div>
-        </label>
-        <label class="md:col-span-2">API Key<input v-model="ai.apiKey" type="password" class="input" :placeholder="aiMasked ? '已配置,留空保持不变' : 'sk-...'" /></label>
-        <label class="md:col-span-2">系统 Prompt<textarea v-model="ai.systemPrompt" rows="6" class="input"></textarea></label>
-      </div>
+      <AiChannelsPanel v-model:channels="ai.channels" v-model:failover-enabled="ai.failoverEnabled" @health-change="refreshChannelHealth" />
+      <label class="mt-4 block text-xs text-surface-400">系统 Prompt<textarea v-model="ai.systemPrompt" rows="6" class="input mt-2 block w-full"></textarea></label>
       <div class="form-grid mt-4 border-t border-surface-800 pt-4">
         <h3 class="section-title md:col-span-2 mb-0!">联网检索 Grounding</h3>
         <label>检索后端
@@ -228,22 +212,18 @@
 <script setup>
 import { computed, markRaw, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Activity, Bell, Bot, Check, Download, FolderCog, Github, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Star, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
-import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import { useToastStore } from '../stores/toast.js'; import StatCard from '../components/StatCard.vue';
+import { Activity, Bell, Bot, Download, FolderCog, Github, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Star, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
+import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import StatCard from '../components/StatCard.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import StoragePruneModal from '../components/settings/StoragePruneModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
+import AiChannelsPanel from '../components/settings/AiChannelsPanel.vue';
 const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'personal', label: '偏好', icon: markRaw(SlidersHorizontal) }, { id: 'notifications', label: '通知', icon: markRaw(Bell) }, { id: 'maintenance', label: '维护', icon: markRaw(Wrench) }, { id: 'mounts', label: '项目纳管', icon: markRaw(FolderCog) }, { id: 'hosts', label: 'Docker 节点', icon: markRaw(Server) }, { id: 'mcp', label: 'MCP', icon: markRaw(Plug) }, { id: 'about', label: '关于', icon: markRaw(Info) }];
 const route = useRoute();
 const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';
-const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({}); const aiMasked = ref(false); const searchMasked = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
-const toast = useToastStore();
-const aiModels = ref([]);
-const aiModelsLoading = ref(false);
-const aiModelQuery = ref('');
-const modelListOpen = ref(false);
+const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
 const mountPlan = ref(null); const mountLoading = ref(false); const highlightedProjectId = computed(() => String(route.query.projectId || ''));
 const hostEditor = ref(null);
 const removeHostTarget = ref(null);
@@ -265,26 +245,18 @@ const mountsDirty = computed(() => {
 });
 const selectionDirty = computed(() => managementDirty.value || mountsDirty.value);
 function ok(text) { message.value = text; error.value = ''; } function fail(e) { error.value = e.message; message.value = ''; }
-const filteredAiModels = computed(() => {
-  const q = aiModelQuery.value.trim().toLowerCase();
-  return q ? aiModels.value.filter((name) => name.toLowerCase().includes(q)) : aiModels.value;
-});
-async function fetchAiModels() {
-  if (aiModelsLoading.value) return;
-  aiModelsLoading.value = true;
-  try {
-    const { models, count } = await api.fetchAiModels({ baseUrl: ai.value.baseUrl, apiKey: ai.value.apiKey || undefined });
-    aiModels.value = models || [];
-    modelListOpen.value = true;
-    toast.success(`成功获取 ${count || models.length} 个可用模型`);
-  } catch (e) {
-    toast.error(`获取模型列表失败:${e.message}`);
-  } finally {
-    aiModelsLoading.value = false;
-  }
+function applyAiConfig(cfg) {
+  ai.value = { channels: (cfg.channels || []).map((item) => ({ ...item, apiKey: '', saved: true, dirty: false })),
+    failoverEnabled: cfg.failoverEnabled !== false, systemPrompt: cfg.systemPrompt,
+    searchProvider: cfg.searchProvider || 'builtin', searchProviders: cfg.searchProviders, searchApiKey: '', searchBaseUrl: cfg.searchBaseUrl || '' };
+  searchMasked.value = !!cfg.searchApiKey;
 }
-function openModelList() { modelListOpen.value = true; }
-function selectAiModel(name) { ai.value.model = name; modelListOpen.value = false; aiModelQuery.value = ''; }
+async function refreshChannelHealth() {
+  try {
+    const cfg = await api.getAiConfig();
+    ai.value.channels = ai.value.channels.map((channel) => ({ ...channel, health: cfg.channels?.find((item) => item.id === channel.id)?.health }));
+  } catch (e) { fail(e); }
+}
 
 function openHostEditor(host) {
   hostEditor.value = host ? {
@@ -373,15 +345,14 @@ async function confirmRemoveHost() {
   } catch (e) { fail(e); }
 }
 
-onMounted(async () => { try { await aiStore.loadConfig(); const cfg = aiStore.config; ai.value = { baseUrl: cfg.baseUrl, apiKey: '', model: cfg.model, systemPrompt: cfg.systemPrompt, searchProvider: cfg.searchProvider || 'builtin', searchProviders: cfg.searchProviders, searchApiKey: '', searchBaseUrl: cfg.searchBaseUrl || '' }; aiMasked.value = !!cfg.apiKey; searchMasked.value = !!cfg.searchApiKey; if (cfg.baseUrl && cfg.apiKey) void fetchAiModels(); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } });
+onMounted(async () => { try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } });
 async function saveAi() {
   try {
-    const payload = { ...ai.value };
-    if (!payload.apiKey) delete payload.apiKey;
+    const payload = { ...ai.value, channels: ai.value.channels.map(({ id, name, baseUrl, apiKey, model, enabled, supportsTools, firstTokenTimeoutMs }) =>
+      ({ id, name, baseUrl, apiKey, model, enabled, supportsTools, firstTokenTimeoutMs })) };
     if (!payload.searchApiKey) delete payload.searchApiKey;
     await aiStore.saveConfig(payload);
-    ai.value.apiKey = ''; aiMasked.value = true;
-    ai.value.searchApiKey = ''; searchMasked.value = true;
+    applyAiConfig(aiStore.config);
     ok('AI 配置已保存');
   } catch (e) { fail(e); }
 }

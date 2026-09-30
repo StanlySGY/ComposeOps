@@ -10,6 +10,20 @@ vi.mock('../src/api/client.js', () => ({ api: apiMock }));
 const { useAgentChat, WORKBENCH_CHANNEL, PAGE_DRAWER_CHANNEL } = await import('../src/composables/useAgentChat.js');
 
 describe('useAgentChat', () => {
+  it('渠道切换独立显示，不污染回复正文且相同渠道不重复刷提示', async () => {
+    const chat = useAgentChat({ channel: 'ai-channel-events' });
+    apiMock.createAgentSession.mockResolvedValue({ sessionId: 17 });
+    apiMock.agentExecuteStream.mockImplementation(async (_payload, onEvent) => {
+      onEvent({ type: 'channel_failed', content: '主渠道超时，尝试备用' });
+      for (let i = 0; i < 2; i++) onEvent({ type: 'channel_selected', channelName: '备用', model: 'm', content: '使用备用' });
+      onEvent({ type: 'token', content: '回答正文' });
+    });
+    await chat.sendMessage('测试');
+    const answer = chat.messages.value[1];
+    expect(answer.content).toBe('回答正文');
+    expect(answer.taskNotices).toEqual(['主渠道超时，尝试备用', '使用备用']);
+    expect(answer.aiChannel).toEqual({ name: '备用', model: 'm' });
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.createAgentSession.mockResolvedValue({ sessionId: 7 });

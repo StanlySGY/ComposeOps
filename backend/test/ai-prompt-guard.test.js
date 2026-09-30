@@ -156,7 +156,7 @@ test('ai-tool-call: 流式发射持回协议残片且不破坏分片边界空白
   ];
   const sse = chunks
     .map((chunk) => `data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`)
-    .join('');
+    .join('') + 'data: [DONE]\n\n';
   const originalFetch = globalThis.fetch;
   const restoreFetch = () => { globalThis.fetch = originalFetch; };
   globalThis.fetch = async () => new Response(sse, { status: 200 });

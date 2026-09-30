@@ -33,6 +33,10 @@ export function toPublicAgentEvent(event) {
   // 这里若逐 token 再清洗(trim/正则),会吃掉分片边界的空白与换行,
   // 造成表格、代码块与前文粘连,以及英文词间空格丢失。
   if (event.type === 'token') return { type: 'token', content: String(event.content ?? '') };
+  if (['channel_selected', 'channel_failed', 'channel_skipped'].includes(event.type)) {
+    return { type: event.type, channelId: String(event.channelId || '').slice(0, 64),
+      channelName: cleanText(event.channelName).slice(0, 80), model: cleanText(event.model).slice(0, 200), content: cleanText(event.content).slice(0, 400) };
+  }
   if (event.type === 'done') {
     // planId 是本次执行的审计主键,供前端把"点赞/点踩"精确写回对应计划。
     const publicEvent = { type: event.type, content: cleanText(event.content), planId: event.planId ? String(event.planId) : '' };

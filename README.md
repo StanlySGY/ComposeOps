@@ -277,7 +277,7 @@ docker compose up -d --build
 
 首次访问需设置管理员密码（最少 10 个字符），之后使用 Session Cookie 登录。
 
-配置 AI 能力：进入 **设置 → AI 配置**，填写 OpenAI 兼容的 Base URL / API Key / 模型名。
+配置 AI 能力：进入 **设置 → AI**，添加一个或多个 OpenAI 兼容渠道，每条独立填写 Base URL / API Key / 模型名，按优先级排序。支持故障自动切换、冷却恢复和工具调用测试；也可直接把 New API 配置为渠道。详见[多渠道配置与 New API 接入](docs/ai-channels.md)。
 
 ### 远程访问（推荐 Tailscale）
 

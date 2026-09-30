@@ -238,6 +238,7 @@ export const api = {
   getAiConfig: () => request('/ai/config'),
   saveAiConfig: (payload) => request('/ai/config', { method: 'POST', body: JSON.stringify(payload) }),
   fetchAiModels: (payload = {}) => request('/ai/fetch-models', { method: 'POST', body: JSON.stringify(payload) }),
+  testAiChannel: (id) => request(`/ai/channels/${encodeURIComponent(id)}/test`, { method: 'POST' }),
   getProjectLogs: (projectId, containerId, tail = 200) => request('/ai/logs', { method: 'POST', body: JSON.stringify({ projectId, containerId, tail }) }),
   getAiHistory: (sessionId, limit = 200, beforeId = null) => request(`/ai/history?${new URLSearchParams({ ...(sessionId ? { sessionId } : {}), ...(beforeId ? { beforeId } : {}), limit })}`),
   getAiSessions: (limit = 30, kind = '') => request(`/ai/sessions?limit=${limit}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`),

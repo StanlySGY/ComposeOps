@@ -1,5 +1,6 @@
 import {
   getAiConfig,
+  getPublicAiConfig,
   setAiConfig,
   callOpenAI,
   addAiMessage,
@@ -64,11 +65,10 @@ function aiRateLimit(limit, windowMs = 60000) {
 
   // GET /api/v1/ai/config
   fastify.get('/config', async () => {
-    const cfg = getAiConfig();
+    const cfg = getPublicAiConfig();
     const search = getSearchConfig();
     return {
       ...cfg,
-      apiKey: cfg.apiKey ? '••••' + cfg.apiKey.slice(-4) : '',
       searchProvider: search.provider,
       searchApiKey: search.apiKey ? '••••' + search.apiKey.slice(-4) : '',
       searchBaseUrl: search.baseUrl,
@@ -90,6 +90,16 @@ function aiRateLimit(limit, windowMs = 60000) {
           apiKey: { type: 'string', maxLength: 4096 },
           model: { type: 'string', maxLength: 512 },
           systemPrompt: { type: 'string', maxLength: 40000 },
+          failoverEnabled: { type: 'boolean' },
+          channels: { type: 'array', maxItems: 12, items: {
+            type: 'object', additionalProperties: false, required: ['name', 'baseUrl', 'model'],
+            properties: {
+              id: { type: 'string', maxLength: 64 }, name: { type: 'string', maxLength: 80 },
+              baseUrl: { type: 'string', maxLength: 2048 }, apiKey: { type: 'string', maxLength: 4096 },
+              model: { type: 'string', maxLength: 200 }, enabled: { type: 'boolean' }, supportsTools: { type: 'boolean' },
+              firstTokenTimeoutMs: { type: 'integer', minimum: 1000, maximum: 120000 },
+            },
+          } },
           searchProvider: { type: 'string', maxLength: 32 },
           searchApiKey: { type: 'string', maxLength: 4096 },
           searchBaseUrl: { type: 'string', maxLength: 2048 },
@@ -97,9 +107,9 @@ function aiRateLimit(limit, windowMs = 60000) {
       },
     },
   }, async (request, reply) => {
-    const { baseUrl, apiKey, model, systemPrompt, searchProvider, searchApiKey, searchBaseUrl } = request.body || {};
+    const { baseUrl, apiKey, model, systemPrompt, channels, failoverEnabled, searchProvider, searchApiKey, searchBaseUrl } = request.body || {};
     try {
-      setAiConfig({ baseUrl, apiKey, model, systemPrompt });
+      setAiConfig({ baseUrl, apiKey, model, systemPrompt, channels, failoverEnabled });
       setSearchConfig({ provider: searchProvider, apiKey: searchApiKey, baseUrl: searchBaseUrl });
       return { ok: true };
     } catch (error) {
@@ -120,11 +130,12 @@ function aiRateLimit(limit, windowMs = 60000) {
         properties: {
           baseUrl: { type: 'string', maxLength: 2048 },
           apiKey: { type: 'string', maxLength: 4096 },
+          channelId: { type: 'string', maxLength: 64 },
         },
       },
     },
   }, async (request, reply) => {
-    const { baseUrl, apiKey } = request.body || {};
+    const { baseUrl, apiKey, channelId } = request.body || {};
     if (baseUrl) {
       try {
         const parsed = new URL(String(baseUrl));
@@ -138,10 +149,30 @@ function aiRateLimit(limit, windowMs = 60000) {
       }
     }
     try {
-      const models = await fetchAiModels({ baseUrl, apiKey });
+      const models = await fetchAiModels({ baseUrl, apiKey, channelId });
       return { models, count: models.length };
     } catch (error) {
       return reply.code(400).send({ error: 'fetch_models_failed', message: error.message });
+    }
+  });
+
+  // 单独探测已保存的渠道，不通过备用渠道掩盖故障，也不会执行任何运维工具。
+  fastify.post('/channels/:id/test', { preHandler: aiRateLimit(15) }, async (request, reply) => {
+    const channel = getAiConfig().channels.find((item) => item.id === request.params.id);
+    if (!channel) return reply.code(404).send({ error: 'channel_not_found', message: '渠道不存在，请先保存' });
+    const started = Date.now();
+    const probeTool = { type: 'function', function: { name: 'connection_probe', description: '测试工具调用格式，不执行动作', parameters: { type: 'object', properties: {}, additionalProperties: false } } };
+    try {
+      const result = await callOpenAI({ channels: [{ ...channel, enabled: true }], failoverEnabled: false, probe: true, totalTimeoutMs: 30000,
+        requiredTool: channel.supportsTools ? 'connection_probe' : undefined,
+        messages: [{ role: 'user', content: channel.supportsTools ? '请调用 connection_probe 工具，参数为空对象。' : '请仅回复 OK。' }],
+        tools: channel.supportsTools ? [probeTool] : undefined, stream: true });
+      if (channel.supportsTools && !result.toolCalls.some((call) => call.function.name === 'connection_probe')) {
+        throw new Error('渠道可连接，但模型未返回测试工具调用；请检查模型能力，或关闭此渠道的工具调用选项');
+      }
+      return { ok: true, latencyMs: Date.now() - started, model: channel.model, supportsTools: channel.supportsTools };
+    } catch (error) {
+      return reply.code(400).send({ error: 'channel_test_failed', message: error.message });
     }
   });
 

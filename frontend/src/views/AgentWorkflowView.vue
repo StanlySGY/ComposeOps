@@ -150,6 +150,7 @@ const chat = useAgentChat({
       const phaseLabels = {
         loop_started: '开始', loop_iteration: event.round ? `第 ${event.round} 轮` : '循环',
         interrupted: '已中断', loop_completed: '完成',
+        channel_selected: '选择渠道', channel_failed: '渠道故障', channel_skipped: '跳过渠道',
       };
       const statusByPhase = { loop_started: 'running', loop_iteration: 'running', interrupted: 'failed', loop_completed: 'done' };
       appendActivity(phaseLabels[event.phase] || event.phase, event.content, {
