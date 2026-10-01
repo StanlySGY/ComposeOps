@@ -56,7 +56,7 @@ export function prepareAiChannels(input, previous) {
     if (!Number.isInteger(firstTokenTimeoutMs) || firstTokenTimeoutMs < 1000 || firstTokenTimeoutMs > 120000) {
       throw new Error('首段响应等待时间应为 1–120 秒');
     }
-    return { id, name, baseUrl, apiKey, model, enabled, supportsTools: item.supportsTools !== false, firstTokenTimeoutMs };
+    return { id, name, baseUrl, apiKey, model, enabled, supportsTools: item.supportsTools !== false, streamToolCalls: item.streamToolCalls !== false, firstTokenTimeoutMs };
   });
 }
 
@@ -67,7 +67,17 @@ export function writeAiChannels(channels) {
 }
 
 function healthKey(channel) {
-  return createHash('sha256').update(JSON.stringify([channel.id, channel.baseUrl, channel.apiKey, channel.model])).digest('hex');
+  return createHash('sha256').update(JSON.stringify([channel.id, channel.baseUrl, channel.apiKey, channel.model, channel.streamToolCalls !== false])).digest('hex');
+}
+
+export function aiChannelRevision(channel) {
+  return createHash('sha256').update(JSON.stringify([healthKey(channel), channel.name, channel.enabled, channel.supportsTools, channel.firstTokenTimeoutMs])).digest('hex');
+}
+
+export function recordAiChannelProbe(channel, error = '') {
+  const state = stateFor(channel);
+  if (error) state.lastError = error;
+  else Object.assign(state, { failures: 0, cooldownUntil: 0, lastError: '', lastSuccessAt: new Date().toISOString() });
 }
 
 function stateFor(channel) {
@@ -82,13 +92,14 @@ function stateFor(channel) {
 export function publicAiChannels(channels) {
   return channels.map((channel) => {
     const { probing, ...state } = stateFor(channel);
-    return { ...channel, apiKey: channel.apiKey ? `••••${channel.apiKey.slice(-4)}` : '', hasApiKey: !!channel.apiKey,
-      health: { ...state, status: !channel.enabled ? 'disabled' : probing ? 'probing' : state.cooldownUntil > Date.now() ? 'cooldown' : state.failures ? 'degraded' : state.lastSuccessAt ? 'healthy' : 'unknown' } };
+    return { ...channel, revision: aiChannelRevision(channel), streamToolCalls: channel.streamToolCalls !== false, apiKey: channel.apiKey ? `••••${channel.apiKey.slice(-4)}` : '', hasApiKey: !!channel.apiKey,
+      health: { ...state, status: !channel.enabled ? 'disabled' : probing ? 'probing' : state.cooldownUntil > Date.now() ? 'cooldown' : state.failures || state.lastError ? 'degraded' : state.lastSuccessAt ? 'healthy' : 'unknown' } };
   });
 }
 
 function errorDescription(error) {
-  if (error.code === 'tool_unsupported') return '模型未返回测试工具调用，请检查模型能力或关闭工具调用选项';
+  if (error.code === 'tool_unsupported') return '模型未返回预期工具调用，尚未证实工具能力；请检查模型或渠道配置';
+  if (error.code === 'invalid_tool_arguments') return '工具参数不是完整 JSON；上游工具响应可能被截断，可尝试兼容模式';
   if (error.name === 'TimeoutError') return '等待模型响应超时';
   if (error.status === 401 || error.status === 403) return `鉴权或权限失败（${error.status}），请检查密钥`;
   if (error.status === 429) return '上游限流或额度不足（429）';
@@ -110,15 +121,15 @@ export async function requestWithAiChannels(options, invoke) {
   signal?.throwIfAborted();
   let channels = (options.channels || [{ ...options, id: 'direct', name: '当前渠道' }])
     .filter((item) => item.enabled !== false && item.apiKey && item.baseUrl);
-  if (options.failoverEnabled === false) channels = channels.slice(0, 1);
   if (tools?.length) channels = channels.filter((item) => item.supportsTools !== false);
+  if (options.failoverEnabled === false) channels = channels.slice(0, 1);
   if (!channels.length) throw new Error(tools?.length ? '没有已启用且支持工具调用的 AI 渠道' : '请先配置并启用 AI 渠道');
   const total = AbortSignal.timeout(options.totalTimeoutMs ?? 120000);
   const combined = signal ? AbortSignal.any([signal, total]) : total;
   const attempts = [];
   for (const channel of channels) {
     combined.throwIfAborted();
-    const state = stateFor(channel);
+    const state = options.diagnostic ? { failures: 0, cooldownUntil: 0 } : stateFor(channel);
     if (!options.probe && (state.cooldownUntil > Date.now() || state.probing)) {
       onChannelEvent?.({ type: 'channel_skipped', channelId: channel.id, channelName: channel.name, model: channel.model,
         content: `「${channel.name}」正在${state.probing ? '恢复探测' : '故障冷却'}，暂时跳过` });
@@ -138,7 +149,7 @@ export async function requestWithAiChannels(options, invoke) {
     };
     arm(channel.firstTokenTimeoutMs ?? DEFAULT_FIRST_TOKEN_MS);
     const notify = (callback) => (value) => {
-      if (value) emitted = true;
+      if (value && callback) emitted = true;
       callback?.(value);
     };
     onChannelEvent?.({ type: 'channel_selected', channelId: channel.id, channelName: channel.name, model: channel.model,
@@ -162,8 +173,8 @@ export async function requestWithAiChannels(options, invoke) {
         }
       }
       attempts.push(`「${channel.name}」${reason}`);
-      if (emitted || !canRetry(error) || combined.aborted) {
-        throw Object.assign(new Error(`${attempts.join('；')}${emitted ? '。回复已开始，为避免内容混合，本次未自动切换；已完成的工具操作不会重跑。' : ''}`), { status: error.status, partial: emitted });
+      if (options.probe || emitted || !canRetry(error) || combined.aborted) {
+        throw Object.assign(new Error(`${attempts.join('；')}${emitted ? '。回复已开始，为避免内容混合，本次未自动切换；已完成的工具操作不会重跑。' : ''}`), { code: error.code, status: error.status, partial: emitted });
       }
       onChannelEvent?.({ type: 'channel_failed', channelId: channel.id, channelName: channel.name, model: channel.model,
         content: `「${channel.name}」${reason}${options.failoverEnabled === false || options.probe ? '' : '，尝试后续可用渠道'}` });

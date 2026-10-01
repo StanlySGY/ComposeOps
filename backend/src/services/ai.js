@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import db, { getSetting, setSetting, addAiMessage, getAiHistory, clearAiHistory } from '../lib/db.js';
 import { scanIcallProtocols, stripAgentInternalText } from '../lib/agent-protocol-core.js';
-import { prepareAiChannels, publicAiChannels, readAiChannels, requestWithAiChannels, validateAiBaseUrl, writeAiChannels } from './ai-channels.js';
+import { aiChannelRevision, prepareAiChannels, publicAiChannels, readAiChannels, requestWithAiChannels, validateAiBaseUrl, writeAiChannels } from './ai-channels.js';
 
 const DEFAULT_SYSTEM_PROMPT = `你是 ComposeOps 的运维助手，擅长 Docker Compose 与容器排错。
 - 当用户请求"排错"时，先给出问题根因的简短判断，再给出可执行的修复步骤。
@@ -235,6 +235,48 @@ export function setAiConfig({ baseUrl, apiKey, model, systemPrompt, channels, fa
   })();
 }
 
+function checkChannelRevision(channel, revision) {
+  if ((channel ? aiChannelRevision(channel) : null) !== (revision ?? null)) {
+    throw Object.assign(new Error('此渠道已在其他页面变更，请重新载入后再保存'), { statusCode: 409 });
+  }
+}
+
+/** 单行修改只合并目标渠道，避免覆盖其他渠道或另一页面的新配置。 */
+export function saveAiChannel(id, input) {
+  return db.transaction(() => {
+    const channels = getAiConfig().channels;
+    const existing = channels.find((item) => item.id === id);
+    checkChannelRevision(existing, input.revision);
+    const next = prepareAiChannels([{ ...input, id }], channels)[0];
+    if (!existing && channels.length >= 12) throw new Error('最多配置 12 条 AI 渠道');
+    writeAiChannels(existing ? channels.map((item) => item.id === id ? next : item) : [...channels, next]);
+    return publicAiChannels([next])[0];
+  })();
+}
+
+export function deleteAiChannel(id, revision) {
+  return db.transaction(() => {
+    const channels = getAiConfig().channels;
+    const existing = channels.find((item) => item.id === id);
+    if (!existing) throw Object.assign(new Error('渠道已不存在，请重新载入'), { statusCode: 404 });
+    checkChannelRevision(existing, revision);
+    writeAiChannels(channels.filter((item) => item.id !== id));
+  })();
+}
+
+export function reorderAiChannels(ids, previousIds) {
+  return db.transaction(() => {
+    const channels = getAiConfig().channels;
+    if (JSON.stringify(channels.map((item) => item.id)) !== JSON.stringify(previousIds)) {
+      throw Object.assign(new Error('渠道列表或顺序已变更，请刷新页面后重试'), { statusCode: 409 });
+    }
+    if (ids.length !== channels.length || new Set(ids).size !== ids.length || ids.some((id) => !channels.some((item) => item.id === id))) {
+      throw new Error('排序必须包含全部已保存渠道且不可重复');
+    }
+    writeAiChannels(ids.map((id) => channels.find((item) => item.id === id)));
+  })();
+}
+
 /**
  * 获取远程模型列表(OpenAI 兼容 /v1/models 与 Ollama /api/tags)。
  * @param {string} baseUrl 若不传则读已保存配置
@@ -293,7 +335,9 @@ export function callOpenAI(options) {
 }
 
 /** 单次传输不执行重试，响应完整后才把工具调用交还引擎。 */
-async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stream = false, onToken, onReasoning, onActivity, signal, requiredTool, probe }) {
+async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stream = false, streamToolCalls = true, onToken, onReasoning, onActivity, signal, requiredTool, probe }) {
+  const bufferedTools = stream && tools?.length && !streamToolCalls;
+  if (bufferedTools) stream = false;
   const body = { model, messages, stream };
   if (stream) body.stream_options = { include_usage: true };
   if (tools?.length) body.tools = tools;
@@ -320,7 +364,7 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
   const normalize = () => {
     for (const call of toolCalls.filter(Boolean)) {
       if (!call.id || !call.function?.name) throw invalid();
-      try { JSON.parse(call.function.arguments); } catch { throw invalid(); }
+      try { JSON.parse(call.function.arguments); } catch { throw invalid('invalid_tool_arguments'); }
     }
     const result = normalizeToolResponse(fullText, toolCalls.filter(Boolean), finishReason);
     if (requiredTool && !result.toolCalls.some((call) => call.function.name === requiredTool)) {
@@ -341,6 +385,7 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
     usage = data.usage || null;
     const result = normalize();
     onActivity?.();
+    if (bufferedTools && result.content) onToken?.(result.content);
     if (fullReasoning) onReasoning?.(fullReasoning.slice(0, MAX_REASONING_CHARS));
     return result;
   }

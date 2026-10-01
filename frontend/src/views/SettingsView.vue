@@ -7,7 +7,11 @@
     <p v-if="message" class="alert-success">{{ message }}</p><p v-if="error" class="alert-error">{{ error }}</p>
 
     <section v-if="tab === 'ai'" class="settings-section">
-      <AiChannelsPanel v-model:channels="ai.channels" v-model:failover-enabled="ai.failoverEnabled" @health-change="refreshChannelHealth" />
+      <AiChannelsPanel v-model:channels="ai.channels" @health-change="refreshChannelHealth" />
+      <fieldset class="space-y-4 border-t border-surface-800 pt-5" :disabled="savingAi">
+      <h2 class="section-title">通用 AI 设置</h2>
+      <label class="toggle-label"><input v-model="ai.failoverEnabled" type="checkbox" />故障时自动切换备用渠道</label>
+      <p class="text-xs leading-5 text-surface-500">超时、限流或服务异常时按顺序尝试。已开始输出的回复会明确报错，已完成的操作不会重复执行。连续失败的渠道会暂时跳过，冷却后自动探测。</p>
       <label class="mt-4 block text-xs text-surface-400">系统 Prompt<textarea v-model="ai.systemPrompt" rows="6" class="input mt-2 block w-full"></textarea></label>
       <div class="form-grid mt-4 border-t border-surface-800 pt-4">
         <h3 class="section-title md:col-span-2 mb-0!">联网检索 Grounding</h3>
@@ -20,7 +24,8 @@
         <label v-else-if="ai.searchProvider !== 'builtin' && ai.searchProvider !== 'duckduckgo'">检索 API Key<input v-model="ai.searchApiKey" type="password" class="input" :placeholder="searchMasked ? '已配置,留空保持不变' : '在此输入 Key'" /></label>
         <p v-else class="md:col-span-2 text-xs text-surface-500">内置检索(GitHub + DuckDuckGo)无需任何配置;需要更强检索质量时可切换 Tavily / Brave / 自托管 SearXNG,失败自动回退内置。</p>
       </div>
-      <button class="btn-primary" @click="saveAi"><Save class="w-4 h-4" />保存 AI 配置</button>
+      <button class="btn-primary" @click="saveAi"><Save class="w-4 h-4" />{{ savingAi ? '保存中…' : '保存通用设置' }}</button>
+      </fieldset>
     </section>
 
     <section v-if="tab === 'personal'" class="settings-section">
@@ -223,7 +228,7 @@ const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'personal', l
 const route = useRoute();
 const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';
-const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
+const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const savingAi = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
 const mountPlan = ref(null); const mountLoading = ref(false); const highlightedProjectId = computed(() => String(route.query.projectId || ''));
 const hostEditor = ref(null);
 const removeHostTarget = ref(null);
@@ -347,14 +352,18 @@ async function confirmRemoveHost() {
 
 onMounted(async () => { try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } });
 async function saveAi() {
+  if (savingAi.value) return;
+  savingAi.value = true;
   try {
-    const payload = { ...ai.value, channels: ai.value.channels.map(({ id, name, baseUrl, apiKey, model, enabled, supportsTools, firstTokenTimeoutMs }) =>
-      ({ id, name, baseUrl, apiKey, model, enabled, supportsTools, firstTokenTimeoutMs })) };
-    if (!payload.searchApiKey) delete payload.searchApiKey;
+    const { systemPrompt, failoverEnabled, searchProvider, searchApiKey, searchBaseUrl } = ai.value;
+    const payload = { systemPrompt, failoverEnabled, searchProvider, searchBaseUrl };
+    if (searchApiKey) payload.searchApiKey = searchApiKey;
     await aiStore.saveConfig(payload);
-    applyAiConfig(aiStore.config);
-    ok('AI 配置已保存');
+    searchMasked.value = !!aiStore.config.searchApiKey;
+    ai.value.searchApiKey = '';
+    ok('通用 AI 设置已保存');
   } catch (e) { fail(e); }
+  finally { savingAi.value = false; }
 }
 function searchProviderLabel(value) {
   return { builtin: '内置(GitHub + DuckDuckGo)', duckduckgo: 'DuckDuckGo', tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG(自托管)' }[value] || value;

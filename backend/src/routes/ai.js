@@ -2,6 +2,9 @@ import {
   getAiConfig,
   getPublicAiConfig,
   setAiConfig,
+  saveAiChannel,
+  deleteAiChannel,
+  reorderAiChannels,
   callOpenAI,
   addAiMessage,
   getAiHistory,
@@ -19,6 +22,7 @@ import {
   listAiSessions,
   truncateAiHistoryFrom,
 } from '../lib/db.js';
+import { testAiChannel } from '../services/ai-channel-probe.js';
 import { getActivityDocker } from '../services/docker-hosts.js';
 import { findProjectContainer } from '../services/scanner.js';
 import { readCompose } from '../services/compose-runner.js';
@@ -43,8 +47,8 @@ import { harvestSecretValues, redactSecrets } from '../lib/secret-redactor.js';
  *    声明 additionalProperties: false 会被 removeAdditional 静默剥空,
  *    工具随即拿着空参数执行。
  *
- * apiKey 只出现在请求体:GET /config 会把它掩成 '••••'+后四位,
- * 且本文件不声明任何 response schema,密钥无从被 schema 带出。
+ * 普通配置响应不包含明文 apiKey:GET /config 会把它掩成 '••••'+后四位,
+ * 仅管理员显式 POST reveal-key 可获得明文，响应禁止缓存。
  */
 
 export default async function aiRoutes(fastify) {
@@ -96,7 +100,7 @@ function aiRateLimit(limit, windowMs = 60000) {
             properties: {
               id: { type: 'string', maxLength: 64 }, name: { type: 'string', maxLength: 80 },
               baseUrl: { type: 'string', maxLength: 2048 }, apiKey: { type: 'string', maxLength: 4096 },
-              model: { type: 'string', maxLength: 200 }, enabled: { type: 'boolean' }, supportsTools: { type: 'boolean' },
+              model: { type: 'string', maxLength: 200 }, enabled: { type: 'boolean' }, supportsTools: { type: 'boolean' }, streamToolCalls: { type: 'boolean' },
               firstTokenTimeoutMs: { type: 'integer', minimum: 1000, maximum: 120000 },
             },
           } },
@@ -156,24 +160,44 @@ function aiRateLimit(limit, windowMs = 60000) {
     }
   });
 
-  // 单独探测已保存的渠道，不通过备用渠道掩盖故障，也不会执行任何运维工具。
+  const revisionField = { type: ['string', 'null'], maxLength: 64 };
+  const channelError = (reply, error) => reply.code(error.statusCode || 400).send({ error: 'invalid_ai_channel', message: error.message });
+  fastify.put('/channels/:id', { schema: { body: {
+    type: 'object', additionalProperties: false, required: ['name', 'baseUrl', 'model'], properties: {
+      name: { type: 'string', maxLength: 80 }, baseUrl: { type: 'string', maxLength: 2048 },
+      model: { type: 'string', maxLength: 200 }, apiKey: { type: 'string', maxLength: 4096 },
+      enabled: { type: 'boolean' }, supportsTools: { type: 'boolean' }, streamToolCalls: { type: 'boolean' },
+      firstTokenTimeoutMs: { type: 'integer', minimum: 1000, maximum: 120000 }, revision: revisionField,
+    },
+  } } }, async (request, reply) => {
+    try { const channel = saveAiChannel(request.params.id, request.body); return { channel, order: getAiConfig().channels.map((item) => item.id) }; }
+    catch (error) { return channelError(reply, error); }
+  });
+  fastify.delete('/channels/:id', { schema: { body: { type: 'object', additionalProperties: false,
+    required: ['revision'], properties: { revision: revisionField },
+  } } }, async (request, reply) => {
+    try { deleteAiChannel(request.params.id, request.body.revision); return { ok: true }; }
+    catch (error) { return channelError(reply, error); }
+  });
+  fastify.post('/channels/order', { schema: { body: { type: 'object', additionalProperties: false,
+    required: ['ids', 'previousIds'], properties: Object.fromEntries(['ids', 'previousIds'].map((key) => [key,
+      { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 64 } }])) },
+  } }, async (request, reply) => {
+    try { reorderAiChannels(request.body.ids, request.body.previousIds); return { ok: true }; }
+    catch (error) { return channelError(reply, error); }
+  });
+  fastify.post('/channels/:id/reveal-key', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const channel = getAiConfig().channels.find((item) => item.id === request.params.id);
+    if (!channel) return reply.code(404).send({ error: 'channel_not_found', message: '渠道不存在，请先保存' });
+    return { apiKey: channel.apiKey };
+  });
+
+  // 仅测试目标渠道；失败以逐项结果返回，不借备用渠道掩盖问题。
   fastify.post('/channels/:id/test', { preHandler: aiRateLimit(15) }, async (request, reply) => {
     const channel = getAiConfig().channels.find((item) => item.id === request.params.id);
     if (!channel) return reply.code(404).send({ error: 'channel_not_found', message: '渠道不存在，请先保存' });
-    const started = Date.now();
-    const probeTool = { type: 'function', function: { name: 'connection_probe', description: '测试工具调用格式，不执行动作', parameters: { type: 'object', properties: {}, additionalProperties: false } } };
-    try {
-      const result = await callOpenAI({ channels: [{ ...channel, enabled: true }], failoverEnabled: false, probe: true, totalTimeoutMs: 30000,
-        requiredTool: channel.supportsTools ? 'connection_probe' : undefined,
-        messages: [{ role: 'user', content: channel.supportsTools ? '请调用 connection_probe 工具，参数为空对象。' : '请仅回复 OK。' }],
-        tools: channel.supportsTools ? [probeTool] : undefined, stream: true });
-      if (channel.supportsTools && !result.toolCalls.some((call) => call.function.name === 'connection_probe')) {
-        throw new Error('渠道可连接，但模型未返回测试工具调用；请检查模型能力，或关闭此渠道的工具调用选项');
-      }
-      return { ok: true, latencyMs: Date.now() - started, model: channel.model, supportsTools: channel.supportsTools };
-    } catch (error) {
-      return reply.code(400).send({ error: 'channel_test_failed', message: error.message });
-    }
+    return testAiChannel(channel);
   });
 
   // POST /api/v1/ai/logs  body: { projectId, containerId, tail? } —— AI 排障使用的容器日志上下文

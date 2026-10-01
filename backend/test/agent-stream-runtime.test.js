@@ -189,3 +189,29 @@ test('压缩 API 保留完整历史,下一轮注入摘要及已完成的后台�
   assert.ok(prompt.includes('后台测试完成'));
   assert.ok(!prompt.includes('审查消息-0'));
 });
+
+test('真实 SSE: 兼容模式完成审批、工具执行和结果回传，正文只发射一次', async t => {
+  const { default: db } = await import('../src/lib/db.js');
+  t.after(() => db.prepare("DELETE FROM settings WHERE key = 'ai.channels'").run());
+  setAiConfig({ channels: [{ id: 'compatible', name: '兼容渠道', baseUrl: 'http://compatible.test/v1', apiKey: 'test-key', model: 'compatible-model', streamToolCalls: false }] });
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (!String(url).startsWith('http://compatible.test/')) return realFetch(url, options);
+    const body = JSON.parse(options.body);
+    assert.equal(body.stream, false);
+    calls++;
+    if (calls === 1) return Response.json({ choices: [{ message: { content: '', tool_calls: [{ id: 'buffered-call', type: 'function', function: { name: 'test.approval', arguments: '{"value":"buffered"}' } }] }, finish_reason: 'tool_calls' }] });
+    assert.equal(calls, 2);
+    assert.ok(body.messages.some(item => item.role === 'tool' && item.content.includes('buffered')));
+    return Response.json({ choices: [{ message: { content: '兼容调用已完成' }, finish_reason: 'stop' }] });
+  });
+  const { sessionId } = await request('/agent/sessions', {});
+  const events = await run(sessionId, async event => {
+    if (event.type === 'confirmation_required') await request('/agent/approve', { executionId: event.executionId, toolCallId: event.toolCallId, approved: true });
+  });
+  assert.deepEqual(executions, [{ value: 'buffered' }]);
+  assert.equal(calls, 2);
+  assert.equal(events.filter(event => event.type === 'token').map(event => event.content).join(''), '兼容调用已完成');
+  assert.equal(getAiHistory(10, sessionId).at(-1).content, '兼容调用已完成');
+  assert.equal(agent.pendingApprovals.size, 0);
+});

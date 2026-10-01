@@ -204,7 +204,7 @@ test('测试连接只访问指定渠道、验证工具协议，不借备用掩�
     return streamReply('不能调用工具');
   });
   const response = await app.inject({ method: 'POST', url: `/api/v1/ai/channels/${a.id}/test`, headers: { cookie } });
-  assert.equal(response.statusCode, 400); assert.equal(requests, 1); assert.match(response.json().message, /工具调用/);
+  assert.equal(response.statusCode, 200); assert.equal(requests, 1); assert.equal(response.json().ok, false); assert.match(response.json().checks[0].message, /工具调用/);
   assert.equal(publicAiChannels([a])[0].health.lastSuccessAt, null);
 });
 
@@ -225,4 +225,135 @@ test('真实 HTTP 双上游：主渠道 503，备用流式中文与模型选择�
     const result = await callOpenAI({ channels, messages: [{ role: 'user', content: '测试' }], stream: true, onToken: text => tokens.push(text) });
     assert.equal(result.content, '故障切换成功🙂'); assert.equal(tokens.join(''), result.content); assert.equal(requests[0].model, channels[1].model);
   } finally { await Promise.all([a, b].map(server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }))); }
+});
+
+
+test('独立保存只修改目标渠道；过期版本及删除后保存不能覆盖配置', async () => {
+  const a = channel('one'), b = channel('two'); setAiConfig({ channels: [a, b] });
+  const [draftA, draftB] = getPublicAiConfig().channels;
+  const put = (id, payload) => app.inject({ method: 'PUT', url: `/api/v1/ai/channels/${id}`, headers: { cookie }, payload });
+  const first = await put(a.id, { ...draftA, name: '已更新', apiKey: '' });
+  assert.equal(first.statusCode, 200, first.body);
+  assert.deepEqual(first.json().order, [a.id, b.id]);
+  assert.ok(!first.body.includes(a.apiKey));
+  assert.equal(getAiConfig().channels[1].apiKey, b.apiKey);
+  assert.equal((await put(a.id, { ...draftA, name: '旧窗口' })).statusCode, 409);
+  assert.equal((await put(b.id, { ...draftB, name: '独立更新', apiKey: '' })).statusCode, 200);
+  const current = getPublicAiConfig().channels[0];
+  const staleDelete = await app.inject({ method: 'DELETE', url: `/api/v1/ai/channels/${a.id}`, headers: { cookie }, payload: { revision: draftA.revision } });
+  assert.equal(staleDelete.statusCode, 409);
+  const deleted = await app.inject({ method: 'DELETE', url: `/api/v1/ai/channels/${a.id}`, headers: { cookie }, payload: { revision: current.revision } });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal((await put(a.id, current)).statusCode, 409);
+  assert.equal(getAiConfig().channels.length, 1);
+});
+
+test('独立新增不受另一条无效草稿影响；顺序保存校验列表且保留密钥', async () => {
+  const a = channel('order-a'), b = channel('order-b'); setAiConfig({ channels: [a] });
+  const added = await app.inject({ method: 'PUT', url: `/api/v1/ai/channels/${b.id}`, headers: { cookie }, payload: { ...b, revision: null } });
+  assert.equal(added.statusCode, 200, added.body);
+  const order = (ids, previousIds) => app.inject({ method: 'POST', url: '/api/v1/ai/channels/order', headers: { cookie }, payload: { ids, previousIds } });
+  assert.equal((await order([b.id, a.id], [a.id, b.id])).statusCode, 200);
+  assert.equal(getAiConfig().channels[0].apiKey, b.apiKey);
+  assert.equal((await order([a.id, b.id], [a.id, b.id])).statusCode, 409);
+  assert.equal((await order([b.id, b.id], [b.id, a.id])).statusCode, 400);
+  assert.equal((await order([b.id], [b.id, a.id])).statusCode, 400);
+});
+
+test('只有已登录管理员可显式查看密钥，跨站请求被拒绝，响应不缓存', async () => {
+  const a = channel('reveal'); setAiConfig({ channels: [a] });
+  const url = `/api/v1/ai/channels/${a.id}/reveal-key`;
+  assert.equal((await app.inject({ method: 'POST', url })).statusCode, 401);
+  assert.equal((await app.inject({ method: 'POST', url, headers: { cookie, origin: 'https://evil.test' } })).statusCode, 403);
+  const revealed = await app.inject({ method: 'POST', url, headers: { cookie } });
+  assert.equal(revealed.statusCode, 200); assert.equal(revealed.json().apiKey, a.apiKey);
+  assert.equal(revealed.headers['cache-control'], 'no-store');
+  assert.ok(!JSON.stringify(getPublicAiConfig()).includes(a.apiKey));
+  assert.ok(!JSON.stringify(exportUserData()).includes(a.apiKey));
+  for (const method of ['PUT', 'DELETE']) {
+    assert.equal((await app.inject({ method, url: `/api/v1/ai/channels/${a.id}`, payload: {} })).statusCode, 401);
+  }
+});
+
+test('工具兼容模式完整返回后发射正文；普通聊天保持流式，参数仍严格校验', async t => {
+  const a = channel('compatible', { streamToolCalls: false });
+  const requests = [], tokens = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(options.body); requests.push(body);
+    return body.stream ? streamReply('流式聊天') : jsonReply('完整正文');
+  });
+  const tools = [{ type: 'function', function: { name: 'probe' } }];
+  await callOpenAI({ channels: [a], messages: [], tools, stream: true, onToken: value => tokens.push(value) });
+  assert.equal(requests[0].stream, false); assert.equal(requests[0].stream_options, undefined);
+  assert.deepEqual(tokens, ['完整正文']);
+  await callOpenAI({ channels: [a], messages: [], stream: true });
+  assert.equal(requests[1].stream, true);
+});
+
+test('无外发回调的流式请求不会误报回复已开始，可以安全切换', async t => {
+  let count = 0;
+  t.mock.method(globalThis, 'fetch', async () => ++count === 1 ? new Response(frame({ content: '内部缓冲' })) : streamReply('备用'));
+  const response = await callOpenAI({ channels: [channel('buffered-a'), channel('buffered-b')], messages: [], stream: true });
+  assert.equal(response.content, '备用'); assert.equal(count, 2);
+});
+
+const nativeTool = (args) => ({ id: 'synthetic-call', type: 'function', function: { name: 'connection_probe', arguments: args } });
+function probeResponse(body, { brokenEmpty = false, wrongReceipt = false } = {}) {
+  const toolResult = body.messages.find(item => item.role === 'tool');
+  let content = '', calls = [];
+  if (toolResult) content = wrongReceipt ? '未读取结果' : JSON.parse(toolResult.content).receipt;
+  else {
+    const nonce = body.tools[0].function.parameters.properties.nonce?.enum[0];
+    calls = [nativeTool(nonce ? JSON.stringify({ nonce }) : brokenEmpty ? '{' : '{}')];
+  }
+  if (!body.stream) return Response.json({ choices: [{ message: { content, tool_calls: calls }, finish_reason: calls.length ? 'tool_calls' : 'stop' }] });
+  return new Response(frame({ content: '\n\n' }) + frame({ content, tool_calls: calls.map(item => ({ ...item, index: 0 })) }, calls.length ? 'tool_calls' : 'stop') + 'data: [DONE]\n\n');
+}
+
+test('探针覆盖带参数、空参数与随机结果回传，流式和兼容模式均验证', async t => {
+  for (const streamToolCalls of [true, false]) {
+    const a = channel('probe-ok', { streamToolCalls }); setAiConfig({ channels: [a] });
+    let count = 0;
+    const mocked = t.mock.method(globalThis, 'fetch', async (_url, options) => { count++; return probeResponse(JSON.parse(options.body)); });
+    const response = await app.inject({ method: 'POST', url: `/api/v1/ai/channels/${a.id}/test`, headers: { cookie } });
+    assert.equal(response.json().ok, true, response.body); assert.equal(count, 3);
+    assert.deepEqual(response.json().checks.map(item => item.status), ['passed', 'passed', 'passed']);
+    assert.equal(publicAiChannels([a])[0].health.status, 'healthy');
+    mocked.mock.restore();
+  }
+});
+
+test('上游空参数流式截断明确定位兼容问题，不修补 JSON、不触发故障熔断', async t => {
+  const a = channel('probe-broken'); setAiConfig({ channels: [a] });
+  t.mock.method(globalThis, 'fetch', async (_url, options) => probeResponse(JSON.parse(options.body), { brokenEmpty: true }));
+  const response = await app.inject({ method: 'POST', url: `/api/v1/ai/channels/${a.id}/test`, headers: { cookie } });
+  const result = response.json();
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.checks.map(item => item.status), ['passed', 'failed', 'skipped']);
+  assert.match(result.checks[1].message, /完整 JSON/); assert.match(result.suggestion, /兼容模式/);
+  assert.doesNotMatch(result.checks[1].message, /回复已开始/);
+  const health = publicAiChannels([a])[0].health;
+  assert.equal(health.failures, 0); assert.equal(health.cooldownUntil, 0); assert.equal(health.lastSuccessAt, null);
+});
+
+test('探针不把只返回工具名称或忽略工具结果算作通过', async t => {
+  const a = channel('probe-receipt'); setAiConfig({ channels: [a] });
+  t.mock.method(globalThis, 'fetch', async (_url, options) => probeResponse(JSON.parse(options.body), { wrongReceipt: true }));
+  const result = (await app.inject({ method: 'POST', url: `/api/v1/ai/channels/${a.id}/test`, headers: { cookie } })).json();
+  assert.equal(result.ok, false); assert.equal(result.checks[2].status, 'failed');
+});
+
+test('关闭故障切换时仍先按能力筛选，不让纯聊天渠道挡住工具渠道', async t => {
+  const chat = channel('chat-only', { supportsTools: false }), agent = channel('agent-tools');
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async url => { urls.push(url); return jsonReply(); });
+  const result = await callOpenAI({ channels: [chat, agent], failoverEnabled: false, messages: [], tools: [{ type: 'function', function: { name: 'probe' } }] });
+  assert.equal(result.channelId, agent.id); assert.equal(urls.length, 1);
+});
+
+test('兼容模式也拒绝残缺工具参数，验证前不外发正文', async t => {
+  const tokens = [];
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{ message: { content: '未验证的正文', tool_calls: [nativeTool('{')] }, finish_reason: 'tool_calls' }] }));
+  await assert.rejects(callOpenAI({ channels: [channel('strict-buffer', { streamToolCalls: false })], stream: true, probe: true, messages: [], tools: [{ type: 'function', function: { name: 'probe' } }], onToken: token => tokens.push(token) }), /完整 JSON/);
+  assert.equal(tokens.length, 0);
 });
