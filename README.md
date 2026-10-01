@@ -26,6 +26,10 @@
 > **这不是什么**：不支持多租户与团队协作（多人请用 Portainer）；不是 PaaS，不接管构建发布流程（那请看 Coolify / Komodo）。
 > **定位**：在这类工具里，ComposeOps 的差异点是 **AI 运维 Agent**——不止能看，还能在你确认后替你动手排障。
 
+[在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [备份与恢复](docs/public/BACKUP_RESTORE.md)
+
+预览使用虚构数据，无需登录，不访问 Docker 或 AI。正式部署默认固定版本 1.5.0；AI 为可选功能。
+
 ## 🚀 为什么选择 ComposeOps
 
 ### AI 驱动，而不只是管理面板
@@ -36,7 +40,7 @@ ComposeOps 解决的是：
 
 **发现问题 → 分析原因 → 请求确认 → 执行操作 → 验证结果**
 
-### 两块独有的"眼前一亮"
+### 两项核心体验
 
 - 🛡 **守护模式**：开启后，每条容器告警自动触发 AI 诊断——读取容器状态与日志、给出根因假设与带风险标注的处置建议，结果落在事件中心，一键展开。面板会自己"值班看告警"，处置决定权仍在你手里。
 - 🔮 **部署预言**：执行 `up` 之前，对照宿主真实状态推演这次部署——哪些容器会新建/重建/原地保留、哪些镜像需要拉取、宿主端口是否被其他容器占用、卷与 bind 路径是否就绪、AI 三句话解读风险。
@@ -62,21 +66,9 @@ ComposeOps 解决的是：
 | 长期记忆运维偏好 | ✅ |
 | 运维工作流编排 | ✅ |
 
-### 与同类产品的区别
+### 适合什么场景
 
-| 能力 | ComposeOps | Dockge | Portainer CE | Komodo |
-|------|-----------|--------|--------------|--------|
-| AI Agent 运维(50+ 工具,确认门+审计) | ✅ | ❌ | ❌ | ❌ |
-| 告警自动 AI 诊断(守护模式) | ✅ | ❌ | ❌ | ❌ |
-| 部署预言(up 前宿主实况推演) | ✅ | ❌ | ❌ | ❌ |
-| 平滑升级 → 健康轮询 → 自动回滚 | ✅ | ❌ | ❌ | 部分 |
-| GitOps 漂移检测 + 版本回滚 | ✅ | ❌ | ❌ | ✅ |
-| 备份还原演练(自证可用) | ✅ | ❌ | ❌ | ❌ |
-| MCP Server(接入 Claude/Cursor/Codex 等) | ✅ | ❌ | ❌ | ❌ |
-| 多宿主(SSH/TCP/Local) | ✅ | 单机 | ✅ | ✅ |
-| 中文优先 + 国内镜像构建 | ✅ | ❌ | ❌ | ❌ |
-
-> 2026 年主流面板对比中,这类工具的共同点是"看见问题";ComposeOps 的差异是"分析问题并在你确认后解决问题"。详细对比见:`docs/public/WHY_COMPOSEOPS.md`
+ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI 工具执行、日志与配置联动。需要团队权限、多租户或应用构建平台时，请分别评估 [Portainer](https://www.portainer.io/)、[Dockge](https://github.com/louislam/dockge)、[Komodo](https://komo.do/) 和 [Coolify](https://coolify.io/) 的当前版本。本文不对其他产品的能力缺失作保证。
 
 ### 🔌 MCP 通用接入:任何 Agent 都能调用面板工具
 
@@ -256,8 +248,8 @@ ComposeOps 解决的是：
 
 ```bash
 mkdir composeops && cd composeops
-# 下载官方 compose.yaml 后 docker compose up -d
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/main/docker-compose.yml -o docker-compose.yml
+# 下载固定版本、无需源码构建的安装清单
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.5.0/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 

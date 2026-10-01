@@ -14,7 +14,8 @@
         <span class="nav-indicator hidden md:block w-1.5 h-1.5 rounded-full bg-accent opacity-0"></span>
       </router-link>
       <section v-for="group in desktopGroups" :key="group.label" class="mt-3 first:mt-4">
-        <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-500">{{ group.label }}</div>
+        <button class="flex w-full items-center justify-between px-2 py-2 text-[10px] font-semibold tracking-[0.16em] text-surface-400 hover:text-surface-200" :aria-expanded="expandedGroups[group.label] !== false" :aria-controls="'nav-group-' + group.label" @click="toggleGroup(group.label)">{{ group.label }}<ChevronDown class="h-3.5 w-3.5 transition-transform" :class="{ '-rotate-90': expandedGroups[group.label] === false }" /></button>
+        <div v-show="expandedGroups[group.label] !== false" :id="'nav-group-' + group.label">
         <router-link
           v-for="item in group.items"
           :key="item.to"
@@ -25,6 +26,7 @@
           <component :is="item.icon" class="w-[18px] h-[18px] shrink-0" />
           <span class="flex-1">{{ item.label }}</span>
         </router-link>
+        </div>
       </section>
     </nav>
     <nav class="flex md:hidden h-16 items-stretch justify-around px-1 pb-[env(safe-area-inset-bottom)]" aria-label="主导航">
@@ -39,12 +41,13 @@
     </nav>
     <div class="hidden md:block mx-4 mb-4 rounded-xl border border-surface-800/80 bg-surface-950/50 p-3">
       <div class="flex items-center gap-2 text-xs text-surface-300"><span class="status-dot bg-emerald-400"></span>本地控制台</div>
-      <p class="mt-1.5 text-[11px] leading-4 text-surface-600">集中管理 Compose 服务与运行状态</p>
+      <button class="mt-2 inline-flex min-h-9 items-center gap-2 text-xs text-surface-400 hover:text-emerald-400" @click="openGuide"><CircleHelp class="h-3.5 w-3.5" />入门指南</button>
     </div>
   </aside>
   <teleport to="body">
     <div v-if="moreOpen" class="fixed inset-0 z-51 bg-black/55 md:hidden" @click.self="moreOpen = false">
       <section class="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-2xl border-t border-surface-700 bg-surface-950 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl" role="dialog" aria-modal="true" aria-label="更多功能">
+        <button class="btn-secondary mb-3 w-full" @click="moreOpen = false; openGuide()"><CircleHelp class="h-4 w-4" />入门指南</button>
         <div class="mb-3 flex items-center justify-between"><div><h2 class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" title="关闭" @click="moreOpen = false">×</button></div>
         <div v-for="group in mobileGroups" :key="group.label" class="mb-4 last:mb-0">
           <h3 class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">{{ group.label }}</h3>
@@ -60,9 +63,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
+import { ChevronDown, CircleHelp, Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
 const primaryItems = [
   { to: '/dashboard', icon: Activity, label: '总览' },
   { to: '/services', icon: Boxes, label: '服务' },
@@ -110,6 +114,21 @@ const navGroups = [
   },
 ];
 const desktopGroups = navGroups;
+const route = useRoute();
+const expandedGroups = ref({ '观测': true, '自动化': false, '资源': false, '系统': true });
+try {
+  const stored = JSON.parse(localStorage.getItem('composeops:nav-groups') || '{}');
+  for (const group of navGroups) if (typeof stored[group.label] === 'boolean') expandedGroups.value[group.label] = stored[group.label];
+} catch { /* use defaults */ }
+function toggleGroup(label) {
+  expandedGroups.value[label] = expandedGroups.value[label] === false;
+  try { localStorage.setItem('composeops:nav-groups', JSON.stringify(expandedGroups.value)); } catch { /* memory only */ }
+}
+function openGuide() { window.dispatchEvent(new CustomEvent('composeops:show-onboarding')); }
+watch(() => route.path, (value) => {
+  const group = navGroups.find(group => group.items.some(item => item.to === value));
+  if (group) expandedGroups.value[group.label] = true;
+}, { immediate: true });
 const moreOpen = ref(false);
 const mobileItems = [primaryItems[0], primaryItems[1], primaryItems[3], primaryItems[4]];
 const mobileGroups = navGroups;

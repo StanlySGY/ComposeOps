@@ -21,3 +21,9 @@ backend/data/backups/
 
 # 本地生成产物
 artifacts/
+
+# 静态预览与浏览器验收产物
+frontend/preview-dist/
+frontend/playwright-report/
+frontend/test-results/
+backend/data/snapshots/

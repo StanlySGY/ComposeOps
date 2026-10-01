@@ -1,112 +1,44 @@
-# PostgreSQL 故障恢复案例
+# PostgreSQL 配置故障恢复演练
 
-## 场景
+此流程演示可复现的配置错误与修复，尚未作为真实 Agent 端到端验收，也不模拟数据损坏恢复。使用空目录和独立测试项目，不绑定宿主端口。
 
-PostgreSQL 容器启动失败，业务无法连接数据库。
+创建 `compose.yml`：
 
-用户希望快速定位原因并恢复服务。
+```yaml
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_PASSWORD: demo-only-change-me
+    command: [postgres, -c, max_connections=100]
+    volumes: [data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  data:
+```
 
----
+```bash
+docker compose -p composeops-pg-demo up -d --wait
+docker compose -p composeops-pg-demo exec -T postgres psql -U postgres -c "CREATE TABLE demo_marker (value text); INSERT INTO demo_marker VALUES ('retained');"
+```
 
-## 用户目标
+将 command 中 `max_connections=100` 改成 `max_connections=invalid`，执行 `docker compose -p composeops-pg-demo up -d`，日志应明确指出参数无效。
 
-修复 PostgreSQL 启动失败问题。
+在 ComposeOps 中授权 **composeops-pg-demo**，保持默认 ask 审批模式，向 Agent 提出：
 
-## Agent 分析
+> 读取这个测试项目的退出状态、日志和配置，定位启动错误。保留数据卷，提出最小配置修复，确认后重建，并执行 SELECT 验证 demo_marker。
 
-用户输入：
+核对计划只修复参数后批准。可手动将参数恢复为 100，运行 `docker compose -p composeops-pg-demo up -d --wait`。验收：
 
-> PostgreSQL 无法启动，帮我排查
+```bash
+docker compose -p composeops-pg-demo exec -T postgres psql -U postgres -c 'SELECT * FROM demo_marker;'
+docker compose -p composeops-pg-demo ps
+```
 
-Agent 自动执行：
+必须看到 `retained` 且容器 healthy。修改 POSTGRES_PASSWORD 环境变量不会为已有数据目录重置数据库密码；不要将它误当成密码修复。数据损坏、主版本升级需要独立的原生备份与恢复计划。
 
-- 获取容器状态
-- 分析启动日志
-- 检查 Compose 配置
-- 检查环境变量
-- 生成修复建议
-
-常见发现：
-
-- 配置错误
-- 环境变量缺失
-- 数据目录挂载异常
-- 镜像版本不兼容
-
----
-
-## 故障诊断
-
-Agent 汇总关键证据：
-
-- 容器退出码
-- 最近错误日志
-- 健康检查状态
-- 相关配置片段
-
-并给出原因分析与修复建议。
-
----
-
-## Approval Gate
-
-如果修复方案涉及：
-
-- 修改配置
-- 重建容器
-- 回滚版本
-
-ComposeOps 会要求用户审批。
-
-所有高风险操作均保留人工确认。
-
----
-
-## 自动修复
-
-工具轨迹示例：
-
-- logs.read
-- compose.read
-- compose.edit
-- compose.up
-- health.check
-
-执行过程实时可见。
-
----
-
-## 验证恢复
-
-修复完成后自动验证：
-
-- PostgreSQL Running
-- Health Check 正常
-- 数据库端口可连接
-- 日志无持续错误
-
-最终结果：
-
-✅ 服务恢复
-
----
-
-## 为什么重要
-
-传统运维通常需要：
-
-查看日志 → 搜索问题 → 修改配置 → 重启验证
-
-ComposeOps 将这些步骤整合到统一工作流中：
-
-发现问题 → 分析原因 → 请求审批 → 执行修复 → 验证恢复
-
-帮助用户更快完成故障处理。
-
----
-
-## 延伸阅读
-
-- Demo Script：`docs/public/DEMO_SCRIPT.md`
-- Roadmap：`docs/public/ROADMAP.md`
-- Release Checklist：`docs/public/RELEASE_CHECKLIST.md`
+演练后仅清理该测试项目：`docker compose -p composeops-pg-demo down -v`（会删除测试数据）。

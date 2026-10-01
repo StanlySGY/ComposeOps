@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-01
+
+### Added
+- 多个 OpenAI 兼容渠道、按优先级故障切换与冷却恢复；每渠道独立保存，管理员可按需查看已保存密钥。
+- 工具调用测试区分基础工具能力与流式兼容性，支持关闭流式工具调用以适配部分上游。
+- GitHub Pages 离线交互预览：服务、日志、审批修复与备份演练；示例数据不连接 Docker 或 AI。
+- SQLite 在线备份与完整性校验 CLI，包含 WAL 数据，拒绝覆盖已有备份；补充停止服务后的恢复操作说明。
+- 发布质量门：单测、lint、构建、桌面/移动浏览器测试，以及隔离镜像首次安装、1.4.0 升级与备份恢复验收。
+
+### Changed
+- 入门指南支持重新打开，区分已发现与已纳管项目，明确 AI 可选；导航分组可折叠并记住偏好。
+- 镜像成功发布后再创建 GitHub Release；提供固定版本的纯镜像安装清单。
+- 收敛文档中的竞品比较、无中断升级与备份保证，明确实际验证边界。
+- 更新存在公开漏洞的传递依赖。
+
 ## [1.4.0] - 2026-09-30
 
 ### Added

@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '镜像标签(留空则用 commit sha;输入 latest 会覆盖最新标签)'
+        description: '预览镜像标签，留空发布 edge 与 sha；稳定标签只能通过 Release 发布'
         required: false
         default: ''
       platforms:
@@ -31,7 +31,10 @@ permissions:
   contents: read
 
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
   publish:
+    needs: quality
     name: Build and Push Image
     runs-on: ubuntu-latest
     steps:
@@ -51,10 +54,13 @@ jobs:
 
       - name: Resolve tags
         id: tags
+        env:
+          EXTRA: ${{ inputs.tag }}
         run: |
           SHA7=$(git rev-parse --short=7 HEAD)
-          EXTRA="${{ inputs.tag }}"
           if [ -n "$EXTRA" ]; then
+            [[ "$EXTRA" =~ ^[a-z0-9][a-z0-9_.-]{0,100}$ ]] || { echo "Invalid preview tag"; exit 1; }
+            case "$EXTRA" in latest|[0-9]*|v[0-9]*) echo "Stable tags require Release"; exit 1;; esac
             echo "tags=stanly1997/opsdash:$EXTRA" >> $GITHUB_OUTPUT
           else
             echo "tags=stanly1997/opsdash:edge,stanly1997/opsdash:sha-$SHA7" >> $GITHUB_OUTPUT

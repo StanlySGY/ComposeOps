@@ -28,6 +28,10 @@ Auto-discover Compose projects, manage services, edit configs, stream logs, diag
 
 ---
 
+[Interactive preview](https://stanlysgy.github.io/ComposeOps/) · [Backup and restore](docs/public/BACKUP_RESTORE.md)
+
+The offline preview uses fictional data and never connects to Docker or AI. The installation manifest pins version 1.5.0; AI is optional.
+
 ## 🚀 Why ComposeOps
 
 ### AI-driven, not just another dashboard
@@ -64,21 +68,9 @@ ComposeOps closes the loop:
 | Long-term memory of your ops preferences | ✅ |
 | Ops workflow orchestration | ✅ |
 
-### How it compares
+### Choosing a tool
 
-| Capability | ComposeOps | Dockge | Portainer CE | Komodo |
-|------------|-----------|--------|--------------|--------|
-| AI agent ops (50+ tools, confirmation gate + audit) | ✅ | ❌ | ❌ | ❌ |
-| Alerts auto-diagnosed by AI (Guardian Mode) | ✅ | ❌ | ❌ | ❌ |
-| Deploy Oracle (simulate `up` against host state) | ✅ | ❌ | ❌ | ❌ |
-| Smooth upgrade → health polling → auto rollback | ✅ | ❌ | ❌ | Partial |
-| GitOps drift detection + version rollback | ✅ | ❌ | ❌ | ✅ |
-| Backup restore drills (self-verifying) | ✅ | ❌ | ❌ | ❌ |
-| MCP server (plug in Claude/Cursor/Codex…) | ✅ | ❌ | ❌ | ❌ |
-| Multi-host (SSH/TCP/Local) | ✅ | Single | ✅ | ✅ |
-| Chinese-first + CN mirror-friendly builds | ✅ | ❌ | ❌ | ❌ |
-
-> In the 2026 landscape of compose panels, they all stop at "seeing the problem"; ComposeOps' difference is "analyzing it and — on your approval — fixing it". Detailed comparison: `docs/public/WHY_COMPOSEOPS.md` (Chinese).
+ComposeOps focuses on personal Compose operations with reviewed AI tool execution and connected logs/configuration. For team permissions, multi-tenancy or application build platforms, evaluate the current versions of [Portainer](https://www.portainer.io/), [Dockge](https://github.com/louislam/dockge), [Komodo](https://komo.do/) and [Coolify](https://coolify.io/). This project does not claim those products lack particular capabilities.
 
 ### 🔌 MCP access: let any agent call the panel's tools
 
@@ -245,7 +237,7 @@ These modules target power users who want to codify their ops experience. The co
 
 ```bash
 mkdir composeops && cd composeops
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.5.0/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 

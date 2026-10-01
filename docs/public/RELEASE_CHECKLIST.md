@@ -1,43 +1,32 @@
-# Open Source Release Checklist
+# Release Checklist
 
-## 产品
+每次稳定版发布均重新核验；未勾选项不表示已经验证。
 
-- [ ] README 首屏优化
-- [ ] Why ComposeOps 文档
-- [ ] FAQ
-- [ ] Roadmap
-- [ ] 架构图
+## 自动门禁
 
-## 演示
+- [ ] 版本、锁文件、CHANGELOG 与安装清单一致
+- [ ] 后端串行测试、前端测试与 lint 通过
+- [ ] 正式应用与静态预览构建通过
+- [ ] 预览桌面/移动浏览器交互与资源子路径通过
+- [ ] 镜像首次安装、认证与重启持久化通过
+- [ ] 从支持基线 1.4.0 升级通过
+- [ ] 在线 SQLite 快照恢复到新卷后可登录并读取配置
+- [ ] amd64/arm64 镜像发布成功后创建 GitHub Release
 
-- [ ] Dashboard 截图
-- [ ] Agent 截图
-- [ ] 60 秒 Demo 视频
-- [ ] GIF 动图
+以上由 Quality checks / Release 执行，以对应 Actions run 为证据。
 
-## 文档
+## 人工复核
 
-- [ ] 快速开始验证
-- [ ] 安装文档验证
-- [ ] AI 配置文档验证
-- [ ] 常见问题验证
+- [ ] 文档链接、安装命令和备份恢复步骤
+- [ ] 提交中无真实凭据或用户数据库
+- [ ] 桌面和手机视觉复核
+- [ ] GitHub Pages 公网可访问，明确标注示例数据
 
-## 工程质量
+## 尚需扩展的验证
 
-- [ ] CI 通过
-- [ ] 测试通过
-- [ ] 无敏感信息
-- [ ] License 检查
+- [ ] Redis/PostgreSQL 案例的真实 Agent 端到端演练
+- [ ] SSH/TLS 多节点故障矩阵
+- [ ] 通知渠道真实送达
+- [ ] 长时间运行资源占用
 
-## 案例验收
-
-- [ ] Redis 升级案例可复现
-- [ ] PostgreSQL 恢复案例可复现
-- [ ] Demo Script 与实际界面一致
-
-## 发布
-
-- [ ] Release Notes
-- [ ] GitHub Release
-- [ ] Docker 镜像发布
-- [ ] 社区宣传材料
+这些项目不被静态预览或本地镜像冒烟测试替代。

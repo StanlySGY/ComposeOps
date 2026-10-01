@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-We release security updates for the following versions:
+Security fixes target the latest stable release. Back up before upgrading older versions; automated upgrade coverage currently starts at 1.4.0.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.2.x   | :white_check_mark: |
-| < 1.2   | :x:                |
+| 1.5.x   | :white_check_mark: |
+| < 1.5   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -94,14 +94,14 @@ We use automated dependency scanning:
 ```yaml
 # docker-compose.yml
 ports:
-  - "127.0.0.1:3001:3001"  # Only local access
+  - "127.0.0.1:28765:3001"  # Only local access
 ```
 
 Use Tailscale or reverse proxy for remote access:
 
 ```bash
 # Tailscale (recommended)
-tailscale serve --bg http://127.0.0.1:3001
+tailscale serve --bg http://127.0.0.1:28765
 
 # Or reverse proxy with HTTPS + auth
 # Set TRUST_PROXY=1 in environment
@@ -121,7 +121,7 @@ server {
     ssl_certificate_key /path/to/key.pem;
     
     location / {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:28765;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -178,15 +178,7 @@ sudo apt update && sudo apt upgrade docker-ce
 
 ### 7. Backup Security
 
-```bash
-# Backup SQLite database (includes session keys and API keys)
-cp backend/data/opsdash.db opsdash.db.backup
-
-# Encrypt backups
-gpg -c opsdash.db.backup
-
-# Never store backups in public repositories
-```
+Use the [online SQLite backup and offline restore guide](docs/public/BACKUP_RESTORE.md). Do not copy a live WAL-mode database file by itself: recent committed writes may exist only in its WAL. Full database backups contain credentials and sessions; keep them private and encrypt off-host copies. Settings JSON exports are not full backups.
 
 ## Security Checklist
 

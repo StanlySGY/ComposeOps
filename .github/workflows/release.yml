@@ -1,110 +1,78 @@
 name: Release
-
 on:
   push:
-    tags:
-      - 'v*.*.*'
-
+    tags: ['v*.*.*']
 permissions:
-  contents: write
-  packages: write
-
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
 jobs:
-  release:
-    name: Create Release
+  metadata:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      
-      - name: Install dependencies
-        run: |
-          npm --prefix backend install
-          npm --prefix frontend install
-      
-      - name: Build frontend
-        run: npm --prefix frontend run build
-      
-      - name: Generate release notes
-        id: notes
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-          # Extract changelog for this version.
-          # 显式状态机而非 awk 区间(/start/,/end/):起始行 "## [x.y.z] - 日期"
-          # 自己也包含 "## [",区间起止同线时只输出这一行,掐头去尾后为空,
-          # 导致每次发版都静默走 git log 兜底(v1.2.0 起一直如此)。
-          # start/end 都用字面量比较(index/substr),避免 -v 传参与正则的
-          # 双重转义问题。
-          awk -v header="## [$VERSION]" 'index($0, header) == 1 {f=1; next} f && substr($0, 1, 3) == "## " {f=0} f' CHANGELOG.md > release-notes.md
-
-          # Fallback if no changelog entry
-          if [ ! -s release-notes.md ]; then
-            echo "Release $VERSION" > release-notes.md
-            git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> release-notes.md
-          fi
-      
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
+      - name: Validate version and changelog
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-notes.mjs "$RELEASE_TAG" --check
+  quality:
+    needs: metadata
+    uses: ./.github/workflows/quality.yml
   docker:
-    name: Build and Push Docker Image
+    name: Publish verified images
+    needs: quality
     runs-on: ubuntu-latest
-    needs: release
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      - name: Extract version
-        id: meta
+      - name: Resolve version
+        id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "major=$(echo $VERSION | cut -d. -f1)" >> $GITHUB_OUTPUT
-          echo "minor=$(echo $VERSION | cut -d. -f1-2)" >> $GITHUB_OUTPUT
-      
-      - name: Build and push
-        uses: docker/build-push-action@v7
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "full=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             stanly1997/opsdash:latest
-            stanly1997/opsdash:${{ steps.meta.outputs.version }}
-            stanly1997/opsdash:${{ steps.meta.outputs.major }}
-            stanly1997/opsdash:${{ steps.meta.outputs.minor }}
+            stanly1997/opsdash:${{ steps.version.outputs.full }}
+            stanly1997/opsdash:${{ steps.version.outputs.major }}
+            stanly1997/opsdash:${{ steps.version.outputs.minor }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@v3
+  release:
+    name: Publish release after images are available
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: stanly1997/opsdash
-          readme-filepath: ./README.en.md
+          node-version: '22'
+      - name: Prepare release assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-notes.mjs "$RELEASE_TAG"
+      - uses: softprops/action-gh-release@v3
+        with:
+          body_path: artifacts/release/notes.md
+          files: artifacts/release/compose.yml
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false

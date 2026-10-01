@@ -19,3 +19,8 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 README.md
+
+**/preview-dist
+**/playwright-report
+**/test-results
+backend/data/snapshots

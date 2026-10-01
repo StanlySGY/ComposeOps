@@ -1,33 +1,18 @@
 # Why ComposeOps
 
-## 为什么不是另一个 Docker 面板
+ComposeOps 面向个人服务器和 Homelab，围绕 Docker Compose 组织服务、配置、日志和 AI 工具执行。
 
-ComposeOps 的目标不是替代所有运维平台，而是成为个人服务器场景下的 AI 运维工作台。
+## 核心体验
 
-## ComposeOps vs Dockge vs Portainer
+- AI 读取状态与日志，提出操作，通过审批门执行并展示工具结果。
+- 默认 ask 模式下写操作需要确认；会话可显式放宽部分审批，critical 操作始终确认。
+- 多渠道按优先级切换，工具能力与流式兼容性可单独测试。
+- 不配置 AI 也能使用服务、日志和配置功能。
 
-| 能力 | ComposeOps | Dockge | Portainer CE |
-|------|------------|---------|--------------|
-| Docker Compose 管理 | ✅ | ✅ | ✅ |
-| AI 运维 Agent | ✅ | ❌ | ❌ |
-| Agent 执行操作 | ✅ | ❌ | ❌ |
-| Approval Gate | ✅ | ❌ | ❌ |
-| 长期记忆 | ✅ | ❌ | ❌ |
-| 运维工作流 | ✅ | ❌ | ❌ |
-| 数据卷备份 | ✅ | ❌ | 部分支持 |
-| 多节点管理 | ✅ | ❌ | ✅ |
-| GitOps | ✅ | ❌ | 部分支持 |
+## 选型边界
 
-## 核心价值
+目前是单管理员、中文界面，没有多租户隔离。Docker Socket 访问等价宿主高权限。需要团队权限、PaaS 构建发布或 Kubernetes 管理时，应评估其他产品的最新版本。
 
-1. 让 Agent 真正参与运维，而不仅仅是聊天。
-2. 所有高风险操作必须经过确认。
-3. 面向个人服务器和自托管用户优化。
-4. Docker Compose 优先，而不是 Kubernetes 优先。
+参考产品：[Dockge](https://github.com/louislam/dockge)、[Portainer](https://www.portainer.io/)、[Komodo](https://komo.do/)、[Coolify](https://coolify.io/)。不提供缺少版本与来源依据的功能胜负表。
 
-## 最适合的人
-
-- Homelab 用户
-- VPS 用户
-- 自托管爱好者
-- 希望把运维经验沉淀为工作流的人
+先体验 [离线预览](https://stanlysgy.github.io/ComposeOps/)，再在测试项目上验证授权与恢复流程。预览不能替代真实环境验收。

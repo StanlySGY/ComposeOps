@@ -1,0 +1,63 @@
+name: Quality checks
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  code:
+    name: Tests, lint and builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm --prefix backend ci && npm --prefix frontend ci
+      - run: node scripts/release-notes.mjs
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm --prefix frontend run build:preview
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Preview browser checks
+        run: npm --prefix frontend run test:preview
+      - uses: actions/upload-artifact@v4
+        with:
+          name: composeops-preview
+          path: frontend/preview-dist
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: frontend/test-results
+          if-no-files-found: ignore
+  image:
+    name: Image installation, upgrade and restore
+    needs: code
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: composeops:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Fresh installation and online backup restore
+        run: node scripts/image-smoke.mjs composeops:ci-test
+      - name: Upgrade from supported baseline
+        run: node scripts/image-smoke.mjs composeops:ci-test stanly1997/opsdash:1.4.0

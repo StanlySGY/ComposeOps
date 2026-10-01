@@ -1,6 +1,6 @@
 {
   "name": "composeops-frontend",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:preview": "vite build --config vite.preview.config.js",
+    "preview:serve": "node ../scripts/serve-preview.mjs",
+    "test:preview": "playwright test"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/test-utils": "^2.5.0",

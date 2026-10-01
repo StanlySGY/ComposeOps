@@ -17,7 +17,7 @@ import globals from 'globals';
  */
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '.vite/**'],
+    ignores: ['dist/**', 'preview-dist/**', 'playwright-report/**', 'test-results/**', 'node_modules/**', 'coverage/**', '.vite/**'],
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/recommended'],
