@@ -339,11 +339,7 @@ function confirmHostChanged() {
   void reloadProjects().then(() => { if (projectId.value && !projects.value.some((p) => p.id === projectId.value)) { projectId.value = ''; selectProject(); } });
 }
 onBeforeUnmount(() => {
-  contentDisposable?.dispose();
-  completionDisposable?.dispose();
-  editor?.getModel()?.dispose();
-  editor?.dispose();
-  editor = null;
+  disposeEditor();
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('composeops:host-changed', onHostChanged);
 });
@@ -357,9 +353,27 @@ function confirmLeave() {
   if (leaveCallback.value) { leaveCallback.value(); leaveCallback.value = null; }
 }
 function beforeUnload(event) { if (dirty.value) { event.preventDefault(); event.returnValue = ''; } }
+function disposeEditor() {
+  completionDisposable?.dispose();
+  contentDisposable?.dispose();
+  editor?.getModel()?.dispose();
+  editor?.dispose();
+  completionDisposable = null;
+  contentDisposable = null;
+  editor = null;
+  editorReady.value = false;
+}
+// The editor host is conditional on both the project and view mode. Recreate
+// Monaco when Vue mounts a new host, including direct links into a project.
+watch(editorEl, (element, previous) => {
+  if (element === previous) return;
+  disposeEditor();
+  if (element) createEditor();
+}, { flush: 'post' });
+
 function createEditor() {
   if (!editorEl.value || editor) return;
-  editor = monaco.editor.create(editorEl.value, { value: '', language: 'yaml', theme: 'vs-dark', automaticLayout: true, fontSize: 13, minimap: { enabled: false }, tabSize: 2, scrollBeyondLastLine: false });
+  editor = monaco.editor.create(editorEl.value, { value: content.value, language: 'yaml', theme: 'vs-dark', automaticLayout: true, fontSize: 13, minimap: { enabled: false }, tabSize: 2, scrollBeyondLastLine: false });
   contentDisposable = editor.onDidChangeModelContent(() => {
     content.value = editor.getValue(); 
     message.value = ''; 

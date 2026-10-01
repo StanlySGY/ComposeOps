@@ -1,48 +1,131 @@
 import { test, expect } from '@playwright/test';
 
-test('静态预览子路径可打开，审批前不改变状态，拒绝/确认/重置均生效', async ({ page }) => {
-  const external = [], errors = [];
-  page.on('request', request => {
-    if (!request.url().startsWith('http://127.0.0.1:4174/ComposeOps/')) external.push(request.url());
-  });
+const previewBase = process.env.PREVIEW_BASE_URL || 'http://127.0.0.1:4174/ComposeOps/';
+function observe(page) {
+  const errors = [], network = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('./');
-  await expect(page.getByText('交互预览 · 全部为示例数据，不连接 Docker 或 AI 服务')).toBeVisible();
-  await page.getByRole('button', { name: '让 AI 分析这个问题' }).click();
-  await page.getByRole('button', { name: '开始演示排查' }).click();
-  await expect(page.getByText('等待管理员确认')).toBeVisible();
-  await page.getByRole('button', { name: '查看并确认模拟修复' }).click();
-  const dialog = page.getByRole('dialog', { name: '确认模拟修复' });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: '取消' }).click();
-  await expect(page.getByText('已取消模拟操作，示例服务状态保持原样。')).toBeVisible();
-  await page.getByRole('button', { name: '查看并确认模拟修复' }).click();
-  await dialog.getByRole('button', { name: '确认模拟修复' }).click();
-  await expect(page.getByText('模拟修复完成，检查通过')).toBeVisible();
-  await page.getByRole('button', { name: '查看服务状态' }).click();
-  const wiki = page.locator('.service-row').filter({ hasText: 'wiki-api' });
-  await expect(wiki.getByText('运行中', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '重置演示' }).click();
-  await expect(wiki.getByText('异常退出')).toBeVisible();
-  expect(external).toEqual([]);
-  expect(errors).toEqual([]);
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (!request.url().startsWith(previewBase) && url.protocol !== 'data:') network.push(request.url());
+    if (url.pathname.startsWith('/api/') || url.pathname === '/health') network.push(request.url());
+  });
+  return { errors, network };
+}
+const routes = {
+  dashboard: '运维总览', services: '服务总览', compose: 'Compose 配置', logs: '实时日志', agent: 'AI 智能运维 Agent',
+  shell: '容器终端', monitor: '实时监控', resources: '存储清理', settings: '设置', topology: '服务拓扑中心', events: '事件中心',
+  inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': '运维任务中心', workflows: '工作流中心',
+  cron: '定时任务', gitops: 'GitOps 集成', review: '变更与回滚', cmdb: '资产中心 (CMDB)', 'node-groups': '节点组管理',
+  marketplace: '应用市场', cost: '成本分析',
+};
+test('真实应用导航和全部页面可访问，没有后端流量或渲染错误', async ({ page }) => {
+  test.setTimeout(60000);
+  const observed = observe(page);
+  for (const [route, title] of Object.entries(routes)) {
+    await page.goto('./?route=' + encodeURIComponent(route) + '#/' + route);
+    await expect(page.locator('.app-header')).toBeVisible();
+    await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    await expect(page.locator('.loading-mark')).toHaveCount(0);
+    await expect(page.locator('.alert-error,.runtime-error-bar')).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
 });
 
-test('服务搜索、日志、备份演练、安装弹窗和窄屏布局可用', async ({ page }) => {
-  await page.goto('./#services');
-  await page.getByRole('textbox', { name: '搜索示例服务' }).fill('missing-service');
-  await expect(page.getByText('没有找到匹配的服务。试试搜索 redis 或 wiki。')).toBeVisible();
-  await page.getByRole('textbox', { name: '搜索示例服务' }).fill('redis');
-  await expect(page.locator('.service-row')).toHaveCount(1);
-  await page.getByRole('button', { name: '查看日志' }).click();
-  await expect(page.getByRole('dialog')).toContainText('以下为预设示例，不是实时服务器日志。');
+test('真实 Agent 审批门可拒绝、确认，刷新后重置示例', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/agent');
+  const input = page.locator('.agent-composer textarea');
+  await input.fill('排查 wiki-api');
+  await input.press('Enter');
+  await expect(page.getByText('需要确认后执行')).toBeVisible();
+  await page.getByRole('button', { name: '拒绝', exact: true }).click();
+  await expect(page.getByText('已拒绝模拟操作，配置与服务状态保持原样。', { exact: false })).toBeVisible();
+  await input.fill('继续排查 wiki-api');
+  await input.press('Enter');
+  await expect(page.getByText('需要确认后执行')).toBeVisible();
+  await page.getByRole('button', { name: '确认执行', exact: true }).click();
+  await expect(page.getByText('模拟修复完成：wiki-api 已恢复运行，数据库连接检查通过。', { exact: false })).toBeVisible();
+  await page.evaluate(() => { location.hash = '/services'; });
+  await expect(page.locator('#project-knowledge-base')).toContainText('运行中');
+  await page.getByRole('button', { name: '重置演示', exact: true }).click();
+  await expect(page.locator('#project-knowledge-base')).toContainText('部分异常');
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
+test('真实多渠道表单支持独立保存、显隐示例密钥与顺序调整', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/settings?tab=ai');
+  const channel = page.locator('[data-channel-id="primary-demo"]');
+  await channel.locator('[data-field="name"]').fill('我的示例主渠道');
+  await channel.getByRole('button', { name: '保存此渠道' }).click();
+  await expect(channel.getByText('此渠道已保存')).toBeVisible();
+  await channel.locator('[data-action="reveal"]').click();
+  await expect(channel.getByRole('textbox', { name: '已保存的 API Key' })).toHaveValue('demo-key-not-a-real-credential');
+  await channel.locator('[data-action="reveal"]').click();
+  await expect(channel.getByRole('textbox', { name: '已保存的 API Key' })).toHaveCount(0);
+  await channel.getByRole('button', { name: '降低优先级' }).click();
+  await expect(page.locator('[data-channel-id]').first()).toHaveAttribute('data-channel-id', 'backup-demo');
+  await page.reload();
+  await expect(page.locator('[data-channel-id]').first()).toHaveAttribute('data-channel-id', 'primary-demo');
+  await expect(channel.locator('[data-field="name"]')).toHaveValue('主渠道（示例）');
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
+test('真实服务搜索、日志与卷备份界面可交互', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/services');
+  await page.getByPlaceholder('搜索项目、容器、镜像或路径').fill('missing');
+  await expect(page.getByText('没有匹配当前条件的项目')).toBeVisible();
+  await page.getByPlaceholder('搜索项目、容器、镜像或路径').fill('redis');
+  await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
+  await page.goto('./#/logs?projectId=knowledge-base&containerId=demo-wiki-api');
+  await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
+  await page.goto('./#/resources');
+  await page.getByRole('button', { name: '卷备份' }).click();
+  await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
+  await page.getByTitle('还原演练:解进一次性临时卷验证可用性,不动原卷').click();
+  await expect(page.getByText('✓ 128 文件')).toBeVisible();
+  await page.getByRole('button', { name: '安装部署', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '安装 ComposeOps' })).toContainText('releases/latest/download/compose.yml');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('navigation', { name: '演示导航' }).getByRole('link', { name: '备份演练' }).click();
-  await page.getByRole('button', { name: '模拟还原演练', exact: true }).click();
-  await expect(page.getByText('模拟演练通过 · 128 个文件')).toBeVisible();
-  await page.getByRole('button', { name: '安装到我的服务器' }).click();
-  await expect(page.getByRole('dialog')).toContainText('deploy/compose.yml');
-  await page.keyboard.press('Escape');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
+test('配置页直达项目、切换视图和重新选择项目后编辑器仍显示内容', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/compose?projectId=knowledge-base');
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+  await expect(page.locator('.monaco-editor')).toContainText('db-old');
+  await page.getByRole('button', { name: '可视化', exact: true }).click();
+  await expect(page.getByText('服务列表', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '代码', exact: true }).click();
+  await expect(page.locator('.monaco-editor')).toContainText('db-old');
+  await page.getByTitle('清除当前选择,回到引导页').click();
+  await expect(page.getByText('请先选择一个已挂载的项目')).toBeVisible();
+  await page.locator('main select').first().selectOption('cache');
+  await expect(page.locator('.monaco-editor')).toContainText('redis:7.4-alpine');
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
+// A configured channel URL must never become an actual outbound request.
+test('未知与外部请求在离线适配器中失败，不回退到真实网络', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/dashboard');
+  await expect(page.getByRole('heading', { name: '运维总览' })).toBeVisible();
+  const responses = await page.evaluate(async () => {
+    const external = await fetch('https://must-not-contact.example.invalid/v1/chat/completions', { method: 'POST' });
+    const unknown = await fetch('/api/v1/preview-unknown', { method: 'DELETE' });
+    return [external.status, unknown.status];
+  });
+  expect(responses).toEqual([501, 501]);
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
 });

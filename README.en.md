@@ -30,7 +30,7 @@ Auto-discover Compose projects, manage services, edit configs, stream logs, diag
 
 [Interactive preview](https://stanlysgy.github.io/ComposeOps/) · [Backup and restore](docs/public/BACKUP_RESTORE.md)
 
-The offline preview uses fictional data and never connects to Docker or AI. The installation manifest pins version 1.5.0; AI is optional.
+The offline preview runs the actual application UI with fictional data and never connects to Docker or AI. See [preview scope](docs/public/PREVIEW.md). The installation manifest pins version 1.5.0; AI is optional.
 
 ## 🚀 Why ComposeOps
 

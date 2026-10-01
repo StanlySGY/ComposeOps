@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- GitHub Pages 预览改为复用正式应用的 App、路由、页面与样式，以离线示例适配器提供数据；移除独立宣传页式控制台。
+- 增加真实页面、AI 审批、渠道独立保存与网络隔离的桌面/移动端回归验证。
+
+### Fixed
+- 配置页随条件渲染的编辑器容器创建/销毁 Monaco，修复带项目参数直达页面与代码/可视化来回切换后的空白编辑器。
+
 ## [1.5.0] - 2026-10-01
 
 ### Added

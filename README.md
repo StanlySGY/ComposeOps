@@ -28,7 +28,7 @@
 
 [在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [备份与恢复](docs/public/BACKUP_RESTORE.md)
 
-预览使用虚构数据，无需登录，不访问 Docker 或 AI。正式部署默认固定版本 1.5.0；AI 为可选功能。
+预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.5.0；AI 为可选功能。
 
 ## 🚀 为什么选择 ComposeOps
 
