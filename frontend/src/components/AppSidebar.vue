@@ -1,5 +1,5 @@
 <template>
-  <aside class="app-sidebar fixed md:static bottom-0 left-0 right-0 z-40 h-16 md:h-auto md:w-[216px] shrink-0 flex flex-col">
+  <aside class="app-sidebar fixed md:static bottom-0 left-0 right-0 z-40 h-16 md:h-auto md:pt-16 md:w-[216px] shrink-0 flex flex-col">
     <nav class="hidden md:flex md:flex-col flex-1 md:px-3 md:py-4 overflow-y-auto">
       <div class="hidden md:block px-2 pb-1 pt-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-500">运行</div>
       <router-link

@@ -14,7 +14,7 @@
     </div>
     <ConfirmDialog :show="showPruneConfirm" title="清理过期事件" message="确认清理 30 天前的历史事件?该操作不可恢复。" tone="warning" confirm-text="清理" @confirm="prune" @cancel="showPruneConfirm = false" />
 
-    <div class="tabs" role="tablist" aria-label="事件中心视图">
+    <div class="tabs-segment" role="tablist" aria-label="事件中心视图">
       <button :class="{ active: tab === 'events' }" role="tab" :aria-selected="tab === 'events'" @click="setTab('events')"><BellRing class="h-4 w-4" />告警事件</button>
       <button :class="{ active: tab === 'timeline' }" role="tab" :aria-selected="tab === 'timeline'" @click="setTab('timeline')"><History class="h-4 w-4" />时间线</button>
       <button :class="{ active: tab === 'operations' }" role="tab" :aria-selected="tab === 'operations'" @click="setTab('operations')"><ListChecks class="h-4 w-4" />操作与任务</button>

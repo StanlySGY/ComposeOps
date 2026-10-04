@@ -1,62 +1,126 @@
 <template>
   <div class="page-shell">
     <div class="page-header"><div><h1 class="page-title">设置</h1><p class="page-subtitle">个人偏好、通知、更新与维护</p></div></div>
-    <div class="tabs">
+    <div class="tabs-segment">
       <button v-for="item in tabs" :key="item.id" :class="{ active: tab === item.id }" @click="setTab(item.id)"><component :is="item.icon" class="w-4 h-4" />{{ item.label }}</button>
     </div>
     <p v-if="message" class="alert-success">{{ message }}</p><p v-if="error" class="alert-error">{{ error }}</p>
 
     <section v-if="tab === 'ai'" class="settings-section">
       <AiChannelsPanel v-model:channels="ai.channels" @health-change="refreshChannelHealth" />
-      <fieldset class="space-y-4 border-t border-surface-800 pt-5" :disabled="savingAi">
+      <fieldset class="space-y-4" :disabled="savingAi">
       <h2 class="section-title">通用 AI 设置</h2>
-      <label class="toggle-label"><input v-model="ai.failoverEnabled" type="checkbox" />故障时自动切换备用渠道</label>
-      <p class="text-xs leading-5 text-surface-500">超时、限流或服务异常时按顺序尝试。已开始输出的回复会明确报错，已完成的操作不会重复执行。连续失败的渠道会暂时跳过，冷却后自动探测。</p>
-      <label class="mt-4 block text-xs text-surface-400">系统 Prompt<textarea v-model="ai.systemPrompt" rows="6" class="input mt-2 block w-full"></textarea></label>
-      <div class="form-grid mt-4 border-t border-surface-800 pt-4">
-        <h3 class="section-title md:col-span-2 mb-0!">联网检索 Grounding</h3>
-        <label>检索后端
-          <select v-model="ai.searchProvider" class="input">
-            <option v-for="item in (ai.searchProviders || ['builtin'])" :key="item" :value="item">{{ searchProviderLabel(item) }}</option>
-          </select>
-        </label>
-        <label v-if="ai.searchProvider === 'searxng'">SearXNG Base URL<input v-model="ai.searchBaseUrl" class="input" placeholder="https://searx.example.com" /></label>
-        <label v-else-if="ai.searchProvider !== 'builtin' && ai.searchProvider !== 'duckduckgo'">检索 API Key<input v-model="ai.searchApiKey" type="password" class="input" :placeholder="searchMasked ? '已配置,留空保持不变' : '在此输入 Key'" /></label>
-        <p v-else class="md:col-span-2 text-xs text-surface-500">内置检索(GitHub + DuckDuckGo)无需任何配置;需要更强检索质量时可切换 Tavily / Brave / 自托管 SearXNG,失败自动回退内置。</p>
+      <div class="ios-group">
+        <div class="ios-row">
+          <div class="ios-row-main">
+            <div class="ios-row-title">故障时自动切换备用渠道</div>
+            <div class="ios-row-desc">超时、限流或服务异常时按顺序尝试。已开始输出的回复会明确报错，已完成的操作不会重复执行。连续失败的渠道会暂时跳过，冷却后自动探测。</div>
+          </div>
+          <label class="toggle-label"><input v-model="ai.failoverEnabled" type="checkbox" aria-label="故障时自动切换备用渠道" /></label>
+        </div>
+        <div class="ios-row-stack">
+          <label class="text-xs font-medium text-surface-400">系统 Prompt</label>
+          <textarea v-model="ai.systemPrompt" rows="6" class="input block w-full"></textarea>
+        </div>
+        <div class="ios-row-stack">
+          <h3 class="section-title">联网检索 Grounding</h3>
+          <div class="ios-group">
+            <div class="ios-row">
+              <div class="ios-row-main">
+                <div class="ios-row-title">检索后端</div>
+                <div class="ios-row-desc">内置检索(GitHub + DuckDuckGo)无需任何配置;需要更强检索质量时可切换 Tavily / Brave / 自托管 SearXNG,失败自动回退内置。</div>
+              </div>
+              <select v-model="ai.searchProvider" class="input max-w-44!">
+                <option v-for="item in (ai.searchProviders || ['builtin'])" :key="item" :value="item">{{ searchProviderLabel(item) }}</option>
+              </select>
+            </div>
+            <div v-if="ai.searchProvider === 'searxng'" class="ios-row-stack">
+              <label class="text-xs font-medium text-surface-400">SearXNG Base URL</label>
+              <input v-model="ai.searchBaseUrl" class="input" placeholder="https://searx.example.com" />
+            </div>
+            <div v-else-if="ai.searchProvider !== 'builtin' && ai.searchProvider !== 'duckduckgo'" class="ios-row-stack">
+              <label class="text-xs font-medium text-surface-400">检索 API Key</label>
+              <input v-model="ai.searchApiKey" type="password" class="input" :placeholder="searchMasked ? '已配置,留空保持不变' : '在此输入 Key'" />
+            </div>
+          </div>
+        </div>
       </div>
-      <button class="btn-primary" @click="saveAi"><Save class="w-4 h-4" />{{ savingAi ? '保存中…' : '保存通用设置' }}</button>
+      <button class="btn-primary self-start" @click="saveAi"><Save class="w-4 h-4" />{{ savingAi ? '保存中…' : '保存通用设置' }}</button>
       </fieldset>
     </section>
 
     <section v-if="tab === 'personal'" class="settings-section">
-      <h2 class="section-title">界面偏好</h2><div class="form-grid"><label>自动刷新间隔（秒）<input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input" /></label><label>日志默认行数<input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input" /></label></div>
-      <button class="btn-primary" @click="savePreferences"><Save class="w-4 h-4" />保存偏好</button>
-      <div class="border-t border-surface-800 pt-4 space-y-3"><h2 class="section-title">修改管理员密码</h2><div class="form-grid"><label>当前密码<input v-model="password.currentPassword" type="password" class="input" /></label><label>新密码<input v-model="password.nextPassword" type="password" class="input" /></label></div><button class="btn-secondary" @click="changePassword"><KeyRound class="w-4 h-4" />修改密码</button></div>
-      <div class="border-t border-surface-800 pt-4"><h2 class="section-title mb-2">数据迁移</h2><p class="text-sm text-surface-400 mb-3">导出项目备注、偏好、AI 模型设置和最近操作记录。密码、API Key 与通知密钥不包含在导出文件中。</p><div class="flex flex-wrap gap-2"><a class="btn-secondary inline-flex" :href="api.exportUrl" download><Download class="w-4 h-4" />导出 JSON</a><label class="btn-secondary cursor-pointer"><Upload class="w-4 h-4" />导入 JSON<input type="file" accept="application/json" class="hidden" @change="importData" /></label></div></div>
+      <h2 class="section-title">界面偏好</h2>
+      <div class="ios-group">
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">自动刷新间隔（秒）</div><div class="ios-row-desc">服务、监控等页面的轮询周期,最小 3 秒。</div></div><div class="ios-row-control"><input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input max-w-24! text-center" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">日志默认行数</div><div class="ios-row-desc">打开日志页时默认拉取的行数,10–5000。</div></div><div class="ios-row-control"><input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input max-w-24! text-center" /></div></div>
+      </div>
+      <button class="btn-primary self-start" @click="savePreferences"><Save class="w-4 h-4" />保存偏好</button>
+      <h2 class="section-title">修改管理员密码</h2>
+      <div class="ios-group">
+        <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">当前密码</label><input v-model="password.currentPassword" type="password" class="input" /></div>
+        <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">新密码</label><input v-model="password.nextPassword" type="password" class="input" /></div>
+      </div>
+      <button class="btn-secondary self-start" @click="changePassword"><KeyRound class="w-4 h-4" />修改密码</button>
+      <h2 class="section-title">数据迁移</h2>
+      <div class="ios-group">
+        <div class="ios-row">
+          <div class="ios-row-main">
+            <div class="ios-row-title">导出 / 导入配置</div>
+            <div class="ios-row-desc">导出项目备注、偏好、AI 模型设置和最近操作记录。密码、API Key 与通知密钥不包含在导出文件中。</div>
+          </div>
+          <div class="ios-row-control"><a class="btn-secondary inline-flex" :href="api.exportUrl" download><Download class="w-4 h-4" />导出</a><label class="btn-secondary cursor-pointer"><Upload class="w-4 h-4" />导入<input type="file" accept="application/json" class="hidden" @change="importData" /></label></div>
+        </div>
+      </div>
     </section>
 
     <section v-if="tab === 'notifications'" class="settings-section">
-      <div class="flex items-center justify-between"><h2 class="section-title">异常通知</h2><label class="toggle-label"><input v-model="notifications.enabled" type="checkbox" />启用</label></div>
-      <div class="form-grid">
-        <label>轮询间隔（秒）<input v-model.number="notifications.intervalSeconds" type="number" min="30" class="input" /></label>
-        <label>内存告警阈值（%）<input v-model.number="notifications.memoryThreshold" type="number" min="1" max="100" class="input" /></label>
-        <label>Docker 空间告警（GB）<input v-model.number="notifications.dockerStorageThresholdGb" type="number" min="1" class="input" /></label>
-      </div>
-      <div v-for="channel in notifications.channels || []" :key="channel.type" class="space-y-3 rounded-xl border border-surface-800 p-3">
-        <label class="toggle-label"><input v-model="channel.enabled" type="checkbox" />{{ channelLabel(channel.type) }}</label>
-        <div v-if="channel.enabled" class="form-grid">
-          <template v-if="['bark','wecom','dingtalk','feishu','webhook'].includes(channel.type)"><label class="md:col-span-2">通知地址<input v-model="channel.endpoint" class="input" placeholder="https://..." /></label></template>
-          <template v-if="channel.type === 'telegram'"><label>Bot Token<input v-model="channel.token" type="password" class="input" placeholder="已配置时显示 configured" /></label><label>Chat ID<input v-model="channel.chatId" class="input" /></label></template>
-          <template v-if="channel.type === 'email'"><label>SMTP 主机<input v-model="channel.smtpHost" class="input" /></label><label>端口<input v-model.number="channel.smtpPort" type="number" class="input" /></label><label>用户名<input v-model="channel.smtpUser" class="input" /></label><label>密码<input v-model="channel.smtpPassword" type="password" class="input" /></label><label>发件人<input v-model="channel.emailFrom" class="input" /></label><label>收件人<input v-model="channel.emailTo" class="input" /></label><label class="toggle-label"><input v-model="channel.smtpSecure" type="checkbox" />TLS/SSL</label></template>
+      <h2 class="section-title">异常通知</h2>
+      <div class="ios-group">
+        <div class="ios-row">
+          <div class="ios-row-main"><div class="ios-row-title">启用异常通知</div><div class="ios-row-desc">触发时按下方渠道推送,并写入事件中心。</div></div>
+          <label class="toggle-label"><input v-model="notifications.enabled" type="checkbox" aria-label="启用异常通知" /></label>
         </div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">轮询间隔（秒）</div><div class="ios-row-desc">容器状态巡检周期,最小 30 秒。</div></div><div class="ios-row-control"><input v-model.number="notifications.intervalSeconds" type="number" min="30" class="input max-w-24! text-center" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">内存告警阈值（%）</div></div><div class="ios-row-control"><input v-model.number="notifications.memoryThreshold" type="number" min="1" max="100" class="input max-w-24! text-center" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">Docker 空间告警（GB）</div></div><div class="ios-row-control"><input v-model.number="notifications.dockerStorageThresholdGb" type="number" min="1" class="input max-w-24! text-center" /></div></div>
       </div>
-      <div class="border-t border-surface-800 pt-3"><p class="mb-2 text-sm text-surface-300">触发事件</p><div class="flex flex-wrap gap-4"><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="exit" />容器崩溃退出</label><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="oom" />OOM 内存溢出</label><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="unhealthy" />容器不健康</label></div></div>
+      <h2 class="section-title">推送渠道</h2>
+      <div v-for="channel in notifications.channels || []" :key="channel.type" class="ios-group mb-4">
+        <div class="ios-row">
+          <div class="ios-row-main"><div class="ios-row-title">{{ channelLabel(channel.type) }}</div></div>
+          <label class="toggle-label"><input v-model="channel.enabled" type="checkbox" :aria-label="channelLabel(channel.type)" /></label>
+        </div>
+        <template v-if="channel.enabled">
+          <div v-if="['bark','wecom','dingtalk','feishu','webhook'].includes(channel.type)" class="ios-row-stack"><label class="text-xs font-medium text-surface-400">通知地址</label><input v-model="channel.endpoint" class="input" placeholder="https://..." /></div>
+          <template v-if="channel.type === 'telegram'">
+            <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">Bot Token</label><input v-model="channel.token" type="password" class="input" placeholder="已配置时显示 configured" /></div>
+            <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">Chat ID</label><input v-model="channel.chatId" class="input" /></div>
+          </template>
+          <template v-if="channel.type === 'email'">
+            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">SMTP 主机</div></div><div class="ios-row-control"><input v-model="channel.smtpHost" class="input max-w-44!" /></div></div>
+            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">端口</div></div><div class="ios-row-control"><input v-model.number="channel.smtpPort" type="number" class="input max-w-24! text-center" /></div></div>
+            <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">用户名 / 密码</label><div class="grid gap-2 sm:grid-cols-2"><input v-model="channel.smtpUser" class="input" /><input v-model="channel.smtpPassword" type="password" class="input" /></div></div>
+            <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">发件人 / 收件人</label><div class="grid gap-2 sm:grid-cols-2"><input v-model="channel.emailFrom" class="input" /><input v-model="channel.emailTo" class="input" /></div></div>
+            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">TLS/SSL</div></div><label class="toggle-label"><input v-model="channel.smtpSecure" type="checkbox" aria-label="TLS/SSL" /></label></div>
+          </template>
+        </template>
+      </div>
+      <h2 class="section-title">触发事件</h2>
+      <div class="ios-group">
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">容器崩溃退出</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="exit" aria-label="容器崩溃退出" /></label></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">OOM 内存溢出</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="oom" aria-label="OOM 内存溢出" /></label></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">容器不健康</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="unhealthy" aria-label="容器不健康" /></label></div>
+      </div>
       <div class="flex gap-2"><button class="btn-primary" @click="saveNotifications"><Save class="w-4 h-4" />保存</button><button class="btn-secondary" @click="testNotifications"><Send class="w-4 h-4" />发送测试</button></div>
     </section>
 
     <section v-if="tab === 'maintenance'" class="settings-section">
       <div class="flex items-center justify-between"><h2 class="section-title">镜像更新</h2><button class="btn-secondary" :disabled="checkingUpdates" @click="checkUpdates"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': checkingUpdates }" />立即检查</button></div>
-      <div class="form-grid"><label class="toggle-label"><input v-model="updates.autoEnabled" type="checkbox" />定时拉取并检查更新</label><label>检查间隔（小时）<input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input" /></label></div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" @click="saveUpdates"><Save class="w-4 h-4" />保存更新策略</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
+      <div class="ios-group">
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">定时拉取并检查更新</div><div class="ios-row-desc">按下方间隔自动拉取镜像并检查更新。</div></div><label class="toggle-label"><input v-model="updates.autoEnabled" type="checkbox" aria-label="定时拉取并检查更新" /></label></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">检查间隔（小时）</div></div><div class="ios-row-control"><input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input max-w-24! text-center" /></div></div>
+      </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" @click="saveUpdates"><Save class="w-4 h-4" />保存更新策略</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
       <div v-if="updateSummary.total" class="grid gap-3 sm:grid-cols-3"><StatCard title="已检查镜像" :value="String(updateSummary.total)" sub="最近一次检查"/><StatCard title="发现更新" :value="String(updateSummary.updated)" sub="需重建相关容器"/><StatCard title="检查失败" :value="String(updateSummary.failed)" sub="请检查仓库或网络"/></div>
       <div v-if="updateResults.length" class="space-y-1"><div v-for="item in updateResults" :key="item.image" class="flex justify-between gap-3 text-sm py-1 border-b border-surface-800"><span class="min-w-0 truncate font-mono" :title="item.image">{{ item.image }}</span><span class="shrink-0" :class="item.status === 'updated' ? 'text-amber-400' : item.status === 'failed' ? 'text-rose-400' : 'text-emerald-400'">{{ imageStatusLabel(item.status) }}</span></div></div>
       <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>

@@ -1,7 +1,7 @@
 <template>
   <div class="page-shell">
     <div class="page-header"><div><h1 class="page-title">实时监控</h1><p class="page-subtitle">{{ tab === 'live' ? scopeLabel : '容器资源历史曲线与告警阈值' }}</p></div><div class="page-actions"><template v-if="tab === 'live'"><span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">{{ lastUpdated }}</span><label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label><button class="btn-secondary" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button></template></div></div>
-    <div class="tabs" role="tablist" aria-label="监控视图">
+    <div class="tabs-segment" role="tablist" aria-label="监控视图">
       <button :class="{ active: tab === 'live' }" role="tab" :aria-selected="tab === 'live'" @click="setTab('live')"><ChartNoAxesCombined class="h-4 w-4" />实时</button>
       <button :class="{ active: tab === 'history' }" role="tab" :aria-selected="tab === 'history'" @click="setTab('history')"><Activity class="h-4 w-4" />历史指标</button>
     </div>

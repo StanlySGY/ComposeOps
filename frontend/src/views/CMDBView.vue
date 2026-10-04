@@ -11,7 +11,7 @@
       </div>
     </div>
 
-    <div class="tabs" role="tablist" aria-label="资产中心视图">
+    <div class="tabs-segment" role="tablist" aria-label="资产中心视图">
       <button :class="{ active: tab === 'assets' }" role="tab" :aria-selected="tab === 'assets'" @click="setTab('assets')"><Server class="h-4 w-4" />资产清单</button>
       <button :class="{ active: tab === 'graph' }" role="tab" :aria-selected="tab === 'graph'" @click="setTab('graph')"><Waypoints class="h-4 w-4" />知识图谱</button>
     </div>

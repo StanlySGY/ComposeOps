@@ -6,7 +6,7 @@
         <p class="page-subtitle">部署前 AI 评审 Compose 变更,出问题后统一回滚配置、数据卷与镜像</p>
       </div>
     </div>
-    <div class="tabs" role="tablist" aria-label="变更与回滚视图">
+    <div class="tabs-segment" role="tablist" aria-label="变更与回滚视图">
       <button :class="{ active: tab === 'review' }" role="tab" :aria-selected="tab === 'review'" @click="setTab('review')"><FileSearch class="h-4 w-4" />变更评审</button>
       <button :class="{ active: tab === 'rollback' }" role="tab" :aria-selected="tab === 'rollback'" @click="setTab('rollback')"><RotateCcw class="h-4 w-4" />自动回滚</button>
     </div>

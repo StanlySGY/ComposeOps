@@ -6,12 +6,16 @@
     </div>
   </div>
   <LoginView v-else-if="!auth.authenticated" />
-  <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden">
+  <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden relative">
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
-    <div class="flex min-h-0 flex-1 overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
+    <div class="flex min-h-0 flex-1 overflow-hidden pt-16 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
       <AppSidebar />
-      <main class="app-main flex-1 min-w-0 overflow-auto">
-        <div class="content-outer mx-auto h-full min-h-full w-full py-5 sm:py-6">
+      <main class="app-main flex-1 min-w-0 overflow-auto" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
+        <div class="pull-indicator" :style="{ transform: 'translateY(' + pullY + 'px)', opacity: pullY > 0 ? 1 : 0 }">
+          <span v-if="refreshing" class="loading-mark"></span>
+          <RefreshCw v-else class="w-4 h-4" :class="{ 'rotate-180': pullY >= pullThreshold }" />
+        </div>
+        <div class="content-outer mx-auto h-full min-h-full w-full pt-[4.75rem] pb-5 sm:pt-[5.5rem] sm:pb-6">
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in">
               <keep-alive :include="keepAliveViews">
@@ -39,6 +43,7 @@ import { onBeforeUnmount, onErrorCaptured, onMounted, ref } from 'vue';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
+import { RefreshCw } from 'lucide-vue-next';
 import CheatSheetModal from './components/common/CheatSheetModal.vue';
 import AgentDrawer from './components/AgentDrawer.vue';
 import OnboardingGuide from './components/common/OnboardingGuide.vue';
@@ -63,6 +68,46 @@ const servicesStore = useServicesStore();
 const toast = useToastStore();
 const { openAgent, startPageTracking, stopPageTracking } = useAgentConsole();
 const cheatSheet = ref(false);
+/* ---- 下拉刷新(移动端触屏)与头部大标题收缩 ---- */
+const pullY = ref(0);
+const refreshing = ref(false);
+const pullThreshold = 72;
+let pullStartY = 0;
+let pullArmed = false;
+
+function onMainScroll(e) {
+  const top = e.target.scrollTop;
+  document.querySelector('.app-header')?.classList.toggle('scrolled', top > 28);
+}
+
+function onPullStart(e) {
+  if (refreshing.value) return;
+  const scroller = e.currentTarget;
+  pullStartY = e.touches[0].clientY;
+  pullArmed = scroller.scrollTop <= 0;
+}
+
+function onPullMove(e) {
+  if (!pullArmed || refreshing.value || e.touches.length !== 1) return;
+  const delta = e.touches[0].clientY - pullStartY;
+  pullY.value = delta > 0 ? Math.min(delta * 0.4, 96) : 0;
+}
+
+function onPullEnd() {
+  if (!pullArmed || refreshing.value) { pullY.value = 0; return; }
+  if (pullY.value >= pullThreshold) {
+    refreshing.value = true;
+    pullY.value = 48;
+    window.dispatchEvent(new CustomEvent('composeops:refresh'));
+    setTimeout(() => {
+      refreshing.value = false;
+      pullY.value = 0;
+    }, 900);
+  } else {
+    pullY.value = 0;
+  }
+}
+
 const runtimeError = ref('');
 // density 的读写只由 AppHeader 一处负责;这里仅在挂载时按已存偏好初始化 body 标记。
 function applyDensity() {

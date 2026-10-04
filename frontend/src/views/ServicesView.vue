@@ -399,6 +399,7 @@ watch(autoRefresh, (value) => {
 onActivated(() => startRealtime());
 watch([() => route.query.focus, () => store.projects], focusProject, { deep: true });
 onMounted(async () => {
+  window.addEventListener('composeops:refresh', refresh);
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
   // 后续 WS 打开成功会做一次非重连刷新,失败则降级轮询。
   await store.refresh(false);
@@ -463,6 +464,7 @@ function pausePage() {
 }
 onDeactivated(pausePage);
 onUnmounted(() => {
+  window.removeEventListener('composeops:refresh', refresh);
   pausePage();
 });
 </script>
