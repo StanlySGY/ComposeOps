@@ -1421,7 +1421,8 @@ body {
   border-color: rgba(148, 163, 184, 0.14);
 }
 .app-main > div {
-  padding-top: clamp(1rem, 2vw, 1.5rem);
+  /* 头部改为悬浮毛玻璃后,内容顶部要垫出头部高度(4rem)再加呼吸空间 */
+  padding-top: calc(4rem + clamp(0.75rem, 2vw, 1.5rem));
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
 }
 .card {

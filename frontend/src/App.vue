@@ -8,14 +8,14 @@
   <LoginView v-else-if="!auth.authenticated" />
   <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden relative">
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
-    <div class="flex min-h-0 flex-1 overflow-hidden pt-16 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
+    <div class="flex min-h-0 flex-1 overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
       <AppSidebar />
       <main class="app-main flex-1 min-w-0 overflow-auto" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
         <div class="pull-indicator" :style="{ transform: 'translateY(' + pullY + 'px)', opacity: pullY > 0 ? 1 : 0 }">
           <span v-if="refreshing" class="loading-mark"></span>
           <RefreshCw v-else class="w-4 h-4" :class="{ 'rotate-180': pullY >= pullThreshold }" />
         </div>
-        <div class="content-outer mx-auto h-full min-h-full w-full pt-[4.75rem] pb-5 sm:pt-[5.5rem] sm:pb-6">
+        <div class="content-outer mx-auto h-full min-h-full w-full">
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in">
               <keep-alive :include="keepAliveViews">
