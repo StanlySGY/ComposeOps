@@ -30,55 +30,47 @@ export function getContainerResourceStats() {
   return withCostCache('containers', fetchContainerResourceStats);
 }
 async function fetchContainerResourceStats() {
-  const docker = getActivityDocker();
-  const containers = await docker.listContainers({ all: true });
-  
-  const stats = [];
-  
-  for (const container of containers) {
-    const projectName = container.Labels?.['com.docker.compose.project'] || 'unknown';
-    const serviceName = container.Labels?.['com.docker.compose.service'] || container.Names[0]?.replace(/^\//, '');
-    
-    // 获取容器统计信息
-    let cpuPercent = 0;
-    let memoryUsage = 0;
-    let memoryLimit = 0;
-    
-    if (container.State === 'running') {
-      try {
-        const containerObj = docker.getContainer(container.Id);
-        const statStream = await containerObj.stats({ stream: false });
-        
-        // 计算 CPU 使用率
-        const cpuDelta = statStream.cpu_stats.cpu_usage.total_usage - statStream.precpu_stats.cpu_usage.total_usage;
-        const systemDelta = statStream.cpu_stats.system_cpu_usage - statStream.precpu_stats.system_cpu_usage;
-        const cpuCount = statStream.cpu_stats.online_cpus || 1;
-        
-        if (systemDelta > 0) {
-          cpuPercent = (cpuDelta / systemDelta) * cpuCount * 100;
+  try {
+    const docker = getActivityDocker();
+    const containers = await docker.listContainers({ all: true });
+    const stats = [];
+    for (const container of containers) {
+      const projectName = container.Labels?.['com.docker.compose.project'] || 'unknown';
+      const serviceName = container.Labels?.['com.docker.compose.service'] || container.Names[0]?.replace(/^\//, '');
+      let cpuPercent = 0;
+      let memoryUsage = 0;
+      let memoryLimit = 0;
+      if (container.State === 'running') {
+        try {
+          const containerObj = docker.getContainer(container.Id);
+          const statStream = await containerObj.stats({ stream: false });
+          const cpuDelta = statStream.cpu_stats.cpu_usage.total_usage - statStream.precpu_stats.cpu_usage.total_usage;
+          const systemDelta = statStream.cpu_stats.system_cpu_usage - statStream.precpu_stats.system_cpu_usage;
+          const cpuCount = statStream.cpu_stats.online_cpus || 1;
+          if (systemDelta > 0) {
+            cpuPercent = (cpuDelta / systemDelta) * cpuCount * 100;
+          }
+          memoryUsage = statStream.memory_stats.usage || 0;
+          memoryLimit = statStream.memory_stats.limit || 0;
+        } catch {
+          // 无法获取统计信息，保持默认值
         }
-        
-        // 内存使用
-        memoryUsage = statStream.memory_stats.usage || 0;
-        memoryLimit = statStream.memory_stats.limit || 0;
-      } catch {
-        // 无法获取统计信息，保持默认值
       }
+      stats.push({
+        containerId: container.Id.substring(0, 12),
+        containerName: serviceName,
+        projectName,
+        state: container.State,
+        cpuPercent: Math.round(cpuPercent * 100) / 100,
+        memoryUsageMB: Math.round(memoryUsage / 1024 / 1024 * 100) / 100,
+        memoryLimitMB: Math.round(memoryLimit / 1024 / 1024 * 100) / 100,
+        created: container.Created
+      });
     }
-    
-    stats.push({
-      containerId: container.Id.substring(0, 12),
-      containerName: serviceName,
-      projectName,
-      state: container.State,
-      cpuPercent: Math.round(cpuPercent * 100) / 100,
-      memoryUsageMB: Math.round(memoryUsage / 1024 / 1024 * 100) / 100,
-      memoryLimitMB: Math.round(memoryLimit / 1024 / 1024 * 100) / 100,
-      created: container.Created
-    });
+    return stats;
+  } catch {
+    return [];
   }
-  
-  return stats;
 }
 
 /**
@@ -88,20 +80,20 @@ export function getImageSizeStats() {
   return withCostCache('images', fetchImageSizeStats);
 }
 async function fetchImageSizeStats() {
-  const docker = getActivityDocker();
-  const images = await docker.listImages();
-  
-  const stats = images.map(image => ({
-    id: image.Id.replace(/^sha256:/, '').substring(0, 12),
-    tags: image.RepoTags || ['<none>'],
-    sizeMB: Math.round(image.Size / 1024 / 1024 * 100) / 100,
-    created: image.Created
-  }));
-  
-  // 按大小排序
-  stats.sort((a, b) => b.sizeMB - a.sizeMB);
-  
-  return stats;
+  try {
+    const docker = getActivityDocker();
+    const images = await docker.listImages();
+    const stats = images.map(image => ({
+      id: image.Id.replace(/^sha256:/, '').substring(0, 12),
+      tags: image.RepoTags || ['<none>'],
+      sizeMB: Math.round(image.Size / 1024 / 1024 * 100) / 100,
+      created: image.Created
+    }));
+    stats.sort((a, b) => b.sizeMB - a.sizeMB);
+    return stats;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -111,11 +103,9 @@ export function getStorageStats() {
   return withCostCache('storage', fetchStorageStats);
 }
 async function fetchStorageStats() {
-  const docker = getActivityDocker();
-  
   try {
+    const docker = getActivityDocker();
     const dfOutput = await docker.df();
-    
     return {
       images: {
         active: dfOutput.Images?.filter(i => i.Containers > 0).length || 0,
@@ -139,7 +129,6 @@ async function fetchStorageStats() {
       }
     };
   } catch {
-    // docker df 不可用时返回空统计
     return {
       images: { active: 0, total: 0, sizeMB: 0, reclaimableMB: 0 },
       containers: { active: 0, total: 0, sizeMB: 0 },

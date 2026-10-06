@@ -74,23 +74,79 @@
         </template>
       </div>
 
-      <div class="divide-y divide-surface-800 border-t border-surface-800">
-        <div v-for="container in project.containers" :key="container.id" class="min-h-12 py-2 flex items-center gap-2">
-          <span class="status-dot" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
-              <span class="text-sm font-mono truncate">{{ container.name }}</span>
-              <span v-if="metrics[container.id]?.cpu != null" class="metric-chip" :class="metrics[container.id].cpu >= 85 ? 'bg-rose-950/50 text-rose-300' : metrics[container.id].cpu >= 60 ? 'bg-amber-950/50 text-amber-300' : 'text-emerald-300'">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
-              <span v-if="metrics[container.id]?.mem != null" class="metric-chip" :class="metrics[container.id].mem >= 90 ? 'bg-rose-950/50 text-rose-300' : 'text-emerald-300'">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB / {{ numberValue(metrics[container.id].mem).toFixed(1) }}%</span>
+      <div class="divide-y divide-surface-800/60 border-t border-surface-800/80">
+        <div v-for="container in project.containers" :key="container.id" class="py-2.5">
+          <!-- 桌面端紧凑单行模式 -->
+          <div class="hidden sm:flex items-center gap-2">
+            <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="text-sm font-mono truncate">{{ container.name }}</span>
+                <span v-if="metrics[container.id]?.cpu != null" class="metric-chip" :class="metrics[container.id].cpu >= 85 ? 'bg-rose-950/50 text-rose-300' : metrics[container.id].cpu >= 60 ? 'bg-amber-950/50 text-amber-300' : 'text-emerald-300'">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
+                <span v-if="metrics[container.id]?.mem != null" class="metric-chip" :class="metrics[container.id].mem >= 90 ? 'bg-rose-950/50 text-rose-300' : 'text-emerald-300'">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB / {{ numberValue(metrics[container.id].mem).toFixed(1) }}%</span>
+              </div>
+              <div class="text-muted truncate">{{ container.image }}<span v-if="container.ports.length"> · {{ portText(container) }}</span><span v-if="container.health" :class="healthClass(container.health)"> · {{ container.health }}</span></div>
+              <div v-if="container.stoppedAt || container.startedAt" class="text-muted text-[11px]">{{ containerStateHint(container) }}</div>
             </div>
-          <div class="text-muted truncate">{{ container.image }}<span v-if="container.ports.length"> · {{ portText(container) }}</span><span v-if="container.health" :class="healthClass(container.health)"> · {{ container.health }}</span></div>
-          <div v-if="container.stoppedAt || container.startedAt" class="text-muted text-[11px]">{{ containerStateHint(container) }}</div>
-        </div>
-          <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
-          <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="`/logs?projectId=${project.id}&containerId=${container.id}`"><ScrollText class="w-4 h-4" /></router-link>
-          <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="`/logs?projectId=${project.id}`"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
-          <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
-          <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
+            <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="`/logs?projectId=${project.id}&containerId=${container.id}`"><ScrollText class="w-4 h-4" /></router-link>
+            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="`/logs?projectId=${project.id}`"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
+          </div>
+
+          <!-- 移动端触控友好卡片模式 -->
+          <div class="flex sm:hidden flex-col gap-2 rounded-xl p-2.5 bg-surface-900/50 border border-surface-800/70">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                <span class="text-sm font-mono font-medium truncate">{{ container.name }}</span>
+              </div>
+              <StatusBadge :status="container.state" size="sm" />
+            </div>
+            <div class="text-[11px] text-muted truncate font-mono">{{ container.image }}</div>
+            <div v-if="container.ports.length" class="text-[11px] text-surface-400">{{ portText(container) }}</div>
+            <div class="flex flex-wrap gap-1.5 mt-0.5">
+              <span v-if="metrics[container.id]?.cpu != null" class="metric-chip text-[10px]">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
+              <span v-if="metrics[container.id]?.mem != null" class="metric-chip text-[10px]">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB</span>
+            </div>
+            <!-- 异常时的一键 Agent 诊断 -->
+            <router-link
+              v-if="container.state !== 'running' && project.managed"
+              :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"
+              class="flex items-center justify-center gap-1.5 rounded-lg bg-amber-950/40 border border-amber-500/30 px-3 py-1.5 text-xs text-amber-300 font-medium active:scale-98"
+            >
+              <Bot class="w-3.5 h-3.5" />
+              <span>容器异常 · 唤醒 Agent 一键诊断</span>
+            </router-link>
+            <!-- 底部触控大按钮行 -->
+            <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-surface-800/50">
+              <router-link
+                :to="`/logs?projectId=${project.id}&containerId=${container.id}`"
+                class="flex items-center justify-center gap-1 rounded-lg bg-surface-800/80 py-1.5 text-xs text-surface-200 active:bg-surface-700"
+                :class="{ 'pointer-events-none opacity-40': !project.managed }"
+              >
+                <ScrollText class="w-3.5 h-3.5" />
+                <span>日志</span>
+              </router-link>
+              <router-link
+                :to="`/shell?projectId=${project.id}&containerId=${container.id}`"
+                class="flex items-center justify-center gap-1 rounded-lg bg-surface-800/80 py-1.5 text-xs text-surface-200 active:bg-surface-700"
+                :class="{ 'pointer-events-none opacity-40': !project.managed }"
+              >
+                <TerminalSquare class="w-3.5 h-3.5" />
+                <span>终端</span>
+              </router-link>
+              <router-link
+                :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"
+                class="flex items-center justify-center gap-1 rounded-lg bg-accent/20 border border-accent/40 py-1.5 text-xs text-blue-300 active:bg-accent/30"
+                :class="{ 'pointer-events-none opacity-40': !project.managed }"
+              >
+                <Bot class="w-3.5 h-3.5" />
+                <span>AI 诊断</span>
+              </router-link>
+            </div>
+          </div>
         </div>
       </div>
     </div>

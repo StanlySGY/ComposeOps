@@ -44,8 +44,8 @@ export async function collectAllMetrics() {
 
       return { collected: collected.length, timestamp: Date.now() };
     } catch (error) {
-      console.error('采集指标失败:', error.message);
-      throw error;
+      // Docker offline or unreachable
+      return { collected: 0, skipped: true, timestamp: Date.now() };
     }
   })();
   collectionState.promise = operation;

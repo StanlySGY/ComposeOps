@@ -3,6 +3,9 @@
   <div v-if="open" class="agent-drawer-layer">
     <button class="agent-drawer-backdrop" aria-label="关闭 Agent" @click="closeAgent"></button>
     <aside class="agent-drawer" role="dialog" aria-modal="true" aria-label="页面 Agent">
+      <div class="flex justify-center pt-2 pb-0 md:hidden cursor-pointer" @click="closeAgent">
+        <div class="h-1 w-10 rounded-full bg-surface-600"></div>
+      </div>
       <header class="agent-drawer-head">
         <div class="flex min-w-0 items-center gap-2"><Bot class="h-4 w-4 text-accent" /><div class="min-w-0"><strong class="block truncate">页面 Agent</strong><small class="block truncate">{{ pageContext.page || '当前页面' }} · {{ pageContext.mode || '运维问答与操作' }}</small></div></div>
         <div class="flex items-center gap-1"><button class="icon-btn" title="新建会话(清空当前上下文)" aria-label="新建会话" @click="startFreshSession"><MessageSquarePlus class="h-4 w-4" /></button><button class="icon-btn" title="中断执行" :disabled="!running" @click="interrupt"><Square class="h-4 w-4" /></button><button class="icon-btn" title="关闭 Agent" @click="closeAgent"><X class="h-4 w-4" /></button></div>

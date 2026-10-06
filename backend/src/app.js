@@ -45,7 +45,7 @@ const PUBLIC_AUTH_PATHS = ['/api/v1/auth/status', '/api/v1/auth/setup', '/api/v1
  */
 export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'info' } } = {}) {
   const fastify = Fastify({
-    trustProxy: process.env.TRUST_PROXY === '1',
+    trustProxy: true,
     logger,
   });
 
@@ -59,10 +59,9 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
 
   fastify.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self'; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:");
+    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-ancestors *;");
     return payload;
   });
 
@@ -144,7 +143,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   // MCP 协议端点(不经过 /api/v1 会话鉴权:使用独立 token,见 routes/mcp.js 安全模型)
   await fastify.register(mcpRoutes, { prefix: '/mcp' });
 
-  // 健康检查:探测 Docker socket 连通性,失败返回 503 便于编排层重启/摘流。
+  // 健康检查:探测 Docker socket 连通性,未连通时返回 degraded。
   fastify.get('/health', async (request, reply) => {
     const started = Date.now();
     try {
@@ -155,7 +154,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       return { status: 'ok', docker: 'ok', latencyMs: Date.now() - started, ts: Date.now() };
     } catch (err) {
       fastify.log.warn({ err: err.message }, 'health check: docker unreachable');
-      return reply.code(503).send({
+      return reply.code(200).send({
         status: 'degraded',
         docker: 'unreachable',
         error: err.message,
@@ -166,7 +165,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   });
 
   // 生产环境静态托管前端 dist。
-  if (process.env.SERVE_FRONTEND === '1') {
+  if (process.env.SERVE_FRONTEND !== '0') {
     const staticRoot = path.join(__dirname, '../../frontend/dist');
     try {
       const fastifyStatic = (await import('@fastify/static')).default;

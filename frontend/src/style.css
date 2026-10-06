@@ -83,19 +83,20 @@
 }
 
 @utility card {
-  @apply bg-surface-900/80 border border-surface-800 rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.08)];
+  @apply bg-surface-950/80 backdrop-blur-md border border-surface-800/70 rounded-2xl;
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.08),
+    0 10px 30px -5px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+    border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   &:hover {
-    border-color: rgba(52, 65, 85, 0.9);
+    border-color: rgba(52, 211, 153, 0.3);
     box-shadow:
-      0 12px 40px rgba(0, 0, 0, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05),
-      0 0 0 1px rgba(34, 211, 238, 0.04);
+      0 16px 36px -6px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 0 16px rgba(16, 185, 129, 0.08);
   }
 }
 
@@ -183,21 +184,21 @@
 }
 
 @utility metric-tile {
-  @apply card flex min-h-24 items-center gap-3 p-4 text-left transition-all duration-150 active:scale-[0.99] hover:-translate-y-0.5 hover:border-surface-700 hover:bg-surface-900;
+  @apply card flex min-h-24 items-center gap-3 p-4 text-left transition-all duration-150 active:scale-[0.99] hover:-translate-y-0.5 hover:border-emerald-500/40;
   &.active {
-    @apply border-accent/70 bg-accent/5 ring-1 ring-accent/20;
+    @apply border-emerald-500/60 bg-emerald-950/20 ring-1 ring-emerald-500/20;
   }
   & strong {
-    @apply block text-xl font-semibold tracking-tight text-surface-50;
+    @apply block font-mono text-2xl font-bold tracking-tight text-surface-50 tabular-nums;
   }
   & small {
-    @apply block text-xs text-surface-400;
+    @apply block text-[11px] font-semibold uppercase tracking-wider text-surface-400 mt-0.5;
   }
 }
 
 @utility active {
   &.metric-tile {
-    @apply border-accent/70 bg-accent/5 ring-1 ring-accent/20;
+    @apply border-emerald-500/60 bg-emerald-950/20 ring-1 ring-emerald-500/20;
   }
   .tabs button& {
     @apply text-surface-100 border-accent;
@@ -205,7 +206,7 @@
 }
 
 @utility metric-icon {
-  @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-950/70;
+  @apply grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-surface-900/90 border border-surface-800/80 shadow-inner;
 }
 
 @utility metric-meta {

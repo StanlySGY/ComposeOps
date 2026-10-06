@@ -109,7 +109,12 @@ export async function scanProjects() {
 }
 
 async function scanProjectsUncached(activeDocker, nodeType) {
-  const containers = await activeDocker.listContainers({ all: true });
+  let containers;
+  try {
+    containers = await activeDocker.listContainers({ all: true });
+  } catch {
+    return [];
+  }
 
   // 按 compose project 分组（以 workingDir 为 key）
   const projects = new Map();

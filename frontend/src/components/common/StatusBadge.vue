@@ -29,18 +29,18 @@ const props = defineProps({
 });
 
 const STATUS = {
-  running: { label: '运行中', dot: 'bg-emerald-400', pulse: true, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10', tip: '服务运行正常' },
-  restarting: { label: '重启中', dot: 'bg-amber-400', pulse: true, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10', tip: '服务正在重启' },
+  running: { label: '运行中', dot: 'bg-emerald-400', pulse: true, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '服务运行正常' },
+  restarting: { label: '重启中', dot: 'bg-amber-400', pulse: true, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]', tip: '服务正在重启' },
   paused: { label: '已暂停', dot: 'bg-sky-400', pulse: false, cls: 'text-sky-300 border-sky-500/30 bg-sky-500/10', tip: '服务已暂停' },
-  stopped: { label: '已停止', dot: 'bg-surface-500', pulse: false, cls: 'text-surface-500 border-surface-600/40 bg-surface-800/40', tip: '服务已停止' },
-  partial: { label: '部分异常', dot: 'bg-amber-400', pulse: false, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10', tip: '部分容器未正常运行' },
-  degraded: { label: '运行降级', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/30 bg-rose-500/10', tip: '服务质量已降级,请检查' },
-  error: { label: '异常', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10', tip: '运行异常,请检查日志' },
+  stopped: { label: '已停止', dot: 'bg-surface-500', pulse: false, cls: 'text-surface-400 border-surface-700/50 bg-surface-900/60', tip: '服务已停止' },
+  partial: { label: '部分异常', dot: 'bg-amber-400', pulse: false, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]', tip: '部分容器未正常运行' },
+  degraded: { label: '运行降级', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.22)]', tip: '服务质量已降级,请检查' },
+  error: { label: '异常', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '运行异常,请检查日志' },
   queued: { label: '排队中', dot: 'bg-accent', pulse: true, cls: 'text-blue-300 border-blue-500/30 bg-blue-500/10', tip: '任务已创建,等待执行' },
-  task: { label: '执行中', dot: 'bg-accent', pulse: true, cls: 'text-blue-300 border-blue-500/30 bg-blue-500/10', tip: '任务正在执行' },
+  task: { label: '执行中', dot: 'bg-accent', pulse: true, cls: 'text-blue-300 border-blue-500/30 bg-blue-500/10 shadow-[0_0_10px_rgba(37,99,235,0.2)]', tip: '任务正在执行' },
   pending: { label: '等待', dot: 'bg-surface-500', pulse: false, cls: 'text-surface-400 border-surface-600/40 bg-surface-800/40', tip: '等待执行' },
-  success: { label: '成功', dot: 'bg-emerald-400', pulse: false, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10', tip: '执行成功' },
-  failed: { label: '失败', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10', tip: '执行失败,请查看详情' },
+  success: { label: '成功', dot: 'bg-emerald-400', pulse: false, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '执行成功' },
+  failed: { label: '失败', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '执行失败,请查看详情' },
   interrupted: { label: '已中断', dot: 'bg-amber-400', pulse: false, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10', tip: '任务被中断' },
 };
 
@@ -53,10 +53,10 @@ const effectiveStatus = computed(() => {
 const data = computed(() => {
   const st = effectiveStatus.value;
   if (st === 'healthy') {
-    return { label: '健康', dot: 'bg-emerald-400', pulse: true, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10', tip: '服务健康' };
+    return { label: '健康', dot: 'bg-emerald-400', pulse: true, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '服务健康' };
   }
   if (st === 'unhealthy') {
-    return { label: '不健康', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10', tip: '服务不健康,请检查' };
+    return { label: '不健康', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '服务不健康,请检查' };
   }
   return STATUS[st] || { label: st || '未知', dot: 'bg-surface-600', pulse: false, cls: 'text-surface-400 border-surface-600/40 bg-surface-800/40', tip: '未知状态' };
 });

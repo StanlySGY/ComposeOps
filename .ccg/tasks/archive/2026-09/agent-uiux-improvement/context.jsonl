@@ -1,9 +1,0 @@
-{"file":"frontend/src/views/AgentWorkflowView.vue","reason":"Agent 会话列表、诊断 query、共享聊天状态入口"}
-{"file":"frontend/src/components/AgentDrawer.vue","reason":"全局 Agent 抽屉第二个聊天实例"}
-{"file":"frontend/src/composables/useAgentChat.js","reason":"消息、SSE、确认门和 session 状态"}
-{"file":"backend/src/routes/ai.js","reason":"会话历史与删除 API"}
-{"file":"backend/src/lib/db.js","reason":"会话持久化与删除实现"}
-{"file":"frontend/src/views/ResourceMonitorView.vue","reason":"模拟历史指标、异常告警和响应式布局"}
-{"file":"backend/src/services/metrics.js","reason":"历史指标查询时间单位和聚合"}
-{"file":"frontend/src/views/ComposeView.vue","reason":"保存校验和变更预览安全门"}
-{"file":"frontend/src/views/SettingsView.vue","reason":"Docker 节点测试连接副作用"}

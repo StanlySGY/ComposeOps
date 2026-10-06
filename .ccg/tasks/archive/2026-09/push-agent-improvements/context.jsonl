@@ -1,4 +1,0 @@
-{"file":"frontend/src/views/AgentWorkflowView.vue","reason":"Agent 会话界面、执行轨迹和构建错误定位"}
-{"file":"backend/src/lib/db.js","reason":"AI 会话元数据及 SQL 查询修复"}
-{"file":"backend/src/routes/agent.js","reason":"会话重命名 API"}
-{"file":"frontend/src/api/client.js","reason":"会话重命名 API 客户端调用"}

@@ -78,7 +78,11 @@ export function validateOrigin(request) {
   const origin = request.headers.origin;
   if (!origin) return true;
   try {
-    return new URL(origin).host === request.headers.host;
+    const originHost = new URL(origin).host;
+    const reqHost = request.headers['x-forwarded-host'] || request.headers.host;
+    if (originHost === reqHost) return true;
+    if (originHost.endsWith('.run.app') || originHost.includes('localhost') || originHost.includes('127.0.0.1')) return true;
+    return false;
   } catch {
     return false;
   }

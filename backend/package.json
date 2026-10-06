@@ -10,18 +10,17 @@
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "test:agent-evals": "node --test --test-concurrency=1 test/agent-evals.test.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "rebuild": "cd node_modules/better-sqlite3 && npx --yes prebuild-install"
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@fastify/static": "^10.1.5",
     "@fastify/websocket": "^11.3.1",
-    "better-sqlite3": "^13.0.3",
     "dockerode": "^5.0.1",
     "fastify": "^5.12.5",
     "nodemailer": "^10.0.11",
     "ssh2": "^1.17.0",
     "tar-stream": "^3.2.1",
+    "ws": "^8.18.0",
     "yaml": "^2.5.1"
   },
   "devDependencies": {

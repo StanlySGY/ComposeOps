@@ -124,7 +124,9 @@ async function ensureFile() {
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     history = Array.isArray(data.history) ? data.history : [];
   } catch (err) {
-    console.error('[cron-scheduler] Failed to load cron data file:', err.message);
+    if (err.code !== 'ENOENT') {
+      console.error('[cron-scheduler] Failed to load cron data file:', err.message);
+    }
     jobs = [];
     history = [];
   }

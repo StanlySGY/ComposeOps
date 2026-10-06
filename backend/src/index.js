@@ -1,5 +1,7 @@
 import { buildApp } from './app.js';
 import { startAlertMonitor } from './services/alert-monitor.js';
+
+try { process.loadEnvFile?.(); } catch {}
 import { startHealthAlerter } from './services/health-alerter.js';
 import { startCronScheduler } from './services/cron-scheduler.js';
 import { startInspectionScheduler } from './services/inspection.js';
@@ -9,7 +11,7 @@ import { startMetricsCollection } from './services/metrics-collector.js';
 import { startDataMaintenance } from './services/maintenance.js';
 import { getCostAnalysisReport } from './services/cost-analysis.js';
 
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const PORT = parseInt(process.env.APP_PORT || (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '3000'), 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
 // 成本页首访要逐容器拉 stats、跑 docker df,较慢;后台按缓存 TTL 预热,

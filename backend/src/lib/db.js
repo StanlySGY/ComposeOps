@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from './sqlite.js';
 import { chmodSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';

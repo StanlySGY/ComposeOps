@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from './sqlite.js';
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, open, rm, stat } from 'node:fs/promises';
 import path from 'node:path';

@@ -1,1 +1,0 @@
-{"id":"agent-protocol-fragment","title":"修复 Agent 分片工具协议泄露","status":"completed","complexity":"M","risk":"medium","domain":"fullstack","currentPhase":"completed","nextAction":"归档任务并推送 GitHub","createdAt":"2026-09-11T18:40:00+08:00","branch":"main"}

@@ -14,6 +14,15 @@
     <div class="card relative flex-1 min-h-[420px] overflow-hidden terminal-host">
       <Skeleton v-if="!termReady" class="skeleton-workspace" rows="10" label="终端加载中" />
       <div ref="termEl" class="h-full w-full" :class="{ invisible: !termReady }"></div>
+      <!-- 移动端虚拟按键辅助栏 (Termius 风格快捷键) -->
+      <div v-if="connected" class="flex md:hidden items-center justify-between gap-1.5 border-t border-surface-800 bg-surface-950/95 px-3 py-2 overflow-x-auto shrink-0 z-20">
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x1b')">ESC</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\t')">TAB</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-rose-300 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x03')">Ctrl+C</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x1b[A')">▲</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x1b[B')">▼</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-emerald-300 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('clear\n')">Clear</button>
+      </div>
       <div v-if="termReady && !connected" class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-surface-1000/95 px-6">
         <div class="flex items-center gap-1.5">
           <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
@@ -77,6 +86,11 @@ onMounted(async () => {
 });
 function connect() { disconnect(); error.value = ''; term.clear(); socket.connect(); }
 function disconnect() { socket.close(); }
+function sendKey(char) {
+  if (!connected.value) return;
+  socket.send(char);
+  term?.focus();
+}
 function onHostChanged() { disconnect(); projects.value = []; void api.getProjects().then((r) => { projects.value = r.projects.filter((project) => project.managed); }).catch(() => {}); }
 onBeforeUnmount(() => { disconnect(); resizeObserver?.disconnect(); term?.dispose(); window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>
