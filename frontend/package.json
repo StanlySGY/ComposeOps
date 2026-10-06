@@ -33,7 +33,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.9",
-    "@vue/test-utils": "^2.5.0",
+    "@vue/test-utils": "^2.5.1",
     "eslint": "^10.10.0",
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.12.0",
