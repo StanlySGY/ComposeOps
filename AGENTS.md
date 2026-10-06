@@ -22,11 +22,14 @@
 - 路由层:`router.js` 的 `preloadRouteChunks()` 在空闲时预取全部 chunk;App.vue 对 13 个无流式/轮询的页面做 keep-alive(**新增流式/定时轮询页面时务必排除**,否则 interval/ws 在后台保活泄漏);页面切换走 `page-fade` 过渡。
 
 ## 常用命令
-- 前端构建: `cd frontend && npm run build`(零 Warning;`chunkSizeWarningLimit: 3000`)
-- 前端单测: `cd frontend && npx vitest run`
-- 后端单测: `cd backend && DB_PATH=/tmp/x.db npm test`(必须 `--test-concurrency=1`,并发会多进程抢同一 DB 偶发失败)
+- 仓库已迁移 npm workspaces:**安装只在根目录 `npm install`**,lockfile 只有根上一份(`package-lock.json`),workspace 包内不再有独立 lockfile——别再生成,否则 CI/Docker 构建又会错位
+- 前端构建: `npm run build`(根执行;零 Warning;`chunkSizeWarningLimit: 3000`)
+- 前端单测: `npm test --workspace frontend` 或 `cd frontend && npx vitest run`
+- 后端单测: `DB_PATH=/tmp/x.db npm test --workspace backend`(必须 `--test-concurrency=1`,并发会多进程抢同一 DB 偶发失败)
 - 后端语法: `node --check <file>`
 - 完整启动: `node backend/src/index.js`(`SERVE_FRONTEND=1 PORT=3001 ENABLE_SHELL=1`)
+- SQLite 走 Node 22 内置 node:sqlite(`backend/src/lib/sqlite.js` 包装 better-sqlite3 语义),better-sqlite3 依赖已移除
+- 跨域嵌入(iframe/Cloud Run 等)用 `EMBED_MODE=1` 显式开启;默认严格 CSP + SameSite=Lax
 
 ## 多节点 Docker 宿主
 - `backend/src/services/docker-hosts.js` 管理 Local/TCP/SSH 节点;活跃节点通过 `setSetting('docker.active_host')` 持久化。
