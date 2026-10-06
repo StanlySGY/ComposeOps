@@ -1410,9 +1410,10 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 .app-header {
-  background: rgba(23, 27, 34, 0.6);
-  -webkit-backdrop-filter: saturate(1.7) blur(18px);
-  backdrop-filter: saturate(1.7) blur(18px);
+  /* iOS 26 导航条材质:高饱和磨砂(Regular glass),顶部镜面高光留给浮层 */
+  background: rgba(23, 27, 34, 0.64);
+  -webkit-backdrop-filter: saturate(1.8) blur(20px);
+  backdrop-filter: saturate(1.8) blur(20px);
   border-bottom-color: rgba(148, 163, 184, 0.14);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025);
 }
@@ -1438,9 +1439,18 @@ body {
   min-height: 40px;
   border-radius: 10px;
   letter-spacing: 0;
-  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+  transition:
+    transform 340ms var(--ease-spring-strong),
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
 }
-.btn:active, .icon-btn:active { transform: scale(0.96); }
+/* iOS 按压手感:按下快(短时长),松手走带过冲的弹簧曲线 */
+.btn:active, .icon-btn:active {
+  transform: scale(0.96);
+  transition-duration: 110ms;
+}
 .btn-primary {
   background-image: none;
   box-shadow: 0 5px 16px rgba(37, 99, 235, 0.2);
@@ -1453,7 +1463,10 @@ body {
   width: 40px;
   height: 40px;
   border-radius: 11px;
-  transition: transform 160ms ease, background-color 160ms ease, color 160ms ease;
+  transition:
+    transform 340ms var(--ease-spring-strong),
+    background-color 160ms ease,
+    color 160ms ease;
 }
 .input, .search-field {
   min-height: 40px;
@@ -1478,8 +1491,15 @@ body {
 .page-fade-enter-from { opacity: 0; transform: translateY(5px); }
 .page-fade-leave-to { opacity: 0; }
 .modal-backdrop, .command-backdrop, .drawer-backdrop { backdrop-filter: blur(8px); }
-.modal { border-radius: 16px; background: rgba(31, 36, 45, 0.92); }
-.event-panel, .command-dialog, .activity-drawer { background: rgba(31, 36, 45, 0.9); }
+/* 浮层是 Liquid Glass 的主场:重玻璃材质 + 顶部镜面高光 + 深投影(iOS 26 sheet/palette) */
+.modal, .event-panel, .command-dialog, .activity-drawer {
+  background: rgba(28, 32, 40, 0.86);
+  -webkit-backdrop-filter: saturate(1.6) blur(28px);
+  backdrop-filter: saturate(1.6) blur(28px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 24px 70px rgba(0, 0, 0, 0.42);
+}
 .agent-messages, .agent-drawer-messages { scroll-behavior: smooth; overscroll-behavior: contain; }
 
 @media (hover: hover) and (pointer: fine) {
@@ -2315,27 +2335,33 @@ pre:hover .code-copy-btn { opacity: 1; }
 }
 
 @utility tabs-segment {
-  @apply inline-flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-surface-800/70 bg-surface-950/60 p-1 backdrop-blur-md;
+  /* iOS 26 分段控制器:胶囊轨道 + 药丸滑块(带 key shadow:环境光+方向光+顶部内高光) */
+  @apply inline-flex max-w-full gap-1 overflow-x-auto rounded-full border border-surface-800/60 bg-surface-950/50 p-1 backdrop-blur-md;
   scrollbar-width: none;
   &::-webkit-scrollbar {
     display: none;
   }
   & button {
-    @apply inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm text-surface-400 whitespace-nowrap;
+    @apply inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm text-surface-400 whitespace-nowrap;
     transition:
       background 0.25s var(--ease-ios),
       color 0.2s ease,
-      transform 0.25s var(--ease-spring);
+      box-shadow 0.25s var(--ease-ios),
+      transform 0.3s var(--ease-spring-strong);
   }
   & button:hover {
     @apply text-surface-200;
   }
   & button.active {
-    @apply bg-surface-700/70 text-surface-50;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+    @apply bg-surface-600/70 font-medium text-surface-50;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      0 2px 6px rgba(0, 0, 0, 0.24),
+      0 1px 1px rgba(0, 0, 0, 0.16);
   }
   & button:active {
-    transform: scale(0.96);
+    transform: scale(0.95);
+    transition-duration: 0.12s;
   }
 }
 
@@ -2392,6 +2418,8 @@ pre:hover .code-copy-btn { opacity: 1; }
 }
 .app-header.scrolled {
   border-bottom-color: rgba(148, 163, 184, 0.22);
+  /* 内容从下方穿过时,底缘透镜高光更明显(iOS 滚动分隔线) */
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.045), 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
 /* 页面内容入场:子元素逐个上浮(keep-alive 复用时不重播) */
@@ -2442,4 +2470,27 @@ pre:hover .code-copy-btn { opacity: 1; }
   color: var(--color-surface-400);
   pointer-events: none;
   transition: opacity 0.2s ease;
+}
+
+/* ---- iOS 风格层三期:连续圆角(squircle) ----
+   iOS 所有圆角都是超椭圆连续曲率,普通 border-radius 是圆弧,肉眼可辨"尖角感"。
+   corner-shape: superellipse() 已进 Chromium 139+/Safari;@supports 兜底,旧浏览器
+   保持圆形角不受影响。数值 2.5 贴近 iOS 大圆角控件的手感。 */
+@supports (corner-shape: superellipse(2.5)) {
+  .btn,
+  .icon-btn,
+  .input,
+  .search-field,
+  .card,
+  .panel-card,
+  .section-panel,
+  .toolbar-panel,
+  .modal,
+  .event-panel,
+  .command-dialog,
+  .activity-drawer,
+  .drawer,
+  .app-header .brand-mark {
+    corner-shape: superellipse(2.5);
+  }
 }
