@@ -25,7 +25,9 @@ test('passwords are hashed and sessions are authenticated by cookie', () => {
   let cookie = '';
   auth.issueSession({ header(name, value) { if (name === 'Set-Cookie') cookie = value; } });
   assert.match(cookie, /HttpOnly/);
-  assert.match(cookie, /SameSite=Strict/);
+  // Lax:跨站写请求不带 Cookie(CSRF 面与 Strict 相同),同时外链跳转不丢会话;
+  // SameSite=None 仅在 EMBED_MODE=1 且 HTTPS 时使用(见 auth.js)。
+  assert.match(cookie, /SameSite=Lax/);
   assert.equal(auth.isAuthenticated({ headers: { cookie: cookie.split(';')[0] } }), true);
   auth.changePassword('correct-horse-battery', 'new-correct-horse-battery');
   assert.equal(auth.isAuthenticated({ headers: { cookie: cookie.split(';')[0] } }), false);

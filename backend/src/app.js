@@ -61,7 +61,16 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: https: blob:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; frame-ancestors *;");
+    if (process.env.EMBED_MODE === '1') {
+      // 跨域嵌入模式:允许被任意页面 iframe,放开跨源 WebSocket 连接。
+      // 牺牲点击劫持防护,只该在面板本身另有网络隔离时使用。
+      reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: https: blob:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; frame-ancestors *;");
+    } else {
+      // 默认收紧:X-Frame-Options DENY、script-src 不放 unsafe-inline ——
+      // 面板有 Shell/容器控制能力,点击劫持与注入面必须收紧。
+      reply.header('X-Frame-Options', 'DENY');
+      reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self'; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:");
+    }
     return payload;
   });
 

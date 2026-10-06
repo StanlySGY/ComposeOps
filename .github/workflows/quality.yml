@@ -14,10 +14,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
-      - run: npm --prefix backend ci && npm --prefix frontend ci
+          cache-dependency-path: package-lock.json
+      # npm workspaces:根 lockfile 描述全部 workspace,一次 ci 装齐
+      - run: npm ci --no-audit --no-fund
       - run: node scripts/release-notes.mjs
       - run: npm run lint
       - run: npm test

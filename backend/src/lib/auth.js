@@ -49,11 +49,21 @@ export function changePassword(currentPassword, nextPassword) {
   clearSessions();
 }
 
+/**
+ * 跨域嵌入模式(EMBED_MODE=1):Cookie 放开 SameSite 以便在 iframe/第三方上下文里保持登录。
+ * 默认 Strict:面板有 Shell/容器控制能力,SameSite=None 会让跨站请求带上会话 Cookie,
+ * 等 CSRF 面积扩大;只有真的要跨源嵌入时才该打开。
+ */
+const embedMode = () => process.env.EMBED_MODE === '1';
+
 export function issueSession(reply, secure = false) {
   const token = randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
   createSession(tokenHash(token), expires.toISOString());
-  const sameSite = secure ? 'SameSite=None; Secure; Partitioned' : 'SameSite=Lax';
+  // SameSite=None 必须 paired Secure,否则浏览器直接拒收;HTTP 部署退回 Lax 保证登录可用。
+  const sameSite = embedMode() && secure
+    ? 'SameSite=None; Secure; Partitioned'
+    : 'SameSite=Lax';
   reply.header('Set-Cookie', [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
@@ -66,7 +76,7 @@ export function issueSession(reply, secure = false) {
 export function clearSession(request, reply) {
   const token = parseCookies(request.headers.cookie)[COOKIE_NAME];
   if (token) deleteSession(tokenHash(token));
-  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=0`);
+  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; Max-Age=0`);
 }
 
 export function isAuthenticated(request) {
@@ -81,7 +91,13 @@ export function validateOrigin(request) {
     const originHost = new URL(origin).host;
     const reqHost = request.headers['x-forwarded-host'] || request.headers.host;
     if (originHost === reqHost) return true;
-    if (originHost.endsWith('.run.app') || originHost.includes('localhost') || originHost.includes('127.0.0.1') || originHost.includes('google.com')) return true;
+    // 反向代理背后 host 可能被改写,x-forwarded-host 一致即放行(不受嵌入模式影响)。
+    if (embedMode()) {
+      // 嵌入场景:显式托管域名与本地调试页放行;substring 匹配太松,一律用后缀判断。
+      if (originHost.endsWith('.run.app')) return true;
+      if (originHost === 'localhost' || originHost.endsWith('.localhost') || originHost.startsWith('localhost:') || originHost.startsWith('127.0.0.1:')) return true;
+      if (originHost === 'google.com' || originHost.endsWith('.google.com')) return true;
+    }
     return false;
   } catch {
     return false;

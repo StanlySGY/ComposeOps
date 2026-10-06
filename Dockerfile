@@ -1,19 +1,22 @@
 # syntax=docker/dockerfile:1
 
+# npm workspaces:根 lockfile 描述全部 workspace,各阶段用 -w 只装所需依赖。
+# COPY 根清单 + 两个 workspace 清单,保证 npm ci 的同步校验完整可用。
+
 # ---------- Stage 1: build the Vue frontend ----------
 FROM node:22-bookworm-slim AS frontend-build
 
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-# Lockfile 的 resolved URL 指向 npmmirror;容器里没有宿主 ~/.npmrc,故显式写死
-# 镜像源。若宿主 shell 设了 HTTP_PROXY/HTTPS_PROXY,BuildKit 透传给 npm 走代理。
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
 RUN npm config set registry https://registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
- && npm ci --no-audit --no-fund
-COPY frontend/ ./
+ && npm ci --workspace frontend --no-audit --no-fund
+COPY frontend/ ./frontend/
 # Output: /app/frontend/dist (hash-history SPA, no server rewrites needed)
-RUN npm run build
+RUN npm run build --workspace frontend
 
 
 # ---------- Stage 2: install backend deps ----------
@@ -22,12 +25,14 @@ RUN npm run build
 # 装编译器 —— 国内构建最容易被 deb.debian.org 卡住的一整段风险随之消失。
 FROM node:22-bookworm-slim AS backend-build
 
-WORKDIR /app/backend
-COPY backend/package.json backend/package-lock.json ./
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
 RUN npm config set registry https://registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
- && npm ci --no-audit --no-fund
+ && npm ci --workspace backend --no-audit --no-fund
 
 
 # ---------- Stage 3: runtime ----------
@@ -63,8 +68,8 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 
 WORKDIR /app/backend
 
-# Backend node_modules (纯 JS 依赖,无原生模块) then source
-COPY --from=backend-build /app/backend/node_modules ./node_modules
+# Workspace 依赖已提升到根 node_modules(Node 会沿 /app/backend → /app 向上解析)
+COPY --from=backend-build /app/node_modules /app/node_modules
 COPY backend/ ./
 
 # Built frontend, placed so index.js staticRoot (backend/src/../../frontend/dist) resolves
