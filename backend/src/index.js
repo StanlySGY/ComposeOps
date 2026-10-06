@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { startAlertMonitor } from './services/alert-monitor.js';
 
-try { process.loadEnvFile?.(); } catch {}
+try { process.loadEnvFile?.(); } catch { /* .env 不存在或不可读时用进程环境变量,属预期 */ }
 import { startHealthAlerter } from './services/health-alerter.js';
 import { startCronScheduler } from './services/cron-scheduler.js';
 import { startInspectionScheduler } from './services/inspection.js';

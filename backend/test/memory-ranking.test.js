@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import Database from 'better-sqlite3';
+import Database from '../src/lib/sqlite.js';
 import { runMigrations, listAiMemories, recordAiMemoryRecall, sleepAiMemories } from '../src/lib/db.js';
 
 function freshDb() {

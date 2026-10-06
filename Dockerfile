@@ -16,43 +16,18 @@ COPY frontend/ ./
 RUN npm run build
 
 
-# ---------- Stage 2: install backend deps + native modules ----------
-# better-sqlite3 自带 N-API 预编译包,优先直接下载预编译产物:这条路不需要
-# python3/make/g++,也就不需要 apt —— 国内直连 deb.debian.org 拉 Packages 索引
-# 经常超时(实测同一容器里 InRelease 能通、12MB 的 Packages.gz 必断),
-# 少一次 apt 就少一个构建失败点。仅当预编译不可用时才回退源码编译。
+# ---------- Stage 2: install backend deps ----------
+# SQLite 已切到 Node 22 内置的 node:sqlite(backend/src/lib/sqlite.js),
+# 不再依赖 better-sqlite3 原生模块:无需预编译下载/源码编译,也就不需要 apt
+# 装编译器 —— 国内构建最容易被 deb.debian.org 卡住的一整段风险随之消失。
 FROM node:22-bookworm-slim AS backend-build
-
-# apt 源镜像(仅在预编译失败的源码编译回退分支里才会用到 apt)。
-# 默认为清华源:实测同一容器里 deb.debian.org 拉 InRelease 能通、但 12MB 的
-# Packages.gz 必超时,清华源 4 秒稳定下完 11.5MB。
-#   - 覆盖:`--build-arg APT_MIRROR=mirrors.ustc.edu.cn`
-#   - 强制走官方源:`--build-arg APT_MIRROR=`
-# 走 http 而非 https:裸 debian 镜像里没预装 ca-certificates,
-# https 会在 update 阶段直接报 "Certificate verification failed"。
-ARG APT_MIRROR="mirrors.tuna.tsinghua.edu.cn"
 
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json ./
-# 关键:先在**不装任何编译器**的前提下试预编译产物。这条路走通就一次 apt 都不用碰,
-# 也就不可能被 deb.debian.org 卡住。prebuild-install 认的环境变量名规则是
-# npm_config_<pkg名去掉非字母数字>_binary_host,所以 better-sqlite3 对应
-# npm_config_better_sqlite3_binary_host。
 RUN npm config set registry https://registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
- && (npm_config_better_sqlite3_binary_host=https://registry.npmmirror.com/-/binary/better-sqlite3 \
-      npm ci --no-audit --no-fund \
-      && node -e "require('better-sqlite3');console.log('[build] better-sqlite3 预编译产物 OK')") \
- || (echo '[build] 预编译不可用,回退源码编译(需要 apt 装编译器)' \
-      && if [ -n "$APT_MIRROR" ]; then \
-           sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
-         fi \
-      && apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
-      && apt-get install -y --no-install-recommends python3 make g++ \
-      && rm -rf /var/lib/apt/lists/* \
-      && npm ci --no-audit --no-fund --build-from-source \
-      && node -e "require('better-sqlite3');console.log('[build] better-sqlite3 源码编译 OK')")
+ && npm ci --no-audit --no-fund
 
 
 # ---------- Stage 3: runtime ----------
@@ -88,7 +63,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 
 WORKDIR /app/backend
 
-# Native node_modules (better-sqlite3 预编译或源码编译) then source
+# Backend node_modules (纯 JS 依赖,无原生模块) then source
 COPY --from=backend-build /app/backend/node_modules ./node_modules
 COPY backend/ ./
 

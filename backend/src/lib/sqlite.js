@@ -33,17 +33,21 @@ class StatementWrapper {
   get(...params) {
     const cleaned = sanitizeParams(params);
     const result = this._stmt.get(...cleaned);
-    return result || undefined;
+    // node:sqlite 返回 null-prototype 对象,better-sqlite3 返回普通对象;
+    // 展开一层,保证 deepStrictEqual / JSON 序列化行为与迁移前一致。
+    return result ? { ...result } : undefined;
   }
 
   all(...params) {
     const cleaned = sanitizeParams(params);
-    return this._stmt.all(...cleaned);
+    return this._stmt.all(...cleaned).map((row) => ({ ...row }));
   }
 
-  iterate(...params) {
+  *iterate(...params) {
     const cleaned = sanitizeParams(params);
-    return this._stmt.iterate(...cleaned);
+    for (const row of this._stmt.iterate(...cleaned)) {
+      yield { ...row };
+    }
   }
 }
 
@@ -51,7 +55,8 @@ export default class Database {
   constructor(location, options = {}) {
     this._db = new DatabaseSync(location, {
       readOnly: options.readonly ?? false,
-      enableForeignKeyConstraints: true,
+      // better-sqlite3 默认关闭外键约束,保持行为兼容,避免既有写入路径被 FK 拦下。
+      enableForeignKeyConstraints: false,
     });
   }
 
@@ -90,21 +95,19 @@ export default class Database {
       } catch (err) {
         try {
           this._db.exec('ROLLBACK');
-        } catch (_) {}
+        } catch (_) { /* 事务已失效时回滚本身也会失败,吞掉后向上抛原错误 */ }
         throw err;
       }
     };
   }
 
-  async backup(destinationPath) {
-    // node:sqlite backup support if available
-    try {
-      const sqlite = await import('node:sqlite');
-      if (typeof sqlite.backup === 'function') {
-        await sqlite.backup(this._db, destinationPath);
-        return;
-      }
-    } catch (_) {}
+  /**
+   * 导出一致性快照(node:sqlite 在 Node 22 上没有 backup API,用 VACUUM INTO)。
+   * 注意:目标文件必须不存在,且本连接不能是 readOnly(SQLite 拒绝只读源)。
+   */
+  vacuumInto(destinationPath) {
+    const target = String(destinationPath).replace(/'/g, "''");
+    this._db.exec(`VACUUM INTO '${target}'`);
   }
 
   close() {

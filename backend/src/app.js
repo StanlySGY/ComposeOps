@@ -59,9 +59,12 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
 
   fastify.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-ancestors *;");
+    // script-src 不放 'unsafe-inline'、frame-ancestors 不放开:面板有 Shell/容器控制能力,
+    // 点击劫持与注入面必须收紧;要嵌别的面板请走反向代理同源方案。
+    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self'; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:");
     return payload;
   });
 
@@ -143,7 +146,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   // MCP 协议端点(不经过 /api/v1 会话鉴权:使用独立 token,见 routes/mcp.js 安全模型)
   await fastify.register(mcpRoutes, { prefix: '/mcp' });
 
-  // 健康检查:探测 Docker socket 连通性,未连通时返回 degraded。
+  // 健康检查:探测 Docker socket 连通性,失败返回 503 便于编排层重启/摘流。
   fastify.get('/health', async (request, reply) => {
     const started = Date.now();
     try {
@@ -154,7 +157,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       return { status: 'ok', docker: 'ok', latencyMs: Date.now() - started, ts: Date.now() };
     } catch (err) {
       fastify.log.warn({ err: err.message }, 'health check: docker unreachable');
-      return reply.code(200).send({
+      return reply.code(503).send({
         status: 'degraded',
         docker: 'unreachable',
         error: err.message,

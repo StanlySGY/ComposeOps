@@ -7,10 +7,6 @@
   "engines": {
     "node": ">=22"
   },
-  "workspaces": [
-    "frontend",
-    "backend"
-  ],
   "scripts": {
     "install:all": "npm --prefix backend install && npm --prefix frontend install",
     "test": "npm run test:backend && npm run test:frontend",

@@ -6,6 +6,9 @@ import test from 'node:test';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-routes-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
+// 测试聚焦 API 语义:显式关闭 SPA 静态托管,未注册路径才走 Fastify 原生 404
+// (生产默认托管前端,未注册路径由 SPA fallback 兜底返回 index.html)。
+process.env.SERVE_FRONTEND = '0';
 
 const { buildApp } = await import('../src/app.js');
 

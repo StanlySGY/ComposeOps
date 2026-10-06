@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, readdirSync, writeFileSync } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import Database from 'better-sqlite3';
+import Database from '../src/lib/sqlite.js';
 import { backupDatabase, verifyDatabase } from '../src/lib/database-backup.js';
 
 test('在线快照包含尚未 checkpoint 的 WAL 数据，权限为 0600，源库继续可写', async () => {
