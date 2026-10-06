@@ -46,25 +46,19 @@
 
         <Skeleton v-if="loading" variant="table" :rows="4" label="拓扑加载中" />
         <EmptyState v-else-if="!services.length" icon="Network" title="该项目没有可解析的服务" description="项目可能没有 Compose 配置,或配置中未定义 services" />
-        <div v-else class="overflow-auto rounded-2xl border border-surface-800 bg-surface-950/60">
-          <svg :viewBox="`0 0 ${layout.width} ${layout.height}`" class="min-w-[720px] w-full" role="img" aria-label="服务拓扑图">
-            <defs>
-              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill="#475569" />
-              </marker>
-            </defs>
-            <!-- 连线 -->
-            <g v-for="edge in edges" :key="edge.key">
-              <path :d="edgePath(edge)" fill="none" stroke="#334155" stroke-width="1.5" marker-end="url(#arrowhead)" />
-            </g>
-            <!-- 节点 -->
-            <g v-for="node in layout.nodes" :key="node.name" :transform="`translate(${node.x}, ${node.y})`">
-              <rect :x="-TOPO.nodeW/2" :y="-TOPO.nodeH/2" :width="TOPO.nodeW" :height="TOPO.nodeH" rx="12" :fill="nodeFill(node)" :stroke="nodeStroke(node)" stroke-width="1.5" />
-              <text :x="0" :y="-4" text-anchor="middle" class="topo-node-name" fill="#E2E8F0">{{ node.name }}</text>
-              <text :x="0" :y="14" text-anchor="middle" class="topo-node-sub" :fill="nodeSubColor(node)">{{ nodeSub(node) }}</text>
-            </g>
-          </svg>
-        </div>
+        <ForceGraph
+          v-else
+          :nodes="graphNodes"
+          :edges="graphEdges"
+          :seed-positions="seedPositions"
+          :selected-key="selectedService"
+          height="560"
+          aria-label="服务拓扑力导向图"
+          @node-click="toggleService"
+        />
+        <p v-if="selectedService" class="mt-3 text-xs text-surface-400">
+          已选中 <span class="font-mono text-surface-200">{{ selectedService }}</span>,服务明细中对应行已高亮;拖拽气泡可整理布局,滚轮缩放,空白处拖拽平移。
+        </p>
       </section>
 
       <!-- 服务明细 -->
@@ -74,7 +68,12 @@
           <table class="data-table">
             <thead><tr><th>服务</th><th>状态</th><th>依赖</th><th>端口</th><th>卷</th><th>镜像</th></tr></thead>
             <tbody>
-              <tr v-for="svc in services" :key="svc.name" class="hover:bg-surface-800/25">
+              <tr
+                v-for="svc in services"
+                :key="svc.name"
+                class="hover:bg-surface-800/25"
+                :class="svc.name === selectedService ? 'topo-row-selected' : ''"
+              >
                 <td class="font-mono font-medium text-surface-100">{{ svc.name }}</td>
                 <td><span class="status-badge" :class="svcStateClass(svc)">{{ svcStateLabel(svc) }}</span></td>
                 <td class="text-surface-300">{{ svc.dependsOn.length ? svc.dependsOn.join(', ') : '—' }}</td>
@@ -96,7 +95,8 @@ import { Boxes, Container, GitBranch, HardDrive, Network, RefreshCw } from 'luci
 import * as YAML from 'yaml';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
-import { computeTopologyLayout, TOPO_DEFAULTS } from '../lib/topology-layout.js';
+import { assignLevels } from '../lib/topology-layout.js';
+import ForceGraph from '../components/ForceGraph.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 
@@ -108,9 +108,8 @@ const error = ref('');
 const services = ref([]);
 const networks = ref([]);
 const volumes = ref([]);
+const selectedService = ref('');
 const composeProjects = computed(() => store.projects.filter((project) => project.editable));
-
-const TOPO = TOPO_DEFAULTS;
 
 const project = computed(() => composeProjects.value.find((p) => p.id === selectedProjectId.value));
 const containerCount = computed(() => (crossProject.value ? store.projects.reduce((n, p) => n + (p.containers?.length || 0), 0) : project.value?.containers?.length || 0));
@@ -119,56 +118,55 @@ const networkCount = computed(() => networks.value.length);
 const volumeCount = computed(() => volumes.value.length);
 const edgeCount = computed(() => services.value.reduce((n, s) => n + s.dependsOn.length, 0));
 
-// 布局计算收敛到 lib/topology-layout.js(纯函数,有单测):
- // 层内节点以画布垂直中点居中,任何层数都不会再被 viewBox 上沿裁掉。
-const layout = computed(() => computeTopologyLayout(services.value));
-const edges = computed(() => {
+// 力导向图:气泡 = 服务,连线 = depends_on;初始坐标继承分层布局的左→右依赖流
+const graphNodes = computed(() =>
+  services.value.map((svc) => ({
+    key: svc.name,
+    label: svc.name.length > 24 ? `${svc.name.slice(0, 23)}…` : svc.name,
+    fullLabel: svc.name,
+    sub: svcStateLabel(svc),
+    state: svcState(svc),
+  }))
+);
+const graphEdges = computed(() => {
   const list = [];
   for (const svc of services.value) {
     for (const dep of svc.dependsOn) {
-      list.push({ key: `${dep}->${svc.name}`, from: dep, to: svc.name });
+      list.push({ source: dep, target: svc.name });
     }
   }
   return list;
 });
+const seedPositions = computed(() => {
+  if (!services.value.length) return null;
+  // 按依赖层级比例铺到世界坐标(被依赖者在左),单层图水平居中;
+  // 力模拟会在此基础上松弛成自然形态
+  const levels = assignLevels(services.value);
+  const maxLevel = Math.max(0, ...levels.map((l) => l.level));
+  const left = 220;
+  const right = 1200 - 220;
+  const map = {};
+  for (const item of levels) {
+    map[item.name] = {
+      x: maxLevel === 0 ? 600 : left + (item.level / maxLevel) * (right - left),
+      y: 350 + (item.index - (item.count - 1) / 2) * 110,
+    };
+  }
+  return map;
+});
 
-function nodePos(name) {
-  return layout.value.nodes.find((n) => n.name === name);
-}
-function edgePath(edge) {
-  const from = nodePos(edge.from);
-  const to = nodePos(edge.to);
-  if (!from || !to) return '';
-  const x1 = from.x + TOPO.nodeW / 2;
-  const y1 = from.y;
-  const x2 = to.x - TOPO.nodeW / 2;
-  const y2 = to.y;
-  const mx = (x1 + x2) / 2;
-  return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+function toggleService(key) {
+  selectedService.value = selectedService.value === key ? '' : key;
 }
 
 function svcState(svc) {
   const projectData = crossProject.value ? store.projects.find((p) => p.id === svc.projectId) : project.value;
-  const container = (projectData?.containers || []).find((c) => c.name.includes(svc.name));
+  // 跨项目模式下服务名带 "项目/" 前缀,容器名匹配要用裸服务名
+  const matchName = crossProject.value ? svc.rawName : svc.name;
+  const container = (projectData?.containers || []).find((c) => c.name.includes(matchName));
   if (!container) return 'none';
   if (container.health === 'unhealthy') return 'unhealthy';
   return container.state === 'running' ? 'running' : 'stopped';
-}
-function nodeFill(node) {
-  const s = svcState(node);
-  return { running: '#052E16', unhealthy: '#451A03', stopped: '#1E293B', none: '#0F172A' }[s] || '#0F172A';
-}
-function nodeStroke(node) {
-  const s = svcState(node);
-  return { running: '#10B981', unhealthy: '#F59E0B', stopped: '#F43F5E', none: '#334155' }[s] || '#334155';
-}
-function nodeSubColor(node) {
-  const s = svcState(node);
-  return { running: '#6EE7B7', unhealthy: '#FCD34D', stopped: '#FDA4AF', none: '#64748B' }[s] || '#64748B';
-}
-function nodeSub(node) {
-  const s = svcState(node);
-  return { running: '运行中', unhealthy: '不健康', stopped: '已停止', none: '无容器' }[s] || '无容器';
 }
 function svcStateClass(svc) {
   const s = svcState(svc);
@@ -234,6 +232,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.topo-node-name { font-size: 13px; font-weight: 600; font-family: ui-monospace, monospace; }
-.topo-node-sub { font-size: 11px; }
+.topo-row-selected {
+  background: rgba(16, 185, 129, 0.08);
+  box-shadow: inset 2px 0 0 var(--color-emerald-400, #34D399);
+}
 </style>

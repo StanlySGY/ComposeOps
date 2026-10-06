@@ -39,25 +39,13 @@
 
       <Skeleton v-if="loading" variant="table" :rows="4" label="图谱加载中" />
       <EmptyState v-else-if="!projects.length" icon="Network" title="暂无项目数据" description="纳管项目后,知识图谱会自动生成实体关系" />
-      <div v-else class="overflow-auto rounded-2xl border border-surface-800 bg-surface-950/60">
-        <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="min-w-[900px] w-full" role="img" aria-label="运维知识图谱">
-          <defs>
-            <marker id="kg-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-              <polygon points="0 0, 8 3, 0 6" fill="#475569" />
-            </marker>
-          </defs>
-          <!-- 连线 -->
-          <g v-for="edge in edges" :key="edge.key">
-            <path :d="edgePath(edge)" fill="none" stroke="#334155" stroke-width="1.2" marker-end="url(#kg-arrow)" />
-          </g>
-          <!-- 节点 -->
-          <g v-for="node in nodes" :key="node.key" :transform="`translate(${node.x}, ${node.y})`">
-            <rect :x="-nodeW/2" :y="-nodeH/2" :width="nodeW" :height="nodeH" rx="10" :fill="nodeFill(node)" :stroke="nodeStroke(node)" stroke-width="1.5" />
-            <text :x="0" :y="-3" text-anchor="middle" class="kg-node-name" fill="#E2E8F0">{{ node.label }}</text>
-            <text :x="0" :y="13" text-anchor="middle" class="kg-node-sub" :fill="nodeSubColor(node)">{{ node.sub }}</text>
-          </g>
-        </svg>
-      </div>
+      <ForceGraph
+        v-else
+        :nodes="graphNodes"
+        :edges="graphEdges"
+        :height="embedded ? 480 : 560"
+        aria-label="运维知识图谱"
+      />
     </section>
 
     <!-- 实体明细 -->
@@ -105,6 +93,7 @@ import { AlertTriangle, Bot, Boxes, Database, HardDrive, RefreshCw, Server } fro
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import { useCmdbStore } from '../stores/cmdb.js';
+import ForceGraph from '../components/ForceGraph.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 
@@ -117,29 +106,24 @@ const alerts = ref([]);
 const inspectionCount = ref(0);
 const useCmdb = ref(false);
 
-const nodeW = 150;
-const nodeH = 44;
-
 const projects = computed(() => useCmdb.value ? cmdb.projects : store.projects);
 const containerCount = computed(() => useCmdb.value ? cmdb.containers.length : projects.value.reduce((n, p) => n + (p.containers?.length || 0), 0));
 const volumeCount = computed(() => useCmdb.value ? cmdb.assets.filter((a) => a.kind === 'volume').length : projects.value.reduce((n, p) => n + (p.containers || []).reduce((m, c) => m + (c.volumes?.length || 0), 0), 0));
 const alertCount = computed(() => alerts.value.length);
 const activeHostName = computed(() => hosts.value.find((h) => h.active)?.name || 'Local Daemon');
 
-// 图谱布局:Host 在左,项目居中,卷/告警在右
-const nodes = computed(() => {
+// 图谱数据交给 ForceGraph 力导向布局:Host 是大 hub,项目居中,卷/告警环绕各自项目
+const graphNodes = computed(() => {
   const list = [];
-  const hostY = 60;
-  hosts.value.forEach((host, i) => {
-    list.push({ key: `host-${host.id}`, type: 'host', label: host.name, sub: host.active ? '活跃节点' : host.type, x: 90, y: hostY + i * 90 });
+  const truncate = (text) => (text.length > 22 ? `${text.slice(0, 21)}…` : text);
+  hosts.value.forEach((host) => {
+    list.push({ key: `host-${host.id}`, label: truncate(host.name), fullLabel: host.name, sub: host.active ? '活跃节点' : host.type, state: 'host' });
   });
-  const projectStartY = 60;
-  projects.value.forEach((p, i) => {
+  projects.value.forEach((p) => {
     const label = useCmdb.value ? (p.displayName || p.name) : p.projectName;
     const sub = useCmdb.value ? (p.status || '') : `${p.containers?.length || 0} 容器`;
-    list.push({ key: `project-${p.id}`, type: 'project', label, sub, x: 340, y: projectStartY + i * 90 });
+    list.push({ key: `project-${p.id}`, label: truncate(String(label)), fullLabel: String(label), sub, state: 'project' });
   });
-  const volumeStartY = 60;
   const volumes = [];
   if (useCmdb.value) {
     cmdb.assets.filter((a) => a.kind === 'volume').forEach((v) => volumes.push(v.name));
@@ -153,66 +137,36 @@ const nodes = computed(() => {
       }
     });
   }
-  volumes.slice(0, 12).forEach((v, i) => {
-    list.push({ key: `volume-${v}`, type: 'volume', label: v, sub: '数据卷', x: 590, y: volumeStartY + i * 70 });
+  volumes.slice(0, 12).forEach((v) => {
+    list.push({ key: `volume-${v}`, label: truncate(v), fullLabel: v, sub: '数据卷', state: 'volume' });
   });
-  const alertStartY = 60;
-  alerts.value.slice(0, 8).forEach((a, i) => {
-    list.push({ key: `alert-${a.id}`, type: 'alert', label: a.title, sub: a.priority === 'danger' ? '紧急' : '关注', x: 840, y: alertStartY + i * 70 });
+  alerts.value.slice(0, 8).forEach((a) => {
+    list.push({ key: `alert-${a.id}`, label: truncate(a.title), fullLabel: a.title, sub: a.priority === 'danger' ? '紧急' : '关注', state: 'alert' });
   });
   return list;
 });
-const edges = computed(() => {
+const graphEdges = computed(() => {
   const list = [];
   const activeHost = hosts.value.find((h) => h.active) || hosts.value[0];
   if (activeHost) {
     for (const p of projects.value) {
-      list.push({ key: `${activeHost.id}->${p.id}`, from: `host-${activeHost.id}`, to: `project-${p.id}` });
+      list.push({ source: `host-${activeHost.id}`, target: `project-${p.id}` });
     }
   }
   for (const p of projects.value) {
     for (const c of p.containers || []) {
       for (const v of c.volumes || []) {
         const name = String(v).split(':')[0];
-        if (name) list.push({ key: `${p.id}->${name}`, from: `project-${p.id}`, to: `volume-${name}` });
+        if (name) list.push({ source: `project-${p.id}`, target: `volume-${name}` });
       }
     }
   }
   for (const a of alerts.value.slice(0, 8)) {
     const target = projects.value.find((p) => a.target?.includes(p.id) || a.title?.includes(p.projectName || p.name));
-    if (target) list.push({ key: `${a.id}->${target.id}`, from: `alert-${a.id}`, to: `project-${target.id}` });
+    if (target) list.push({ source: `alert-${a.id}`, target: `project-${target.id}` });
   }
   return list;
 });
-const svgWidth = computed(() => 1000);
-const svgHeight = computed(() => {
-  const maxCount = Math.max(hosts.value.length, projects.value.length, Math.min(12, volumeCount.value), Math.min(8, alertCount.value));
-  return 120 + maxCount * 90;
-});
-
-function nodePos(key) {
-  return nodes.value.find((n) => n.key === key);
-}
-function edgePath(edge) {
-  const from = nodePos(edge.from);
-  const to = nodePos(edge.to);
-  if (!from || !to) return '';
-  const x1 = from.x + nodeW / 2;
-  const y1 = from.y;
-  const x2 = to.x - nodeW / 2;
-  const y2 = to.y;
-  const mx = (x1 + x2) / 2;
-  return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
-}
-function nodeFill(node) {
-  return { host: '#0C4A6E', project: '#052E16', volume: '#2E1065', alert: '#4C0519' }[node.type] || '#0F172A';
-}
-function nodeStroke(node) {
-  return { host: '#38BDF8', project: '#10B981', volume: '#A78BFA', alert: '#F43F5E' }[node.type] || '#334155';
-}
-function nodeSubColor(node) {
-  return { host: '#7DD3FC', project: '#6EE7B7', volume: '#C4B5FD', alert: '#FDA4AF' }[node.type] || '#64748B';
-}
 
 async function load() {
   if (loading.value) return;
@@ -249,8 +203,3 @@ onMounted(async () => {
   await load();
 });
 </script>
-
-<style scoped>
-.kg-node-name { font-size: 12px; font-weight: 600; font-family: ui-monospace, monospace; }
-.kg-node-sub { font-size: 10px; }
-</style>
