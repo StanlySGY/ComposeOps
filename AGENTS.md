@@ -44,6 +44,10 @@
 - 网络:沙箱 LAN IP(192.168.0.102)对服务器**不可达**,用沙箱 tailscale IP(100.108.186.126);curl 一律 `--noproxy '*'`。面板 WS 路由前缀是 `/ws`(带 cookie 即鉴权)。
 - 面板重启后会自动为纳管项目预热 workspace 容器(sleep 3600 + 项目目录 bind),是正常机制,别当垃圾清掉。
 
+## Stitch MCP(Google 设计生成,用户级配置)
+- 配置在 `~/.zcode/cli/config.json` → `mcp.servers.stitch`(http 型,URL `https://stitch.googleapis.com/mcp`,头 `X-Goog-Api-Key`,密钥在用户配置里,**严禁**写进仓库文件;新会话才生效)。
+- 沙箱内直连超时,**必须走代理**才能通;也可用 curl 直接打 JSON-RPC(tools/call)。工具 schema 要点:`create_project` 参数是 `title`(不是 name);`generate_screen_from_text` 要 `projectId`+`prompt`,桌面设计传 `deviceType: "DESKTOP"`,生成一次要几分钟、占免费额度(350/月)。
+
 ## CodeGraph
 
 Use CodeGraph to understand or locate code BEFORE grep/find or reading files, when the repo is indexed (a `.codegraph/` directory exists at the repo root).
