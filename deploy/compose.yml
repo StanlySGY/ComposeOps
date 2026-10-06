@@ -1,7 +1,7 @@
 # Stable image installation. Source builds use the repository's docker-compose.yml.
 services:
   opsdash:
-    image: stanly1997/opsdash:${COMPOSEOPS_VERSION:-1.5.0}
+    image: stanly1997/opsdash:${COMPOSEOPS_VERSION:-1.5.1}
     container_name: opsdash
     restart: unless-stopped
     init: true

@@ -1,6 +1,6 @@
 {
   "name": "composeops",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "type": "module",
   "description": "ComposeOps —— Docker Compose 可视化运维面板",

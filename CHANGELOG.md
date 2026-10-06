@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 配置页随条件渲染的编辑器容器创建/销毁 Monaco，修复带项目参数直达页面与代码/可视化来回切换后的空白编辑器。
 
+## [1.5.1] - 2026-10-06
+
+### Added
+- 拓扑中心与资产中心知识图谱升级为双模式关系图：分层架构按依赖深度排列，自由拓扑为力导向气泡，支持拖拽、缩放平移、悬停高亮上下游链路与依赖流向动画。
+- 跨域嵌入开关 EMBED_MODE：放宽 CSP 与会话 Cookie 策略用于 iframe/Cloud Run 场景，默认保持严格安全姿态。
+
+### Changed
+- 全站界面按 iOS 风格打磨：胶囊分段控制器、毛玻璃浮层材质、按压弹簧手感、连续圆角（支持的浏览器）。
+- SQLite 存储迁移到 Node 22 内置 node:sqlite，移除 better-sqlite3 原生依赖，镜像构建不再需要编译器。
+- 仓库切换为 npm workspaces，根 lockfile 统一管理依赖。
+
 ## [1.5.0] - 2026-10-01
 
 ### Added
