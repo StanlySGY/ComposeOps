@@ -38,6 +38,12 @@
 - `git push origin main` HTTPS 在沙箱握手失败;直接提升权限走已批准 `["git","push"]` 即可成功;SSH 地址 `git@github.com:StanlySGY/ComposeOps.git` 沙箱内 DNS 解析失败,需同样提升权限。
 - 提交信息用中文结构话术(标题 + `-` 分节)。
 
+## 服务器部署经验(100.86.191.116:28765)
+- 面板容器 `opsdash` 的镜像**自带代码**(/app),仓库没有 bind 进容器;发版 = 在服务器上用仓库重建镜像,不能改容器内文件。
+- 发版流程:沙箱 `git bundle create /tmp/x.bundle main ^<服务器HEAD>` → `python3 -m http.server 8899` → 通过面板 Web Shell(`ws://host/ws/exec`,注意**没有** `/api/v1` 前缀;二进制帧=终端输出,文本帧=控制 JSON)起 detached helper 容器(直接用 `stanly1997/opsdash:latest`,内含 git/docker/compose):`docker run -d --name codeployN -v /home/sgy/workspace/ComposeOps:/home/sgy/workspace/ComposeOps -v /tmp:/hosttmp -v /var/run/docker.sock:/var/run/docker.sock -w <同路径> stanly1997/opsdash:latest sh -c '... curl bundle && git fetch && git merge --ff-only && docker compose build && docker compose up -d --force-recreate'`,日志写到 /hosttmp 便于轮询,完事删 helper。
+- 网络:沙箱 LAN IP(192.168.0.102)对服务器**不可达**,用沙箱 tailscale IP(100.108.186.126);curl 一律 `--noproxy '*'`。面板 WS 路由前缀是 `/ws`(带 cookie 即鉴权)。
+- 面板重启后会自动为纳管项目预热 workspace 容器(sleep 3600 + 项目目录 bind),是正常机制,别当垃圾清掉。
+
 ## CodeGraph
 
 Use CodeGraph to understand or locate code BEFORE grep/find or reading files, when the repo is indexed (a `.codegraph/` directory exists at the repo root).
