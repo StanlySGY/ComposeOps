@@ -38,7 +38,7 @@
         />
         <!-- 连线:底层弧线 + 上层流向虚线 -->
         <g class="fg-edges">
-          <template v-for="(edge, i) in renderedEdges" :key="edge.key">
+          <template v-for="edge in renderedEdges" :key="edge.key">
             <path
               class="fg-edge-line"
               :class="{ 'fg-dim': isDimmedEdge(edge) }"
@@ -391,7 +391,7 @@ function onPointerMove(event) {
     if (dragState.moved) viewTouched = true;
   }
 }
-function onPointerUp(event) {
+function onPointerUp() {
   window.removeEventListener('pointermove', onPointerMove);
   const state = dragState;
   dragState = null;
