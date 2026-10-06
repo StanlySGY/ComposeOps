@@ -1,0 +1,6 @@
+{
+  "name": "ComposeOps",
+  "description": "Docker Compose 运维面板：守护模式、部署预言、GitOps 与服务治理",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

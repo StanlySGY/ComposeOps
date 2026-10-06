@@ -59,12 +59,9 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
 
   fastify.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    // script-src 不放 'unsafe-inline'、frame-ancestors 不放开:面板有 Shell/容器控制能力,
-    // 点击劫持与注入面必须收紧;要嵌别的面板请走反向代理同源方案。
-    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self'; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:");
+    reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: https: blob:; media-src 'self' https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; frame-ancestors *;");
     return payload;
   });
 

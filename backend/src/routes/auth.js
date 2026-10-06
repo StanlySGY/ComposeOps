@@ -48,6 +48,8 @@ function saveLockouts() {
   setSetting(LOCKOUT_KEY, JSON.stringify(Object.fromEntries(map)));
 }
 
+const isSecure = (req) => req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https';
+
 export default async function authRoutes(fastify) {
   const attempts = {
     get: (key) => loadLockouts().get(key),
@@ -82,7 +84,7 @@ export default async function authRoutes(fastify) {
     }
     try {
       setPassword(request.body?.password);
-      issueSession(reply, request.protocol === 'https');
+      issueSession(reply, isSecure(request));
       return { ok: true };
     } catch (error) {
       return reply.code(400).send({ error: 'invalid_password', message: error.message });
@@ -116,7 +118,7 @@ export default async function authRoutes(fastify) {
       return reply.code(401).send({ error: 'invalid_credentials', message: '密码错误' });
     }
     attempts.delete(key);
-    issueSession(reply, request.protocol === 'https');
+    issueSession(reply, isSecure(request));
     return { ok: true };
   });
 
@@ -136,7 +138,7 @@ export default async function authRoutes(fastify) {
   }, async (request, reply) => {
     try {
       changePassword(request.body?.currentPassword, request.body?.nextPassword);
-      issueSession(reply, request.protocol === 'https');
+      issueSession(reply, isSecure(request));
       return { ok: true };
     } catch (error) {
       return reply.code(400).send({ error: 'password_change_failed', message: error.message });

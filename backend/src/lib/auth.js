@@ -53,20 +53,20 @@ export function issueSession(reply, secure = false) {
   const token = randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
   createSession(tokenHash(token), expires.toISOString());
+  const sameSite = secure ? 'SameSite=None; Secure; Partitioned' : 'SameSite=Lax';
   reply.header('Set-Cookie', [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Strict',
+    sameSite,
     `Max-Age=${SESSION_DAYS * 86400}`,
-    secure ? 'Secure' : '',
-  ].filter(Boolean).join('; '));
+  ].join('; '));
 }
 
 export function clearSession(request, reply) {
   const token = parseCookies(request.headers.cookie)[COOKIE_NAME];
   if (token) deleteSession(tokenHash(token));
-  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=0`);
 }
 
 export function isAuthenticated(request) {
@@ -81,7 +81,7 @@ export function validateOrigin(request) {
     const originHost = new URL(origin).host;
     const reqHost = request.headers['x-forwarded-host'] || request.headers.host;
     if (originHost === reqHost) return true;
-    if (originHost.endsWith('.run.app') || originHost.includes('localhost') || originHost.includes('127.0.0.1')) return true;
+    if (originHost.endsWith('.run.app') || originHost.includes('localhost') || originHost.includes('127.0.0.1') || originHost.includes('google.com')) return true;
     return false;
   } catch {
     return false;
