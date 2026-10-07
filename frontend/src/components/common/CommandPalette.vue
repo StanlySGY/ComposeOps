@@ -52,7 +52,7 @@
             </div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-surface-800 px-4 py-2 text-[11px] text-surface-400">
               <span><kbd>↑ ↓</kbd> 选择</span><span><kbd>Enter</kbd> 打开</span><span><kbd>Esc</kbd> 关闭</span>
-              <span class="ml-auto" role="status" aria-live="polite">{{ filtered.length }} 个结果</span>
+              <span class="ml-auto" role="status" aria-live="polite">{{ resultSummary }}</span>
             </div>
           </div>
         </Transition>
@@ -82,7 +82,11 @@ const dialogRef = ref(null);
 const listId = `command-list-${useId()}`;
 let previousFocus = null;
 
-const filtered = computed(() => searchCommands(props.commands, query.value));
+const allMatches = computed(() => searchCommands(props.commands, query.value));
+const filtered = computed(() => query.value.trim() ? allMatches.value : allMatches.value.slice(0, 10));
+const resultSummary = computed(() => query.value.trim()
+  ? `${allMatches.value.length} 个结果`
+  : `${filtered.value.length} 个常用入口 · 共 ${allMatches.value.length} 个命令`);
 
 watch(() => props.show, async (show) => {
   if (show) {

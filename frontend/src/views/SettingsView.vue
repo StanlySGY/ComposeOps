@@ -484,6 +484,7 @@ async function confirmSaveManagement() {
     selectedMountProjectIds.value = selectedMountProjectIds.value.filter((id) => selectedProjectIds.value.includes(id));
     await api.saveProjectManagement(selectedProjectIds.value, selectedMountProjectIds.value);
     applyMountPlan(await api.getMountPlan());
+    window.dispatchEvent(new CustomEvent('composeops:projects-changed'));
     ok('管理与 Compose 目录选择已更新');
   }
   catch (e) { fail(e); } finally { mountLoading.value = false; }

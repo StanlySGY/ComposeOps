@@ -20,7 +20,8 @@ describe('命令面板键盘与焦点', () => {
     const input = document.querySelector('[role=combobox]');
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
     await flushPromises();
-    expect(document.querySelector('[role=option][aria-selected=true]').textContent).toContain('命令 29');
+    expect(document.querySelector('[role=option][aria-selected=true]').textContent).toContain('命令 9');
+    expect(document.querySelector('[role=status]').textContent).toBe('10 个常用入口 · 共 30 个命令');
     expect(input.getAttribute('aria-activedescendant')).toBe(document.querySelector('[role=option][aria-selected=true]').id);
     expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
     delete Element.prototype.scrollIntoView;

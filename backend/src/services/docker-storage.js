@@ -84,23 +84,54 @@ function assignDfItem(merged, item) {
   if (item.Volumes) { merged.Volumes = merged.Volumes.concat(Array.isArray(item.Volumes) ? item.Volumes : []); return; }
   if (item.BuildCache) { merged.BuildCache = merged.BuildCache.concat(Array.isArray(item.BuildCache) ? item.BuildCache : []); return; }
   // NDJSON 行:映射为 parseDockerDf 可识别的内部结构
-  const type = String(item.Type || '').toLowerCase();
-  const size = Number(item.Size) || 0;
-  const reclaim = Number(item.Reclaimable) || 0;
+  // Docker CLI emits human-readable byte strings in NDJSON on current releases
+  // (for example "28.76GB" and "25.81GB (89%)"); older releases emit numbers.
+  const type = String(item.Type || '').toLowerCase().replace(/[^a-z]/g, '');
+  const size = dfBytes(item.Size);
+  const reclaim = dfBytes(item.Reclaimable);
+  const totalCount = dfCount(item.TotalCount ?? item.Total);
+  const activeCount = dfCount(item.Active ?? item.ActiveCount);
   if (type === 'images') {
     // 整块汇总:拆为可回收(Containers=0)与在用(Containers=1)两条
     merged.Images.push({ Size: reclaim, Containers: 0 });
     if (size - reclaim > 0) merged.Images.push({ Size: size - reclaim, Containers: 1 });
+    recordDfSummary(merged, 'images', totalCount, activeCount);
   } else if (type === 'containers') {
     merged.Containers.push({ SizeRw: reclaim, State: 'exited' });
     if (size - reclaim > 0) merged.Containers.push({ SizeRw: size - reclaim, State: 'running' });
-  } else if (type === 'volumes') {
+    recordDfSummary(merged, 'containers', totalCount, activeCount);
+  } else if (type === 'volumes' || type === 'localvolumes') {
     merged.Volumes.push({ Name: String(item.Name || 'volume'), UsageData: { Size: reclaim, RefCount: 0 } });
     if (size - reclaim > 0) merged.Volumes.push({ Name: String(item.Name || 'volume') + '-used', UsageData: { Size: size - reclaim, RefCount: 1 } });
+    recordDfSummary(merged, 'volumes', totalCount, activeCount);
   } else if (type === 'buildcache') {
     merged.BuildCache.push({ Size: reclaim, InUse: false });
     if (size - reclaim > 0) merged.BuildCache.push({ Size: size - reclaim, InUse: true });
+    recordDfSummary(merged, 'buildCache', totalCount, activeCount);
   }
+}
+
+function dfBytes(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  return parseHumanBytes(value).total;
+}
+
+function dfCount(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const count = Number(value);
+  return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : null;
+}
+
+function recordDfSummary(merged, key, total, active) {
+  if (total === null && active === null) return;
+  merged.summary ||= {};
+  const previous = merged.summary[key] || { count: 0, active: 0 };
+  merged.summary[key] = {
+    count: previous.count + (total ?? 0),
+    active: previous.active + (active ?? 0),
+    hasCount: previous.hasCount || total !== null,
+    hasActive: previous.hasActive || active !== null,
+  };
 }
 
 /**
@@ -154,6 +185,7 @@ function parseHumanBytes(value) {
 
 /** 解析 docker system df --format json 为结构化统计(纯输出,便于单测)。 */
 export function parseDockerDf(data = {}) {
+  const summary = data.summary || {};
   const imagesTotal = sum(data.Images, 'Size') || 0;
   const imagesReclaimable = sum((data.Images || []).filter((item) => Number(item.Containers) <= 0), 'Size');
   const containersTotal = sum(data.Containers, 'SizeRw') || 0;
@@ -176,10 +208,10 @@ export function parseDockerDf(data = {}) {
   const total = imagesTotal + containersTotal + volumesTotal + buildCacheTotal;
   const reclaimable = imagesReclaimable + containersReclaimable + volumesReclaimable + buildCacheReclaimable;
   return {
-    images: { count: data.Images?.length || 0, total: imagesTotal, reclaimable: imagesReclaimable },
-    containers: { count: data.Containers?.length || 0, total: containersTotal, reclaimable: containersReclaimable },
-    volumes: { count: volumes.length, total: volumesTotal, reclaimable: volumesReclaimable, orphans: volumes.filter((v) => v.orphan).length },
-    buildCache: { count: buildCache.length, total: buildCacheTotal, reclaimable: buildCacheReclaimable },
+    images: { count: summary.images?.hasCount ? summary.images.count : data.Images?.length || 0, total: imagesTotal, reclaimable: imagesReclaimable },
+    containers: { count: summary.containers?.hasCount ? summary.containers.count : data.Containers?.length || 0, total: containersTotal, reclaimable: containersReclaimable },
+    volumes: { count: summary.volumes?.hasCount ? summary.volumes.count : volumes.length, total: volumesTotal, reclaimable: volumesReclaimable, orphans: summary.volumes?.hasCount && summary.volumes?.hasActive ? Math.max(0, summary.volumes.count - summary.volumes.active) : volumes.filter((v) => v.orphan).length },
+    buildCache: { count: summary.buildCache?.hasCount ? summary.buildCache.count : buildCache.length, total: buildCacheTotal, reclaimable: buildCacheReclaimable },
     total,
     reclaimable,
   };

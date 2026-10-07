@@ -145,7 +145,9 @@ export function getProjectCostSummary() {
   return withCostCache('projects', fetchProjectCostSummary);
 }
 async function fetchProjectCostSummary() {
-  const projects = (await scanProjects()).filter((project) => project.managed);
+  // 成本页是只读视图,应覆盖服务页发现的全部 Compose 项目。纳管权限只限制
+  // 控制与配置操作,不应该让未纳管项目在排行中消失。
+  const projects = await scanProjects();
   const containerStats = await getContainerResourceStats();
   
   const summary = projects.map(project => {

@@ -13,6 +13,25 @@ import {
 } from '../services/cost-analysis.js';
 import { addOperation } from '../lib/db.js';
 
+const costStorageSectionSchema = {
+  type: 'object',
+  properties: {
+    active: { type: 'number' },
+    total: { type: 'number' },
+    sizeMB: { type: 'number' },
+    reclaimableMB: { type: 'number' },
+  },
+};
+const costStorageSchema = {
+  type: 'object',
+  properties: {
+    images: costStorageSectionSchema,
+    containers: costStorageSectionSchema,
+    volumes: costStorageSectionSchema,
+    buildCache: costStorageSectionSchema,
+  },
+};
+
 export default async function costAnalysisRoutes(api, _opts) {
   // 获取完整成本分析报告
   api.get('/report', {
@@ -38,7 +57,7 @@ export default async function costAnalysisRoutes(api, _opts) {
             },
             containers: { type: 'array' },
             images: { type: 'array' },
-            storage: { type: 'object' },
+            storage: costStorageSchema,
             projects: { type: 'array' },
             trends: { type: 'array' }
           }
@@ -113,10 +132,10 @@ export default async function costAnalysisRoutes(api, _opts) {
         200: {
           type: 'object',
           properties: {
-            images: { type: 'object' },
-            containers: { type: 'object' },
-            volumes: { type: 'object' },
-            buildCache: { type: 'object' }
+            images: costStorageSectionSchema,
+            containers: costStorageSectionSchema,
+            volumes: costStorageSectionSchema,
+            buildCache: costStorageSectionSchema
           }
         }
       }

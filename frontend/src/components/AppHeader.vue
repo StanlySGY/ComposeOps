@@ -22,13 +22,17 @@
         <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span class="hidden sm:inline">服务离线</span>
       </span>
       <div class="relative">
-        <button class="btn-secondary min-h-8! px-2.5! py-1! text-xs" title="快速切换项目" aria-label="快速切换项目" @click="projectSwitcherOpen = !projectSwitcherOpen">
-          <Layers class="w-3.5 h-3.5" /><span class="hidden md:inline">项目</span>
+        <button class="btn-secondary min-h-8! px-2.5! py-1! text-xs" title="快速切换项目" aria-label="快速切换项目" @click="toggleProjectSwitcher">
+          <Layers class="w-3.5 h-3.5" /><span class="hidden min-[380px]:inline">项目</span>
           <ChevronDown class="w-3 h-3" />
         </button>
         <div v-if="projectSwitcherOpen" class="command-backdrop" @click.self="projectSwitcherOpen = false"></div>
         <div v-if="projectSwitcherOpen" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60">
           <div class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
+          <label class="search-field mx-2 my-2 flex-none" aria-label="搜索项目">
+            <Search class="h-3.5 w-3.5 shrink-0" />
+            <input v-model="projectQuery" type="search" placeholder="搜索项目、归属或路径" />
+          </label>
           <div class="max-h-80 overflow-y-auto p-1.5">
             <button v-for="p in quickProjects" :key="p.id" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-800/60" @click="goProject(p)">
               <span class="status-dot shrink-0" :class="projectStatusDotClass(p.status)"></span>
@@ -38,7 +42,7 @@
               </span>
               <span v-if="p.managed" class="count-badge shrink-0 text-[9px] text-emerald-300">纳管</span>
             </button>
-            <p v-if="!quickProjects.length" class="px-2 py-4 text-center text-xs text-surface-600">暂无项目</p>
+            <p v-if="!quickProjects.length" class="px-2 py-4 text-center text-xs text-surface-600">{{ projectQuery ? '没有匹配的项目' : '暂无项目' }}</p>
           </div>
         </div>
       </div>
@@ -53,6 +57,16 @@
   </header>
 
   <CommandPalette :show="commandOpen" :commands="commands" @close="commandOpen = false" @execute="runCommand" />
+  <ConfirmDialog
+    :show="!!pendingProjectAction"
+    title="停止项目"
+    :message="`确认停止 ${pendingProjectAction?.projectName || ''} 中正在运行的容器？容器和数据不会删除。`"
+    tone="warning"
+    confirm-text="停止项目"
+    :busy="projectActionBusy"
+    @confirm="confirmProjectAction"
+    @cancel="pendingProjectAction = null"
+  />
 </template>
 
 <script setup>
@@ -62,6 +76,7 @@ import { Activity, Bot, Boxes, ChartNoAxesCombined, ChevronDown, FileCode2, File
 import EventCenter from './EventCenter.vue';
 import HostSwitcher from './HostSwitcher.vue';
 import CommandPalette from './common/CommandPalette.vue';
+import ConfirmDialog from './common/ConfirmDialog.vue';
 import { api, bumpHostEpoch } from '../api/client.js';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
@@ -74,12 +89,20 @@ const backendOnline = ref(false);
 const currentTime = ref('');
 const commandOpen = ref(false);
 const projectSwitcherOpen = ref(false);
+const projectQuery = ref('');
+const pendingProjectAction = ref(null);
+const projectActionBusy = ref(false);
 const density = ref(localStorage.getItem('composeops:density') || 'comfortable');
 function toggleDensity() { density.value = density.value === 'compact' ? 'comfortable' : 'compact'; document.body.dataset.density = density.value; localStorage.setItem('composeops:density', density.value); }
 /** 归一化 API 返回值,避免非数组形态触发 `.slice`/`.filter` 报错。 */
 function asArray(value) { return Array.isArray(value) ? value : []; }
 const allProjects = ref([]);
-const quickProjects = computed(() => asArray(allProjects.value).slice(0, 12));
+const quickProjects = computed(() => {
+  const query = projectQuery.value.trim().toLocaleLowerCase();
+  return asArray(allProjects.value)
+    .filter((project) => !query || [project.projectName, project.owner, project.workingDir].some((value) => String(value || '').toLocaleLowerCase().includes(query)))
+    .slice(0, 20);
+});
 const pageNames = { dashboard: '运维总览', services: '服务总览', compose: 'Compose 配置', logs: '实时日志', shell: '容器终端', agent: 'AI 智能运维 Agent', 'agent-history': 'Agent 执行历史', inspection: 'AI 巡检中心', monitor: '实时监控', review: '变更与回滚', events: '事件中心', resources: '存储清理', cron: '定时任务', gitops: 'GitOps', cost: '成本分析', topology: '服务拓扑', 'ops-center': '运维任务', 'node-groups': '节点组管理', cmdb: '资产中心', workflows: '工作流', marketplace: '应用市场', settings: '系统设置' };
 const currentPage = computed(() => pageNames[route.name] || '运维控制台');
 const envProjects = ref([]);
@@ -149,7 +172,7 @@ const commands = computed(() => {
     .flatMap((project) => ([
       { id: `run-${project.id}-up`, run: () => void runProjectAction(project, 'up'), label: `启动: ${project.projectName}`, description: '通过 Compose 启动项目', icon: Play, category: `start up 启动 运行 ${project.projectName}` },
       { id: `run-${project.id}-restart`, run: () => void runProjectAction(project, 'restart'), label: `重启: ${project.projectName}`, description: '重启项目所有容器', icon: RotateCw, category: `restart reboot 重启 ${project.projectName}` },
-      { id: `run-${project.id}-stop`, run: () => void runProjectAction(project, 'stop'), label: `停止: ${project.projectName}`, description: '停止项目所有容器', icon: Square, category: `stop halt 停止 ${project.projectName}` },
+      { id: `run-${project.id}-stop`, run: () => requestProjectAction(project, 'stop'), label: `停止: ${project.projectName}`, description: '停止项目所有容器', icon: Square, category: `stop halt 停止 ${project.projectName}` },
       { id: `logs-${project.id}`, to: `/logs?projectId=${project.id}`, label: `日志: ${project.projectName}`, description: '查看项目实时日志', icon: ScrollText, category: `logs 日志 ${project.projectName}` },
     ]));
   return [...baseCommands, ...actionCommands, ...nodeCommands, ...envCommands, ...blueprintCommands].map((item) =>
@@ -159,7 +182,12 @@ const commands = computed(() => {
 
 function goProject(project) {
   projectSwitcherOpen.value = false;
+  projectQuery.value = '';
   router.push(`/services?focus=${project.id}`);
+}
+function toggleProjectSwitcher() {
+  projectSwitcherOpen.value = !projectSwitcherOpen.value;
+  projectQuery.value = '';
 }
 // 与 StatusBadge.vue 的 STATUS 语义一致:运行=emerald、部分异常=restarting/amber、停止=surface、异常=rose。
 const PROJECT_STATUS_DOT = { running: 'bg-emerald-400', restarting: 'bg-amber-400', partial: 'bg-amber-400', stopped: 'bg-surface-500' };
@@ -167,12 +195,30 @@ function projectStatusDotClass(status) {
   return PROJECT_STATUS_DOT[status] || 'bg-rose-400';
 }
 async function runProjectAction(project, action) {
-  closeCommand();
   try {
     await api.createProjectBatchJob([project.id], action);
     window.dispatchEvent(new CustomEvent('composeops:operation-started', { detail: { projectName: project.projectName, action } }));
+    return true;
   } catch (error) {
     toast.error(`操作提交失败:${error?.message || '未知错误'}`);
+    return false;
+  }
+}
+function requestProjectAction(project, action) {
+  if (action === 'stop') {
+    pendingProjectAction.value = project;
+    return;
+  }
+  void runProjectAction(project, action);
+}
+async function confirmProjectAction() {
+  const project = pendingProjectAction.value;
+  if (!project || projectActionBusy.value) return;
+  projectActionBusy.value = true;
+  try {
+    if (await runProjectAction(project, 'stop')) pendingProjectAction.value = null;
+  } finally {
+    projectActionBusy.value = false;
   }
 }
 const emit = defineEmits(['logout', 'open-agent']);
@@ -225,6 +271,10 @@ function onHostChanged() {
   void reloadHostProjects();
   void api.getBlueprints(true).then((data) => { appBlueprints.value = asArray(data?.blueprints); }).catch(() => {});
 }
+function onProjectsChanged() {
+  projectSwitcherOpen.value = false;
+  void reloadHostProjects();
+}
 function onGlobalKeydown(event) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); commandOpen.value = !commandOpen.value; }
 }
@@ -238,6 +288,7 @@ onMounted(() => {
   clockTimer = setInterval(() => { currentTime.value = new Date().toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }, 30000);
   window.addEventListener('keydown', onGlobalKeydown);
   window.addEventListener('composeops:host-changed', onHostChanged);
+  window.addEventListener('composeops:projects-changed', onProjectsChanged);
 });
-onUnmounted(() => { clearInterval(pingTimer); clearInterval(clockTimer); window.removeEventListener('keydown', onGlobalKeydown); window.removeEventListener('composeops:host-changed', onHostChanged); });
+onUnmounted(() => { clearInterval(pingTimer); clearInterval(clockTimer); window.removeEventListener('keydown', onGlobalKeydown); window.removeEventListener('composeops:host-changed', onHostChanged); window.removeEventListener('composeops:projects-changed', onProjectsChanged); });
 </script>

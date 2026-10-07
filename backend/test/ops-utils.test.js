@@ -127,6 +127,25 @@ test('docker-storage: parseDockerDfOutput 解析 NDJSON 多行独立对象', () 
   assert.equal(parsed.buildCache.reclaimable, 100);
 });
 
+test('docker-storage: 解析新版 Docker NDJSON 的人类可读容量与汇总数量', () => {
+  const raw = [
+    JSON.stringify({ Type: 'Images', TotalCount: '22', Active: '13', Size: '28.76GB', Reclaimable: '25.81GB (89%)' }),
+    JSON.stringify({ Type: 'Containers', TotalCount: '13', Active: '12', Size: '6.555GB', Reclaimable: '4.096kB (0%)' }),
+    JSON.stringify({ Type: 'Local Volumes', TotalCount: '5', Active: '3', Size: '826MB', Reclaimable: '4.041kB (0%)' }),
+    JSON.stringify({ Type: 'Build Cache', TotalCount: '497', Active: '0', Size: '17.39GB', Reclaimable: '14.21GB' }),
+  ].join('\n');
+  const parsed = parseDockerDfOutput(raw);
+  assert.equal(parsed.images.count, 22);
+  assert.equal(parsed.images.total, 28.76 * 1024 ** 3);
+  assert.equal(parsed.images.reclaimable, 25.81 * 1024 ** 3);
+  assert.equal(parsed.containers.count, 13);
+  assert.equal(parsed.volumes.count, 5);
+  assert.equal(parsed.volumes.orphans, 2);
+  assert.equal(parsed.buildCache.count, 497);
+  assert.equal(parsed.buildCache.total, 17.39 * 1024 ** 3);
+  assert.equal(parsed.buildCache.reclaimable, 14.21 * 1024 ** 3);
+});
+
 test('docker-storage: parseDockerDfOutput 容忍 WARNING/ANSI 脏输出', () => {
   const raw = '\x1b[2J WARNING: Error getting usage insights\n' + JSON.stringify({
     Images: [{ Size: 10, Containers: 0 }],
