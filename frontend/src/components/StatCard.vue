@@ -5,9 +5,9 @@
       <span class="flex items-center gap-1.5"><span v-if="tone" class="h-1.5 w-1.5 rounded-full" :class="tone"></span><span v-else class="h-1.5 w-1.5 rounded-full bg-accent/80"></span></span>
     </div>
     <div class="px-4 py-3.5">
-      <div class="flex items-end justify-between gap-3">
+      <div class="flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
         <div class="min-w-0">
-          <div class="truncate text-2xl font-semibold tracking-tight font-mono tabular-nums text-surface-50">{{ value }}</div>
+          <div class="truncate text-lg font-semibold tracking-tight font-mono tabular-nums text-surface-50 sm:text-2xl">{{ value }}</div>
           <div class="text-muted mt-1">{{ sub }}</div>
         </div>
         <SparklineChart v-if="trend && trend.length > 1" :cpu="trend" :mem="[]" :width="72" :height="28" class="shrink-0 opacity-90" />
