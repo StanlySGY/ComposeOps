@@ -180,19 +180,48 @@ export function tickModel(model) {
   }
 
   // 5. 碰撞分离(位置直接校正,视觉上气泡永不重叠)
+  //    节点带 w/h 时按矩形(AABB)处理——卡片类节点用圆形碰撞会低估实际占位,
+  //    两张 196x68 的卡片中心距 100 时视觉已经压叠,圆形判定却完全不触发。
+  //    成对修正会互相打架,每 tick 跑两遍收敛得更干净。
+  resolveCollisions(nodes, o.collisionPad);
+  resolveCollisions(nodes, o.collisionPad);
+
+  model.alpha = alpha * (1 - o.alphaDecay);
+  return model.alpha >= o.alphaMin;
+}
+
+/** 一遍成对碰撞校正(位置直接修正)。矩形优先,无 w/h 退回圆形。 */
+function resolveCollisions(nodes, pad = 12) {
+  const n = nodes.length;
   for (let i = 0; i < n; i++) {
     const a = nodes[i];
     for (let j = i + 1; j < n; j++) {
       const b = nodes[j];
       const dx = b.x - a.x;
       const dy = b.y - a.y;
-      const min = a.r + b.r + o.collisionPad;
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= min * min || d2 === 0) continue;
-      const d = Math.sqrt(d2);
-      const push = (min - d) / 2;
-      const ux = dx / d;
-      const uy = dy / d;
+      let ux, uy, push;
+      if (a.w && a.h && b.w && b.h) {
+        const overlapX = (a.w + b.w) / 2 - Math.abs(dx);
+        const overlapY = (a.h + b.h) / 2 - Math.abs(dy);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+        if (dx === 0 && dy === 0) {
+          // 完全重合:给一个确定性的分离方向,避免死锁
+          ux = 1; uy = (i - j) * 0.5 || 0.5;
+        } else if (overlapX < overlapY) {
+          ux = Math.sign(dx) || 1; uy = 0;
+        } else {
+          ux = 0; uy = Math.sign(dy) || 1;
+        }
+        push = Math.min(overlapX, overlapY) / 2;
+      } else {
+        const min = a.r + b.r + pad;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= min * min || d2 === 0) continue;
+        const d = Math.sqrt(d2);
+        push = (min - d) / 2;
+        ux = dx / d;
+        uy = dy / d;
+      }
       if (!a.fixed) {
         a.x -= ux * push;
         a.y -= uy * push;
@@ -203,15 +232,22 @@ export function tickModel(model) {
       }
     }
   }
-
-  model.alpha = alpha * (1 - o.alphaDecay);
-  return model.alpha >= o.alphaMin;
 }
 
-/** 连续推进直到冷却(测试/一次性布局用)。 */
+/** 无重叠收尾:物理冷却后纯碰撞校正,直到互不压叠(弹簧/斥力已不再捣乱)。 */
+function deOverlap(nodes, maxIterations = 60) {
+  for (let i = 0; i < maxIterations; i++) {
+    const before = nodes.map((n) => `${n.x},${n.y}`).join('|');
+    resolveCollisions(nodes);
+    if (nodes.map((n) => `${n.x},${n.y}`).join('|') === before) return;
+  }
+}
+
+/** 连续推进直到冷却(测试/一次性布局用);冷却后做纯解重叠收尾。 */
 export function settleModel(model, maxTicks = 600) {
   for (let i = 0; i < maxTicks; i++) {
     if (!tickModel(model)) break;
   }
+  deOverlap(model.nodes);
   return model;
 }

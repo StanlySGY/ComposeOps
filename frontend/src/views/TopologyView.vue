@@ -258,15 +258,22 @@ const graphEdges = computed(() => {
 
 const seedPositions = computed(() => {
   if (!services.value.length) return null;
+  // 按依赖层级比例铺到世界坐标(被依赖者在左),单层图水平居中;
+  // 力模拟会在此基础上松弛成自然形态。
+  // 跨项目时不同项目的同层服务会算出相同坐标,确定性错开,避免出生点重叠。
   const levels = assignLevels(services.value);
   const maxLevel = Math.max(0, ...levels.map((l) => l.level));
   const left = 220;
   const right = 1100;
+  const seen = new Map();
   const map = {};
   for (const item of levels) {
+    const slot = `${item.level}:${item.index}`;
+    const dup = seen.get(slot) || 0;
+    seen.set(slot, dup + 1);
     map[item.name] = {
-      x: maxLevel === 0 ? 600 : left + (item.level / maxLevel) * (right - left),
-      y: 350 + (item.index - (item.count - 1) / 2) * 110,
+      x: (maxLevel === 0 ? 600 : left + (item.level / maxLevel) * (right - left)) + dup * 96,
+      y: 350 + (item.index - (item.count - 1) / 2) * 110 + (dup ? (dup % 2 ? 1 : -1) * Math.ceil(dup / 2) * 84 : 0),
     };
   }
   return map;

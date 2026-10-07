@@ -43,6 +43,7 @@
     <svg
       ref="svgEl"
       class="ios-canvas"
+      :class="{ 'ios-dag-mode': layoutMode === 'dag' }"
       :aria-label="ariaLabel"
       role="img"
       @pointerdown="onPointerDown"
@@ -584,6 +585,13 @@ const graphSignature = computed(() =>
 watch(graphSignature, () => {
   const fresh = createGraphModel(props.nodes, props.edges);
   if (props.seedPositions) applySeedPositions(fresh, props.seedPositions);
+  // 卡片是 196x68 的矩形:给节点注册真实占位,碰撞与斥力按卡片尺寸算,
+  // 否则两张卡片中心距 100 时视觉已压叠,圆形判定(r≈34)永远不触发。
+  for (const node of fresh.nodes) {
+    node.w = CARD_W + 24;
+    node.h = CARD_H + 24;
+    node.r = Math.max(node.w, node.h) / 2;
+  }
   model.width = fresh.width;
   model.height = fresh.height;
   model.nodes.splice(0, model.nodes.length, ...fresh.nodes);
@@ -727,21 +735,18 @@ function onPointerMove(event) {
     const nextY = world.y + dragState.offsetY;
 
     if (layoutMode.value === 'dag') {
-      const entry = dagNodesMap.get(dragState.key);
-      if (entry) {
-        entry.x = nextX;
-        entry.y = nextY;
-      }
-    } else {
-      const target = model.nodes.find((n) => n.key === dragState.key);
-      if (target) {
-        target.x = nextX;
-        target.y = nextY;
-        target.vx = 0;
-        target.vy = 0;
-        model.alpha = Math.max(model.alpha, 0.3);
-        ensureLoop();
-      }
+      // 分层架构是编排好的语义视图:卡片不可拖出所属分组框(仅点击高亮/画布平移缩放)。
+      // 拖拽整理布局请切到自由拓扑。
+      return;
+    }
+    const target = model.nodes.find((n) => n.key === dragState.key);
+    if (target) {
+      target.x = nextX;
+      target.y = nextY;
+      target.vx = 0;
+      target.vy = 0;
+      model.alpha = Math.max(model.alpha, 0.3);
+      ensureLoop();
     }
   } else {
     tx.value = dragState.tx0 + dx;
@@ -913,6 +918,10 @@ defineExpose({ reseed, fitView, setLayoutMode });
 .ios-card-node {
   cursor: grab;
   transition: opacity 0.28s ease, filter 0.28s ease;
+}
+/* 分层架构是编排好的视图,卡片不可拖拽,光标提示可点击 */
+.ios-canvas.ios-dag-mode .ios-card-node {
+  cursor: pointer;
 }
 .ios-card-node.ios-grabbing {
   cursor: grabbing;

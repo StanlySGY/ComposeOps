@@ -113,3 +113,49 @@ describe('applySeedPositions', () => {
     expect(model.nodes[1].x).toBe(FORCE_DEFAULTS.width - FORCE_DEFAULTS.boundsPad);
   });
 });
+
+describe('矩形节点碰撞(卡片 w/h)', () => {
+  function makeCardGraph(keys, links, pos) {
+    const model = createGraphModel(keys.map((key) => ({ key })), links, { alphaDecay: 0.05 });
+    applySeedPositions(model, pos);
+    for (const node of model.nodes) { node.w = 220; node.h = 92; node.r = 110; }
+    return model;
+  }
+
+  it('矩形卡片视觉压叠时也会被推开(圆形碰撞低估卡片占位的回归用例)', () => {
+    // 中心距 120:卡片 220 宽,视觉已压叠;圆形 r=34 的旧实现完全不会触发
+    const model = makeCardGraph(['a', 'b'], [], { a: { x: 600, y: 350 }, b: { x: 720, y: 350 } });
+    settleModel(model);
+    const [a, b] = model.nodes;
+    const overlapX = 220 - Math.abs(b.x - a.x);
+    const overlapY = 92 - Math.abs(b.y - a.y);
+    expect(overlapX > 0 && overlapY > 0).toBe(false);
+  });
+
+  it('完全重合的出生点(跨项目同层同序)也会被确定性分离', () => {
+    const model = makeCardGraph(['p1/web', 'p2/web'], [], { 'p1/web': { x: 600, y: 350 }, 'p2/web': { x: 600, y: 350 } });
+    settleModel(model);
+    const [a, b] = model.nodes;
+    const dx = Math.abs(b.x - a.x);
+    const dy = Math.abs(b.y - a.y);
+    expect(dx >= 220 || dy >= 92).toBe(true);
+  });
+
+  it('矩形分离后互不压叠(AABB)', () => {
+    const model = makeCardGraph(
+      ['a', 'b', 'c', 'd'],
+      [{ source: 'a', target: 'b' }, { source: 'a', target: 'c' }, { source: 'a', target: 'd' }],
+      null
+    );
+    settleModel(model);
+    for (let i = 0; i < model.nodes.length; i++) {
+      for (let j = i + 1; j < model.nodes.length; j++) {
+        const a = model.nodes[i];
+        const b = model.nodes[j];
+        const overlapX = (a.w + b.w) / 2 - Math.abs(b.x - a.x);
+        const overlapY = (a.h + b.h) / 2 - Math.abs(b.y - a.y);
+        expect(overlapX > 0 && overlapY > 0, `${a.key} 与 ${b.key} 压叠`).toBe(false);
+      }
+    }
+  });
+});
