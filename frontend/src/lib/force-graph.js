@@ -235,7 +235,7 @@ function resolveCollisions(nodes, pad = 12) {
 }
 
 /** 无重叠收尾:物理冷却后纯碰撞校正,直到互不压叠(弹簧/斥力已不再捣乱)。 */
-function deOverlap(nodes, maxIterations = 60) {
+export function deOverlap(nodes, maxIterations = 60) {
   for (let i = 0; i < maxIterations; i++) {
     const before = nodes.map((n) => `${n.x},${n.y}`).join('|');
     resolveCollisions(nodes);

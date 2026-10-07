@@ -69,6 +69,7 @@
         :edges="graphEdges"
         :height="embedded ? 480 : 560"
         default-layout="dag"
+        :lane-titles="{ single: '资产实体', first: '宿主与告警', middle: '纳管项目', last: '存储卷' }"
         aria-label="运维资产关系图谱"
       />
     </section>

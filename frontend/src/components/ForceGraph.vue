@@ -293,7 +293,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Compass, Layers, Maximize2, RotateCw, ZoomIn, ZoomOut } from 'lucide-vue-next';
-import { createGraphModel, tickModel, applySeedPositions } from '../lib/force-graph.js';
+import { createGraphModel, tickModel, applySeedPositions, deOverlap } from '../lib/force-graph.js';
 import { assignLevels } from '../lib/topology-layout.js';
 
 const CARD_W = 196;
@@ -310,6 +310,11 @@ const props = defineProps({
   seedPositions: { type: Object, default: null },
   ariaLabel: { type: String, default: '服务拓扑与关系图' },
   defaultLayout: { type: String, default: 'dag' }, // 'dag' | 'force'
+  /** 分层架构各列的语义标题(按业务域定制,默认是服务拓扑话术) */
+  laneTitles: {
+    type: Object,
+    default: () => ({ single: '独立服务', first: '依赖与存储 (Data / Base)', middle: '核心应用', last: '接入与网关 (Gateway / Web)' }),
+  },
 });
 const emit = defineEmits(['node-click']);
 
@@ -320,7 +325,11 @@ function setLayoutMode(mode) {
   if (mode === 'dag') {
     applyDagLayout();
   } else {
-    reseed();
+    // 只解重叠、不跑任何力:手动布局原样保留(重力/斥力都会把卡片拉离原位);
+    // "重新布局"按钮做全量重排
+    deOverlap(model.nodes, model.options.collisionPad);
+    pendingFit = true;
+    if (!viewTouched) fitView();
   }
 }
 
@@ -488,16 +497,17 @@ function applyDagLayout() {
       if (y > maxY) maxY = y;
     });
 
-    // 层级标题
+    // 层级标题:按业务域可配置(服务拓扑/资产图谱话术不同)
+    const titles = props.laneTitles || {};
     let title;
     if (maxLevel === 0) {
-      title = '独立服务';
+      title = titles.single || '独立服务';
     } else if (l === 0) {
-      title = '依赖与存储 (Data / Base)';
+      title = titles.first || '依赖与存储 (Data / Base)';
     } else if (l === maxLevel) {
-      title = '接入与网关 (Gateway / Web)';
+      title = titles.last || '接入与网关 (Gateway / Web)';
     } else {
-      title = `核心应用 (${l})`;
+      title = `${titles.middle || '核心应用'} (${l})`;
     }
 
     if (count > 0) {
@@ -583,7 +593,8 @@ const graphSignature = computed(() =>
 );
 
 watch(graphSignature, () => {
-  const fresh = createGraphModel(props.nodes, props.edges);
+  // 弹簧理想长度大于卡片宽度:否则相连卡片被弹簧往一起拉、又被碰撞顶开,互相对抗
+  const fresh = createGraphModel(props.nodes, props.edges, { springLength: Math.max(260, CARD_W + 64) });
   if (props.seedPositions) applySeedPositions(fresh, props.seedPositions);
   // 卡片是 196x68 的矩形:给节点注册真实占位,碰撞与斥力按卡片尺寸算,
   // 否则两张卡片中心距 100 时视觉已压叠,圆形判定(r≈34)永远不触发。
@@ -594,6 +605,7 @@ watch(graphSignature, () => {
   }
   model.width = fresh.width;
   model.height = fresh.height;
+  model.options = fresh.options;
   model.nodes.splice(0, model.nodes.length, ...fresh.nodes);
   model.links.splice(0, model.links.length, ...fresh.links);
 
@@ -657,6 +669,8 @@ function fitView() {
     maxX = Math.max(maxX, n.x + CARD_W / 2);
     maxY = Math.max(maxY, n.y + CARD_H / 2);
   }
+  // 分层架构的列标题画在首行卡片上方,取景时留出标题高度
+  if (layoutMode.value === 'dag') minY -= 64;
 
   const pad = 64;
   const contentW = maxX - minX;
