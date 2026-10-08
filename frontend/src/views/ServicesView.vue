@@ -78,7 +78,7 @@
         @toggle-expand="toggleExpanded(project.id)" @toggle-select="toggleSelection(project.id)" @refresh="refresh" @activity="activityProject = project" @env="envProject = project" @upgrade="upgradeProject = project" @db-dump="dbDumpProject = project" @action="(action) => run(project, action)"
       />
     </div>
-    <OperationOutputDrawer v-if="output.open" :label="actionLabel(output.action)" :name="output.name" :text="output.text" :project-id="output.projectId" :exit-code="output.exitCode" :running="output.running" :batch-tasks="batchTasks" :batch-progress="batchProgress" :completed-count="completedBatchTasks" @close="output.open = false" @diagnose="openDiagnosisForOutput" />
+    <OperationOutputDrawer v-if="output.open" :label="actionLabel(output.action)" :name="output.name" :text="output.text" :project-id="output.projectId" :exit-code="output.exitCode" :running="output.running" :batch-tasks="batchTasks" :batch-progress="batchProgress" :completed-count="completedBatchTasks" @close="output.open = false" @diagnose="openDiagnosisForOutput" @inspect="inspectOutputProject" />
     <ProjectEnvModal v-if="envProject" :project="envProject" @close="closeEnv" @refresh="refresh" @apply="handleEnvApply" />
     <AIDiagnosisModal v-if="diagnosis" :open="!!diagnosis" :project-id="diagnosis.projectId" :project-name="diagnosis.projectName" :container-id="diagnosis.containerId" :raw-logs="diagnosis.rawLogs" :env-keys="diagnosis.envKeys" :failed-command="diagnosis.failedCommand" :exit-code="diagnosis.exitCode" :env-editable="diagnosis.envEditable" @close="diagnosis = null" />
     <ProjectActivityDrawer v-if="activityProject" :project="activityProject" @close="activityProject = null" @restored="handleRestored" />
@@ -298,6 +298,13 @@ function openDiagnosisForOutput() {
     exitCode: output.exitCode,
     envEditable: !!project.editable,
   };
+}
+function inspectOutputProject() {
+  const projectId = String(output.projectId || '');
+  if (!projectId) return;
+  output.open = false;
+  focusedProject.value = '';
+  router.replace({ path: '/services', query: { focus: projectId } });
 }
 async function runBatch(action) {
   const projects = selectedProjects.value;

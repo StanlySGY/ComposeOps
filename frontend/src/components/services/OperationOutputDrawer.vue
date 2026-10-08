@@ -16,9 +16,15 @@
       </div>
     </div>
     <pre class="terminal-output flex-1">{{ text }}</pre>
-    <div v-if="failed && !running && projectId" class="ai-diagnose-bar">
-      <button class="btn-primary" @click="$emit('diagnose')"><Sparkles class="w-4 h-4" />一键 AI 诊断</button>
-      <span class="text-xs text-muted">检测到执行失败,可交给 AI 分析根因与修复建议</span>
+    <div v-if="!running && projectId" class="ai-diagnose-bar">
+      <template v-if="failed">
+        <button class="btn-primary" @click="$emit('diagnose')"><Sparkles class="w-4 h-4" />一键 AI 诊断</button>
+        <span class="text-xs text-muted">检测到执行失败，可交给 AI 分析根因与修复建议</span>
+      </template>
+      <template v-else>
+        <span class="text-xs text-emerald-300">执行完成。建议立即回到项目确认容器状态。</span>
+        <button class="btn-secondary text-xs!" @click="$emit('inspect')">查看项目状态</button>
+      </template>
     </div>
   </div>
 </template>
@@ -39,9 +45,9 @@ const props = defineProps({
   batchProgress: { type: Number, default: 0 },
   completedCount: { type: Number, default: 0 },
 });
-const emit = defineEmits(['close', 'diagnose']);
+const emit = defineEmits(['close', 'diagnose', 'inspect']);
 const failed = computed(() => {
-  if (props.exitCode != null && props.exitCode !== 0) return true;
+  if (props.exitCode != null) return props.exitCode !== 0;
   return /(fatal|error|crash|exception|failed|failed to|error:|exited with code)/i.test(props.text);
 });
 useEscapeKey({ active: computed(() => true), onClose: () => emit('close'), layer: 'drawer', lockBody: true });
