@@ -594,12 +594,23 @@ async function applyRouteContext() {
   if (requestedContainerId) containerId.value = requestedContainerId;
   if (route.query.diagnose && requestedProjectId) {
     try {
+      let diagnosisPrompt = '';
+      const stored = sessionStorage.getItem('composeops:agent-diagnosis-prompt');
+      if (stored) {
+        try {
+          const payload = JSON.parse(stored);
+          const age = Date.now() - Number(payload.createdAt || 0);
+          if (payload.projectId === requestedProjectId && age >= 0 && age < 5 * 60 * 1000) diagnosisPrompt = String(payload.prompt || '');
+        } finally {
+          sessionStorage.removeItem('composeops:agent-diagnosis-prompt');
+        }
+      }
       if (requestedContainerId) {
         const result = await api.getProjectLogs(requestedProjectId, requestedContainerId, 200);
         onAttach({ text: result.logs || '', count: result.count || 0 });
       }
       const failure = route.query.failure ? JSON.parse(decodeURIComponent(String(route.query.failure))) : null;
-      input.value = failure ? '刚才 Agent 执行 ' + (failure.tool || '运维操作') + ' 失败。请结合当前项目状态与失败证据分析根因，给出修复方案；如需要修改系统状态，先提出计划并等待我的确认。' + '\n\n失败摘要：' + (failure.error || failure.summary || '未知错误') : '请分析已挂载的容器日志，判断异常原因并给出修复建议';
+      input.value = diagnosisPrompt || (failure ? '刚才 Agent 执行 ' + (failure.tool || '运维操作') + ' 失败。请结合当前项目状态与失败证据分析根因，给出修复方案；如需要修改系统状态，先提出计划并等待我的确认。' + '\n\n失败摘要：' + (failure.error || failure.summary || '未知错误') : '请分析已挂载的容器日志，判断异常原因并给出修复建议');
     } catch (error) {
       toast.error('加载诊断上下文失败:' + error.message);
     }

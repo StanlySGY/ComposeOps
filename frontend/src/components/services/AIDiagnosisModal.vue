@@ -104,10 +104,11 @@ function sendToAgent() {
   if (!fullText.value || !props.projectId) return;
   const prompt = '这是刚完成的 AI 诊断结果，请基于它制定修复方案。不要直接执行有副作用的操作，先说明计划并等待确认。' + '\n\n' + fullText.value;
 
+  sessionStorage.setItem('composeops:agent-diagnosis-prompt', JSON.stringify({ projectId: props.projectId, prompt, createdAt: Date.now() }));
   close();
   const query = { projectId: props.projectId, diagnose: '1' };
   if (props.containerId) query.containerId = props.containerId;
   router.push({ path: '/agent', query });
-  setTimeout(() => window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt } })), 0);
+
 }
 </script>
