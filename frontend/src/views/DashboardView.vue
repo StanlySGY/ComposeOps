@@ -57,6 +57,34 @@
         <router-link to="/marketplace" class="btn-primary ml-2">浏览应用市场</router-link>
       </section>
 
+      <section v-if="attentionProjectList.length" class="section-panel dashboard-attention-panel">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <AlertTriangle class="h-4 w-4 text-amber-300" />
+              <h3 class="font-semibold text-surface-100">需要处理</h3>
+              <span class="count-badge text-amber-300">{{ attentionProjects }}</span>
+            </div>
+            <p class="mt-1 text-xs text-muted">优先处理异常项目，避免在多个页面之间来回寻找。</p>
+          </div>
+          <router-link to="/services" class="text-xs text-accent hover:text-blue-300">查看全部 <ArrowRight class="inline h-3.5 w-3.5" /></router-link>
+        </div>
+        <div class="dashboard-attention-list">
+          <div v-for="project in attentionProjectList" :key="project.id" class="dashboard-attention-row">
+            <span class="status-dot" :class="project.status === 'running' ? 'bg-amber-400' : 'bg-rose-400'"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="truncate text-sm font-medium text-surface-200">{{ project.projectName }}</span>
+                <span class="count-badge hidden sm:inline-flex" :class="project.status === 'running' ? 'text-amber-300' : 'text-rose-300'">{{ project.status === 'running' ? '健康检查异常' : '未运行' }}</span>
+              </div>
+              <p class="mt-0.5 truncate text-xs text-muted">{{ project.containers.filter(c => c.health === 'unhealthy').length ? `${project.containers.filter(c => c.health === 'unhealthy').length} 个容器不健康` : `${project.containers.length} 个容器 · ${project.status}` }}</p>
+            </div>
+            <router-link :to="`/services?focus=${project.id}`" class="icon-btn" :aria-label="`打开 ${project.projectName}`" title="打开项目"><ArrowRight class="h-4 w-4" /></router-link>
+            <router-link :to="`/agent?projectId=${project.id}`" class="icon-btn hidden sm:inline-grid" :aria-label="`让 Agent 诊断 ${project.projectName}`" title="让 Agent 诊断"><Bot class="h-4 w-4" /></router-link>
+          </div>
+        </div>
+      </section>
+
       <section class="section-panel">
           <div class="mb-4 flex items-center justify-between">
             <h3 class="font-semibold text-surface-100">最近事件</h3>
@@ -78,7 +106,7 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
-import { Boxes, Container, Cpu, Gauge, MemoryStick, RefreshCw } from 'lucide-vue-next';
+import { AlertTriangle, ArrowRight, Bot, Boxes, Container, Cpu, Gauge, MemoryStick, RefreshCw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -102,6 +130,10 @@ const containerCount = computed(() => store.projects.reduce((n, p) => n + (p.con
 const runningContainers = computed(() => store.projects.reduce((n, p) => n + (p.containers || []).filter(c => c.state === 'running').length, 0));
 const attentionProjects = computed(() => store.projects.filter(p => p.status !== 'running' || (p.containers || []).some(c => c.health === 'unhealthy')).length);
 const healthyProjects = computed(() => projectCount.value - attentionProjects.value);
+const attentionProjectList = computed(() => [...store.projects]
+  .filter((project) => project.status !== 'running' || (project.containers || []).some((container) => container.health === 'unhealthy'))
+  .sort((a, b) => Number(b.status !== 'running') - Number(a.status !== 'running') || a.projectName.localeCompare(b.projectName))
+  .slice(0, 5));
 
 const cpu = computed(() => metrics.value?.host?.cpu?.percent ?? null);
 const memory = computed(() => metrics.value?.host?.memory?.percent ?? null);
