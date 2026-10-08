@@ -10,7 +10,8 @@
       </div>
       <aside class="flex flex-col gap-2 border-t border-surface-800 p-3 md:border-l md:border-t-0">
         <p class="text-xs text-muted">快捷操作</p>
-        <button class="btn-secondary" :disabled="!fullText" @click="copyFix"><Copy class="w-4 h-4" />复制修复命令</button>
+        <button class="btn-primary" :disabled="!fullText || !projectId" @click="sendToAgent"><Sparkles class="w-4 h-4" />交给 Agent 制定修复</button>
+        <button class="btn-secondary" :disabled="!fullText" @click="copyFix"><Copy class="w-4 h-4" />复制修复建议</button>
         <button class="btn-secondary" :disabled="!projectId" @click="goCompose"><FileCode2 class="w-4 h-4" />跳转 Compose 编辑器</button>
         <button class="btn-secondary" :disabled="!projectId || !envEditable" @click="goEnv"><KeyRound class="w-4 h-4" />跳转 Env 编辑器</button>
       </aside>
@@ -99,4 +100,14 @@ async function copyFix() {
 }
 function goCompose() { close(); router.push(`/compose?projectId=${props.projectId}`); }
 function goEnv() { close(); router.push(`/services?env=${props.projectId}`); }
+function sendToAgent() {
+  if (!fullText.value || !props.projectId) return;
+  const prompt = '这是刚完成的 AI 诊断结果，请基于它制定修复方案。不要直接执行有副作用的操作，先说明计划并等待确认。' + '\n\n' + fullText.value;
+
+  close();
+  const query = { projectId: props.projectId, diagnose: '1' };
+  if (props.containerId) query.containerId = props.containerId;
+  router.push({ path: '/agent', query });
+  setTimeout(() => window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt } })), 0);
+}
 </script>
