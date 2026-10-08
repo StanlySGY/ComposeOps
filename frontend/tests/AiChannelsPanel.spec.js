@@ -132,7 +132,7 @@ describe('AI 渠道设置', () => {
     await action(row(wrapper), 'test').trigger('click'); await flushPromises();
     await row(wrapper).find('[aria-label="获取此渠道的模型"]').trigger('click'); await flushPromises();
     expect(api.fetchAiModels).toHaveBeenCalledWith({ channelId: 'primary', baseUrl: 'http://primary.test/v1', apiKey: undefined });
-    expect(wrapper.findAll('datalist option')).toHaveLength(2);
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(2);
     expect(wrapper.text()).toContain('测试未全部通过'); expect(wrapper.text()).toContain('工具参数截断'); expect(wrapper.text()).toContain('尚未验证');
   });
 

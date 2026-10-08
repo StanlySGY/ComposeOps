@@ -25,8 +25,17 @@
           <p v-if="addressChanged(channel)" class="text-xs leading-5 text-amber-400">地址已变更，请重新填写对应密钥后保存。</p>
         </div>
         <label>模型
-          <div class="flex items-center gap-1.5"><input class="input min-w-0 flex-1" data-field="model" :value="channel.model" :list="`models-${channel.id}`" placeholder="输入或获取模型名称" @input="update(channel.id, { model: $event.target.value })" /><button class="icon-btn shrink-0" title="获取此渠道的模型" aria-label="获取此渠道的模型" @click="fetchModels(channel)"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy[channel.id] === 'models' }" /></button></div>
-          <datalist :id="`models-${channel.id}`"><option v-for="name in modelLists[channel.id] || []" :key="name" :value="name" /></datalist>
+          <div class="flex min-w-0 items-center gap-1.5">
+            <div class="relative min-w-0 flex-1" :ref="el => (modelPickerRoots[channel.id] = el)">
+              <input class="input min-w-0 w-full pr-9" data-field="model" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" :aria-expanded="isModelOpen(channel.id)" :aria-controls="modelListId(channel.id)" :aria-activedescendant="activeModelOptionId(channel)" :value="channel.model" placeholder="输入或选择模型名称" autocomplete="off" spellcheck="false" @focus="openModels(channel)" @click="openModels(channel)" @input="updateModel(channel, $event.target.value)" @keydown="onModelKeydown(channel, $event)" />
+              <button type="button" class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-surface-400 transition hover:bg-surface-800 hover:text-surface-100" :aria-label="isModelOpen(channel.id) ? '收起模型列表' : '选择模型'" :aria-expanded="isModelOpen(channel.id)" :disabled="!modelLists[channel.id]?.length" @mousedown.prevent @click="toggleModels(channel)"><ChevronDown class="h-4 w-4 transition-transform" :class="{ 'rotate-180': isModelOpen(channel.id) }" /></button>
+              <div v-if="isModelOpen(channel.id)" :id="modelListId(channel.id)" class="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-2xl" role="listbox" :aria-label="`${channel.name || '渠道'} 可选模型`">
+                <button v-for="(name, modelIndex) in filteredModels(channel.id)" :id="modelOptionId(channel.id, modelIndex)" :key="name" type="button" class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-surface-200 transition hover:bg-surface-800 focus:bg-surface-800 focus:outline-none" :class="{ 'bg-surface-800 text-white': modelActiveIndex[channel.id] === modelIndex, 'text-emerald-300': channel.model === name }" role="option" :aria-selected="channel.model === name" @mousedown.prevent @mouseenter="modelActiveIndex[channel.id] = modelIndex" @click="selectModel(channel, name)"><span class="min-w-0 flex-1 break-all">{{ name }}</span><Check v-if="channel.model === name" class="h-4 w-4 shrink-0 text-emerald-400" /></button>
+                <p v-if="!filteredModels(channel.id).length" class="px-3 py-3 text-xs text-surface-400">没有匹配的模型；可以继续使用手动输入的名称。</p>
+              </div>
+            </div>
+            <button type="button" class="icon-btn shrink-0" title="获取此渠道的模型" aria-label="获取此渠道的模型" @click="fetchModels(channel)"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy[channel.id] === 'models' }" /></button>
+          </div>
         </label>
       </fieldset>
       <div v-if="revealed[channel.id]" class="rounded-lg border border-surface-700 bg-surface-950/50 p-3 space-y-2">
@@ -66,7 +75,7 @@
 
 <script setup>
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
-import { Activity, AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Copy, Eye, EyeOff, MinusCircle, Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next';
+import { Activity, AlertCircle, ArrowDown, ArrowUp, Check, CheckCircle2, ChevronDown, Copy, Eye, EyeOff, MinusCircle, Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
 
@@ -74,7 +83,9 @@ const props = defineProps({ channels: { type: Array, default: () => [] } });
 const emit = defineEmits(['update:channels', 'health-change']);
 const busy = ref({}), results = ref({}), notices = ref({}), modelLists = ref({}), conflicts = ref({});
 const revealed = ref({}), removeTarget = ref(null), ordering = ref(false), orderMessage = ref('');
+const modelOpenId = ref(null), modelSearch = ref({}), modelActiveIndex = ref({});
 const snapshots = new Map(), hideTimers = new Map(), keyInputs = {};
+const modelPickerRoots = {};
 let visible = true, revealEpoch = 0;
 const listBusy = computed(() => ordering.value || Object.values(busy.value).some(Boolean));
 const draft = (item) => ({ ...item, apiKey: '', saved: true, dirty: false });
@@ -82,9 +93,10 @@ const patchRow = (id, patch) => emit('update:channels', props.channels.map(item 
 watch(() => props.channels, (channels) => {
   for (const item of channels) if (item.saved && !item.dirty) snapshots.set(item.id, draft(item));
   for (const id of snapshots.keys()) if (!channels.some(item => item.id === id)) { snapshots.delete(id); hideKey(id); }
+  if (modelOpenId.value && !channels.some(item => item.id === modelOpenId.value)) modelOpenId.value = null;
 }, { immediate: true });
 function update(id, patch) {
-  if ('baseUrl' in patch || 'apiKey' in patch) { delete modelLists.value[id]; hideKey(id); }
+  if ('baseUrl' in patch || 'apiKey' in patch) { delete modelLists.value[id]; hideKey(id); if (modelOpenId.value === id) modelOpenId.value = null; delete modelSearch.value[id]; }
   delete results.value[id]; delete notices.value[id];
   patchRow(id, { ...patch, dirty: true });
 }
@@ -170,10 +182,85 @@ async function fetchModels(channel) {
     const current = props.channels.find(item => item.id === channel.id);
     if (current?.baseUrl !== channel.baseUrl || current?.apiKey !== channel.apiKey) return;
     modelLists.value[channel.id] = models;
-    notices.value[channel.id] = { ok: true, text: `已获取 ${models.length} 个模型，可在模型输入框中选择。` };
+    modelSearch.value[channel.id] = '';
+    modelActiveIndex.value[channel.id] = Math.max(0, models.indexOf(channel.model));
+    modelOpenId.value = channel.id;
+    notices.value[channel.id] = { ok: true, text: `已获取 ${models.length} 个模型，已展开选择列表。` };
   } catch (error) { reportError(channel.id, error); }
   finally { delete busy.value[channel.id]; }
 }
+function isModelOpen(id) { return modelOpenId.value === id; }
+function modelListId(id) { return `models-list-${String(id).replace(/[^a-zA-Z0-9_-]/g, '-')}`; }
+function modelOptionId(id, index) { return `${modelListId(id)}-option-${index}`; }
+function filteredModels(id) {
+  const models = modelLists.value[id] || [];
+  const query = String(modelSearch.value[id] || '').trim().toLocaleLowerCase();
+  return query ? models.filter(name => String(name).toLocaleLowerCase().includes(query)) : models;
+}
+function activeModelOptionId(channel) {
+  const index = modelActiveIndex.value[channel.id];
+  return typeof index === 'number' && filteredModels(channel.id)[index] !== undefined
+    ? modelOptionId(channel.id, index)
+    : undefined;
+}
+function openModels(channel) {
+  if (!modelLists.value[channel.id]?.length || isModelOpen(channel.id)) return;
+  modelSearch.value[channel.id] = '';
+  const selected = modelLists.value[channel.id].indexOf(channel.model);
+  modelActiveIndex.value[channel.id] = selected >= 0 ? selected : 0;
+  modelOpenId.value = channel.id;
+}
+function toggleModels(channel) {
+  if (isModelOpen(channel.id)) modelOpenId.value = null;
+  else openModels(channel);
+}
+function updateModel(channel, value) {
+  update(channel.id, { model: value });
+  modelSearch.value[channel.id] = value;
+  if (modelLists.value[channel.id]?.length) {
+    modelOpenId.value = channel.id;
+    modelActiveIndex.value[channel.id] = 0;
+  }
+}
+function selectModel(channel, name) {
+  if (channel.model !== name) update(channel.id, { model: name });
+  modelSearch.value[channel.id] = '';
+  modelOpenId.value = null;
+}
+function onModelKeydown(channel, event) {
+  const id = channel.id;
+  const options = filteredModels(id);
+  if (event.key === 'Escape' && isModelOpen(id)) {
+    event.preventDefault();
+    modelOpenId.value = null;
+    return;
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (!isModelOpen(id)) openModels(channel);
+    const available = filteredModels(id);
+    if (!available.length) return;
+    event.preventDefault();
+    const current = modelActiveIndex.value[id] ?? (event.key === 'ArrowDown' ? -1 : 0);
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    modelActiveIndex.value[id] = (current + delta + available.length) % available.length;
+    return;
+  }
+  if (event.key === 'Enter' && isModelOpen(id) && options.length) {
+    const index = modelActiveIndex.value[id] ?? 0;
+    if (options[index]) {
+      event.preventDefault();
+      selectModel(channel, options[index]);
+    }
+  }
+}
+function onModelPointerDown(event) {
+  const id = modelOpenId.value;
+  if (id && !modelPickerRoots[id]?.contains(event.target)) modelOpenId.value = null;
+}
+watch(modelOpenId, (id) => {
+  document.removeEventListener('pointerdown', onModelPointerDown, true);
+  if (id) document.addEventListener('pointerdown', onModelPointerDown, true);
+});
 async function testChannel(channel) {
   if (channel.dirty || !channel.saved) { channel = await saveChannel(channel); if (!channel) return; }
   busy.value[channel.id] = 'test'; delete results.value[channel.id]; delete notices.value[channel.id];
@@ -185,10 +272,13 @@ async function testChannel(channel) {
   finally { delete busy.value[channel.id]; emit('health-change'); }
 }
 function hideKey(id) { clearTimeout(hideTimers.get(id)); hideTimers.delete(id); delete revealed.value[id]; }
-function clearKeys() { visible = false; revealEpoch++; for (const id of Object.keys(revealed.value)) hideKey(id); }
+function clearKeys() { visible = false; revealEpoch++; modelOpenId.value = null; for (const id of Object.keys(revealed.value)) hideKey(id); }
 onActivated(() => { visible = true; });
 onDeactivated(clearKeys);
-onBeforeUnmount(clearKeys);
+onBeforeUnmount(() => {
+  clearKeys();
+  document.removeEventListener('pointerdown', onModelPointerDown, true);
+});
 async function toggleKey(channel) {
   if (revealed.value[channel.id]) { hideKey(channel.id); return; }
   const epoch = revealEpoch;
