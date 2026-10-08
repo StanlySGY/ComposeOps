@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">运维任务中心</h1>
-        <p class="page-subtitle">一键生成备份、拉镜像、部署、健康检查与回滚策略的完整运维任务流</p>
+        <p class="page-subtitle">把备份、镜像更新与 AI 巡检组合成可复用的定时运维计划</p>
       </div>
       <div class="page-actions">
         <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
@@ -14,7 +14,7 @@
 
     <!-- 任务流生成器 -->
     <section class="section-panel">
-      <div class="mb-4"><h2 class="section-title">一键运维任务流</h2><p class="mt-1 text-muted">选择目标项目,自动生成完整的升级运维流程</p></div>
+      <div class="mb-4"><h2 class="section-title">生成运维计划</h2><p class="mt-1 text-muted">选择目标项目和执行时间，生成当前系统实际支持的定时任务</p></div>
       <div class="grid gap-4 lg:grid-cols-3">
         <div class="lg:col-span-1 space-y-3">
           <div>
@@ -37,7 +37,7 @@
               <span class="text-sm text-surface-300">自动巡检</span>
               <label class="toggle-label"><input v-model="enableInspection" type="checkbox" /></label>
             </div>
-            <p class="mt-1 text-xs text-surface-500">按周期执行 AI 巡检并留存报告</p>
+            <p class="mt-1 text-xs text-surface-500">按同一周期执行只读 AI 巡检并留存报告</p>
           </div>
           <button class="btn-primary w-full" :disabled="!targetProjectId || generating" @click="generateFlow">
             <Sparkles class="w-4 h-4" :class="{ 'animate-pulse': generating }" />{{ generating ? '生成中...' : '生成任务流' }}
@@ -48,7 +48,7 @@
         <div class="lg:col-span-2">
           <div v-if="!flowSteps.length" class="flex h-full min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-surface-700 p-6 text-center">
             <Bot class="mb-3 h-8 w-8 text-surface-600" />
-            <p class="text-sm text-surface-400">选择项目后点击「生成任务流」,AI 将自动编排完整的运维流程</p>
+            <p class="text-sm text-surface-400">选择项目后生成计划，系统会列出实际会创建的定时任务</p>
           </div>
           <div v-else class="space-y-2">
             <div v-for="(step, idx) in flowSteps" :key="idx" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
@@ -59,7 +59,10 @@
               </div>
               <span class="shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold" :class="step.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : step.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ step.tag }}</span>
             </div>
-            <div class="flex gap-2 pt-2">
+            <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200/80">
+              当前计划会创建“数据卷备份”“拉取镜像”和可选的“AI 巡检”定时任务；部署、健康检查和回滚仍需在服务/运维操作中执行，不会被假装成已自动化。
+            </div>
+            <div class="flex gap-2 pt-1">
               <button class="btn-primary flex-1" :disabled="creating" @click="createFlowJobs"><Rocket class="w-4 h-4" :class="{ 'animate-pulse': creating }" />{{ creating ? '创建中...' : '创建定时任务' }}</button>
               <button class="btn-secondary" @click="flowSteps = []">清空</button>
             </div>
@@ -172,9 +175,6 @@ function generateFlow() {
   const steps = [
     { title: '备份数据卷', description: `对「${name}」的命名卷执行 tar 备份,保留最近 20 份`, tag: '备份', tone: 'success' },
     { title: '拉取最新镜像', description: `执行 docker compose pull,获取「${name}」的最新镜像`, tag: '拉取', tone: 'success' },
-    { title: '部署服务', description: `执行 docker compose up -d --force-recreate 重建容器`, tag: '部署', tone: 'warning' },
-    { title: '健康检查', description: '部署后检查容器健康状态,确认服务正常启动', tag: '检查', tone: 'warning' },
-    { title: '回滚策略', description: '若健康检查失败,自动回滚到升级前配置并重建', tag: '回滚', tone: 'danger' },
   ];
   if (enableInspection.value) {
     steps.push({ title: 'AI 巡检', description: '部署完成后执行一次只读巡检,留存报告', tag: '巡检', tone: 'success' });
