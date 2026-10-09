@@ -22,6 +22,10 @@ test('guard: 灾难性命令全部拦截', () => {
   for (const cmd of [
     'rm -rf /',
     'rm -fr / ',
+    'rm -rf /; echo survived',
+    'rm -rf /&& echo survived',
+    'rm -rf /#comment',
+    'chmod -R 777 /; echo survived',
     'rm --no-preserve-root -rf /',
     'mkfs.ext4 /dev/sda1',
     'dd if=/dev/zero of=/dev/sda',

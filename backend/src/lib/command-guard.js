@@ -7,13 +7,13 @@
  */
 
 const CATASTROPHIC_PATTERNS = [
-  { re: /\brm\s+(?:-{1,2}[\w-]+\s+)*\/(?:\s|$)/i, reason: '递归删除根目录(rm -rf /)' },
+  { re: /\brm\s+(?:-{1,2}[\w-]+\s+)*\/(?:\s|$|[;&|#$])/i, reason: '递归删除根目录(rm -rf /)' },
   { re: /\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+--no-preserve-root/i, reason: 'rm --no-preserve-root' },
   { re: /\brm\s+--no-preserve-root\b/i, reason: 'rm --no-preserve-root' },
   { re: /\bmkfs(?:\.\w+)?\b/i, reason: '格式化文件系统(mkfs)' },
   { re: /\bdd\s+[^;&|]*of=\/dev\/(?:sd|vd|nvme|hd|mmcblk)/i, reason: 'dd 直写块设备' },
   { re: /:\(\)\s*\{.*\}\s*;\s*:/, reason: 'fork 炸弹' },
-  { re: /\bchmod\s+(?:-[a-z]+\s+)*777\s+\/(?:\s|$)/i, reason: '对根目录开放写权限(chmod 777 /)' },
+  { re: /\bchmod\s+(?:-[a-z]+\s+)*777\s+\/(?:\s|$|[;&|#$])/i, reason: '对根目录开放写权限(chmod 777 /)' },
   { re: /\b(?:shutdown|halt|poweroff)\b/i, reason: '关机/停机命令' },
   { re: /\breboot\b/i, reason: '重启命令' },
   { re: /\binit\s+[06]\b/, reason: 'init 0/6 切换运行级' },

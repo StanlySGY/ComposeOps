@@ -5,22 +5,44 @@
  * 避免两处各自维护一份 exec 白名单 / 日志读取实现(曾因两份实现出现严格性漂移)。
  */
 
-/** 只读探测命令白名单:仅允许不带副作用的信息类命令。curl/wget 已移除:可发起外部请求。 */
-export const READONLY_EXEC = /^(env|printenv|ps|top\s+-b\s+-n\s+1|netstat|ss|cat|head|tail|ls|df|du|free|uptime|uname|hostname|date|whoami|id|ip\s+addr|ping\s+-c\s+\d+)/;
+/** 只读探测命令白名单:curl/wget 与可启动子进程的 env 参数模式不允许。 */
+export const READONLY_EXEC = /^(?:env|printenv|ps|top|netstat|ss|cat|head|tail|ls|df|du|free|uptime|uname|hostname|date|whoami|id|ip|ping)(?:\s|$)/;
+const READONLY_COMMANDS = new Set([
+  'env', 'printenv', 'ps', 'top', 'netstat', 'ss', 'cat', 'head', 'tail', 'ls', 'df', 'du',
+  'free', 'uptime', 'uname', 'hostname', 'date', 'whoami', 'id', 'ip', 'ping',
+]);
+const SHELL_CONTROL = /[;&|`$()<>\\\\\0\r\n]/;
 
-/** 校验首个命令 token 是否命中只读白名单。失败抛错,不改执行。 */
+/** 校验命令及参数，而非只检查首 token；Docker Cmd 使用 argv，但 env 可启动任意子进程。 */
 export function assertReadonlyExecutable(cmdString) {
-  const parts = String(cmdString || '').trim().split(/\s+/);
-  if (!parts.length) throw new Error('命令为空');
-  if (!READONLY_EXEC.test(parts[0])) {
+  const text = String(cmdString ?? '').trim();
+  if (!text) throw new Error('命令为空');
+  if (SHELL_CONTROL.test(text)) throw new Error('只读探测命令不允许 shell 控制符');
+  const parts = text.split(/\s+/);
+  const [command, ...args] = parts;
+  if (!READONLY_COMMANDS.has(command)) {
     throw new Error('仅允许执行只读探测命令(env/ps/netstat/cat/tail/ls/df/free 等)');
+  }
+  // env <program> 可直接启动 shell/任意子进程，不能作为只读探测入口。
+  if (command === 'env' && args.length) throw new Error('env 只允许无参数输出环境变量');
+  if (command === 'top' && !(args.length === 3 && args[0] === '-b' && args[1] === '-n' && args[2] === '1')) {
+    throw new Error('top 仅允许单次采样:top -b -n 1');
+  }
+  if (command === 'ip' && !(args.length === 1 && args[0] === 'addr')) {
+    throw new Error('ip 仅允许查看地址:ip addr');
+  }
+  if (command === 'ping') {
+    const count = args[0] === '-c' ? Number(args[1]) : NaN;
+    if (args.length !== 3 || args[0] !== '-c' || !Number.isInteger(count) || count < 1 || count > 10 || args[2]?.startsWith('-')) {
+      throw new Error('ping 仅允许 ping -c 1..10 <host>');
+    }
   }
 }
 
 /**
  * 在容器内静默执行一条只读命令,返回 stdout/stderr/exitCode/durationMs。
  * @param {object} container - dockerode Container 实例
- * @param {string} cmdString - 完整命令字符串,首个 token 须命中 READONLY_EXEC 白名单
+ * @param {string} cmdString - 完整命令字符串，须通过命令及参数级只读白名单校验
  */
 export async function execReadonly(container, cmdString) {
   assertReadonlyExecutable(cmdString);

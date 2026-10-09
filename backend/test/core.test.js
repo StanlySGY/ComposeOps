@@ -12,7 +12,7 @@ const database = await import('../src/lib/db.js');
 const { composeArgs, resolveProjectFile } = await import('../src/services/compose-runner.js');
 const { parseYaml, validateYaml } = await import('../src/lib/files.js');
 const { demuxStream } = await import('../src/lib/docker-streams.js');
-const { buildMountPlan, compactMountPaths, safeProjectMountPath } = await import('../src/services/mount-plan.js');
+const { buildMountPlan, compactMountPaths, safeProjectMountPath, isWithinProjectPath } = await import('../src/services/mount-plan.js');
 const { runContainerAction, supportsContainerAction } = await import('../src/services/project-control.js');
 const { assertProjectActionAllowed } = await import('../src/services/project-action-runner.js');
 
@@ -184,6 +184,11 @@ test('mount plan deduplicates exact paths without broadening permissions', () =>
   assert.equal(safeProjectMountPath('/'), null);
   assert.equal(safeProjectMountPath('/home/user'), null);
   assert.equal(safeProjectMountPath('/home/user/services/app'), '/home/user/services/app');
+  assert.equal(isWithinProjectPath('/srv/compose/app-a', '/srv/compose/app-a/data'), true);
+  assert.equal(isWithinProjectPath('/srv/compose/app-a', '/srv/compose/app-a/../app-a/secrets'), true);
+  assert.equal(isWithinProjectPath('/srv/compose/app-a', '/srv/compose/app-a/../../etc'), false);
+  assert.equal(isWithinProjectPath('/srv/compose/app-a', '/srv/compose/app-ab/data'), false);
+  assert.equal(isWithinProjectPath('/srv/compose/app-a', '/srv/compose/app-a'), false);
   assert.deepEqual(compactMountPaths([
     '/srv/compose/app-a',
     '/srv/compose/app-a/worker',

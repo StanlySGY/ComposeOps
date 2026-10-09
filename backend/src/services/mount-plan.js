@@ -22,6 +22,14 @@ function containsPath(parent, child) {
   return child === parent || child.startsWith(`${parent}/`);
 }
 
+/** 检查宿主目录是否为项目根目录下的真实词法子路径，防止 ../ 与同名前缀逃逸。 */
+export function isWithinProjectPath(projectRoot, candidate) {
+  const root = safeProjectMountPath(projectRoot);
+  if (!root || typeof candidate !== 'string' || !candidate || /[\0\r\n]/.test(candidate) || !path.posix.isAbsolute(candidate)) return false;
+  const normalized = path.posix.normalize(candidate);
+  return normalized !== root && normalized.startsWith(`${root}/`);
+}
+
 /**
  * 精确目录去重：如果一个待挂载项目本身已经是另一个项目的父目录，只保留父目录。
  * 不会为了减少条目而擅自扩大到 /home、/srv 等公共根目录。

@@ -13,6 +13,7 @@ import { applyProjectEnv, assertEnvAccess, readProjectEnv, saveProjectEnv } from
 import { scanProjects } from '../scanner.js';
 import { attachPrivateRollback, redactText } from '../../lib/redaction.js';
 import * as YAML from 'yaml';
+import path from 'node:path';
 
 function collectOutput() {
   let text = '';
@@ -367,7 +368,7 @@ export function registerConfigTools(agent) {
         if (!doc.hasIn(['services', service])) throw Object.assign(new Error(`服务 ${service} 不存在`), { statusCode: 404 });
 
         // 校验 source 路径安全性:必须位于项目目录内或已明确挂载的受控路径
-        const { safeProjectMountPath } = await import('../mount-plan.js');
+        const { safeProjectMountPath, isWithinProjectPath } = await import('../mount-plan.js');
         const projectMount = safeProjectMountPath(context.project.workingDir);
         if (!projectMount) {
           throw Object.assign(
@@ -375,21 +376,19 @@ export function registerConfigTools(agent) {
             { statusCode: 403 }
           );
         }
-        // source 必须是绝对路径且在项目目录下(防止挂载任意宿主机路径)
-        if (!source.startsWith('/')) {
-          throw Object.assign(
-            new Error('source 必须是绝对路径'),
-            { statusCode: 400 }
-          );
+        // 先规范化再做路径边界判断，不能仅用 startsWith；否则 /project/../../etc 会逃逸到宿主机目录。
+        if (!path.posix.isAbsolute(source)) {
+          throw Object.assign(new Error('source 必须是绝对路径'), { statusCode: 400 });
         }
-        if (!source.startsWith(`${projectMount}/`)) {
+        const normalizedSource = path.posix.normalize(source);
+        if (!isWithinProjectPath(projectMount, normalizedSource)) {
           throw Object.assign(
-            new Error(`source 必须位于项目目录 ${projectMount} 内`),
+            new Error(`source 必须是项目目录 ${projectMount} 内的子路径，且不能通过 .. 逃逸`),
             { statusCode: 403 }
           );
         }
 
-        const mount = `${source}:${target}`;
+        const mount = `${normalizedSource}:${target}`;
         const existing = doc.getIn(['services', service, 'volumes']);
         const list = existing == null ? [] : Array.isArray(existing) ? [...existing] : [existing];
         const normalized = list
