@@ -37,6 +37,18 @@ function validateRepoUrl(value) {
   if (!SAFE_REPO_URL.test(url)) {
     throw Object.assign(new Error('仓库 URL 仅支持 http(s)://、ssh:// 或 git@ 形式'), { statusCode: 400 });
   }
+  // URL 中的 userinfo 会被持久化并经仓库配置 API 返回，禁止把密码/令牌嵌入 URL。
+  if (/^https?:\/\//i.test(url)) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw Object.assign(new Error('仓库 URL 格式不合法'), { statusCode: 400 });
+    }
+    if (parsed.username || parsed.password) {
+      throw Object.assign(new Error('仓库 URL 不允许包含用户名或密码，请改用 SSH 或其他安全凭据配置'), { statusCode: 400 });
+    }
+  }
   return url;
 }
 
