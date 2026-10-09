@@ -629,6 +629,28 @@ export class OperationsAgent {
                   ? { ...toolParams, ...approval.input }
                   : toolParams;
 
+              // 确认弹窗允许编辑参数，因此必须对最终执行参数重新解析项目上下文与风险。
+              // 若参数编辑导致风险升级，旧确认只覆盖原调用，拒绝本次执行并要求重新发起确认。
+              if (JSON.stringify(effectiveParams) !== JSON.stringify(toolParams)) {
+                let editedRisk;
+                try {
+                  const editedContext = await resolveToolContext(effectiveParams);
+                  editedRisk = assessRisk(toolName, effectiveParams, { ...context, ...editedContext });
+                } catch (error) {
+                  const rejectMsg = `编辑后的参数无法重新验证风险，已拒绝执行: ${error.message}`;
+                  messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
+                  onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg });
+                  continue;
+                }
+                const riskRank = { low: 0, medium: 1, high: 2, critical: 3 };
+                if ((riskRank[editedRisk] ?? 3) > (riskRank[dynamicRisk] ?? 3)) {
+                  const rejectMsg = `编辑后的参数将风险从 ${dynamicRisk} 提升为 ${editedRisk}，原确认不适用于新参数；请重新发起操作并确认。`;
+                  messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
+                  onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg, risk: editedRisk });
+                  continue;
+                }
+              }
+
               // "本会话不再询问":按工具或按工具+参数指纹记忆。
               // 指纹必须用"实际执行参数"(含弹窗编辑后的值),否则记住的是原始参数、
               // 放行的却是编辑后参数;critical 风险不记忆——critical 每次都要确认。
