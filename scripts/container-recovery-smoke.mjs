@@ -38,7 +38,7 @@ try {
   assert.equal(stopped.State.Status, 'exited', 'failure injection must leave the target exited');
 
   const project = {
-    id: `smoke-${tprojectName}`,
+    id: `smoke-${projectName}`,
     projectName,
     owner: 'composeops-smoke',
     workingDir: root,
@@ -63,7 +63,7 @@ try {
   console.log(`MODE=${prepared.mode}`);
   console.log('INJECTED=exited');
   console.log(`ACTION_CODE=${exitCode}`);
-  console.log(`RECOVERED-${recovered.State.Status}`);
+  console.log(`RECOVERED=${recovered.State.Status}`);
 } finally {
   await cleanup();
 }

@@ -61,9 +61,10 @@ function resetChannel(state) {
 }
 
 export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null, onApproval = null } = {}) {
+  const instance = getCurrentInstance();
   const state = channelState(channel);
   // 非组件调用(例如单测或一次性脚本)没有卸载钩子,避免共享状态污染下一次独立调用。
-  if (!getCurrentInstance() && !state.running.value) resetChannel(state);
+  if (!instance && !state.running.value) resetChannel(state);
   const messages = state.messages;
   const input = state.input;
   const running = state.running;
@@ -72,7 +73,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   const pendingQueue = state.pendingQueue;
   const scrollEl = ref(null);
   const subscriber = { onEventExtra, onApproval };
-  state.subscribers.add(subscriber);
+  if (instance) state.subscribers.add(subscriber);
   function setSubscriberActive(active) { subscriber.active = active !== false; }
   // 滚动跟随:用户向上回看时暂停自动滚底,回到底部(或手动点"回到底部")后恢复。
   const atBottom = ref(true);
@@ -404,10 +405,12 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     zoomScale.value = 1;
   }
 
-  // Esc 关闭放大浮层,并锁定背景滚动(复用全局弹层 Esc 分层体系)
-  useEscapeKey({ active: zoomOpen, layer: 'modal', onClose: closeZoom, lockBody: true });
-
-  onBeforeUnmount(() => state.subscribers.delete(subscriber));
+  // Esc 关闭放大浮层,并锁定背景滚动(复用全局弹层 Esc 分层体系)。
+  // 非组件调用不具备 router 注入和卸载生命周期,跳过 DOM 生命周期绑定。
+  if (instance) {
+    useEscapeKey({ active: zoomOpen, layer: 'modal', onClose: closeZoom, lockBody: true });
+    onBeforeUnmount(() => state.subscribers.delete(subscriber));
+  }
 
   // 切换本会话审批模式:后端 ApprovalGate 按 sessionId 记忆,这里只负责把
   // 选择立刻反映到界面(不等下一轮 approval_mode 事件回来)。
