@@ -3,7 +3,7 @@ import { realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import docker from './docker.js';
-import { ACTIONS, assertComposeVersion, withComposeFileLock } from './compose-runner.js';
+import { ACTIONS, assertComposeVersion, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
@@ -392,11 +392,28 @@ export async function saveWorkspaceCompose(project, fileIndex, content, reason =
       checkFiles[index] = tempPath;
       const check = await execInRunner(container, ['docker', 'compose', ...checkFiles.flatMap((file) => ['-f', file]), 'config', '--quiet']);
       if (check.code !== 0) throw Object.assign(new Error(check.stderr.trim() || `docker compose config 退出码 ${check.code}`), { statusCode: 422 });
-      addComposeBackup(project.id, filePath, previous.content, reason);
-      const move = await execInRunner(container, ['mv', '-f', '--', tempPath, filePath]);
-      if (move.code !== 0) throw new Error(move.stderr.trim() || 'Compose 文件替换失败');
-      await execInRunner(container, ['chmod', previous.header.mode.toString(8), filePath]).catch(() => {});
-      await execInRunner(container, ['chown', `${previous.header.uid}:${previous.header.gid}`, filePath]).catch(() => {});
+      await replaceComposeWithBackup({
+        replace: async () => {
+          const move = await execInRunner(container, ['mv', '-f', '--', tempPath, filePath]);
+          if (move.code !== 0) throw new Error(move.stderr.trim() || 'Compose 文件替换失败');
+          await execInRunner(container, ['chmod', previous.header.mode.toString(8), filePath]).catch(() => {});
+          await execInRunner(container, ['chown', `${previous.header.uid}:${previous.header.gid}`, filePath]).catch(() => {});
+        },
+        backup: () => addComposeBackup(project.id, filePath, previous.content, reason),
+        rollback: async () => {
+          const rollbackName = `.composeops-${randomBytes(8).toString('hex')}.rollback`;
+          const rollbackPath = path.posix.join(path.posix.dirname(filePath), rollbackName);
+          try {
+            await putArchiveFile(container, path.posix.dirname(filePath), rollbackName, previous.content, previous.header);
+            const restore = await execInRunner(container, ['mv', '-f', '--', rollbackPath, filePath]);
+            if (restore.code !== 0) throw new Error(restore.stderr.trim() || '恢复原 Compose 文件失败');
+            await execInRunner(container, ['chmod', previous.header.mode.toString(8), filePath]).catch(() => {});
+            await execInRunner(container, ['chown', `${previous.header.uid}:${previous.header.gid}`, filePath]).catch(() => {});
+          } finally {
+            await execInRunner(container, ['rm', '-f', '--', rollbackPath]).catch(() => {});
+          }
+        },
+      });
     } catch (error) {
       await execInRunner(container, ['rm', '-f', '--', tempPath]).catch(() => {});
       throw error;

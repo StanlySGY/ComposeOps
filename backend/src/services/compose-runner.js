@@ -29,6 +29,34 @@ export function assertComposeVersion(currentContent, expectedContent) {
   }
 }
 
+/** 替换文件与备份目录协调:失败时恢复原内容,避免留下误导性的备份记录。 */
+export async function replaceComposeWithBackup({ replace, backup, rollback }) {
+  try {
+    await replace();
+  } catch (replaceError) {
+    await restoreOrThrow(rollback, replaceError, 'Compose 替换失败且原文件恢复失败');
+    throw replaceError;
+  }
+  try {
+    return await backup();
+  } catch (backupError) {
+    await restoreOrThrow(rollback, backupError, 'Compose 备份写入失败且原文件恢复失败');
+    throw backupError;
+  }
+}
+
+async function restoreOrThrow(rollback, cause, message) {
+  try {
+    await rollback();
+  } catch (rollbackError) {
+    const error = new Error(`${message}: ${rollbackError.message}`, { cause });
+    error.code = 'COMPOSE_SAVE_ROLLBACK_FAILED';
+    error.statusCode = 500;
+    error.rollbackError = rollbackError;
+    throw error;
+  }
+}
+
 /** 组合节点环境变量(DOCKER_HOST)与 Compose 超时变量。 */
 export function nodeEnv(project) {
   const hostEnv = composeEnv(project?.host || getActiveHost());
@@ -140,10 +168,25 @@ export async function saveCompose(project, fileIndex, content, reason = 'save', 
       const checkFiles = [...project.composeFiles];
       checkFiles[Number(fileIndex)] = tempPath;
       await runConfigCheck(project, checkFiles);
-      addComposeBackup(project.id, filePath, previous, reason);
       await chown(tempPath, currentStat.uid, currentStat.gid).catch(() => {});
-      await rename(tempPath, filePath);
-      await chmod(filePath, currentStat.mode);
+      await replaceComposeWithBackup({
+        replace: async () => {
+          await rename(tempPath, filePath);
+          await chmod(filePath, currentStat.mode);
+        },
+        backup: () => addComposeBackup(project.id, filePath, previous, reason),
+        rollback: async () => {
+          const rollbackPath = path.join(path.dirname(filePath), `.composeops-${randomBytes(8).toString('hex')}.rollback`);
+          try {
+            await writeFile(rollbackPath, previous, { encoding: 'utf8', mode: currentStat.mode });
+            await chown(rollbackPath, currentStat.uid, currentStat.gid).catch(() => {});
+            await rename(rollbackPath, filePath);
+            await chmod(filePath, currentStat.mode);
+          } finally {
+            await unlink(rollbackPath).catch(() => {});
+          }
+        },
+      });
     } catch (error) {
       await unlink(tempPath).catch(() => {});
       throw error;

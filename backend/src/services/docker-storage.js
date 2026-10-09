@@ -273,19 +273,24 @@ export async function getSystemStorageDf() {
  * - safe:悬空镜像(dangling)、不再使用且非 running 的容器、未被引用的 build cache
  * - builder:全部构建缓存
  * - volumes:孤儿持久卷
- * - all:safe + volumes + builder
+ * - all:safe + volumes + builder (仅供手动且已二次确认的深度清理)
+ * - scheduled:safe + builder, 永不清理数据卷 (供无人值守的定时任务使用)
  * 返回释放字节数。
  */
 export async function pruneStorage(mode = 'safe') {
   const docker = getActivityDocker();
   const reclaimed = { images: 0, containers: 0, volumes: 0, buildCache: 0 };
-  if (mode === 'safe' || mode === 'all') {
+  if (mode === 'safe' || mode === 'all' || mode === 'scheduled') {
     const images = await docker.pruneImages({ filters: { dangling: ['true'] } });
     reclaimed.images = sumBytes(images?.SpaceReclaimed);
     const containers = await docker.pruneContainers({ filters: { status: ['exited'] } });
     reclaimed.containers = sumBytes(containers?.SpaceReclaimed);
+    if (mode === 'safe') {
+      const builder = await docker.pruneBuilds({ filters: { inUse: ['false'] } });
+      reclaimed.buildCache = sumBytes(builder?.SpaceReclaimed);
+    }
   }
-  if (mode === 'builder' || mode === 'all') {
+  if (mode === 'builder' || mode === 'all' || mode === 'scheduled') {
     const builder = await docker.pruneBuilds({ filters: { inUse: ['false'] } });
     reclaimed.buildCache = sumBytes(builder?.SpaceReclaimed);
   }

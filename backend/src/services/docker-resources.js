@@ -105,18 +105,19 @@ export async function listDockerResources() {
 
 /**
  * DELETE /ops/storage/resources/:kind/:id:删除单个资源。
- * kind ∈ image | volume | network。镜像删除默认 force(连带删除依赖它的容器);
- * 卷删除同样 force,避免"卷被容器引用"时悄悄失败。
+ * 默认不强制删除:列表加载后资源可能被新容器引用,由 Docker 拒绝删除可保护数据。
  */
-export async function removeDockerResource(kind, id, force = false) {
+export async function removeDockerResource(kind, id, _force = false) {
   const docker = getActivityDocker();
   if (kind === 'image') {
     const image = docker.getImage(id);
-    await image.remove({ force: true });
+    await image.remove({ force: false });
     return { kind, id, removed: true };
   }
   if (kind === 'volume') {
-    await docker.getVolume(id).remove({ force: force !== false });
+    // 不能为了避免“被引用卷删除失败”而强制删除:调用方列表可能已过期。
+    // Docker 会在卷被容器引用时拒绝删除,这是数据安全的最后一道保护。
+    await docker.getVolume(id).remove({ force: false });
     return { kind, id, removed: true };
   }
   if (kind === 'network') {

@@ -14,12 +14,19 @@ export const CRON_DATA_FILE = path.join(__dirname, '../../data/cron-jobs.json');
 const JOB_TYPES = {
   'db-backup': { label: '数据库自动备份', description: '对所有纳管项目中运行的数据库容器执行 Dump 并留存本地' },
   'prune-safe': { label: 'Docker 安全清理', description: '清理悬空镜像、退出容器与未使用构建缓存' },
-  'prune-all': { label: 'Docker 深度清理', description: '深度清理孤儿卷与全部构建缓存(谨慎)' },
+  'prune-all': { label: 'Docker 自动深度清理', description: '自动清理悬空镜像、退出容器与全部未使用构建缓存;不会删除数据卷' },
   'images-check': { label: '镜像更新检查', description: '全局检测纳管项目镜像是否有远程更新(写入雷达缓存)' },
   'pull-images': { label: '定时拉取镜像', description: '对所有可编辑项目执行 docker compose pull' },
   'volume-backup': { label: '数据卷备份', description: '对所有纳管项目的命名卷执行 tar 备份,保留最近份数' },
   'inspection': { label: 'AI 巡检', description: '执行一次只读巡检并留存报告(容器/磁盘/内存/备份时效)' },
 };
+
+/** 汇总镜像拉取结果;部分失败必须抛错,由调度器记录 failed 并触发告警。 */
+export function summarizePullImagesResult(pulled, errors) {
+  if (errors.length && !pulled) throw new Error(`拉取镜像全部失败:${errors.slice(0, 3).join(', ')}`);
+  if (errors.length) throw new Error(`拉取镜像部分失败: ${pulled} 个成功,${errors.length} 个失败:${errors.slice(0, 5).join(', ')}`);
+  return pulled ? `已拉取 ${pulled} 个项目的镜像` : '没有可拉取镜像的项目';
+}
 
 /** 解析单个 cron 字段 → 匹配函数(纯函数,便于单测)。 */
 export function parseField(value, min, max) {
@@ -268,7 +275,9 @@ async function executeJob(job) {
       }
       case 'prune-safe':
       case 'prune-all': {
-        const result = await pruneStorage(job.type === 'prune-all' ? 'all' : 'safe');
+        // 定时任务无人值守,即使类型名为 prune-all 也不得删除孤儿数据卷。
+        // 数据卷清理只允许通过需要显式 PRUNE 确认的手动接口执行。
+        const result = await pruneStorage(job.type === 'prune-all' ? 'scheduled' : 'safe');
         return `Docker 清理完成,释放 ${result.reclaimedMB} MB`;
       }
       case 'images-check': {
@@ -319,10 +328,7 @@ async function executeJob(job) {
             errors.push(project.projectName);
           }
         }
-        if (errors.length && !pulled) throw new Error(`拉取镜像全部失败:${errors.slice(0, 3).join(', ')}`);
-        return pulled
-          ? (errors.length ? `拉取 ${pulled} 个成功,${errors.length} 个失败` : `已拉取 ${pulled} 个项目的镜像`)
-          : '没有可拉取镜像的项目';
+        return summarizePullImagesResult(pulled, errors);
       }
       case 'inspection': {
         const { runInspection } = await import('./inspection.js');

@@ -40,6 +40,7 @@ import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { getSetting, setSetting } from '../lib/db.js';
 import { getAgent } from '../services/agent.js';
 import { assessRisk } from '../services/agent-tools.js';
+import { resolveToolContext } from '../services/agent/planning.js';
 import { redactValue } from '../lib/redaction.js';
 import { validateOrigin } from '../lib/auth.js';
 import { checkRateLimit } from '../lib/rate-limit.js';
@@ -97,8 +98,13 @@ export function exportableTools(mode) {
 }
 
 /** 高危工具(声明需确认,或动态风险评估为 high)在 MCP 通道必须显式 confirm。 */
-export function needsExplicitConfirm(tool) {
-  return tool.confirmationRequired === true || assessRisk(tool.name, {}, {}) === 'high';
+export function isCriticalRisk(tool, params = {}, context = {}) {
+  return assessRisk(tool.name, params, context) === 'critical';
+}
+
+export function needsExplicitConfirm(tool, params = {}, context = {}) {
+  const risk = assessRisk(tool.name, params, context);
+  return tool.confirmationRequired === true || risk === 'high' || risk === 'critical';
 }
 
 /**
@@ -250,7 +256,18 @@ async function callToolResult(agent, mode, message) {
   const args = { ...(params?.arguments || {}) };
   const confirmed = args.confirm === true;
   delete args.confirm;
-  if (needsExplicitConfirm(tool) && !confirmed) {
+  // MCP 直接调用 agent.executeTool,不会经过面板 Tool Loop 的动态审批门。
+  // 因此必须按实际项目上下文重新评估风险,不能只看工具静态风险。
+  let resolvedContext = {};
+  try {
+    resolvedContext = await resolveToolContext(args);
+  } catch {
+    // 保留确认优先于参数/上下文错误的行为;执行阶段会返回准确的上下文错误。
+  }
+  if (isCriticalRisk(tool, args, resolvedContext)) {
+    return { status: 200, body: { jsonrpc: '2.0', id, result: wrapToolResult({ tool: tool.name, success: false, error: `工具 ${tool.name} 在当前项目上下文中风险等级为 critical,MCP 通道 fail-closed,拒绝执行。` }, true) } };
+  }
+  if (needsExplicitConfirm(tool, args, resolvedContext) && !confirmed) {
     // 用 isError 结果而非协议错误:这样模型能读到原因并带 confirm:true 重试。
     const reason = tool.confirmationRequired === true && assessRisk(tool.name, {}, {}) !== 'high'
       ? `工具 ${tool.name} 会改动系统状态(风险等级 ${tool.risk})`

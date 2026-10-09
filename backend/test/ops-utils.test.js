@@ -8,9 +8,35 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-ops-test-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const { parseImageRef, extractImageRefs } = await import('../src/services/image-updater.js');
-const { parseDockerDf, parseDockerDfOutput } = await import('../src/services/docker-storage.js');
+const { parseDockerDf, parseDockerDfOutput, pruneStorage } = await import('../src/services/docker-storage.js');
+const { getActivityDocker } = await import('../src/services/docker-hosts.js');
+const { removeDockerResource } = await import('../src/services/docker-resources.js');
 const { renderBlueprintCompose, renderBlueprintEnv, getBlueprint, listBlueprints } = await import('../src/services/app-blueprints.js');
 const { evaluateContainer, buildTitle, buildBody, stripDockerMultiplex } = await import('../src/services/health-alerter.js');
+const { summarizePullImagesResult } = await import('../src/services/cron-scheduler.js');
+
+test('cron pull-images: 全部成功时返回成功摘要', () => {
+  assert.equal(summarizePullImagesResult(3, []), '已拉取 3 个项目的镜像');
+});
+
+test('cron pull-images: 部分失败必须抛错,使任务记录失败并触发告警', () => {
+  assert.throws(
+    () => summarizePullImagesResult(2, ['api', 'worker']),
+    /部分失败: 2 个成功,2 个失败:api, worker/,
+  );
+});
+
+test('cron pull-images: 全部失败必须抛错并保留失败项目', () => {
+  assert.throws(
+    () => summarizePullImagesResult(0, ['api', 'worker']),
+    /全部失败:api, worker/,
+  );
+});
+
+test('cron pull-images: 没有纳管项目时返回无工作摘要', () => {
+  assert.equal(summarizePullImagesResult(0, []), '没有可拉取镜像的项目');
+});
+
 
 test('image-updater: parseImageRef 识别 registry/image/tag', () => {
   assert.deepEqual(parseImageRef('nginx:1.25'), { registry: 'docker.io', image: 'library/nginx', tag: '1.25', original: 'nginx:1.25' });
@@ -38,6 +64,57 @@ test('docker-storage: parseDockerDf 解析 df json 并汇总 reclaimable', () =>
   assert.equal(parsed.volumes.reclaimable, 300);
   assert.equal(parsed.buildCache.reclaimable, 50);
   assert.equal(parsed.reclaimable, 1000 + 200 + 300 + 50);
+});
+
+test('docker-storage: scheduled 深度清理包含常规资源和构建缓存,但绝不清理数据卷', async () => {
+  const docker = getActivityDocker();
+  const originals = {
+    pruneImages: docker.pruneImages,
+    pruneContainers: docker.pruneContainers,
+    pruneBuilds: docker.pruneBuilds,
+    pruneVolumes: docker.pruneVolumes,
+  };
+  const calls = [];
+  docker.pruneImages = async () => { calls.push('images'); return { SpaceReclaimed: 1024 }; };
+  docker.pruneContainers = async () => { calls.push('containers'); return { SpaceReclaimed: 2048 }; };
+  docker.pruneBuilds = async () => { calls.push('builds'); return { SpaceReclaimed: 4096 }; };
+  docker.pruneVolumes = async () => { calls.push('volumes'); return { SpaceReclaimed: 8192 }; };
+  try {
+    const result = await pruneStorage('scheduled');
+    assert.deepEqual(calls, ['images', 'containers', 'builds']);
+    assert.equal(result.reclaimed.volumes, 0);
+    assert.equal(result.reclaimedMB, 0);
+    assert.equal(result.reclaimed.images, 1024);
+    assert.equal(result.reclaimed.containers, 2048);
+    assert.equal(result.reclaimed.buildCache, 4096);
+  } finally {
+    for (const [name, method] of Object.entries(originals)) {
+      if (method === undefined) delete docker[name];
+      else docker[name] = method;
+    }
+  }
+});
+
+test('docker-resources: 即使调用方传 force=true,镜像与数据卷也不强制删除', async () => {
+  const docker = getActivityDocker();
+  const originalGetImage = docker.getImage;
+  const originalGetVolume = docker.getVolume;
+  const calls = [];
+  docker.getImage = (id) => ({ remove: async (options) => calls.push(['image', id, options]) });
+  docker.getVolume = (id) => ({ remove: async (options) => calls.push(['volume', id, options]) });
+  try {
+    await removeDockerResource('image', 'image-id', true);
+    await removeDockerResource('volume', 'volume-id', true);
+    assert.deepEqual(calls, [
+      ['image', 'image-id', { force: false }],
+      ['volume', 'volume-id', { force: false }],
+    ]);
+  } finally {
+    if (originalGetImage === undefined) delete docker.getImage;
+    else docker.getImage = originalGetImage;
+    if (originalGetVolume === undefined) delete docker.getVolume;
+    else docker.getVolume = originalGetVolume;
+  }
 });
 
 test('docker-storage: parseDockerDf 空数据返回 0', () => {

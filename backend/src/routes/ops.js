@@ -87,7 +87,7 @@ export default async function opsRoutes(fastify) {
   });
 
   // kind 不设 enum:处理函数自己归一 image|volume|network 并返回 400。
-  // 卷删除默认 force,避免"被引用卷删除静默失败"的糟糕体验。
+  // 资源可能在前端确认后被新容器引用;服务层一律非强制删除以保护运行中资源与持久数据。
   fastify.delete('/storage/resources/:kind/:id', {
     schema: {
       params: {
@@ -102,7 +102,7 @@ export default async function opsRoutes(fastify) {
       return reply.code(400).send({ error: 'unknown_resource_kind', message: `未知资源类型:${kind}` });
     }
     try {
-      const result = await removeDockerResource(kind, id, true);
+      const result = await removeDockerResource(kind, id, false);
       addOperation({ action: `resource.remove.${kind}`, status: 'success', detail: id });
       return { ok: true, ...result };
     } catch (error) {

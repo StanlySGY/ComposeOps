@@ -15,6 +15,7 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 const { buildApp } = await import('../src/app.js');
 const mcp = await import('../src/routes/mcp.js');
 const { getSetting } = await import('../src/lib/db.js');
+const { assessRisk } = await import('../src/services/agent-tools.js');
 
 const app = await buildApp({ logger: false });
 await app.ready();
@@ -264,6 +265,15 @@ test('mcp: all 模式下高危工具带 destructiveHint,且清单里出现需确
 function tool_names_includes(tools, name) {
   return tools.some((tool) => tool.name === name);
 }
+
+test('mcp: 生产项目动态升为 critical 时 fail-closed,不允许 confirm 绕过', () => {
+  const tool = { name: 'compose.exec', confirmationRequired: true };
+  const production = { project: { tags: ['production'], projectName: 'payments-prod' } };
+  assert.equal(assessRisk(tool.name, { projectId: 'prod' }, production), 'critical');
+  assert.equal(mcp.isCriticalRisk(tool, { projectId: 'prod' }, production), true);
+  assert.equal(mcp.needsExplicitConfirm(tool, { projectId: 'prod' }, production), true);
+  assert.equal(mcp.isCriticalRisk(tool, { projectId: 'dev' }, { project: { projectName: 'dev' } }), false);
+});
 
 test('mcp: 高危工具不带 confirm 被拒(isError 且可重试)', async () => {
   const response = await app.inject({

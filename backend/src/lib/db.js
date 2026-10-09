@@ -1196,16 +1196,19 @@ export function setProjectMounts(discoveredProjectIds, managedProjectIds, mountP
 export const COMPOSE_BACKUP_KEEP = 20;
 
 export function addComposeBackup(projectId, filePath, content, reason = 'save') {
-  const result = db.prepare(
-    'INSERT INTO compose_backups(project_id, file_path, content, reason) VALUES(?, ?, ?, ?)'
-  ).run(projectId, filePath, content, reason);
-  db.prepare(`
-    DELETE FROM compose_backups
-    WHERE project_id = ? AND id NOT IN (
-      SELECT id FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT ${COMPOSE_BACKUP_KEEP}
-    )
-  `).run(projectId, projectId);
-  return Number(result.lastInsertRowid);
+  // 插入与保留策略必须是同一事务，避免清理失败时留下半完成的备份写入。
+  return db.transaction(() => {
+    const result = db.prepare(
+      'INSERT INTO compose_backups(project_id, file_path, content, reason) VALUES(?, ?, ?, ?)'
+    ).run(projectId, filePath, content, reason);
+    db.prepare(`
+      DELETE FROM compose_backups
+      WHERE project_id = ? AND id NOT IN (
+        SELECT id FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT ${COMPOSE_BACKUP_KEEP}
+      )
+    `).run(projectId, projectId);
+    return Number(result.lastInsertRowid);
+  })();
 }
 
 export function listComposeBackups(projectId) {
