@@ -1,4 +1,4 @@
-import { readFile, rename, writeFile, unlink } from 'fs/promises';
+import { readFile, rename, writeFile, unlink, lstat, chmod, chown } from 'fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseDotenv, serializeDotenv, validateDotenv } from '../lib/dotenv.js';
@@ -10,6 +10,111 @@ import { withProjectOperationLock } from './project-operation-lock.js';
 const ENV_FILE = '.env';
 const ENV_EXAMPLE = '.env.example';
 const MAX_ENV_BYTES = 256 * 1024;
+const envFileLocks = new Map();
+
+async function withEnvFileLock(filePath, task) {
+  const previous = envFileLocks.get(filePath) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  envFileLocks.set(filePath, current);
+  await previous;
+  try { return await task(); }
+  finally {
+    release();
+    if (envFileLocks.get(filePath) === current) envFileLocks.delete(filePath);
+  }
+}
+
+async function assertRegularEnvTarget(filePath) {
+  try {
+    const info = await lstat(filePath);
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw Object.assign(new Error('环境变量目标必须是普通文件，拒绝写入符号链接或特殊文件'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+    }
+    return info;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// Isolated filesystem transaction so failure paths can be tested deterministically.
+export async function replaceEnvFileWithBackup({ envPath, backupPath, content, existingStat, fsOps = {} }) {
+  const ops = { writeFile, rename, unlink, chmod, chown, assertTarget: assertRegularEnvTarget, ...fsOps };
+  const previous = existingStat ? await readFile(envPath, 'utf8') : '';
+  const tempPath = `${envPath}.tmp.${randomBytes(8).toString('hex')}`;
+  let backupAttempted = false;
+  let backupCreated = false;
+  try {
+    backupAttempted = true;
+    await ops.writeFile(backupPath, previous, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    backupCreated = true;
+    await ops.writeFile(tempPath, content, { encoding: 'utf8', mode: existingStat?.mode ?? 0o600, flag: 'wx' });
+    if (existingStat) {
+      await ops.chown(tempPath, existingStat.uid, existingStat.gid).catch(() => {});
+      await ops.chmod(tempPath, existingStat.mode & 0o777);
+    }
+    const latest = await ops.assertTarget(envPath);
+    if (!!latest !== !!existingStat || (latest && (latest.ino !== existingStat.ino || latest.dev !== existingStat.dev))) {
+      throw Object.assign(new Error('环境变量文件在保存期间发生变化，请刷新后重试'), { statusCode: 409, code: 'ENV_VERSION_CONFLICT' });
+    }
+    await ops.rename(tempPath, envPath);
+  } catch (error) {
+    await ops.unlink(tempPath).catch(() => {});
+    // A failed write may leave a partial backup; preserve any pre-existing collision.
+    if (backupCreated || (backupAttempted && error.code !== 'EEXIST')) await ops.unlink(backupPath).catch(() => {});
+    throw Object.assign(error, { statusCode: error.statusCode || 500, message: error.statusCode ? error.message : `写入 .env 失败:${error.message}` });
+  }
+  return { tempPath };
+}
+
+// Workspace/SSH equivalent, with the remote filesystem operations injectable for failure tests.
+export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content, ops = {} }) {
+  const remote = {
+    exec: (target, args) => execInRunner(target, args),
+    read: (target, filePath) => readArchiveFile(target, filePath),
+    put: (target, directory, name, data, options) => putArchiveFile(target, directory, name, data, options),
+    ...ops,
+  };
+  const safeTarget = await remote.exec(container, ['test', '!', '-L', envPath]);
+  if (safeTarget.code !== 0) {
+    throw Object.assign(new Error('环境变量目标是符号链接或无法安全验证，拒绝读取/写入'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+  }
+  const targetExists = await remote.exec(container, ['test', '-e', envPath]);
+  if (targetExists.code === 0) {
+    const regularTarget = await remote.exec(container, ['test', '-f', envPath]);
+    if (regularTarget.code !== 0) {
+      throw Object.assign(new Error('环境变量目标必须是普通文件，拒绝写入目录或特殊文件'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+    }
+  } else if (targetExists.code !== 1) {
+    throw Object.assign(new Error('无法安全验证环境变量目标，拒绝写入'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+  }
+  const previousFile = await remote.read(container, envPath).catch((error) => {
+    if (error.statusCode === 404) return null;
+    throw error;
+  });
+  const previous = previousFile?.content ?? '';
+  const header = previousFile?.header ?? { mode: 0o600, uid: 0, gid: 0 };
+  const tempName = `.composeops-${randomBytes(8).toString('hex')}.envtmp`;
+  const tempPath = path.posix.join(root, tempName);
+  let backupAttempted = false;
+  let backupCreated = false;
+  try {
+    backupAttempted = true;
+    await remote.put(container, root, backupName, previous, { mode: 0o600, uid: header.uid, gid: header.gid });
+    backupCreated = true;
+    await remote.put(container, root, tempName, content, { mode: 0o600, uid: header.uid, gid: header.gid });
+    const moved = await remote.exec(container, ['mv', '-f', '--', tempPath, envPath]);
+    if (moved.code !== 0) throw new Error(moved.stderr?.trim() || '环境变量文件原子替换失败');
+    await remote.exec(container, ['chmod', (header.mode & 0o777).toString(8), envPath]).catch(() => {});
+    await remote.exec(container, ['chown', `${header.uid}:${header.gid}`, envPath]).catch(() => {});
+  } catch (error) {
+    await remote.exec(container, ['rm', '-f', '--', tempPath]).catch(() => {});
+    if (backupCreated || (backupAttempted && error.code !== 'EEXIST')) await remote.exec(container, ['rm', '-f', '--', backupPath]).catch(() => {});
+    throw Object.assign(error, { statusCode: error.statusCode || 500, message: error.statusCode ? error.message : `写入环境变量文件失败:${error.message}` });
+  }
+  return { ok: true, path: envPath, backup: backupName };
+}
 // 环境变量文件族:.env / *.env / .env.example(如 multi.env、.env.production)
 const ENV_FILE_PATTERN = /^(\.env(\.example)?|[\w][\w.-]{0,63}\.env|\.[\w.-]{0,63}\.env)$/;
 
@@ -139,33 +244,26 @@ export async function saveProjectEnv(project, { raw, entries }, fileName = ENV_F
   const backupName = `${target}.backup.${Date.now()}.${randomBytes(3).toString('hex')}`;
   const backupPath = path.posix.join(root, backupName);
 
-  if (project.mounted) {
-    const previous = await readHostFile(envPath) ?? '';
-    const tempPath = `${envPath}.tmp.${randomBytes(4).toString('hex')}`;
-    try {
-      await writeFile(backupPath, previous, 'utf8');
-      await writeFile(tempPath, content, 'utf8');
-      await rename(tempPath, envPath);
-    } catch (error) {
-      await unlink(tempPath).catch(() => {});
-      throw Object.assign(new Error(`写入 ${target} 失败:${error.message}`), { statusCode: 500 });
+  return withEnvFileLock(`${project.id}:${envPath}`, async () => {
+    if (project.mounted) {
+      const existingStat = await assertRegularEnvTarget(envPath);
+      try {
+        await replaceEnvFileWithBackup({ envPath, backupPath, content, existingStat });
+      } catch (error) {
+        throw Object.assign(error, { statusCode: error.statusCode || 500, message: error.statusCode ? error.message : `写入 ${target} 失败:${error.message}` });
+      }
+      addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
+      return { ok: true, path: envPath, backup: backupName };
     }
-    addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
-    return { ok: true, path: envPath, backup: backupName };
-  }
-  // workspace 容器模式:在容器内读旧内容 → 写备份文件 → 写目标文件
-  return withRunner(project, async (container) => {
-    const previous = await readContainerFile(container, envPath, { missingOk: true }) ?? '';
-    // 备份文件写在项目根(容器内与宿主机同路径绑定)
-    await putArchiveFile(container, root, backupName, previous, { mode: 0o600, uid: 0, gid: 0 });
-    try {
-      await putArchiveFile(container, root, target, content, { mode: 0o600, uid: 0, gid: 0 });
-    } catch (error) {
-      await execInRunner(container, ['rm', '-f', '--', backupPath]).catch(() => {});
-      throw Object.assign(new Error(`写入 ${target} 失败:${error.message}`), { statusCode: 500 });
+
+    if (!project.editable || !project.workspaceAvailable) {
+      throw Object.assign(new Error('项目未启用 Compose 目录能力，无法写入环境变量'), { statusCode: 403 });
     }
-    addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
-    return { ok: true, path: envPath, backup: backupName };
+    return withRunner(project, async (container) => {
+      const result = await replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content });
+      addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
+      return result;
+    });
   });
 }
 

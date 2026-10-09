@@ -167,6 +167,8 @@ export const api = {
   getBackups: (projectId) => request(`/projects/${projectId}/backups`),
   getBackup: (projectId, backupId) => request(`/projects/${projectId}/backups/${backupId}`),
   restoreBackup: (projectId, backupId) => request(`/projects/${projectId}/backups/${backupId}/restore`, { method: 'POST' }),
+  getProjectEnvBackups: (projectId, file = '.env') => request('/projects/' + projectId + '/env/backups?' + new URLSearchParams({ file })),
+  restoreProjectEnvBackup: (projectId, file, backup) => request('/projects/' + projectId + '/env/backups/restore', { method: 'POST', body: JSON.stringify({ file, backup }) }),
   // docker hosts
   getHosts: (force = false) => request('/hosts', { force }),
   saveHost: (payload) => request('/hosts', { method: 'POST', body: JSON.stringify(payload) }),

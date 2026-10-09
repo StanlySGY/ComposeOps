@@ -19,6 +19,25 @@
         <button :class="{ active: mode === 'raw' }" @click="mode = 'raw'"><FileCode2 class="h-4 w-4" />原始文本</button>
       </div>
 
+      <section class="mx-4 mt-3 shrink-0 rounded-lg border border-surface-800 bg-surface-950/40">
+        <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-surface-300 hover:text-surface-100" :disabled="backupLoading" @click="backupsExpanded = !backupsExpanded">
+          <History class="h-4 w-4" />
+          <span>历史备份</span>
+          <span class="text-surface-500">({{ envBackups.length }})</span>
+          <RefreshCw class="ml-auto h-3.5 w-3.5" :class="{ 'animate-spin': backupLoading }" @click.stop="loadEnvBackups" />
+        </button>
+        <div v-if="backupsExpanded" class="max-h-36 space-y-1 overflow-auto border-t border-surface-800 p-2">
+          <p v-if="!envBackups.length && !backupLoading" class="px-2 py-3 text-center text-xs text-surface-500">当前文件暂无历史备份</p>
+          <div v-for="backup in envBackups" :key="backup.name" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-900">
+            <div class="min-w-0 flex-1">
+              <p class="truncate font-mono text-[11px] text-surface-300">{{ backup.name }}</p>
+              <p class="text-[10px] text-surface-500">{{ formatBackupDate(backup.createdAt) }}<span v-if="backup.size != null"> · {{ formatBackupSize(backup.size) }}</span></p>
+            </div>
+            <button class="btn-secondary shrink-0 px-2! py-1! text-[11px]" :disabled="saving || backupLoading" @click="requestRestore(backup)">恢复</button>
+          </div>
+        </div>
+      </section>
+
       <!-- 搜索栏(仅表格模式) -->
       <div v-if="mode === 'table'" class="shrink-0 px-4 py-2">
         <label class="search-field max-w-xl">
@@ -88,13 +107,14 @@
       <button class="btn-primary w-full justify-start" :disabled="previewLoading" @click="applyWithPreview"><Play class="h-4 w-4" />保存并平滑重建容器(推荐)<span v-if="previewLoading" class="text-xs opacity-70">正在生成变更预览…</span></button>
     </BaseModal>
     <ChangePreviewModal :show="showPreview" :preview="changePreview" title="应用环境变量 · 变更预览" confirm-text="保存并重建" fallback-message="无法获取变更预览,继续将保存文件并平滑重建容器。" @confirm="doSave(true)" @cancel="showPreview = false" />
+    <ConfirmDialog :show="!!restorePending" title="恢复历史环境变量" :message="restorePending ? '确定将 ' + activeFile + ' 恢复为 ' + restorePending.name + '？当前文件会先自动备份，选中的历史备份不会被删除。' : ''" tone="warning" confirm-text="确认恢复" @confirm="confirmRestore" @cancel="restorePending = null" />
     <ConfirmDialog :show="!!pendingConfirm" title="未保存的修改" :message="pendingConfirm?.message || ''" tone="warning" confirm-text="继续" @confirm="confirmPending" @cancel="pendingConfirm = null" />
   </BaseModal>
 </template>
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileCode2, KeyRound, ListOrdered, Play, Plus, RefreshCw, Save, Search, Trash2 } from 'lucide-vue-next';
+import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileCode2, History, KeyRound, ListOrdered, Play, Plus, RefreshCw, Save, Search, Trash2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import { parseDotenv, serializeDotenv, isSecretKey } from '../../lib/dotenv.js';
 import { useToastStore } from '../../stores/toast.js';
@@ -117,6 +137,10 @@ const entries = ref([]);
 const data = ref({ path: '.env', examplePath: '', exists: false, exampleRaw: '' });
 const activeFile = ref('.env');
 const envFiles = ref([]);
+const envBackups = ref([]);
+const backupLoading = ref(false);
+const backupsExpanded = ref(false);
+const restorePending = ref(null);
 const revealed = ref(new Set());
 const confirm = ref(false);
 const pendingApply = ref(false);
@@ -145,6 +169,7 @@ async function load() {
     rawText.value = result.raw || '';
     entries.value = (result.entries || []).map((entry) => ({ ...entry, _uid: ++uidSeq }));
     if (result.file) activeFile.value = result.file;
+    await loadEnvBackups();
   } catch (error) {
     toast.error(`读取环境变量失败:${error.message}`);
   } finally { loading.value = false; }
@@ -157,6 +182,48 @@ async function loadEnvFiles() {
       envFiles.value.unshift({ name: activeFile.value, exists: false });
     }
   } catch { envFiles.value = [{ name: '.env', exists: true }]; }
+}
+
+async function loadEnvBackups() {
+  backupLoading.value = true;
+  try {
+    const result = await api.getProjectEnvBackups(props.project.id, activeFile.value);
+    envBackups.value = result.backups || [];
+  } catch (error) {
+    envBackups.value = [];
+    toast.error('读取历史备份失败:' + error.message);
+  } finally { backupLoading.value = false; }
+}
+
+function formatBackupDate(timestamp) {
+  return timestamp ? new Date(timestamp).toLocaleString() : '未知时间';
+}
+function formatBackupSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+function requestRestore(backup) {
+  if (dirty.value) {
+    toast.error('请先保存或放弃当前修改，再恢复历史备份');
+    return;
+  }
+  restorePending.value = backup;
+}
+
+async function confirmRestore() {
+  const backup = restorePending.value;
+  if (!backup) return;
+  restorePending.value = null;
+  saving.value = true;
+  try {
+    const result = await api.restoreProjectEnvBackup(props.project.id, activeFile.value, backup.name);
+    toast.success('已恢复历史备份，并将恢复前内容另存为 ' + result.backup);
+    await load();
+    emit('refresh');
+  } catch (error) {
+    toast.error('恢复失败:' + error.message);
+  } finally { saving.value = false; }
 }
 
 function switchEnvFile(name) {

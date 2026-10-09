@@ -4,6 +4,7 @@ import { readCompose, saveCompose } from '../services/compose-runner.js';
 import { pruneWorkspaceRunners, readWorkspaceCompose, saveWorkspaceCompose } from '../services/compose-workspace.js';
 import { prepareProjectAction } from '../services/project-action-runner.js';
 import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles, normalizeEnvFileName } from '../services/project-env.js';
+import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
 import { readContainerStat } from '../services/stats.js';
 import { validateComposeSemantics, previewComposeChange } from '../services/compose-validator.js';
@@ -320,6 +321,47 @@ export default async function projectRoutes(fastify) {
   });
 
   // ---- 环境变量(.env 文件族:可读 .env / *.env / .env.example)----
+  fastify.get('/:id/env/backups', {
+    schema: {
+      params: idParams,
+      querystring: { type: 'object', properties: { file: { type: 'string', maxLength: 128 } } },
+    },
+  }, async (request, reply) => {
+    const project = await projectOr404(request.params.id, reply);
+    if (!project) return;
+    try {
+      assertEnvAccess(project);
+      return await listProjectEnvBackups(project, request.query?.file || '.env');
+    } catch (error) {
+      return reply.code(error.statusCode || 500).send({ error: 'env_backups_failed', message: error.message });
+    }
+  });
+
+  fastify.post('/:id/env/backups/restore', {
+    schema: {
+      params: idParams,
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['file', 'backup'],
+        properties: {
+          file: { type: 'string', minLength: 1, maxLength: 128 },
+          backup: { type: 'string', minLength: 1, maxLength: 160 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const project = await projectOr404(request.params.id, reply);
+    if (!project) return;
+    try {
+      assertEnvAccess(project);
+      return await restoreProjectEnvBackup(project, request.body.file, request.body.backup);
+    } catch (error) {
+      addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.restore', status: 'failed', detail: error.message });
+      return reply.code(error.statusCode || 500).send({ error: 'env_restore_failed', message: error.message });
+    }
+  });
+
   fastify.get('/:id/env/files', { schema: { params: idParams } }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
     if (!project) return;
