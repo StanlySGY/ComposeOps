@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,15 +8,15 @@ import { listProjectEnvBackups, restoreProjectEnvBackup } from '../src/services/
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'composeops-env-backups-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  retun {
+  return {
     root,
     project: { id: 'env-backup-' + path.basename(root), projectName: 'env-backup-test', workingDir: root, mounted: true, editable: true, managed: true },
   };
 }
 
-test('lists only regular backups for the selected env file and never retuns contents', async (t) => {
+test('lists only regular backups for the selected env file and never returns contents', async (t) => {
   const { root, project } = await fixture(t);
-  await writeFile(path.join(root, '.env.backup.1000.abcdef'), 'SECRET_VALUE=do-not-retun\n');
+  await writeFile(path.join(root, '.env.backup.1000.abcdef'), 'SECRET_VALUE=do-not-return\n');
   await writeFile(path.join(root, '.env.backup.2000.abcdef'), 'APP_MODE=older\n');
   await writeFile(path.join(root, '.env.backup.3000.nothex'), 'ignored\n');
   await writeFile(path.join(root, 'other.env.backup.4000.abcdef'), 'other\n');

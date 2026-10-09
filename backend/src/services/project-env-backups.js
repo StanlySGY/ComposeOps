@@ -1,4 +1,4 @@
-﻿import { readdir, lstat, readFile } from 'node:fs/promises';
+import { readdir, lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { saveProjectEnv } from './project-env.js';
 import { withRunner, execInRunner, readArchiveFile } from './compose-workspace.js';
@@ -11,29 +11,29 @@ function projectRoot(project) {
   if (!root || typeof root !== 'string' || !path.posix.isAbsolute(root)) {
     throw Object.assign(new Error('项目工作目录缺失，无法定位环境变量备份'), { statusCode: 409 });
   }
-  retun path.posix.normalize(root);
+  return path.posix.normalize(root);
 }
 
 function validEnvName(file) {
   const name = String(file || '').trim();
-  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) retun null;
-  retun /^(\.env(\.example)?|[\w][\w.-]{0,63}\.env|\.[\w.-]{0,63}\.env)$/.test(name) ? name : null;
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return null;
+  return /^(\.env(\.example)?|[\w][\w.-]{0,63}\.env|\.[\w.-]{0,63}\.env)$/.test(name) ? name : null;
 }
 
-function backupPatten(file) {
+function backupPattern(file) {
   const escaped = file.replace(/[.*+?^$()|[\]\\]/g, '\\$&');
-  retun new RegExp('^' + escaped + '\\.backup\\.(\\d+)\\.([a-f0-9]{6})$');
+  return new RegExp('^' + escaped + '\\.backup\\.(\\d+)\\.([a-f0-9]{6})$');
 }
 
 
-async function listMountedBackups(root, patten) {
+async function listMountedBackups(root, pattern) {
   const names = await readdir(root).catch((error) => {
-    if (error.code === 'ENOENT') retun [];
+    if (error.code === 'ENOENT') return [];
     throw error;
   });
   const backups = [];
   for (const name of names) {
-    const match = patten.exec(name);
+    const match = pattern.exec(name);
     if (!match) continue;
     try {
       const info = await lstat(path.join(root, name));
@@ -43,7 +43,7 @@ async function listMountedBackups(root, patten) {
       if (error.code !== 'ENOENT') throw error;
     }
   }
-  retun backups.sort((a, b) => b.createdAt - a.createdAt || b.name.localeCompare(a.name));
+  return backups.sort((a, b) => b.createdAt - a.createdAt || b.name.localeCompare(a.name));
 }
 
 export async function listProjectEnvBackups(project, fileName = '.env') {
@@ -51,25 +51,25 @@ export async function listProjectEnvBackups(project, fileName = '.env') {
   const file = validEnvName(fileName);
   if (!file) throw Object.assign(new Error('环境变量文件名不合法'), { statusCode: 400 });
   const root = projectRoot(project);
-  const patten = backupPatten(file);
-  if (project.mounted) retun { file, backups: await listMountedBackups(root, patten) };
+  const pattern = backupPattern(file);
+  if (project.mounted) return { file, backups: await listMountedBackups(root, pattern) };
   if (!project.editable || !project.workspaceAvailable) {
     throw Object.assign(new Error('项目未启用 Compose 目录能力，无法读取环境变量备份'), { statusCode: 403 });
   }
-  retun withRunner(project, async (container) => {
+  return withRunner(project, async (container) => {
     const result = await execInRunner(container, ['find', root, '-maxdepth', '1', '-type', 'f', '-name', file + '.backup.*', '-print']);
     if (result.code !== 0) throw Object.assign(new Error(result.stderr?.trim() || '读取环境变量备份列表失败'), { statusCode: 502 });
     const backups = [];
     for (const line of String(result.stdout || '').split('\n')) {
       const name = path.posix.basename(line.trim());
-      const match = patten.exec(name);
+      const match = pattern.exec(name);
       if (!match) continue;
       const safe = await execInRunner(container, ['test', '!', '-L', path.posix.join(root, name)]);
       if (safe.code !== 0) continue;
       backups.push({ name, createdAt: Number(match[1]), size: null });
     }
     backups.sort((a, b) => b.createdAt - a.createdAt || b.name.localeCompare(a.name));
-    retun { file, backups };
+    return { file, backups };
   });
 }
 
@@ -77,7 +77,7 @@ export async function restoreProjectEnvBackup(project, fileName, backupName) {
   if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
   const file = validEnvName(fileName);
   if (!file) throw Object.assign(new Error('环境变量文件名不合法'), { statusCode: 400 });
-  if (typeof backupName !== 'string' || !backupPatten(file).test(backupName)) {
+  if (typeof backupName !== 'string' || !backupPattern(file).test(backupName)) {
     throw Object.assign(new Error('环境变量备份名称不合法'), { statusCode: 400, code: 'ENV_BACKUP_INVALID' });
   }
   const root = projectRoot(project);
@@ -110,7 +110,7 @@ export async function restoreProjectEnvBackup(project, fileName, backupName) {
       if (Buffer.byteLength(archive.content, 'utf8') > MAX_ENV_BYTES) {
         throw Object.assign(new Error('环境变量备份超过 256KB，拒绝恢复'), { statusCode: 413 });
       }
-      retun archive.content;
+      return archive.content;
     });
   }
   if (Buffer.byteLength(content, 'utf8') > MAX_ENV_BYTES) {
@@ -124,5 +124,5 @@ export async function restoreProjectEnvBackup(project, fileName, backupName) {
     status: 'success',
     detail: 'file=' + file + '; source=' + backupName + '; safetyBackup=' + result.backup,
   });
-  retun { ok: true, file, restoredFrom: backupName, backup: result.backup };
+  return { ok: true, file, restoredFrom: backupName, backup: result.backup };
 }
