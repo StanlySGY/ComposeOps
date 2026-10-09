@@ -158,8 +158,8 @@ export const api = {
   createProjectBatchJob: async (projectIds, action) => normalizeBackgroundJob(await request('/jobs', { method: 'POST', body: JSON.stringify({ projectIds, action }) })),
   saveProjectPreference: (id, payload) => request(`/projects/${id}/preferences`, { method: 'PATCH', body: JSON.stringify(payload) }),
   getComposeFile: (projectId, fileIndex = 0, force = false) => request(`/projects/${projectId}/compose?fileIndex=${fileIndex}`, { force }),
-  saveComposeFile: (projectId, fileIndex, content) =>
-    request(`/projects/${projectId}/compose`, { method: 'PUT', body: JSON.stringify({ fileIndex, content }) }),
+  saveComposeFile: (projectId, fileIndex, content, expectedContent) =>
+    request(`/projects/${projectId}/compose`, { method: 'PUT', body: JSON.stringify({ fileIndex, content, expectedContent }) }),
   getProjectEnv: (projectId, file = '', force = false) => request(`/projects/${projectId}/env?${new URLSearchParams({ ...(file ? { file } : {}), ...(force ? { force: '1' } : {}) })}`),
   getProjectEnvFiles: (projectId) => request(`/projects/${projectId}/env/files`),
   saveProjectEnv: (projectId, payload) => request(`/projects/${projectId}/env`, { method: 'PUT', body: JSON.stringify(payload) }),

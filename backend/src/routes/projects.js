@@ -261,7 +261,7 @@ export default async function projectRoutes(fastify) {
       body: {
         type: 'object',
         additionalProperties: false,
-        properties: { content: { type: 'string', maxLength: CONTENT_MAX }, fileIndex: fileIndexField },
+        properties: { content: { type: 'string', maxLength: CONTENT_MAX }, expectedContent: { type: 'string', maxLength: CONTENT_MAX }, fileIndex: fileIndexField },
       },
     },
   }, async (request, reply) => {
@@ -270,8 +270,8 @@ export default async function projectRoutes(fastify) {
     if (!requireEditable(project, reply)) return;
     try {
       const result = project.mounted
-        ? await saveCompose(project, request.body?.fileIndex || 0, request.body?.content)
-        : await saveWorkspaceCompose(project, request.body?.fileIndex || 0, request.body?.content);
+        ? await saveCompose(project, request.body?.fileIndex || 0, request.body?.content, 'save', request.body?.expectedContent)
+        : await saveWorkspaceCompose(project, request.body?.fileIndex || 0, request.body?.content, 'save', request.body?.expectedContent);
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'compose.save', status: 'success' });
       return result;
     } catch (error) {
@@ -306,8 +306,12 @@ export default async function projectRoutes(fastify) {
     const fileIndex = project.composeFiles.indexOf(backup.filePath);
     if (fileIndex < 0) return reply.code(409).send({ error: 'backup_file_changed', message: '备份文件已变化,请刷新后重试' });
     try {
-      if (project.mounted) await saveCompose(project, fileIndex, backup.content, 'restore');
-      else await saveWorkspaceCompose(project, fileIndex, backup.content, 'restore');
+      // 记录回滚发起时看到的版本；若保存期间文件又变化，服务层在锁内拒绝覆盖。
+      const current = project.mounted
+        ? await readCompose(project, fileIndex)
+        : await readWorkspaceCompose(project, fileIndex);
+      if (project.mounted) await saveCompose(project, fileIndex, backup.content, 'restore', current.content);
+      else await saveWorkspaceCompose(project, fileIndex, backup.content, 'restore', current.content);
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'compose.restore', status: 'success', detail: `backup=${backup.id}` });
       return { ok: true };
     } catch (error) {

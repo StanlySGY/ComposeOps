@@ -9,7 +9,7 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const auth = await import('../src/lib/auth.js');
 const database = await import('../src/lib/db.js');
-const { composeArgs, resolveProjectFile } = await import('../src/services/compose-runner.js');
+const { composeArgs, resolveProjectFile, withComposeFileLock, assertComposeVersion } = await import('../src/services/compose-runner.js');
 const { parseYaml, validateYaml } = await import('../src/lib/files.js');
 const { demuxStream } = await import('../src/lib/docker-streams.js');
 const { buildMountPlan, compactMountPaths, safeProjectMountPath, isWithinProjectPath, isWithinProjectPathReal } = await import('../src/services/mount-plan.js');
@@ -179,6 +179,27 @@ test('Docker multiplexed streams survive fragmented frames', async () => {
   ]);
   assert.equal(Buffer.concat(stdout).toString(), 'hello');
   assert.equal(Buffer.concat(stderr).toString(), 'failure');
+});
+
+test('Compose 保存锁串行执行，过期版本在锁内被拒绝', async () => {
+  const key = '/tmp/composeops-version-lock-test.yml';
+  let current = 'version-a';
+  const order = [];
+  const first = withComposeFileLock(key, async () => {
+    order.push('first-start');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assertComposeVersion(current, 'version-a');
+    current = 'version-b';
+    order.push('first-end');
+  });
+  const second = withComposeFileLock(key, async () => {
+    order.push('second-start');
+    assert.throws(() => assertComposeVersion(current, 'version-a'), { code: 'COMPOSE_VERSION_CONFLICT', statusCode: 409 });
+    order.push('second-rejected');
+  });
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ['first-start', 'first-end', 'second-start', 'second-rejected']);
+  assert.equal(current, 'version-b', '旧版本保存不得覆盖先完成的更新');
 });
 
 test('mount plan deduplicates exact paths without broadening permissions', () => {

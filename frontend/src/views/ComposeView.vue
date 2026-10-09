@@ -636,7 +636,7 @@ async function save() {
 async function confirmSave() {
   saving.value = true; error.value = '';
   try {
-    await api.saveComposeFile(projectId.value, fileIndex.value, content.value);
+    await api.saveComposeFile(projectId.value, fileIndex.value, content.value, original.value);
     original.value = content.value; message.value = `已校验并保存 · ${new Date().toLocaleTimeString()}`;
     showPreview.value = false; changePreview.value = null; semanticIssues.value = [];
   }

@@ -3,7 +3,7 @@ import { realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import docker from './docker.js';
-import { ACTIONS } from './compose-runner.js';
+import { ACTIONS, assertComposeVersion, withComposeFileLock } from './compose-runner.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
@@ -375,14 +375,15 @@ export async function readWorkspaceCompose(project, fileIndex = 0) {
   });
 }
 
-export async function saveWorkspaceCompose(project, fileIndex, content, reason = 'save') {
+export async function saveWorkspaceCompose(project, fileIndex, content, reason = 'save', expectedContent = undefined) {
   if (typeof content !== 'string' || content.length === 0 || content.length > 2 * 1024 * 1024) {
     throw Object.assign(new Error('Compose 内容为空或超过 2MB'), { statusCode: 400 });
   }
   validateYaml(content);
   const { index, filePath, files } = selectedFile(project, fileIndex);
-  return withRunner(project, async (container) => {
+  return withComposeFileLock(`${project.id}:${filePath}`, () => withRunner(project, async (container) => {
     const previous = await readArchiveFile(container, filePath);
+    assertComposeVersion(previous.content, expectedContent);
     const tempName = `.composeops-${randomBytes(8).toString('hex')}.tmp`;
     const tempPath = path.posix.join(path.posix.dirname(filePath), tempName);
     await putArchiveFile(container, path.posix.dirname(filePath), tempName, content, previous.header);
@@ -401,7 +402,7 @@ export async function saveWorkspaceCompose(project, fileIndex, content, reason =
       throw error;
     }
     return { ok: true, path: filePath };
-  });
+  }));
 }
 
 export async function runWorkspaceComposeArgs(project, args, onOutput = () => {}, options = {}) {

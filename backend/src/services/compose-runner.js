@@ -8,6 +8,27 @@ import { composeEnv, getActiveHost } from './docker-hosts.js';
 
 const COMPOSE_BIN = process.env.COMPOSE_BIN || 'docker';
 
+// 同一进程内对同一 Compose 文件的保存/恢复串行化，避免校验与替换交错。
+const composeFileLocks = new Map();
+export async function withComposeFileLock(filePath, task) {
+  const previous = composeFileLocks.get(filePath) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  composeFileLocks.set(filePath, current);
+  await previous;
+  try { return await task(); }
+  finally {
+    release();
+    if (composeFileLocks.get(filePath) === current) composeFileLocks.delete(filePath);
+  }
+}
+
+export function assertComposeVersion(currentContent, expectedContent) {
+  if (expectedContent !== undefined && currentContent !== expectedContent) {
+    throw Object.assign(new Error('Compose 文件已被其他操作修改，请刷新后重新编辑；本次保存未覆盖现有内容'), { statusCode: 409, code: 'COMPOSE_VERSION_CONFLICT' });
+  }
+}
+
 /** 组合节点环境变量(DOCKER_HOST)与 Compose 超时变量。 */
 export function nodeEnv(project) {
   const hostEnv = composeEnv(project?.host || getActiveHost());
@@ -103,29 +124,32 @@ export async function readCompose(project, fileIndex = 0) {
   return { fileIndex: Number(fileIndex), path: filePath, content: await readFile(filePath, 'utf8') };
 }
 
-export async function saveCompose(project, fileIndex, content, reason = 'save') {
+export async function saveCompose(project, fileIndex, content, reason = 'save', expectedContent = undefined) {
   if (typeof content !== 'string' || content.length === 0 || content.length > 2 * 1024 * 1024) {
     throw Object.assign(new Error('Compose 内容为空或超过 2MB'), { statusCode: 400 });
   }
   validateYaml(content);
   const filePath = await resolveProjectFile(project, fileIndex);
-  const previous = await readFile(filePath, 'utf8');
-  const currentStat = await stat(filePath);
-  const tempPath = path.join(path.dirname(filePath), `.composeops-${randomBytes(8).toString('hex')}.tmp`);
-  await writeFile(tempPath, content, { encoding: 'utf8', mode: currentStat.mode });
-  try {
-    const checkFiles = [...project.composeFiles];
-    checkFiles[Number(fileIndex)] = tempPath;
-    await runConfigCheck(project, checkFiles);
-    addComposeBackup(project.id, filePath, previous, reason);
-    await chown(tempPath, currentStat.uid, currentStat.gid).catch(() => {});
-    await rename(tempPath, filePath);
-    await chmod(filePath, currentStat.mode);
-  } catch (error) {
-    await unlink(tempPath).catch(() => {});
-    throw error;
-  }
-  return { ok: true, path: filePath };
+  return withComposeFileLock(filePath, async () => {
+    const previous = await readFile(filePath, 'utf8');
+    assertComposeVersion(previous, expectedContent);
+    const currentStat = await stat(filePath);
+    const tempPath = path.join(path.dirname(filePath), `.composeops-${randomBytes(8).toString('hex')}.tmp`);
+    await writeFile(tempPath, content, { encoding: 'utf8', mode: currentStat.mode });
+    try {
+      const checkFiles = [...project.composeFiles];
+      checkFiles[Number(fileIndex)] = tempPath;
+      await runConfigCheck(project, checkFiles);
+      addComposeBackup(project.id, filePath, previous, reason);
+      await chown(tempPath, currentStat.uid, currentStat.gid).catch(() => {});
+      await rename(tempPath, filePath);
+      await chmod(filePath, currentStat.mode);
+    } catch (error) {
+      await unlink(tempPath).catch(() => {});
+      throw error;
+    }
+    return { ok: true, path: filePath };
+  });
 }
 
 export { ACTIONS };
