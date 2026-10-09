@@ -12,7 +12,8 @@ const database = await import('../src/lib/db.js');
 const { composeArgs, resolveProjectFile } = await import('../src/services/compose-runner.js');
 const { parseYaml, validateYaml } = await import('../src/lib/files.js');
 const { demuxStream } = await import('../src/lib/docker-streams.js');
-const { buildMountPlan, compactMountPaths, safeProjectMountPath, isWithinProjectPath } = await import('../src/services/mount-plan.js');
+const { buildMountPlan, compactMountPaths, safeProjectMountPath, isWithinProjectPath, isWithinProjectPathReal } = await import('../src/services/mount-plan.js');
+const { validateWorkspaceProjectPaths } = await import('../src/services/compose-workspace.js');
 const { runContainerAction, supportsContainerAction } = await import('../src/services/project-control.js');
 const { assertProjectActionAllowed } = await import('../src/services/project-action-runner.js');
 
@@ -78,16 +79,16 @@ test('managed projects can control existing containers without Compose files', a
   await assert.rejects(runContainerAction(project, 'pull', () => {}, fakeDocker), /需要挂载/);
 });
 
-test('project file validation rejects symlinks escaping the project root', async () => {
+test('project file validation rejects symlinks escaping the project root in both edit paths', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-root-'));
   const outside = path.join(tempDir, 'outside.yml');
   fs.writeFileSync(outside, 'services: {}\n');
   const linked = path.join(root, 'compose.yml');
   fs.symlinkSync(outside, linked);
-  await assert.rejects(
-    resolveProjectFile({ workingDir: root, composeFiles: [linked] }, 0),
-    /不在项目目录内/
-  );
+  const project = { workingDir: root, composeFiles: [linked] };
+  await assert.rejects(resolveProjectFile(project, 0), /不在项目目录内/);
+  await assert.rejects(validateWorkspaceProjectPaths(project), /真实路径不在项目工作目录内/);
+  assert.equal(await isWithinProjectPathReal(root, linked), false);
 });
 
 test('exports and imports exclude credentials', () => {

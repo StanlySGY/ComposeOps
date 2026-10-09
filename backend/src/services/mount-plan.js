@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 
 const BROAD_PATHS = new Set([
   '/', '/home', '/root', '/opt', '/srv', '/var', '/data', '/mnt', '/media', '/Users',
@@ -28,6 +29,17 @@ export function isWithinProjectPath(projectRoot, candidate) {
   if (!root || typeof candidate !== 'string' || !candidate || /[\0\r\n]/.test(candidate) || !path.posix.isAbsolute(candidate)) return false;
   const normalized = path.posix.normalize(candidate);
   return normalized !== root && normalized.startsWith(`${root}/`);
+}
+
+/** 文件系统级边界校验：仅当项目根和候选路径都能解析且真实路径仍在根目录下时通过。 */
+export async function isWithinProjectPathReal(projectRoot, candidate, resolvePath = realpath) {
+  if (!isWithinProjectPath(projectRoot, candidate)) return false;
+  try {
+    const [root, resolved] = await Promise.all([resolvePath(projectRoot), resolvePath(candidate)]);
+    return resolved !== root && resolved.startsWith(`${root.replace(/\/$/, '')}/`);
+  } catch {
+    return false;
+  }
 }
 
 /**

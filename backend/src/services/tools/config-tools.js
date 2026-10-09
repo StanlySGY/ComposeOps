@@ -8,7 +8,9 @@ import { assertCommandAllowed } from '../../lib/command-guard.js';
 import { callOpenAI, getAiConfig } from '../ai.js';
 import { readCompose, saveCompose } from '../compose-runner.js';
 import { previewComposeChange, validateComposeSemantics } from '../compose-validator.js';
-import { getActivityDocker } from '../docker-hosts.js';
+import { getActiveHost, getActiveHostType, getActivityDocker } from '../docker-hosts.js';
+import { sshExec } from '../remote-shell.js';
+import { realpath } from 'node:fs/promises';
 import { applyProjectEnv, assertEnvAccess, readProjectEnv, saveProjectEnv } from '../project-env.js';
 import { scanProjects } from '../scanner.js';
 import { attachPrivateRollback, redactText } from '../../lib/redaction.js';
@@ -382,13 +384,30 @@ export function registerConfigTools(agent) {
         }
         const normalizedSource = path.posix.normalize(source);
         if (!isWithinProjectPath(projectMount, normalizedSource)) {
-          throw Object.assign(
-            new Error(`source 必须是项目目录 ${projectMount} 内的子路径，且不能通过 .. 逃逸`),
-            { statusCode: 403 }
-          );
+          throw Object.assign(new Error(`source 必须是项目目录 ${projectMount} 内的子路径，且不能通过 .. 逃逸`), { statusCode: 403 });
+        }
+        // 路径字符串通过不代表真实路径安全；本地/SSH 节点都解析实际文件系统路径。
+        const hostType = getActiveHostType();
+        let actualRoot;
+        let actualSource;
+        if (hostType === 'ssh') {
+          const host = getActiveHost();
+          const resolveRemote = async (remotePath) => {
+            const result = await sshExec(host, ['realpath', '-e', '--', remotePath], { timeoutMs: 15000 });
+            if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);
+            return result.stdout.trim();
+          };
+          [actualRoot, actualSource] = await Promise.all([resolveRemote(projectMount), resolveRemote(normalizedSource)]);
+        } else if (hostType === 'local') {
+          [actualRoot, actualSource] = await Promise.all([realpath(projectMount), realpath(normalizedSource)]);
+        } else {
+          throw Object.assign(new Error('当前 Docker 节点无法验证宿主机真实路径，已拒绝挂载修改'), { statusCode: 403 });
+        }
+        if (actualSource === actualRoot || !actualSource.startsWith(`${actualRoot.replace(/\/$/, '')}/`)) {
+          throw Object.assign(new Error('source 的真实路径不在项目目录内，可能存在符号链接逃逸'), { statusCode: 403 });
         }
 
-        const mount = `${normalizedSource}:${target}`;
+        const mount = `${actualSource}:${target}`;
         const existing = doc.getIn(['services', service, 'volumes']);
         const list = existing == null ? [] : Array.isArray(existing) ? [...existing] : [existing];
         const normalized = list

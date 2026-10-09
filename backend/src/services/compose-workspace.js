@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import docker from './docker.js';
@@ -29,6 +30,25 @@ function projectPaths(project) {
     throw Object.assign(new Error('Compose 文件不在项目工作目录内'), { statusCode: 403 });
   }
   return { root, files };
+}
+
+/** 在访问/写入工作区前解析真实路径，防止项目内的 Compose 符号链接指向项目外。 */
+export async function validateWorkspaceProjectPaths(project, resolvePath = realpath) {
+  const { root, files } = projectPaths(project);
+  let actualRoot;
+  try {
+    actualRoot = await resolvePath(root);
+    for (const file of files) {
+      const actualFile = await resolvePath(file);
+      if (actualFile !== actualRoot && !actualFile.startsWith(`${actualRoot.replace(/\/$/, '')}/`)) {
+        throw Object.assign(new Error('Compose 文件真实路径不在项目工作目录内（可能存在符号链接逃逸）'), { statusCode: 403 });
+      }
+    }
+  } catch (error) {
+    if (error.statusCode) throw error;
+    throw Object.assign(new Error(`无法验证 Compose 文件真实路径: ${error.message}`), { statusCode: 403 });
+  }
+  return { root, files, actualRoot };
 }
 
 async function runnerImage() {
@@ -164,8 +184,13 @@ async function acquireRunner(project) {
 async function withRunner(project, callback) {
   if (getActiveHostType() === 'ssh') {
     try {
-      projectPaths(project);
-      return await callback({ __ssh: true, host: getActiveHost() });
+      const host = getActiveHost();
+      await validateWorkspaceProjectPaths(project, async (remotePath) => {
+        const result = await sshExec(host, ['realpath', '-e', '--', remotePath], { timeoutMs: 15000 });
+        if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);
+        return result.stdout.trim();
+      });
+      return await callback({ __ssh: true, host });
     } catch (error) {
       if (!error.statusCode) error.statusCode = 409;
       throw error;
@@ -173,6 +198,7 @@ async function withRunner(project, callback) {
   }
   let lease;
   try {
+    await validateWorkspaceProjectPaths(project);
     lease = await acquireRunner(project);
     return await callback(lease.container);
   } catch (error) {
