@@ -182,7 +182,8 @@ async function acquireRunner(project) {
 }
 
 async function withRunner(project, callback) {
-  if (getActiveHostType() === 'ssh') {
+  const hostType = getActiveHostType();
+  if (hostType === 'ssh') {
     try {
       const host = getActiveHost();
       await validateWorkspaceProjectPaths(project, async (remotePath) => {
@@ -198,8 +199,15 @@ async function withRunner(project, callback) {
   }
   let lease;
   try {
-    await validateWorkspaceProjectPaths(project);
     lease = await acquireRunner(project);
+    // Compose 文件路径属于 Docker daemon 所在主机，而不是必然属于
+    // ComposeOps backend 容器的文件系统。通过 daemon 创建的 workspace
+    // runner 解析真实路径，避免 backend 容器看不到宿主机目录时误报 ENOENT。
+    await validateWorkspaceProjectPaths(project, async (remotePath) => {
+      const result = await execInRunner(lease.container, ['realpath', '-e', '--', remotePath], { timeoutMs: 15000 });
+      if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);
+      return result.stdout.trim();
+    });
     return await callback(lease.container);
   } catch (error) {
     if (error.statusCode === 504 && lease) {

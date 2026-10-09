@@ -91,6 +91,20 @@ test('project file validation rejects symlinks escaping the project root in both
   assert.equal(await isWithinProjectPathReal(root, linked), false);
 });
 
+test('workspace path validation can resolve paths in the Docker daemon namespace', async () => {
+  const project = {
+    workingDir: '/data/remote/app',
+    composeFiles: ['/data/remote/app/compose.yml'],
+  };
+  const calls = [];
+  const result = await validateWorkspaceProjectPaths(project, async (remotePath) => {
+    calls.push(remotePath);
+    return remotePath;
+  });
+  assert.deepEqual(calls, ['/data/remote/app', '/data/remote/app/compose.yml']);
+  assert.equal(result.actualRoot, '/data/remote/app');
+});
+
 test('exports and imports exclude credentials', () => {
   database.setSetting('ai.api_key', 'secret-key');
   database.setSetting('notifications.config', JSON.stringify({ token: 'secret-token' }));
