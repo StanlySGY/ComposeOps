@@ -88,6 +88,18 @@ async function runGit(args, options = {}) {
   return result.stdout;
 }
 
+/** 校验破坏性 Git 操作的目标仓库归属和工作区状态。 */
+async function assertRepoSafeForDestructiveOperation(localPath, configuredUrl, env) {
+  const originUrl = (await runGit(['-C', localPath, 'remote', 'get-url', 'origin'], { encoding: 'utf-8', env })).trim();
+  if (originUrl !== configuredUrl) {
+    throw Object.assign(new Error('本地仓库 origin 与配置的仓库 URL 不一致，已拒绝操作以防误覆盖'), { code: 'GITOPS_ORIGIN_MISMATCH' });
+  }
+  const status = (await runGit(['-C', localPath, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf-8', env })).trim();
+  if (status) {
+    throw Object.assign(new Error('本地仓库存在未提交的已跟踪文件改动，已拒绝操作以防丢失修改'), { code: 'GITOPS_WORKTREE_DIRTY' });
+  }
+}
+
 /** 防止同一仓库的自动同步在上一轮未结束时被下一轮并发触发(git 操作竞态)。 */
 function withSyncGuard(repoId, fn) {
   const watcher = activeWatchers.get(repoId);
@@ -247,7 +259,9 @@ export async function syncGitOpsRepo(id) {
       mkdirSync(localPath, { recursive: true });
       await runGit(['clone', '--branch', branch, '--', url, localPath], { env });
     } else {
-      // 已存在则执行 pull
+      // 已存在的目录必须确实是配置的仓库，且不能覆盖工作区内的未提交改动。
+      // reset --hard 会永久丢弃已跟踪文件的本地修改；路径配置错误时还可能误操作其他仓库。
+      await assertRepoSafeForDestructiveOperation(localPath, url, env);
       await runGit(['-C', localPath, 'fetch', 'origin', branch], { env });
       await runGit(['-C', localPath, 'reset', '--hard', 'origin/' + branch], { env });
     }
@@ -319,6 +333,7 @@ export async function rollbackGitOpsRepo(id, commitHash) {
   }
 
   const localPath = validateLocalPath(repo.localPath);
+  const configuredUrl = validateRepoUrl(repo.url);
   const commit = String(commitHash || '');
   if (!SAFE_COMMIT.test(commit)) {
     throw Object.assign(new Error('提交 ID 格式不合法'), { statusCode: 400 });
@@ -327,6 +342,7 @@ export async function rollbackGitOpsRepo(id, commitHash) {
   const env = gitEnv(sshKey);
 
   try {
+    await assertRepoSafeForDestructiveOperation(localPath, configuredUrl, env);
     await runGit(['-C', localPath, 'checkout', '--detach', commit], { env });
 
     const commitMsg = (await runGit(['-C', localPath, 'log', '-1', '--pretty=%B'], { encoding: 'utf-8', env })).trim();
