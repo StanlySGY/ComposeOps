@@ -60,4 +60,12 @@ describe('总览数据与跳转', () => {
     expect(wrapper.findAll('a[href="/monitor"]')).toHaveLength(2);
     expect(wrapper.get('a[href="/inspection"]').text()).toContain('95');
   });
+  it('常用运维入口直达服务、Compose、日志和 AI 助手', async () => {
+    await start();
+    const quickActions = wrapper.get('nav[aria-label="常用运维入口"]');
+    expect(quickActions.get('a[href="/services"]').text()).toContain('管理服务');
+    expect(quickActions.get('a[href="/compose"]').text()).toContain('编辑配置');
+    expect(quickActions.get('a[href="/logs"]').text()).toContain('查看日志');
+    expect(quickActions.get('a[href="/agent"]').text()).toContain('AI 助手');
+  });
 });

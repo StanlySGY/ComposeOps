@@ -1,5 +1,5 @@
 <template>
-  <BaseModal :show="show" :title="title" :size-class="sizeClass" body-class="p-4 space-y-3" @close="$emit('cancel')">
+  <BaseModal :show="show" :title="title" :size-class="sizeClass" body-class="p-4 space-y-3" :close-disabled="busy" @close="$emit('cancel')">
     <div class="flex items-start gap-3">
       <div
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border"
@@ -13,7 +13,7 @@
       </div>
     </div>
     <template #footer>
-      <button class="btn-ghost" @click="$emit('cancel')">{{ cancelText }}</button>
+      <button class="btn-ghost" :disabled="busy" @click="emit('cancel')">{{ cancelText }}</button>
       <button class="btn" :class="tone.btn" :disabled="busy" @click="$emit('confirm')">
         <Loader2 v-if="busy" class="h-4 w-4 animate-spin" />
         <component v-else :is="tone.icon" class="h-4 w-4" />
@@ -40,7 +40,7 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
 });
 
-defineEmits(['confirm', 'cancel']);
+const emit = defineEmits(['confirm', 'cancel']);
 
 const TONES = {
   info: { icon: Info, text: 'text-sky-300', box: 'border-sky-900/50 bg-sky-950/40', btn: 'btn-primary' },

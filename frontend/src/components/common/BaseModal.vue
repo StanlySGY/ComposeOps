@@ -1,14 +1,14 @@
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="show" class="modal-backdrop" @click.self="$emit('close')" @keydown="trapTab">
+      <div v-if="show" class="modal-backdrop" @click.self="!closeDisabled && emit('close')" @keydown="trapTab">
         <Transition name="modal-pop" appear>
           <div class="modal" :class="sizeClass" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1">
             <div class="modal-header">
               <span class="truncate">{{ title }}</span>
               <div class="flex items-center gap-1">
                 <slot name="header-actions" />
-                <button class="icon-btn" aria-label="关闭" @click="$emit('close')"><X class="w-4 h-4" /></button>
+                <button class="icon-btn" aria-label="关闭" :disabled="closeDisabled" @click="emit('close')"><X class="w-4 h-4" /></button>
               </div>
             </div>
             <div :class="bodyClass">
@@ -35,13 +35,14 @@ const props = defineProps({
   // 覆盖 .modal 默认宽度(utilities 层级高于 components 层,可生效)
   sizeClass: { type: String, default: '' },
   bodyClass: { type: String, default: 'p-3' },
+  closeDisabled: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['close']);
 
 useEscapeKey({
   active: computed(() => props.show),
-  onClose: () => emit('close'),
+  onClose: () => { if (!props.closeDisabled) emit('close'); },
   layer: 'modal',
   lockBody: true,
 });

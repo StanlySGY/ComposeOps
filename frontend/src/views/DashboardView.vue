@@ -13,6 +13,14 @@
       </div>
     </div>
 
+    <nav class="dashboard-quick-actions" aria-label="常用运维入口">
+      <span class="dashboard-quick-label">快速操作</span>
+      <router-link to="/services" class="dashboard-quick-link"><Boxes class="h-4 w-4" /><span>管理服务</span><ArrowRight class="dashboard-quick-arrow h-3.5 w-3.5" /></router-link>
+      <router-link to="/compose" class="dashboard-quick-link"><FileCode2 class="h-4 w-4" /><span>编辑配置</span><ArrowRight class="dashboard-quick-arrow h-3.5 w-3.5" /></router-link>
+      <router-link to="/logs" class="dashboard-quick-link"><ScrollText class="h-4 w-4" /><span>查看日志</span><ArrowRight class="dashboard-quick-arrow h-3.5 w-3.5" /></router-link>
+      <router-link to="/agent" class="dashboard-quick-link"><Bot class="h-4 w-4" /><span>AI 助手</span><ArrowRight class="dashboard-quick-arrow h-3.5 w-3.5" /></router-link>
+    </nav>
+
     <div v-if="loadError" class="alert-error flex items-center justify-between gap-3">
       <span>{{ loadError }}</span>
       <button class="btn-secondary px-2.5! py-1! text-xs" :disabled="loading" @click="load">重试</button>
@@ -106,7 +114,7 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
-import { AlertTriangle, ArrowRight, Bot, Boxes, Container, Cpu, Gauge, MemoryStick, RefreshCw } from 'lucide-vue-next';
+import { AlertTriangle, ArrowRight, Bot, Boxes, Container, Cpu, FileCode2, Gauge, MemoryStick, RefreshCw, ScrollText } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';

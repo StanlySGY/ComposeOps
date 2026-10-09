@@ -111,8 +111,10 @@
         <p v-if="!changePreview.added.length && !changePreview.changed.length && !changePreview.restarted.length && !changePreview.removed.length" class="text-xs text-surface-400">未检测到会影响现有容器的变更,可直接保存。</p>
       </template>
       <template #footer>
-        <button class="btn-ghost" @click="closePreview">取消</button>
-        <button class="btn-primary" @click="confirmSave"><Save class="w-4 h-4" />确认保存</button>
+        <button class="btn-ghost" :disabled="saving" @click="closePreview">取消</button>
+        <button class="btn-primary" :disabled="saving" @click="confirmSave">
+          <Save class="w-4 h-4" />{{ saving ? '保存中…' : '确认保存' }}
+        </button>
       </template>
     </BaseModal>
 
@@ -612,6 +614,8 @@ async function validateSemantics() {
   return false;
 }
 async function save() {
+  // 防止键盘快捷键或快速重复点击并发触发多次预览/保存。
+  if (saving.value || previewLoading.value || !projectId.value || !dirty.value) return;
   error.value = '';
   if (!await validateSemantics()) return;
   // 保存前展示变更预览(影响哪些容器会被重建/重启)
@@ -634,6 +638,8 @@ async function save() {
   await confirmSave(); // 无影响时直接保存
 }
 async function confirmSave() {
+  // 预览弹窗中的确认按钮可能在 Vue 完成禁用渲染前被快速连点。
+  if (saving.value || !projectId.value || !dirty.value) return;
   saving.value = true; error.value = '';
   try {
     await api.saveComposeFile(projectId.value, fileIndex.value, content.value, original.value);

@@ -2,7 +2,7 @@
   <div class="page-shell">
     <div class="page-header"><div><h1 class="page-title">设置</h1><p class="page-subtitle">个人偏好、通知、更新与维护</p></div></div>
     <div class="tabs-segment">
-      <button v-for="item in tabs" :key="item.id" :class="{ active: tab === item.id }" @click="setTab(item.id)"><component :is="item.icon" class="w-4 h-4" />{{ item.label }}</button>
+      <button v-for="item in tabs" :key="item.id" :class="{ active: tab === item.id }" :aria-pressed="tab === item.id" @click="setTab(item.id)"><component :is="item.icon" class="w-4 h-4" />{{ item.label }}</button>
     </div>
     <p v-if="message" class="alert-success">{{ message }}</p><p v-if="error" class="alert-error">{{ error }}</p>
 
@@ -55,13 +55,13 @@
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">自动刷新间隔（秒）</div><div class="ios-row-desc">服务、监控等页面的轮询周期,最小 3 秒。</div></div><div class="ios-row-control"><input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input max-w-24! text-center" /></div></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">日志默认行数</div><div class="ios-row-desc">打开日志页时默认拉取的行数,10–5000。</div></div><div class="ios-row-control"><input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input max-w-24! text-center" /></div></div>
       </div>
-      <button class="btn-primary self-start" @click="savePreferences"><Save class="w-4 h-4" />保存偏好</button>
+      <button class="btn-primary self-start" :disabled="savingPreferences" @click="savePreferences"><Save class="w-4 h-4" />{{ savingPreferences ? '保存中…' : '保存偏好' }}</button>
       <h2 class="section-title">修改管理员密码</h2>
       <div class="ios-group">
         <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">当前密码</label><input v-model="password.currentPassword" type="password" class="input" /></div>
         <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">新密码</label><input v-model="password.nextPassword" type="password" class="input" /></div>
       </div>
-      <button class="btn-secondary self-start" @click="changePassword"><KeyRound class="w-4 h-4" />修改密码</button>
+      <button class="btn-secondary self-start" :disabled="changingPassword" @click="changePassword"><KeyRound class="w-4 h-4" />{{ changingPassword ? '修改中…' : '修改密码' }}</button>
       <h2 class="section-title">数据迁移</h2>
       <div class="ios-group">
         <div class="ios-row">
@@ -112,7 +112,7 @@
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">OOM 内存溢出</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="oom" aria-label="OOM 内存溢出" /></label></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">容器不健康</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="unhealthy" aria-label="容器不健康" /></label></div>
       </div>
-      <div class="flex gap-2"><button class="btn-primary" @click="saveNotifications"><Save class="w-4 h-4" />保存</button><button class="btn-secondary" @click="testNotifications"><Send class="w-4 h-4" />发送测试</button></div>
+      <div class="flex gap-2"><button class="btn-primary" :disabled="savingNotifications" @click="saveNotifications"><Save class="w-4 h-4" />{{ savingNotifications ? '保存中…' : '保存通知设置' }}</button><button class="btn-secondary" :disabled="testingNotifications || savingNotifications" @click="testNotifications"><Send class="w-4 h-4" />{{ testingNotifications ? '发送中…' : '发送测试' }}</button></div>
     </section>
 
     <section v-if="tab === 'maintenance'" class="settings-section">
@@ -120,7 +120,7 @@
       <div class="ios-group">
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">定时拉取并检查更新</div><div class="ios-row-desc">按下方间隔自动拉取镜像并检查更新。</div></div><label class="toggle-label"><input v-model="updates.autoEnabled" type="checkbox" aria-label="定时拉取并检查更新" /></label></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">检查间隔（小时）</div></div><div class="ios-row-control"><input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input max-w-24! text-center" /></div></div>
-      </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" @click="saveUpdates"><Save class="w-4 h-4" />保存更新策略</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
+      </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" :disabled="savingUpdates" @click="saveUpdates"><Save class="w-4 h-4" />{{ savingUpdates ? '保存中…' : '保存更新策略' }}</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
       <div v-if="updateSummary.total" class="grid gap-3 sm:grid-cols-3"><StatCard title="已检查镜像" :value="String(updateSummary.total)" sub="最近一次检查"/><StatCard title="发现更新" :value="String(updateSummary.updated)" sub="需重建相关容器"/><StatCard title="检查失败" :value="String(updateSummary.failed)" sub="请检查仓库或网络"/></div>
       <div v-if="updateResults.length" class="space-y-1"><div v-for="item in updateResults" :key="item.image" class="flex justify-between gap-3 text-sm py-1 border-b border-surface-800"><span class="min-w-0 truncate font-mono" :title="item.image">{{ item.image }}</span><span class="shrink-0" :class="item.status === 'updated' ? 'text-amber-400' : item.status === 'failed' ? 'text-rose-400' : 'text-emerald-400'">{{ imageStatusLabel(item.status) }}</span></div></div>
       <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>
@@ -199,10 +199,10 @@
     <BaseModal :show="!!hostEditor" :title="hostEditor?.id ? '编辑远程主机' : '添加远程主机'" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[90vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-3" @close="hostEditor = null">
       <template v-if="hostEditor">
         <div class="form-grid">
-          <label class="md:col-span-2">节点名称<input v-model="hostEditor.name" class="input" placeholder="例如 K8s Worker / 生产机" /></label>
+          <label class="md:col-span-2">节点名称<input v-model="hostEditor.name" class="input" required maxlength="80" autocomplete="off" placeholder="例如 K8s Worker / 生产机" /></label>
           <label>连接方式<select v-model="hostEditor.type" class="input"><option value="tcp">TCP (Docker API)</option><option value="ssh">SSH</option></select></label>
-          <label>端口<input v-model.number="hostEditor.port" type="number" class="input" :placeholder="hostEditor.type === 'ssh' ? '22' : '2375'" /></label>
-          <label>主机地址<input v-model="hostEditor.host" class="input" placeholder="192.168.1.10" /></label>
+          <label>端口<input v-model.number="hostEditor.port" type="number" min="1" max="65535" step="1" inputmode="numeric" class="input" :placeholder="hostEditor.type === 'ssh' ? '22' : '2375'" /></label>
+          <label>主机地址<input v-model="hostEditor.host" class="input" required autocomplete="off" spellcheck="false" placeholder="192.168.1.10" /></label>
           <label>用户名<input v-model="hostEditor.username" class="input" placeholder="root" /></label>
         </div>
         <template v-if="hostEditor.type === 'ssh'">
@@ -224,7 +224,7 @@
       </template>
       <template #footer>
         <button class="btn-secondary" :disabled="hostEditor?.pinging" @click="testHostConnection"><Activity class="w-4 h-4" />{{ hostEditor?.pinging ? '检测中…' : '测试连接' }}</button>
-        <button class="btn-primary" @click="saveHost"><Save class="w-4 h-4" />保存节点</button>
+        <button class="btn-primary" :disabled="savingHost" @click="saveHost"><Save class="w-4 h-4" />{{ savingHost ? '保存中…' : '保存节点' }}</button>
       </template>
     </BaseModal>
     <StoragePruneModal v-if="storageModal" @close="storageModal = false" @reclaimed="loadUsage" />
@@ -233,12 +233,12 @@
     <section v-if="tab === 'mcp'" class="settings-section space-y-4">
       <div class="flex items-center justify-between">
         <div><h2 class="section-title">MCP 服务</h2><p class="mt-1 text-sm text-surface-400">把面板的运维工具通过 MCP 协议暴露给 Claude Desktop、Cursor 等客户端</p></div>
-        <label class="toggle-label"><input v-model="mcp.enabled" type="checkbox" @change="saveMcp" />启用</label>
+        <label class="toggle-label"><input v-model="mcp.enabled" type="checkbox" :disabled="savingMcp" @change="saveMcp" />启用</label>
       </div>
       <template v-if="mcp.enabled">
         <div class="form-grid">
           <label>暴露范围
-            <select v-model="mcp.mode" class="input" @change="saveMcp">
+            <select v-model="mcp.mode" class="input" :disabled="savingMcp" @change="saveMcp">
               <option value="readonly">只读工具(推荐)</option>
               <option value="all">包含高风险工具(不含 critical)</option>
             </select>
@@ -257,7 +257,7 @@
           <p class="text-surface-500">高危工具(重建容器、改 Compose、回滚等)在 MCP 通道必须由调用方显式传 <code class="font-mono text-surface-400">confirm: true</code> 才会执行——这条通道没有确认弹窗,用显式开关代替。</p>
           <div class="flex flex-wrap items-center gap-2">
             <button class="btn-secondary py-1.5! text-xs" @click="copyMcpConfig">复制客户端配置</button>
-            <button class="btn-secondary py-1.5! text-xs" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" />重置 Token</button>
+            <button class="btn-secondary py-1.5! text-xs" :disabled="resettingMcpToken" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': resettingMcpToken }" />{{ resettingMcpToken ? '重置中…' : '重置 Token' }}</button>
             <button class="btn-secondary py-1.5! text-xs" @click="showMcpToken">查看 Token</button>
           </div>
         </div>
@@ -294,7 +294,7 @@ const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';
 const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const savingAi = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const updateResults = ref([]); const checkingUpdates = ref(false); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
 const mountPlan = ref(null); const mountLoading = ref(false); const highlightedProjectId = computed(() => String(route.query.projectId || ''));
-const hostEditor = ref(null);
+const hostEditor = ref(null); const savingHost = ref(false); const savingPreferences = ref(false); const changingPassword = ref(false); const savingNotifications = ref(false); const testingNotifications = ref(false); const savingUpdates = ref(false);
 const removeHostTarget = ref(null);
 const managementConfirm = ref(false);
 const removedProjectCount = computed(() => savedManagedProjectIds.value.filter((id) => !selectedProjectIds.value.includes(id)).length);
@@ -379,14 +379,19 @@ function editorToPayload(editor) {
 }
 async function saveHost() {
   const editor = hostEditor.value;
-  if (!editor) return;
+  if (!editor || savingHost.value) return;
   try {
     if (!editor.name.trim()) throw new Error('节点名称不能为空');
     if (editor.type !== 'local' && !editor.host.trim()) throw new Error('请填写主机地址');
+    if (editor.type !== 'local' && (!Number.isInteger(Number(editor.port)) || Number(editor.port) < 1 || Number(editor.port) > 65535)) {
+      throw new Error('端口必须是 1–65535 之间的整数');
+    }
+    savingHost.value = true;
     await hostsStore.addOrUpdate(editorToPayload(editor));
     hostEditor.value = null;
     ok('Docker 节点已保存');
   } catch (e) { fail(e); }
+  finally { savingHost.value = false; }
 }
 async function pingHost(host) {
   try {
@@ -432,21 +437,50 @@ async function saveAi() {
 function searchProviderLabel(value) {
   return { builtin: '内置(GitHub + DuckDuckGo)', duckduckgo: 'DuckDuckGo', tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG(自托管)' }[value] || value;
 }
-async function savePreferences() { try { preferences.value = await api.savePreferences(preferences.value); ok('个人偏好已保存'); } catch (e) { fail(e); } }
-async function changePassword() { try { if (password.value.nextPassword.length < 10) throw new Error('新密码至少需要 10 个字符'); await api.changePassword(password.value); password.value = { currentPassword: '', nextPassword: '' }; ok('管理员密码已修改，其他会话已退出'); } catch (e) { fail(e); } }
+async function savePreferences() {
+  if (savingPreferences.value) return;
+  try {
+    const { refreshInterval, logTail } = preferences.value;
+    if (!Number.isInteger(refreshInterval) || refreshInterval < 3 || refreshInterval > 300) throw new Error('自动刷新间隔必须是 3–300 秒的整数');
+    if (!Number.isInteger(logTail) || logTail < 10 || logTail > 5000) throw new Error('日志默认行数必须是 10–5000 的整数');
+    savingPreferences.value = true;
+    preferences.value = await api.savePreferences(preferences.value);
+    ok('个人偏好已保存');
+  } catch (e) { fail(e); } finally { savingPreferences.value = false; }
+}
+async function changePassword() {
+  if (changingPassword.value) return;
+  try {
+    if (!password.value.currentPassword) throw new Error('请填写当前密码');
+    if (password.value.nextPassword.length < 10) throw new Error('新密码至少需要 10 个字符');
+    if (password.value.currentPassword === password.value.nextPassword) throw new Error('新密码不能与当前密码相同');
+    changingPassword.value = true;
+    await api.changePassword(password.value);
+    password.value = { currentPassword: '', nextPassword: '' };
+    ok('管理员密码已修改，其他会话已退出');
+  } catch (e) { fail(e); } finally { changingPassword.value = false; }
+}
 async function importData(event) { try { const file = event.target.files?.[0]; if (!file) return; await api.importData(JSON.parse(await file.text())); ok('设置与项目备注已导入，刷新页面后生效'); event.target.value = ''; } catch (e) { fail(e); } }
 function channelLabel(type) {
   return { bark: 'Bark', telegram: 'Telegram', wecom: '企业微信', dingtalk: '钉钉', feishu: '飞书', email: '邮件 SMTP', webhook: '通用 Webhook' }[type] || type;
 }
-const mcp = ref({ enabled: false, mode: 'readonly', token: '', configured: false, sseUrl: '/mcp/sse', sessionCount: 0, toolsExported: 0 });
+const mcp = ref({ enabled: false, mode: 'readonly', token: '', configured: false, sseUrl: '/mcp/sse', sessionCount: 0, toolsExported: 0 }); const savingMcp = ref(false); const resettingMcpToken = ref(false);
 async function loadMcp() {
   try { mcp.value = { ...mcp.value, ...(await api.getMcpConfig()) }; } catch (e) { /* MCP 配置读取失败时保持默认 */ }
 }
 async function saveMcp() {
-  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ enabled: mcp.value.enabled, mode: mcp.value.mode })) }; ok(mcp.value.enabled ? 'MCP 服务已启用' : 'MCP 服务已关闭'); } catch (e) { fail(e); }
+  if (savingMcp.value) return;
+  savingMcp.value = true;
+  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ enabled: mcp.value.enabled, mode: mcp.value.mode })) }; ok(mcp.value.enabled ? 'MCP 服务已启用' : 'MCP 服务已关闭'); }
+  catch (e) { fail(e); }
+  finally { savingMcp.value = false; }
 }
 async function regenerateMcpToken() {
-  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ regenerateToken: true })) }; ok('Token 已重置,旧 Token 立即失效'); } catch (e) { fail(e); }
+  if (resettingMcpToken.value) return;
+  resettingMcpToken.value = true;
+  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ regenerateToken: true })) }; ok('Token 已重置,旧 Token 立即失效'); }
+  catch (e) { fail(e); }
+  finally { resettingMcpToken.value = false; }
 }
 async function showMcpToken() {
   try { const { token } = await api.revealMcpToken(); if (token) { await navigator.clipboard.writeText(token).catch(() => {}); ok(`Token 已复制到剪贴板:${token.slice(0, 6)}••••`); } } catch (e) { fail(e); }
@@ -460,9 +494,30 @@ async function copyMcpConfig() {
     ok('MCP 客户端配置 JSON 已复制(Streamable HTTP)');
   } catch (e) { fail(e); }
 }
-async function saveNotifications() { try { notifications.value = await api.saveNotifications({ ...notifications.value, events: alertEvents.value }); await api.saveNotificationEvents(alertEvents.value); ok('通知配置已保存'); } catch (e) { fail(e); } }
-async function testNotifications() { try { await api.testNotifications(notifications.value); ok('测试通知已发送'); } catch (e) { fail(e); } }
-async function saveUpdates() { try { updates.value = await api.saveUpdateSettings(updates.value); ok('更新策略已保存'); } catch (e) { fail(e); } }
+async function saveNotifications() {
+  if (savingNotifications.value) return;
+  try {
+    const n = notifications.value;
+    if (!Number.isInteger(Number(n.intervalSeconds)) || Number(n.intervalSeconds) < 30) throw new Error('通知巡检间隔必须是至少 30 秒的整数');
+    if (!Number.isFinite(Number(n.memoryThreshold)) || Number(n.memoryThreshold) < 1 || Number(n.memoryThreshold) > 100) throw new Error('内存告警阈值必须在 1–100% 之间');
+    if (!Number.isFinite(Number(n.dockerStorageThresholdGb)) || Number(n.dockerStorageThresholdGb) < 1) throw new Error('Docker 空间告警阈值必须至少为 1 GB');
+    for (const channel of n.channels || []) {
+      if (!channel.enabled) continue;
+      if (['bark','wecom','dingtalk','feishu','webhook'].includes(channel.type) && !String(channel.endpoint || '').trim()) throw new Error();
+      if (channel.type === 'telegram' && !String(channel.chatId || '').trim()) throw new Error('Telegram 需要填写 Chat ID');
+      if (channel.type === 'email') {
+        if (!String(channel.smtpHost || '').trim()) throw new Error('邮件通知需要填写 SMTP 主机');
+        if (!Number.isInteger(Number(channel.smtpPort)) || Number(channel.smtpPort) < 1 || Number(channel.smtpPort) > 65535) throw new Error('SMTP 端口必须是 1–65535 之间的整数');
+      }
+    }
+    savingNotifications.value = true;
+    notifications.value = await api.saveNotifications({ ...n, events: alertEvents.value });
+    await api.saveNotificationEvents(alertEvents.value);
+    ok('通知配置已保存');
+  } catch (e) { fail(e); } finally { savingNotifications.value = false; }
+}
+async function testNotifications() { if (testingNotifications.value) return; testingNotifications.value = true; try { await api.testNotifications(notifications.value); ok('测试通知已发送'); } catch (e) { fail(e); } finally { testingNotifications.value = false; } }
+async function saveUpdates() { if (savingUpdates.value) return; try { if (!Number.isInteger(Number(updates.value.intervalHours)) || Number(updates.value.intervalHours) < 1 || Number(updates.value.intervalHours) > 720) throw new Error('镜像检查间隔必须是 1–720 小时的整数'); savingUpdates.value = true; updates.value = await api.saveUpdateSettings(updates.value); ok('更新策略已保存'); } catch (e) { fail(e); } finally { savingUpdates.value = false; } }
 async function checkUpdates() { checkingUpdates.value = true; try { updateResults.value = (await api.checkUpdates()).results; updates.value.lastCheck = Date.now(); updates.value.lastResults = updateResults.value; ok('镜像检查完成'); } catch (e) { fail(e); } finally { checkingUpdates.value = false; } }
 async function loadUsage() { try { usage.value = await api.getStorageDf(); } catch (e) { fail(e); } }
 function applyMountPlan(plan) {
