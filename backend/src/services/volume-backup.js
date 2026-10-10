@@ -231,11 +231,14 @@ async function resolveBackupDirForDocker(docker, host, dir) {
   }
 }
 
-async function volumeBinds(volume, mode, host = getActiveHost(), docker = getDockerForHost(host?.id || 'local')) {
+async function resolveBackupBind(host, docker, mode = 'rw') {
   const backupHostPath = await resolveBackupDirForDocker(docker, host, getBackupDir(host));
-  return [volume + ':/src:' + mode, backupHostPath + ':/backup'];
+  return `${backupHostPath}:/backup:${mode}`;
 }
 
+async function volumeBinds(volume, mode, host = getActiveHost(), docker = getDockerForHost(host?.id || 'local')) {
+  return [`${volume}:/src:${mode}`, await resolveBackupBind(host, docker)];
+}
 
 /** 备份单个命名卷,返回新纪录。 */
 export async function createVolumeBackup(project, volumeName) {
@@ -279,7 +282,7 @@ async function removeBackupFile(file, hostId = 'local') {
   file = assertBackupFileName(file);
   const host = hostForId(hostId);
   const docker = getDockerForHost(host.id);
-  const { exitCode, output } = await runHelper(docker, `rm -f "/backup/${file}"`, [`${getBackupDir(host)}:/backup`]);
+  const { exitCode, output } = await runHelper(docker, `rm -f "/backup/${file}"`, [await resolveBackupBind(host, docker)]);
   if (exitCode !== 0) throw Object.assign(new Error(`删除备份文件失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
 }
 
@@ -327,8 +330,8 @@ export async function verifyVolumeBackup(id) {
   // ① 压缩包完整性:列出全部条目(gzip CRC 校验贯穿整个解压过程)
   const listing = await runHelper(
     docker,
-    `tar tzf "/backup/${file}" | wc -l`,
-    [`${getBackupDir(host)}:/backup:ro`],
+    `tar tzf "/backup/${file}" >/dev/null && tar tzf "/backup/${file}" | wc -l`,
+    [await resolveBackupBind(host, docker, 'ro')],
   ).catch((error) => { throw fail(`helper 容器执行失败:${error.message}`); });
   if (listing.exitCode !== 0) {
     throw fail(`备份已损坏(exit ${listing.exitCode}):${listing.output.slice(0, 200)}`);
@@ -342,7 +345,7 @@ export async function verifyVolumeBackup(id) {
     const restore = await runHelper(
       docker,
       `tar xzf "/backup/${file}" -C /src && find /src -type f | wc -l && du -sh /src | cut -f1`,
-      [`${tmpVolume}:/src:rw`, `${getBackupDir(host)}:/backup:ro`],
+      [`${tmpVolume}:/src:rw`, await resolveBackupBind(host, docker, 'ro')],
     ).catch((error) => { throw fail(`helper 容器执行失败:${error.message}`); });
     if (restore.exitCode !== 0) {
       throw fail(`还原演练失败(exit ${restore.exitCode}):${restore.output.slice(0, 200)}`);
