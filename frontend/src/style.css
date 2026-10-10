@@ -2644,3 +2644,185 @@ pre:hover .code-copy-btn { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .service-project-card, .service-project-card__toggle { transition: none; }
 }
+
+
+/* ===== ComposeOps global finish: Linear restraint + Things clarity =====
+   Keep operational density; remove decorative noise and make hierarchy consistent. */
+:root { color-scheme: dark; }
+body {
+  background: #101319;
+  color: var(--text-bright, #e7ebf2);
+}
+.app-header {
+  background: rgba(17, 20, 27, 0.96);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.13);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.015);
+}
+.app-sidebar {
+  background: #131820;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+}
+.app-sidebar nav { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.2) transparent; }
+.app-sidebar .nav-link {
+  min-height: 40px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.app-sidebar nav > div > button {
+  min-height: 36px;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+}
+.nav-link-active {
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: inset 2px 0 0 #60a5fa;
+  color: #f1f5f9;
+}
+.nav-link-active svg { color: #93c5fd; }
+.page-shell { gap: 20px; }
+.page-header { gap: 14px; padding-bottom: 18px; }
+.page-header h1, .page-title {
+  color: #f1f5f9;
+  font-size: clamp(21px, 1.5vw, 24px);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+.page-subtitle {
+  max-width: 72ch;
+  color: #9aa5b5;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.card, .section-panel, .panel-card, .toolbar-panel {
+  border-radius: 12px;
+  border-color: rgba(148, 163, 184, 0.13);
+  background: rgba(24, 29, 37, 0.88);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.card { transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease; }
+.card:hover {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(27, 33, 42, 0.94);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+.panel-card, .section-panel, .toolbar-panel { transition: border-color 160ms ease, background-color 160ms ease; }
+.metric-tile {
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  background: rgba(24, 29, 37, 0.86);
+}
+.metric-tile strong { line-height: 1.2; font-variant-numeric: tabular-nums; }
+.page-actions { align-items: center; gap: 8px; }
+.btn, .icon-btn, .input, .search-field { border-radius: 9px; }
+.btn, .icon-btn {
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 100ms ease;
+}
+.btn:active, .icon-btn:active { transform: scale(0.985); }
+.btn-primary { box-shadow: none; }
+.btn-primary:hover { box-shadow: 0 3px 10px rgba(37, 99, 235, 0.16); }
+.input, .search-field {
+  background: rgba(13, 17, 23, 0.82);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+.input:focus, .search-field:focus-within {
+  border-color: rgba(96, 165, 250, 0.82);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.modal, .event-panel, .command-dialog, .activity-drawer, .drawer {
+  background: rgba(22, 27, 35, 0.98);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.38);
+}
+.data-table th {
+  color: #aeb8c7;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+}
+.data-table td { line-height: 1.55; }
+.data-table tbody tr { transition: background-color 120ms ease; }
+.data-table tbody tr:hover { background: rgba(148, 163, 184, 0.045); }
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+:where(input, select, textarea)[aria-invalid="true"] {
+  border-color: rgba(251, 113, 133, 0.78);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.1);
+}
+.page-shell > * { animation-duration: 180ms; }
+.page-shell > *:nth-child(2) { animation-delay: 20ms; }
+.page-shell > *:nth-child(3) { animation-delay: 40ms; }
+.page-shell > *:nth-child(4) { animation-delay: 60ms; }
+.page-shell > *:nth-child(n + 5) { animation-delay: 80ms; }
+
+@media (min-width: 1536px) {
+  .page-shell { gap: 22px; }
+  .page-header { padding-bottom: 20px; }
+}
+@media (max-width: 767px) {
+  .page-shell { gap: 15px; }
+  .page-header { gap: 10px; padding-bottom: 14px; }
+  .page-header h1, .page-title { font-size: 20px; letter-spacing: -0.015em; }
+  .page-subtitle { font-size: 12px; line-height: 1.55; }
+  .card, .section-panel, .panel-card, .toolbar-panel { border-radius: 11px; }
+  .app-sidebar .nav-link { border-radius: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-shell > *, .card, .panel-card, .section-panel, .toolbar-panel, .btn, .icon-btn {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Critical-workflow UX: make destructive and impact-heavy actions readable on every viewport. */
+.table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
+.table-wrap:focus-within { outline: 1px solid rgba(96, 165, 250, 0.25); outline-offset: 2px; }
+.data-table th, .data-table td { vertical-align: middle; }
+.data-table td { overflow-wrap: anywhere; }
+.data-table td .btn, .data-table td .btn-secondary, .data-table td .btn-danger { white-space: nowrap; }
+:where(details > summary) { border-radius: 6px; }
+:where(details > summary):focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+@media (max-width: 767px) {
+  .table-wrap { margin-inline: -2px; }
+  .data-table { font-size: 12px; }
+  .data-table th, .data-table td { padding: 9px 10px; }
+  .page-actions { width: 100%; flex-wrap: wrap; }
+  .page-actions > .input, .page-actions > select { min-width: 0; max-width: 100%; flex: 1 1 160px; }
+  .section-panel { min-width: 0; }
+  .metric-grid { gap: 10px; }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-grid > .metric-tile { min-height: 78px; gap: 8px; padding: 12px; }
+  .metric-grid > .metric-tile .metric-icon { width: 34px; height: 34px; border-radius: 9px; }
+}
+
+/* Desktop KPI cards: give supporting status a dedicated second line instead of squeezing it beside the value. */
+@media (min-width: 768px) {
+  .metric-grid > .metric-tile { position: relative; min-height: 100px; padding-bottom: 30px; }
+  .metric-grid > .metric-tile .metric-meta {
+    position: absolute;
+    left: 64px;
+    right: 12px;
+    bottom: 10px;
+    display: block;
+    max-width: none;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.25;
+  }
+}
+
+/* On narrow phones the page-Agent drawer duplicates the dedicated AI tab; keep search, project/node switching and alerts accessible. */
+@media (max-width: 640px) {
+  .app-header button[aria-label="打开页面 Agent"] { display: none; }
+  .app-header > div:last-child { gap: 4px; }
+}

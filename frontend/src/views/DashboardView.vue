@@ -75,7 +75,7 @@
             </div>
             <p class="mt-1 text-xs text-muted">优先处理异常项目，避免在多个页面之间来回寻找。</p>
           </div>
-          <router-link to="/services" class="text-xs text-accent hover:text-blue-300">查看全部 <ArrowRight class="inline h-3.5 w-3.5" /></router-link>
+          <router-link to="/services" class="shrink-0 whitespace-nowrap text-xs text-accent hover:text-blue-300">查看全部 <ArrowRight class="inline h-3.5 w-3.5" /></router-link>
         </div>
         <div class="dashboard-attention-list">
           <div v-for="project in attentionProjectList" :key="project.id" class="dashboard-attention-row">
@@ -96,7 +96,7 @@
       <section class="section-panel">
           <div class="mb-4 flex items-center justify-between">
             <h3 class="font-semibold text-surface-100">最近事件</h3>
-            <router-link to="/events?tab=timeline" class="text-xs text-emerald-400 hover:text-emerald-300">查看全部 →</router-link>
+            <router-link to="/events?tab=timeline" class="shrink-0 whitespace-nowrap text-xs text-emerald-400 hover:text-emerald-300">查看全部 →</router-link>
           </div>
           <div v-if="recentEvents.length" class="space-y-2">
             <div v-for="event in recentEvents" :key="event.key" class="flex items-center gap-3 rounded-lg border border-surface-800 bg-surface-900/60 px-3 py-2">

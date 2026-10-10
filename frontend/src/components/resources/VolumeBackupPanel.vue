@@ -52,7 +52,7 @@
               <td class="whitespace-nowrap px-3 py-2 text-right">
                 <a :href="api.volumeBackupDownloadUrl(backup.id)" class="mr-2 inline-flex text-cyan-400 hover:text-cyan-300" title="下载"><Download class="h-3.5 w-3.5" /></a>
                 <button class="mr-2 inline-flex text-emerald-400 hover:text-emerald-300 disabled:opacity-40" title="还原演练:解进一次性临时卷验证可用性,不动原卷" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
-                <button class="mr-2 text-amber-400 hover:text-amber-300" title="恢复到卷(覆盖现有内容)" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" /></button>
+                <button class="mr-2 text-amber-400 hover:text-amber-300 disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '恢复到卷(会先自动演练备份；仅演练通过后才覆盖现有内容)'" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
                 <button class="text-zinc-500 hover:text-rose-300" title="删除备份" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
               </td>
             </tr>
@@ -62,7 +62,7 @@
       </div>
     </div>
 
-    <ConfirmDialog :show="restoreTarget !== null" title="恢复数据卷" :message="`将用 ${restoreTarget?.host || 'local'} 节点上的备份覆盖卷「${restoreTarget?.volume}」的现有内容,容器内服务正在写入时建议先停止。继续?`" tone="warning" confirm-text="覆盖恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
+    <ConfirmDialog :show="restoreTarget !== null" :busy="restoringId === restoreTarget?.id" title="恢复数据卷" :message="`将先验证 ${restoreTarget?.file} 并在临时卷演练；仅演练通过后才会用 ${restoreTarget?.host || 'local'} 节点上的备份覆盖卷「${restoreTarget?.volume}」的现有内容。若验证失败，将拒绝恢复。建议先停止正在写入的容器。继续?`" tone="warning" confirm-text="验证并恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
     <ConfirmDialog :show="deleteTarget !== null" title="删除备份" :message="`删除备份文件 ${deleteTarget?.file}?该操作不可恢复。`" tone="danger" confirm-text="删除" @confirm="doDelete" @cancel="deleteTarget = null" />
   </div>
 </template>
@@ -86,6 +86,7 @@ const backing = ref(false);
 const restoreTarget = ref(null);
 const deleteTarget = ref(null);
 const verifyingId = ref('');
+const restoringId = ref('');
 
 function formatBytes(bytes) {
   if (!bytes) return '—';
@@ -149,13 +150,17 @@ async function doVerify(backup) {
 }
 async function doRestore() {
   const backup = restoreTarget.value;
-  restoreTarget.value = null;
-  if (!backup) return;
+  if (!backup || restoringId.value) return;
+  restoringId.value = backup.id;
   try {
     await api.restoreVolumeBackup(backup.id);
-    toast.success(`卷 ${backup.volume} 已从备份恢复`);
+    toast.success(`卷 ${backup.volume} 已通过还原演练并完成恢复`);
+    restoreTarget.value = null;
   } catch (error) {
-    toast.error(error.message);
+    toast.error(`恢复失败：${error.message}。请检查目标卷状态并确认服务健康。`);
+  } finally {
+    restoringId.value = '';
+    await loadBackups();
   }
 }
 function askDelete(backup) { deleteTarget.value = backup; }

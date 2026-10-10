@@ -115,6 +115,10 @@ test('isolated Docker + protected API: create, verify, download, restore, delete
   fs.writeFileSync(archivePath, corruptedArchive);
   const corruptVerify = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/verify', headers });
   assert.equal(corruptVerify.statusCode, 502, corruptVerify.body);
+  await runInVolume("printf 'must-preserve-after-corrupt-restore\\n' > /data/payload.txt");
+  const corruptRestore = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/restore', headers });
+  assert.equal(corruptRestore.statusCode, 502, corruptRestore.body);
+  await runInVolume("grep -q 'must-preserve-after-corrupt-restore' /data/payload.txt");
   fs.writeFileSync(archivePath, validArchive);
   const reverify = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/verify', headers });
   assert.equal(reverify.statusCode, 200, reverify.body);

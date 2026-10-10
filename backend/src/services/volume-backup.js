@@ -294,6 +294,10 @@ export async function restoreVolumeBackup(id) {
   const volume = assertVolumeName(record.volume);
   const host = hostForId(record.host);
   const docker = getDockerForHost(host.id);
+  // Verify the entire gzip/tar archive and exercise extraction in a temporary volume before touching the target.
+  // A corrupt archive must never be allowed to partially overwrite the real volume before tar reports an error.
+  await verifyVolumeBackup(id);
+
   const { exitCode, output } = await runHelper(
     docker,
     `tar xzf "/backup/${file}" -C /src`,
