@@ -7,7 +7,7 @@ import test from 'node:test';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-volbackup-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
-const { parseProjectVolumes, resolveProjectVolumeNames, getBackupDir, createVolumeBackup, openBackupStream, listProjectVolumes } = await import('../src/services/volume-backup.js');
+const { parseProjectVolumes, resolveProjectVolumeNames, getBackupDir, resolveMountedHostPath, createVolumeBackup, openBackupStream, listProjectVolumes } = await import('../src/services/volume-backup.js');
 const db = (await import('../src/lib/db.js')).default;
 const {
   addVolumeBackup, pruneVolumeBackups, pruneAiData,
@@ -15,6 +15,32 @@ const {
   createAiSession, addAiMessage, createAgentPlan, recordAgentExecution, recordAiUsage,
 } = await import('../src/lib/db.js');
 const { setSetting } = await import('../src/lib/db.js');
+
+
+test('volume-backup: 容器内备份目录映射到宿主机持久化卷真实路径', () => {
+  const hostPath = resolveMountedHostPath({ Mounts: [
+    { Type: 'volume', Source: '/var/lib/docker/volumes/opsdash-data/_data', Destination: '/app/backend/data' },
+    { Type: 'bind', Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock' },
+  ] }, '/app/backend/data/volume-backups');
+  assert.equal(hostPath, '/var/lib/docker/volumes/opsdash-data/_data/volume-backups');
+});
+
+test('volume-backup: 宿主机路径映射选择最深的匹配挂载点', () => {
+  const hostPath = resolveMountedHostPath({ Mounts: [
+    { Type: 'bind', Source: '/srv', Destination: '/app' },
+    { Type: 'bind', Source: '/mnt/data', Destination: '/app/backend/data' },
+  ] }, '/app/backend/data/volume-backups');
+  assert.equal(hostPath, '/mnt/data/volume-backups');
+});
+
+test('volume-backup: 拒绝映射到应用容器挂载点之外的目录', () => {
+  assert.throws(
+    () => resolveMountedHostPath({ Mounts: [
+      { Type: 'volume', Source: '/var/lib/docker/volumes/opsdash-data/_data', Destination: '/app/backend/data' },
+    ] }, '/tmp/volume-backups'),
+    (error) => error.statusCode === 400 && /挂载点/.test(error.message),
+  );
+});
 
 test('volume-backup: parseProjectVolumes 区分命名卷/bind/变量引用', () => {
   const compose = `

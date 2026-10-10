@@ -10,7 +10,7 @@
  */
 
 import { mkdir, stat } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -197,9 +197,45 @@ async function runHelper(docker, cmd, binds) {
   }
 }
 
-function volumeBinds(volume, mode, host = getActiveHost()) {
-  return [`${volume}:/src:${mode}`, `${getBackupDir(host)}:/backup`];
+
+/** 将应用容器内的备份目录映射为 Docker daemon 所在宿主机上的真实路径。 */
+export function resolveMountedHostPath(containerInfo, targetPath) {
+  const target = path.posix.resolve(targetPath);
+  const mounts = Array.isArray(containerInfo?.Mounts) ? containerInfo.Mounts : [];
+  const matches = mounts
+    .filter((mount) => typeof mount?.Destination === 'string' && typeof mount?.Source === 'string')
+    .map((mount) => ({ ...mount, destination: path.posix.resolve(mount.Destination) }))
+    .filter((mount) => {
+      const relative = path.posix.relative(mount.destination, target);
+      return relative === '' || (!relative.startsWith('..') && !path.posix.isAbsolute(relative));
+    })
+    .sort((a, b) => b.destination.length - a.destination.length);
+  if (!matches.length) {
+    throw Object.assign(new Error('备份目录 ' + target + ' 不在应用容器的任何挂载点内；请将目录放入持久化挂载或配置宿主机可访问的目录'), { statusCode: 400 });
+  }
+  const mount = matches[0];
+  return path.posix.resolve(mount.Source, path.posix.relative(mount.destination, target));
 }
+
+async function resolveBackupDirForDocker(docker, host, dir) {
+  if (!isLocalHost(host)) return dir;
+  try {
+    const appContainer = await docker.getContainer(process.env.HOSTNAME).inspect();
+    return resolveMountedHostPath(appContainer, dir);
+  } catch (error) {
+    if (error?.statusCode === 400) throw error;
+    if (existsSync('/.dockerenv')) {
+      throw Object.assign(new Error('无法读取当前应用容器的挂载信息，拒绝把容器内路径误用为宿主机 bind mount 源'), { statusCode: 502 });
+    }
+    return dir;
+  }
+}
+
+async function volumeBinds(volume, mode, host = getActiveHost(), docker = getDockerForHost(host?.id || 'local')) {
+  const backupHostPath = await resolveBackupDirForDocker(docker, host, getBackupDir(host));
+  return [volume + ':/src:' + mode, backupHostPath + ':/backup'];
+}
+
 
 /** 备份单个命名卷,返回新纪录。 */
 export async function createVolumeBackup(project, volumeName) {
@@ -214,7 +250,7 @@ export async function createVolumeBackup(project, volumeName) {
   const { exitCode, output } = await runHelper(
     docker,
     `tar czf "/backup/${file}" -C /src . && du -b "/backup/${file}" | cut -f1`,
-    volumeBinds(volumeName, 'ro', host),
+    await volumeBinds(volumeName, 'ro', host, docker),
   ).catch((error) => {
     throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
   });
@@ -258,7 +294,7 @@ export async function restoreVolumeBackup(id) {
   const { exitCode, output } = await runHelper(
     docker,
     `tar xzf "/backup/${file}" -C /src`,
-    volumeBinds(volume, 'rw', host),
+    await volumeBinds(volume, 'rw', host, docker),
   ).catch((error) => {
     throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
   });
@@ -370,7 +406,7 @@ export async function streamBackupToReply(id, reply) {
   const container = await docker.createContainer({
     Image: HELPER_IMAGE,
     Cmd: ['sh', '-c', `cat "/backup/${file}"`],
-    HostConfig: { Binds: volumeBinds(volume, 'ro', host) },
+    HostConfig: { Binds: await volumeBinds(volume, 'ro', host, docker) },
     Labels: { 'composeops.role': 'volume-backup' },
   });
   let attach = null;
