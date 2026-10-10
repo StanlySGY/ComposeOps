@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.e2e.js',
   fullyParallel: true,
+  // Monaco + the full 22-route sweep are memory-heavy under WSL; two workers keep mobile-route startup deterministic.
+  workers: 2,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: 'list',

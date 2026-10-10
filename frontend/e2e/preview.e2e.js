@@ -29,6 +29,13 @@ test('真实应用导航和全部页面可访问，没有后端流量或渲染�
     await expect(page.locator('.loading-mark')).toHaveCount(0);
     await expect(page.locator('.alert-error,.runtime-error-bar')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const unnamedControls = await page.locator('button:visible, a:visible').evaluateAll((elements) => elements
+      .filter((element) => ![
+        element.getAttribute('aria-label'), element.getAttribute('aria-labelledby'), element.getAttribute('title'),
+        element.innerText, element.textContent,
+      ].some((value) => String(value || '').trim()))
+      .map((element) => ({ tag: element.tagName.toLowerCase(), className: String(element.className || '').slice(0, 80), html: element.outerHTML.slice(0, 180) })));
+    expect(unnamedControls, `存在缺少可识别名称的按钮/链接：${route}`).toEqual([]);
   }
   expect(observed.errors).toEqual([]);
   expect(observed.network).toEqual([]);
@@ -128,4 +135,58 @@ test('未知与外部请求在离线适配器中失败，不回退到真实网�
   expect(responses).toEqual([501, 501]);
   expect(observed.errors).toEqual([]);
   expect(observed.network).toEqual([]);
+});
+
+test('快速跳转支持键盘搜索、执行与 Escape 关闭', async ({ page }) => {
+  const trigger = page.getByRole('button', { name: '打开快速跳转' });
+  await page.goto('./#/dashboard');
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: '快速跳转与操作' });
+  await expect(dialog).toBeVisible();
+  const search = dialog.getByRole('combobox', { name: '搜索命令' });
+  await expect(search).toBeFocused();
+  await search.fill('设置');
+  await expect(dialog.getByRole('option')).toHaveCount(2);
+  await expect(dialog.getByRole('option').first()).toContainText('系统设置');
+  await search.press('Enter');
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+test('移动端更多功能抽屉可导航、Escape 可关闭且页面不横向溢出', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('./#/dashboard');
+  const more = page.getByRole('button', { name: '更多功能' });
+  await more.click();
+  const drawer = page.getByRole('dialog', { name: '更多功能' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('link', { name: '设置' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(drawer).toHaveCount(0);
+  await more.click();
+  await drawer.getByRole('link', { name: '设置' }).click();
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  await expect(drawer).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('数据卷恢复和删除均先展示明确的确认门，取消后不执行破坏性操作', async ({ page }) => {
+  await page.goto('./#/resources');
+  await page.getByRole('button', { name: '卷备份' }).click();
+  await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
+  await page.getByRole('button', { name: '恢复卷 cache_data 的备份' }).click();
+  const restoreDialog = page.getByRole('dialog', { name: '恢复数据卷' });
+  await expect(restoreDialog).toContainText('仅演练通过后才会');
+  await restoreDialog.getByRole('button', { name: '取消' }).click();
+  await expect(restoreDialog).toHaveCount(0);
+  await page.getByRole('button', { name: '删除备份 cache-data-demo.tar.gz' }).click();
+  const deleteDialog = page.getByRole('dialog', { name: '删除备份' });
+  await expect(deleteDialog).toContainText('该操作不可恢复');
+  await deleteDialog.getByRole('button', { name: '取消' }).click();
+  await expect(deleteDialog).toHaveCount(0);
+  await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
 });
