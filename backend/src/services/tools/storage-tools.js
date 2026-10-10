@@ -56,7 +56,7 @@ export function registerStorageTools(agent) {
       },
     })
     .registerTool('volume.verify', {
-      description: '对数据卷备份做还原演练(不动原卷:校验 tar 完整性并解进一次性临时卷统计文件数)',
+      description: '验证数据卷备份：校验 tar 完整性，并解包到一次性临时卷统计文件数；不会修改原卷',
       category: 'diagnostic',
       requiredPermission: 'readonly',
       confirmationRequired: false,

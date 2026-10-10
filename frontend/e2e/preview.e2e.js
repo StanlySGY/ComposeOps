@@ -88,7 +88,7 @@ test('真实服务搜索、日志与卷备份界面可交互', async ({ page }) 
   await page.goto('./#/resources');
   await page.getByRole('button', { name: '卷备份' }).click();
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
-  await page.getByTitle('还原演练:解进一次性临时卷验证可用性,不动原卷').click();
+  await page.getByRole('button', { name: '验证备份 cache-data-demo.tar.gz' }).click();
   await expect(page.getByText('✓ 128 文件')).toBeVisible();
   await page.getByRole('button', { name: '安装部署', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '安装 ComposeOps' })).toContainText('releases/latest/download/compose.yml');

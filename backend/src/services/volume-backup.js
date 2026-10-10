@@ -342,7 +342,7 @@ export async function verifyVolumeBackup(id) {
   }
   const entries = Number(listing.output.split('\n').pop()) || 0;
 
-  // ② 还原演练:解进一次性临时卷并统计文件数
+  // ② 还原演练：解包到一次性临时卷并统计文件数，不修改原卷
   const tmpVolume = `composeops-verify-${randomBytes(4).toString('hex')}`;
   await docker.createVolume({ Name: tmpVolume, Labels: { 'composeops.role': 'volume-verify' } });
   try {

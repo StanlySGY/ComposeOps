@@ -165,7 +165,7 @@ export default async function opsRoutes(fastify) {
     }
   });
 
-  // 还原演练:不动原卷,把备份解进一次性临时卷验证可用性(只读安全,无需确认门)
+  // 还原演练：不动原卷，把备份解包到一次性临时卷验证可用性（只读安全，无需确认门）
   fastify.post('/storage/volume-backups/:id/verify', {
     schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'integer', minimum: 1 } } } },
   }, async (request, reply) => {

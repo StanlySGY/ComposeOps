@@ -50,10 +50,10 @@
                 <span v-else class="text-[10px] text-zinc-600">未演练</span>
               </td>
               <td class="whitespace-nowrap px-3 py-2 text-right">
-                <a :href="api.volumeBackupDownloadUrl(backup.id)" class="mr-2 inline-flex text-cyan-400 hover:text-cyan-300" title="下载"><Download class="h-3.5 w-3.5" /></a>
-                <button class="mr-2 inline-flex text-emerald-400 hover:text-emerald-300 disabled:opacity-40" title="还原演练:解进一次性临时卷验证可用性,不动原卷" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
-                <button class="mr-2 text-amber-400 hover:text-amber-300 disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '恢复到卷(会先自动演练备份；仅演练通过后才覆盖现有内容)'" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
-                <button class="text-zinc-500 hover:text-rose-300" title="删除备份" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
+                <a :href="api.volumeBackupDownloadUrl(backup.id)" class="inline-flex h-8 w-8 items-center justify-center rounded-md text-cyan-400 transition-colors hover:bg-cyan-500/10 hover:text-cyan-300" title="下载备份" :aria-label="`下载备份 ${backup.file}`"><Download class="h-3.5 w-3.5" /></a>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-emerald-400 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40" title="验证备份：在一次性临时卷中解包并统计文件数，不会修改原卷" :aria-label="`验证备份 ${backup.file}`" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-400 transition-colors hover:bg-amber-500/10 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '恢复到卷（会先自动验证备份；仅验证通过后才覆盖现有内容）'" :aria-label="restoringId === backup.id ? `正在恢复 ${backup.volume}` : `恢复卷 ${backup.volume} 的备份`" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title="删除备份" :aria-label="`删除备份 ${backup.file}`" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
               </td>
             </tr>
           </tbody>
