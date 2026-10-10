@@ -22,8 +22,13 @@ const routes = {
 test('真实应用导航和全部页面可访问，没有后端流量或渲染错误', async ({ page }) => {
   test.setTimeout(60000);
   const observed = observe(page);
+  await page.goto('./#/dashboard');
   for (const [route, title] of Object.entries(routes)) {
-    await page.goto('./?route=' + encodeURIComponent(route) + '#/' + route);
+    // Exercise the real single-page router instead of restarting the Preview shell for every route.
+    if (route !== 'dashboard') {
+      await page.evaluate((nextRoute) => { window.location.hash = '/' + nextRoute; }, route);
+      await page.waitForURL((url) => url.hash === '#/' + route);
+    }
     await expect(page.locator('.app-header')).toBeVisible();
     await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
     await expect(page.locator('.loading-mark')).toHaveCount(0);
@@ -112,6 +117,19 @@ test('配置页直达项目、切换视图和重新选择项目后编辑器仍�
   await expect(page.locator('.monaco-editor')).toContainText('db-old');
   await page.getByRole('button', { name: '可视化', exact: true }).click();
   await expect(page.getByText('服务列表', { exact: true })).toBeVisible();
+  const editService = page.getByRole('button', { name: '编辑服务 postgres', exact: true });
+  await expect(editService).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除服务 postgres', exact: true })).toBeVisible();
+  await editService.click();
+  const serviceDialog = page.getByRole('dialog', { name: '编辑服务' });
+  await expect(serviceDialog).toBeVisible();
+  await expect(serviceDialog.getByText('编辑服务', { exact: true })).toHaveCount(1);
+  await expect(serviceDialog.getByLabel('服务名称')).toHaveValue('postgres');
+  await expect(serviceDialog.getByRole('button', { name: '关闭' })).toBeVisible();
+  await expect(serviceDialog.getByRole('textbox', { name: '第 1 行卷挂载 · 宿主机路径或命名卷' })).toHaveValue('data');
+  await expect(serviceDialog.getByRole('button', { name: '删除第 1 行卷挂载' })).toBeVisible();
+  await serviceDialog.getByRole('button', { name: '关闭' }).click();
+  await expect(serviceDialog).toHaveCount(0);
   await page.getByRole('button', { name: '代码', exact: true }).click();
   await expect(page.locator('.monaco-editor')).toContainText('db-old');
   await page.getByTitle('清除当前选择,回到引导页').click();

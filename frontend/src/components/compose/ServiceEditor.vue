@@ -1,16 +1,12 @@
 <template>
   <div class="service-editor">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-semibold">{{ isNew ? '新增服务' : '编辑服务' }}</h3>
-      <button class="icon-btn" @click="$emit('close')"><X class="w-4 h-4" /></button>
-    </div>
-
     <div class="space-y-4">
       <!-- 基础信息 -->
       <div class="form-group">
-        <label class="form-label">服务名称</label>
+        <label class="form-label" for="compose-service-name">服务名称</label>
         <input
           v-model="service.name"
+          id="compose-service-name"
           type="text"
           class="input"
           placeholder="例如: nginx, postgres, redis"
@@ -19,9 +15,10 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">镜像</label>
+        <label class="form-label" for="compose-service-image">镜像</label>
         <input
           v-model="service.image"
+          id="compose-service-image"
           type="text"
           class="input"
           placeholder="例如: nginx:latest, postgres:15-alpine"
@@ -29,9 +26,10 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">容器名称 (可选)</label>
+        <label class="form-label" for="compose-service-container-name">容器名称 (可选)</label>
         <input
           v-model="service.container_name"
+          id="compose-service-container-name"
           type="text"
           class="input"
           placeholder="留空使用默认命名"
@@ -47,6 +45,7 @@
         <div v-for="(port, idx) in service.ports" :key="idx" class="flex items-center gap-2 mb-2">
           <input
             v-model="port.host"
+            :aria-label="`第 ${idx + 1} 行端口映射 · 宿主机端口`"
             type="text"
             class="input flex-1"
             placeholder="宿主机端口"
@@ -54,11 +53,12 @@
           <span class="text-muted">:</span>
           <input
             v-model="port.container"
+            :aria-label="`第 ${idx + 1} 行端口映射 · 容器端口`"
             type="text"
             class="input flex-1"
             placeholder="容器端口"
           />
-          <button class="icon-btn" @click="removePort(idx)"><Trash2 class="w-4 h-4" /></button>
+          <button class="icon-btn" :aria-label="`删除第 ${idx + 1} 行端口映射`" :title="`删除第 ${idx + 1} 行端口映射`" @click="removePort(idx)"><Trash2 class="w-4 h-4" /></button>
         </div>
       </div>
 
@@ -68,21 +68,29 @@
           <label class="form-label mb-0">卷挂载</label>
           <button class="btn-ghost text-xs" @click="addVolume"><Plus class="w-3 h-3" />添加</button>
         </div>
-        <div v-for="(vol, idx) in service.volumes" :key="idx" class="flex items-center gap-2 mb-2">
-          <input
-            v-model="vol.host"
-            type="text"
-            class="input flex-1"
-            placeholder="宿主机路径或命名卷"
-          />
-          <span class="text-muted">:</span>
-          <input
-            v-model="vol.container"
-            type="text"
-            class="input flex-1"
-            placeholder="容器路径"
-          />
-          <button class="icon-btn" @click="removeVolume(idx)"><Trash2 class="w-4 h-4" /></button>
+        <div v-for="(vol, idx) in service.volumes" :key="idx" class="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center">
+          <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
+            <span class="text-xs text-surface-500 sm:hidden">宿主机路径或命名卷</span>
+            <input
+              v-model="vol.host"
+              :aria-label="`第 ${idx + 1} 行卷挂载 · 宿主机路径或命名卷`"
+              type="text"
+              class="input w-full sm:w-auto sm:flex-1"
+              placeholder="宿主机路径或命名卷"
+            />
+          </label>
+          <span class="text-muted hidden sm:inline">:</span>
+          <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
+            <span class="text-xs text-surface-500 sm:hidden">容器路径</span>
+            <input
+              v-model="vol.container"
+              :aria-label="`第 ${idx + 1} 行卷挂载 · 容器路径`"
+              type="text"
+              class="input w-full sm:w-auto sm:flex-1"
+              placeholder="容器路径"
+            />
+          </label>
+          <button class="icon-btn self-end sm:self-auto" :aria-label="`删除第 ${idx + 1} 行卷挂载`" :title="`删除第 ${idx + 1} 行卷挂载`" @click="removeVolume(idx)"><Trash2 class="w-4 h-4" /></button>
         </div>
       </div>
 
@@ -92,29 +100,38 @@
           <label class="form-label mb-0">环境变量</label>
           <button class="btn-ghost text-xs" @click="addEnv"><Plus class="w-3 h-3" />添加</button>
         </div>
-        <div v-for="(env, idx) in service.environment" :key="idx" class="flex items-center gap-2 mb-2">
-          <input
-            v-model="env.key"
-            type="text"
-            class="input flex-1"
-            placeholder="变量名"
-          />
-          <span class="text-muted">=</span>
-          <input
-            v-model="env.value"
-            type="text"
-            class="input flex-1"
-            placeholder="值"
-          />
-          <button class="icon-btn" @click="removeEnv(idx)"><Trash2 class="w-4 h-4" /></button>
+        <div v-for="(env, idx) in service.environment" :key="idx" class="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center">
+          <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
+            <span class="text-xs text-surface-500 sm:hidden">变量名</span>
+            <input
+              v-model="env.key"
+              :aria-label="`第 ${idx + 1} 行环境变量名称`"
+              type="text"
+              class="input w-full sm:w-auto sm:flex-1"
+              placeholder="变量名"
+            />
+          </label>
+          <span class="text-muted hidden sm:inline">=</span>
+          <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
+            <span class="text-xs text-surface-500 sm:hidden">变量值</span>
+            <input
+              v-model="env.value"
+              :aria-label="`第 ${idx + 1} 行环境变量值`"
+              type="text"
+              class="input w-full sm:w-auto sm:flex-1"
+              placeholder="值"
+            />
+          </label>
+          <button class="icon-btn self-end sm:self-auto" :aria-label="`删除第 ${idx + 1} 行环境变量`" :title="`删除第 ${idx + 1} 行环境变量`" @click="removeEnv(idx)"><Trash2 class="w-4 h-4" /></button>
         </div>
       </div>
 
       <!-- 依赖关系 -->
       <div class="form-group">
-        <label class="form-label">依赖服务 (可选)</label>
+        <label class="form-label" for="compose-service-depends-on">依赖服务 (可选)</label>
         <input
           v-model="dependsOnInput"
+          id="compose-service-depends-on"
           type="text"
           class="input"
           placeholder="逗号分隔,例如: db, redis"
@@ -124,8 +141,8 @@
 
       <!-- 重启策略 -->
       <div class="form-group">
-        <label class="form-label">重启策略</label>
-        <select v-model="service.restart" class="input">
+        <label class="form-label" for="compose-service-restart">重启策略</label>
+        <select id="compose-service-restart" v-model="service.restart" class="input">
           <option value="">不重启</option>
           <option value="no">no</option>
           <option value="always">always</option>
@@ -136,9 +153,10 @@
 
       <!-- 网络 -->
       <div class="form-group">
-        <label class="form-label">网络 (可选)</label>
+        <label class="form-label" for="compose-service-networks">网络 (可选)</label>
         <input
           v-model="networksInput"
+          id="compose-service-networks"
           type="text"
           class="input"
           placeholder="逗号分隔,例如: frontend, backend"
@@ -155,7 +173,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
-import { X, Plus, Trash2 } from 'lucide-vue-next';
+import { Plus, Trash2 } from 'lucide-vue-next';
 
 const props = defineProps({
   modelValue: {

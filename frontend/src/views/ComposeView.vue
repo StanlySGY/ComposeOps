@@ -57,8 +57,8 @@
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button class="icon-btn" @click="editService(service)"><Pencil class="w-4 h-4" /></button>
-              <button class="icon-btn text-rose-400 hover:text-rose-300" @click="deleteService(service.name)"><Trash2 class="w-4 h-4" /></button>
+              <button class="icon-btn" :aria-label="`编辑服务 ${service.name}`" :title="`编辑服务 ${service.name}`" @click="editService(service)"><Pencil class="w-4 h-4" /></button>
+              <button class="icon-btn text-rose-400 hover:text-rose-300" :aria-label="`删除服务 ${service.name}`" :title="`删除服务 ${service.name}`" @click="deleteService(service.name)"><Trash2 class="w-4 h-4" /></button>
             </div>
           </div>
           <div v-if="service.ports?.length" class="pt-2 border-t border-surface-800">
@@ -71,7 +71,7 @@
       </div>
     </div>
 
-    <BaseModal :show="showServiceEditor" title="" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[85vh] overflow-auto" body-class="p-0" @close="showServiceEditor = false">
+    <BaseModal :show="showServiceEditor" :title="isNewService ? '新增服务' : '编辑服务'" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[85vh] overflow-auto" body-class="p-0" @close="showServiceEditor = false">
       <ServiceEditor :model-value="currentService" :is-new="isNewService" @save="saveServiceFromEditor" @close="showServiceEditor = false" />
     </BaseModal>
 
