@@ -190,3 +190,50 @@ test('数据卷恢复和删除均先展示明确的确认门，取消后不执�
   await expect(deleteDialog).toHaveCount(0);
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
 });
+
+test('定时任务创建表单先做本地校验，离线不支持的提交会明确报错且保留草稿', async ({ page }) => {
+  await page.goto('./#/cron');
+  await page.getByRole('button', { name: '新建定时任务' }).click();
+  const dialog = page.getByRole('dialog', { name: '新建定时任务' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '创建任务' }).click();
+  await expect(dialog.getByText('请填写任务名称')).toBeVisible();
+  const name = dialog.getByPlaceholder('例如:每天凌晨自动备份数据库');
+  await name.fill('回归测试任务');
+  await dialog.getByRole('button', { name: '创建任务' }).click();
+  await expect(dialog.getByText(/未在离线预览中模拟/)).toBeVisible();
+  await expect(name).toHaveValue('回归测试任务');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) => {
+  await page.goto('./#/workflows');
+  await page.getByRole('button', { name: '新建工作流' }).click();
+  const dialog = page.getByRole('dialog', { name: '新建工作流' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect(page.getByText('请填写工作流名称')).toBeVisible();
+  await dialog.getByPlaceholder('如:故障自动处理').fill('回归测试工作流');
+  const nodeIds = dialog.getByPlaceholder('节点 ID');
+  await nodeIds.nth(1).fill('trigger');
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect(page.getByText('节点 ID 重复:trigger')).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page }) => {
+  await page.goto('./#/gitops');
+  await page.getByRole('button', { name: '添加仓库' }).first().click();
+  const dialog = page.getByRole('dialog', { name: '添加仓库' });
+  await expect(dialog).toBeVisible();
+  const required = dialog.locator('form input[required], form select[required]');
+  expect(await required.count()).toBeGreaterThanOrEqual(4);
+  await dialog.getByRole('button', { name: '添加', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  expect(await required.evaluateAll((fields) => fields.some((field) => !field.checkValidity()))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
