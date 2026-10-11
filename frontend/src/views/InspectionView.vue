@@ -172,7 +172,7 @@
 </template>
 
 <script setup>
-import { onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, CheckCircle2, CircleAlert, CircleX, FileText, Hourglass, Info, Play, RefreshCw, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -350,8 +350,6 @@ function askAgentForReport() {
   window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: `请分析这份巡检报告并给出处置建议:\n\n${summaryText}` } }));
 }
 
-let activatedOnce = false;
-function onActivatedLoad() { if (activatedOnce) void load(); activatedOnce = true; }
 function handleHostChanged() { void load(); }
 
 usePullRefresh(load);
@@ -359,7 +357,6 @@ onMounted(() => {
   void load();
   window.addEventListener('composeops:host-changed', handleHostChanged);
 });
-onActivated(onActivatedLoad);
 onBeforeUnmount(() => {
   window.removeEventListener('composeops:host-changed', handleHostChanged);
   resetAgentContext();

@@ -1028,6 +1028,9 @@
 .webui-badge { @apply inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-medium text-emerald-300 transition-colors hover:bg-emerald-900/50; }
 .webui-menu { @apply absolute right-0 top-full z-60 mt-1 w-56 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 py-1 shadow-lg shadow-black/40; }
 .webui-menu-item { @apply flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-surface-800; }
+.container-picker { @apply flex flex-col gap-2 rounded-xl border border-surface-800 bg-surface-900/50 px-3 py-2.5; }
+.container-chip { @apply inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-full border border-surface-700/60 bg-surface-950/60 px-2.5 text-[11px] text-surface-300 transition-colors hover:border-surface-600 hover:bg-surface-800/70 hover:text-surface-100; }
+.container-chip.active { @apply border-accent/70 bg-accent/15 text-surface-50; }
 .aggregate-line { @apply flex items-start gap-2 rounded-sm px-1.5 py-0.5 font-mono text-[12px] leading-relaxed hover:bg-surface-800/40; }
 .container-badge { @apply mt-0.5 inline-flex shrink-0 items-center rounded-sm border px-1.5 py-px text-[10px] font-semibold whitespace-nowrap; }
 .line-ts { @apply shrink-0 text-[10px] text-surface-600 tabular-nums; }
@@ -1515,6 +1518,11 @@ body {
   /* .status-pill 的 display 定义在 utilities 之后,会压掉 hidden md:inline-flex;
      窄屏显式隐藏,防止顶栏右侧溢出与品牌区重叠 */
   .app-header .status-pill { display: none; }
+}
+
+/* 底部导航条(4rem + 安全区)之上再放运行时错误条,否则窄屏完全不可见 */
+@media (max-width: 767px) {
+  .runtime-error-bar { bottom: calc(4rem + 1rem + env(safe-area-inset-bottom)); }
 }
 
 @media (max-width: 640px) {

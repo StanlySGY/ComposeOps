@@ -1,6 +1,6 @@
 <template>
   <div class="aggregate-line group" :class="{ 'line-error': isError }">
-    <span class="container-badge" :class="badgeClass">{{ containerName }}</span>
+    <span v-if="containerName" class="container-badge" :class="badgeClass">{{ containerName }}</span>
     <span v-if="ts" class="line-ts">{{ shortTs }}</span>
     <template v-if="jsonState !== null">
       <pre class="json-block" :class="{ open: jsonOpen }">{{ jsonText }}</pre>
@@ -18,7 +18,11 @@
 <script setup>
 import { computed, ref } from 'vue';
 
-const props = defineProps({ line: { type: Object, required: true } });
+// 单容器日志流的帧里没有 containerName,由调用方补一个 fallbackName,徽章颜色仍按名字哈希取色。
+const props = defineProps({
+  line: { type: Object, required: true },
+  fallbackName: { type: String, default: '' },
+});
 const jsonOpen = ref(false);
 
 const PALETTES = [
@@ -34,7 +38,8 @@ function hashColor(name = '') {
   for (const char of String(name)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
   return PALETTES[Math.abs(hash) % PALETTES.length];
 }
-const badgeClass = computed(() => hashColor(props.line.containerName));
+const containerName = computed(() => props.line.containerName || props.fallbackName || '');
+const badgeClass = computed(() => hashColor(containerName.value));
 
 const text = computed(() => String(props.line.data || ''));
 const level = computed(() => props.line.level || (/(error|exception|fatal|crash|panic|failed)/i.test(text.value) ? 'error' : /(warn|deprecat)/i.test(text.value) ? 'warn' : 'info'));

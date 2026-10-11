@@ -227,13 +227,25 @@ function emitAgentOpen() {
 }
 let pingTimer; let clockTimer;
 
+let pingInitialized = false;
+/**
+ * 窄屏 CSS 把 .status-pill 整条藏了,后端掉线在手机上没有任何提示。
+ * 这里只在状态真的翻转时补一条 toast(首次探测不算翻转,避免进页面就弹提示)。
+ */
 async function ping() {
+  let online;
   try {
     const res = await fetch('/health');
-    backendOnline.value = res.ok;
+    online = res.ok;
   } catch {
-    backendOnline.value = false;
+    online = false;
   }
+  if (pingInitialized && online !== backendOnline.value) {
+    if (online) toast.success('后端服务已恢复连接');
+    else toast.error('后端服务连接中断,数据可能不是最新');
+  }
+  pingInitialized = true;
+  backendOnline.value = online;
 }
 function closeCommand() { commandOpen.value = false; }
 function runCommand(item) {

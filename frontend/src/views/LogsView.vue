@@ -4,17 +4,42 @@
       <div><h1 class="page-title">实时日志</h1><p class="page-subtitle">多容器聚合、着色分流与即时过滤</p></div>
       <div class="page-actions">
         <select v-model="projectId" class="input" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器' " @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
-        <select v-if="!aggregateMode" v-model="containerId" class="input" @change="onContainerChange"><option value="">选择容器</option><option v-for="c in containers" :key="c.id" :value="c.id">{{ c.name }}</option></select>
-        <select v-else v-model="selectedContainers" class="input" multiple size="1" title="聚合容器(按住 Ctrl 多选)"><option v-for="c in containers" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+        <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
         <select v-model="levelFilter" class="input w-28" title="级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
-        <input v-model="search" class="input w-40" placeholder="搜索或 /regex/" />
+        <label class="search-field w-44"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" placeholder="搜索或 /regex/" /></label>
         <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
         <button v-else class="btn-danger" @click="disconnect"><Square class="w-4 h-4" />断开</button>
         <button class="icon-btn" :title="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /></button>
         <button class="icon-btn" title="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
         <button class="icon-btn" title="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
         <button v-if="hasErrors" class="btn-primary" @click="diagnosis = true"><Sparkles class="w-4 h-4" />AI 诊断</button>
+      </div>
+    </div>
+
+    <!-- 容器选择条(借鉴 Dozzle:模糊匹配容器名 + 名称旁直接挂实时 CPU/内存) -->
+    <div v-if="containers.length" class="container-picker">
+      <div class="flex flex-wrap items-center gap-2">
+        <label class="search-field w-44"><Filter class="h-4 w-4" /><input v-model="containerQuery" :placeholder="aggregateMode ? '过滤容器(可多选)' : '过滤容器(支持缩写)'" /></label>
+        <span class="text-[11px] text-muted">{{ aggregateMode ? (selectedContainers.length ? `已选 ${selectedContainers.length} 个容器` : '未选择时聚合全部容器') : '点击容器切换日志源' }}</span>
+        <template v-if="aggregateMode">
+          <button class="btn-secondary min-h-7! px-2! py-0.5! text-[11px]!" @click="selectVisibleContainers">全选可见</button>
+          <button class="btn-secondary min-h-7! px-2! py-0.5! text-[11px]!" :disabled="!selectedContainers.length" @click="selectedContainers = []">清空</button>
+        </template>
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <button
+          v-for="c in visibleContainers"
+          :key="c.id"
+          class="container-chip"
+          :class="{ active: aggregateMode ? selectedContainers.includes(c.id) : c.id === containerId }"
+          :title="`${c.name} · ${c.state || '未知状态'}${c.image ? ' · ' + c.image : ''}`"
+          @click="pickContainer(c)"
+        >
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="c.state === 'running' ? 'bg-emerald-400' : 'bg-surface-600'"></span>
+          <span class="min-w-0 max-w-40 truncate">{{ c.name }}</span>
+          <span v-if="liveStats[c.id]" class="metric-chip">{{ liveStats[c.id] }}</span>
+        </button>
+        <span v-if="!visibleContainers.length" class="py-1 text-[11px] text-muted">没有匹配的容器</span>
       </div>
     </div>
 
@@ -33,12 +58,8 @@
     <div ref="boxEl" class="terminal-output card flex-1 min-h-[420px]" @scroll="onScroll" @wheel="onWheel">
       <template v-if="filtered.length">
         <div :style="{ height: scrollPadTop + 'px' }" aria-hidden="true"></div>
-        <template v-if="aggregateMode">
-          <LogLine v-for="line in visibleLines" :key="line.id" :line="line" />
-        </template>
-        <template v-else>
-          <div v-for="line in visibleLines" :key="line.id" class="aggregate-line" :class="line.type === 'stderr' || line.type === 'error' ? 'text-rose-400' : 'text-surface-200'" style="white-space: nowrap; overflow-x: auto;">{{ line.data }}</div>
-        </template>
+        <!-- 单容器与聚合共用 LogLine:单容器流的帧里没有 containerName,由 fallback-name 补上徽章。 -->
+        <LogLine v-for="line in visibleLines" :key="line.id" :line="line" :fallback-name="activeContainerName" />
         <div :style="{ height: scrollPadBottom + 'px' }" aria-hidden="true"></div>
       </template>
       <p v-else class="text-muted px-2 py-1">等待日志…</p>
@@ -54,10 +75,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute } from 'vue-router';
-import { Download, Layers, Pause, Play, Sparkles, Square, Trash2 } from 'lucide-vue-next';
-import { api, wsUrl } from '../api/client.js';
+import { Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import LogLine from '../components/logs/LogLine.vue';
+import { filterContainers } from '../lib/container-match.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 
 const route = useRoute();
@@ -66,6 +88,7 @@ const projectId = ref(route.query.projectId || '');
 const containerId = ref(route.query.containerId || '');
 const aggregateMode = ref(!!route.query.projectId && !route.query.containerId);
 const selectedContainers = ref([]);
+const containerQuery = ref('');
 const levelFilter = ref('');
 const tail = ref(200);
 const lines = ref([]);
@@ -81,18 +104,21 @@ const autoScroll = ref(true);
 const autoScrollPaused = ref(false);
 const error = ref('');
 const boxEl = ref(null);
+const searchEl = ref(null);
 const diagnosis = ref(false);
 const sequence = ref(0);
 const errorLines = ref(0);
 const levelCounts = ref({ error: 0, warn: 0, info: 0 });
 const sawError = ref(false);
 const retainedCount = ref(0);
+const liveStats = ref({});
 const LINE_H = 24;
 const OVERSCAN = 30;
 const viewStart = ref(0);
 const viewEnd = ref(0);
 let followFrame = 0;
 let resizeObserver;
+let statsController = null;
 
 /** 单容器与聚合两条流各自持有一个连接实例,URL 用 getter 读取最新筛选条件。 */
 const logSocket = useWebSocket(
@@ -119,6 +145,8 @@ const connected = computed(() => logSocket.connected.value || aggSocket.connecte
 const reconnecting = computed(() => logSocket.reconnecting.value || aggSocket.reconnecting.value);
 
 const containers = computed(() => projects.value.find((p) => p.id === projectId.value)?.containers || []);
+const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
+const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
@@ -149,6 +177,7 @@ usePullRefresh(reloadProjects);
 onMounted(() => {
   nextTick(syncViewport);
   window.addEventListener('composeops:host-changed', onHostChanged);
+  window.addEventListener('keydown', onKeydown);
   if (boxEl.value) {
     resizeObserver = new ResizeObserver(syncViewport);
     resizeObserver.observe(boxEl.value);
@@ -156,7 +185,7 @@ onMounted(() => {
   void reloadProjects();
 });
 
-function onHostChanged() { disconnect(); clearLines(); projects.value = []; void reloadProjects(); }
+function onHostChanged() { disconnect(); closeStats(); clearLines(); projects.value = []; void reloadProjects(); }
 async function reloadProjects() {
   const currentLoad = ++loadId;
   const [result, prefs] = await Promise.allSettled([api.getProjects(true), api.getPreferences()]);
@@ -168,6 +197,7 @@ async function reloadProjects() {
   }
   projects.value = (result.value?.projects || []).filter(project => project.managed);
   error.value = '';
+  openStats();
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 }
 watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nextContainer]) => {
@@ -177,9 +207,11 @@ watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nex
   containerId.value = nextContainer || '';
   aggregateMode.value = !!nextProject && !nextContainer;
   selectedContainers.value = [];
+  containerQuery.value = '';
+  openStats();
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 });
-function onProjectChange() { containerId.value = ''; selectedContainers.value = []; disconnect(); clearLines(); }
+function onProjectChange() { containerId.value = ''; selectedContainers.value = []; containerQuery.value = ''; disconnect(); closeStats(); clearLines(); }
 function onContainerChange() { disconnect(); clearLines(); }
 function toggleAggregate() {
   aggregateMode.value = !aggregateMode.value;
@@ -188,9 +220,26 @@ function toggleAggregate() {
   clearLines();
 }
 
+/** 容器 chip 点击:聚合模式改多选集合,单容器模式换日志源。 */
+function pickContainer(container) {
+  if (aggregateMode.value) {
+    const index = selectedContainers.value.indexOf(container.id);
+    if (index >= 0) selectedContainers.value.splice(index, 1);
+    else selectedContainers.value.push(container.id);
+    if (connected.value) connect();
+    return;
+  }
+  if (containerId.value === container.id) return;
+  containerId.value = container.id;
+  onContainerChange();
+}
+function selectVisibleContainers() { selectedContainers.value = visibleContainers.value.map((c) => c.id); }
+
 function connect() {
   if (disposed || !canConnect.value) return;
-  disconnect();
+  // 聚合模式改选容器:URL 是 getter,直接 connect 即可让 useWebSocket 换址重连,
+  // 先 close 会让日志整段断一下,肉眼可见地闪。
+  if (!(aggregateMode.value && aggSocket.connected.value)) disconnect();
   streamEnded.value = false;
   error.value = '';
   if (aggregateMode.value) aggSocket.connect();
@@ -295,8 +344,61 @@ function disconnect() {
   logSocket.close();
   aggSocket.close();
 }
+
+const ACTIVE_TAG = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+function isTyping(target) {
+  if (!target || !target.tagName) return false;
+  if (ACTIVE_TAG.has(target.tagName) || target.isContentEditable) return true;
+  return !!target.closest?.('.monaco-editor');
+}
+/** 与速查表一致的日志页快捷键:/ 聚焦搜索,Space 暂停/继续,End 恢复自动滚动。 */
+function onKeydown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === '/') {
+    if (isTyping(event.target)) return;
+    event.preventDefault();
+    searchEl.value?.focus();
+    return;
+  }
+  if (isTyping(event.target)) return;
+  // 焦点在按钮上时交给浏览器原生激活,避免一次按键触发两次。
+  if (event.target?.closest?.('button')) return;
+  if (event.key === ' ') { event.preventDefault(); togglePause(); }
+  else if (event.key === 'End') { event.preventDefault(); resumeScroll(); }
+}
+
+function numberValue(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? String(Math.round(num * 10) / 10) : '0';
+}
+/** 复用项目指标 SSE 流,在容器 chip 上挂实时 CPU/内存(Dozzle 侧栏同款)。 */
+function closeStats() {
+  statsController?.abort();
+  statsController = null;
+  liveStats.value = {};
+}
+function openStats() {
+  closeStats();
+  if (disposed || !projectId.value) return;
+  if (!containers.value.some((c) => c.state === 'running')) return;
+  const controller = new AbortController();
+  statsController = controller;
+  streamProjectStats(projectId.value, (frame) => {
+    if (disposed || statsController !== controller) return;
+    if (frame.type !== 'stats') return;
+    const next = {};
+    for (const row of frame.data || []) {
+      if (!row?.containerId) continue;
+      next[row.containerId] = `${numberValue(row.cpuPercent)}% · ${numberValue(row.memUsageMB)}MB`;
+    }
+    liveStats.value = next;
+  }, controller.signal, 5000).catch(() => {
+    // 指标流不可用时静默降级,日志流本身不受影响。
+  });
+}
+
 function download() {
-  const blob = new Blob([filtered.value.map((l) => `${l.containerName || ''}${l.ts ? ' ' + l.ts : ''} ${l.data}`).join('\n')], { type: 'text/plain' });
+  const blob = new Blob([filtered.value.map((l) => `${l.containerName || activeContainerName.value || ''}${l.ts ? ' ' + l.ts : ''} ${l.data}`).join('\n')], { type: 'text/plain' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `composeops-${Date.now()}.log`;
@@ -307,8 +409,10 @@ onBeforeUnmount(() => {
   disposed = true;
   loadId += 1;
   disconnect();
+  closeStats();
   if (followFrame) cancelAnimationFrame(followFrame);
   resizeObserver?.disconnect();
   window.removeEventListener('composeops:host-changed', onHostChanged);
+  window.removeEventListener('keydown', onKeydown);
 });
 </script>

@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { ref } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
-const { api, channels } = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getPreferences: vi.fn() }, channels: [] }));
+const { api, channels } = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getPreferences: vi.fn(), streamProjectStats: vi.fn(() => new Promise(() => {})) }, channels: [] }));
 vi.mock('../src/api/client.js', () => ({ api, wsUrl: path => path }));
 vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket: (url, options) => {
   const connected = ref(false);

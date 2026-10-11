@@ -307,8 +307,9 @@ function toggleSource() {
   void load();
 }
 
-// 只作为资产中心的「知识图谱」tab 嵌入,跟随父页面的保活状态。
-usePullRefresh(load, { keepAlive: true });
+// 只作为资产中心的「知识图谱」tab 嵌入:本组件不在 keep-alive 白名单内,
+// 保活由父页面 CMDBView 负责,这里只挂普通下拉刷新。
+usePullRefresh(load);
 onMounted(async () => {
   await store.refresh(false);
   await load();

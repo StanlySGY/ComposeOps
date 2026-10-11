@@ -109,7 +109,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, ArrowDownToLine, Bot, Brain, Check, ChevronRight, Copy, Download, Edit3, Eraser, FileEdit, FileText, FoldVertical, FolderKanban, FolderOpen, Globe2, MessageCircle, MessageSquare, Mic, MoreHorizontal, Pencil, Play, Plus, RefreshCw, ScrollText, Search, Send, ThumbsDown, ThumbsUp, ShieldAlert, Sparkles, Square, Terminal, Trash2, UserRound, Wand2, Wrench, X } from 'lucide-vue-next';
@@ -167,7 +167,7 @@ const chat = useAgentChat({
   },
   onApproval: (message, kind) => { if (kind === 'approved') appendActivity('已确认', '变更继续执行', { status: 'done' }); else appendActivity('已拒绝', '变更未执行', { status: 'rejected' }); },
 });
-const { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom, setSubscriberActive } = chat;
+const { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom } = chat;
 // 审批模式是后端会话级设置(ApprovalGate),这里切换后由 approval_mode 事件回执同步。
 async function changeApprovalMode(mode) {
   try {
@@ -623,11 +623,10 @@ onMounted(async () => {
   if (!sessionId.value && sessions.value.length) await openSession(sessions.value[0].sessionId);
   else if (!messages.value.length) focusInput();
 
+  // Ctrl/Cmd+K 归全局命令面板(AppHeader 注册),这里不再抢同一个键,
+  // 否则一次按键同时开面板又聚焦输入框。
   const handleKeydown = (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-      e.preventDefault();
-      focusInput();
-    } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       if (input.value.trim()) sendMessage(input.value.trim());
     } else if (e.key === 'Escape' && running.value) {
@@ -638,17 +637,14 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
   onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
 });
-// 订阅者始终有效。页面被 keep-alive 缓存、用户切到别的页面时,Agent 仍在跑:
+// 订阅者始终有效(本页面不在 keep-alive 白名单,卸载即停止累积):
 // 之前 onDeactivated 会把订阅者静音,那一轮的执行动态就整段丢了,
 // 切回来右侧空空如也 —— 这正是"切走再切回,执行动态都没了"的原因。
-// 动态是按会话分组的,后台累积不会互相污染。
 // 下拉刷新只重读侧栏(项目/会话/记忆);Agent 正在执行时不动话面,避免打断这一轮。
 usePullRefresh(() => {
   if (running.value) return;
   return Promise.all([loadProjects(), loadSessions(), loadMemories()]);
 });
-onActivated(() => { mobileSessionsOpen.value = false; setSubscriberActive(true); });
-onDeactivated(() => { mobileSessionsOpen.value = false; resetViewState(); });
 </script>
 
 <style scoped>

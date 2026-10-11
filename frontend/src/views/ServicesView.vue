@@ -88,7 +88,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search } from 'lucide-vue-next';
 import { useServicesStore } from '../stores/services.js';
@@ -415,9 +415,8 @@ watch(autoRefresh, (value) => {
   }
   startRealtime();
 });
-onActivated(() => startRealtime());
 watch([() => route.query.focus, () => store.projects], focusProject, { deep: true });
-usePullRefresh(refresh, { keepAlive: true });
+usePullRefresh(refresh);
 onMounted(async () => {
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
   // 后续 WS 打开成功会做一次非重连刷新,失败则降级轮询。
@@ -481,6 +480,5 @@ function pausePage() {
   controlController = null;
   stopRealtime();
 }
-onDeactivated(pausePage);
 onUnmounted(pausePage);
 </script>

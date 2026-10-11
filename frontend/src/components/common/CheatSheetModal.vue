@@ -44,6 +44,7 @@ const groups = [
     { label: '关闭弹层 / 对话框', keys: ['Esc'] },
   ]},
   { label: '日志页面', items: [
+    { label: '聚焦搜索框(支持 /正则/)', keys: ['/'] },
     { label: '暂停 / 继续显示', keys: ['Space'] },
     { label: '恢复自动滚动', keys: ['End'] },
   ]},
