@@ -241,6 +241,7 @@
 
 <script setup>
 import { ref, computed, onActivated, onMounted } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { api } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
 
@@ -331,6 +332,7 @@ const cpuTrendPoints = computed(() => {
     .join(' ');
 });
 
+usePullRefresh(loadReport, { keepAlive: true });
 onMounted(() => {
   loadReport();
 });

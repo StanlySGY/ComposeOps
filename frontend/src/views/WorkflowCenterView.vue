@@ -140,6 +140,7 @@
 
 <script setup>
 import { onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { storeToRefs } from 'pinia';
 import { Pencil, Play, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next';
 import { useWorkflowStore } from '../stores/workflow.js';
@@ -280,6 +281,7 @@ async function loadProjects() {
 }
 function onHostChanged() { void loadProjects(); }
 
+usePullRefresh(load, { keepAlive: true });
 onMounted(() => { void load(); void loadProjects(); window.addEventListener('composeops:host-changed', onHostChanged); });
 onBeforeUnmount(() => window.removeEventListener('composeops:host-changed', onHostChanged));
 let activatedOnce = false;

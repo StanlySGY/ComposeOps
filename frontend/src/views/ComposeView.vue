@@ -161,6 +161,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
 import { AlignLeft, ArrowLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
@@ -260,6 +261,11 @@ const project = computed(() => projects.value.find((p) => p.id === projectId.val
 const dirty = computed(() => content.value !== original.value);
 const toast = useToastStore();
 
+// 编辑器有未保存改动时不响应下拉刷新,否则本地内容会被远端版本覆盖。
+usePullRefresh(async () => {
+  await reloadProjects();
+  if (projectId.value) await load();
+}, { keepAlive: true, enabled: () => !dirty.value });
 onMounted(async () => {
   await Promise.all([reloadProjects(), loadTemplates()]);
   projectsLoaded.value = true;

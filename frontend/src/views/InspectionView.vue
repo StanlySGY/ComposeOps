@@ -173,6 +173,7 @@
 
 <script setup>
 import { onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, CheckCircle2, CircleAlert, CircleX, FileText, Hourglass, Info, Play, RefreshCw, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -353,6 +354,7 @@ let activatedOnce = false;
 function onActivatedLoad() { if (activatedOnce) void load(); activatedOnce = true; }
 function handleHostChanged() { void load(); }
 
+usePullRefresh(load);
 onMounted(() => {
   void load();
   window.addEventListener('composeops:host-changed', handleHostChanged);

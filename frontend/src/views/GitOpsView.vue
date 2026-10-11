@@ -198,6 +198,7 @@
 
 <script setup>
 import { computed, ref, onActivated, onMounted } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { History, Plus, RefreshCw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
@@ -401,6 +402,7 @@ function getStatusLabel(status) {
   return labels[status] || '未知';
 }
 
+usePullRefresh(() => Promise.all([loadProjects(), loadRepos(), loadDrift()]), { keepAlive: true });
 onMounted(() => {
   loadProjects();
   loadRepos();

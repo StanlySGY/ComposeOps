@@ -205,6 +205,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { ArrowDownLeft, ArrowUpRight, Boxes, Container, GitBranch, HardDrive, Network, RefreshCw, ScrollText, Sliders, X } from 'lucide-vue-next';
 import * as YAML from 'yaml';
 import { api } from '../api/client.js';
@@ -349,6 +350,7 @@ async function loadProject() {
   }
 }
 
+usePullRefresh(loadProject);
 onMounted(async () => {
   await store.refresh(false);
   if (!selectedProjectId.value && !crossProject.value && composeProjects.value.length) {

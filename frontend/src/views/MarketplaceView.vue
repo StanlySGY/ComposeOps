@@ -273,6 +273,7 @@
 
 <script setup>
 import { computed, onActivated, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { api } from '../api/client.js';
@@ -568,6 +569,7 @@ watch(deployTarget, (template) => {
   }
 });
 
+usePullRefresh(() => Promise.all([loadStats(), loadTemplates()]), { keepAlive: true });
 onMounted(async () => {
   await Promise.all([loadStats(), loadTemplates()]);
 });

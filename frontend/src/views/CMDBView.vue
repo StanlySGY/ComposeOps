@@ -73,6 +73,7 @@
 
 <script setup>
 import { computed, onActivated, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Boxes, Container, RefreshCw, Server, Trash2, Waypoints } from 'lucide-vue-next';
 import { useCmdbStore } from '../stores/cmdb.js';
@@ -162,6 +163,8 @@ async function confirmRemove() {
   }
 }
 
+// 只在「资产清单」tab 响应:知识图谱 tab 由嵌入的 KnowledgeGraphView 自己刷新。
+usePullRefresh(load, { keepAlive: true, enabled: () => tab.value === 'assets' });
 onMounted(load);
 let activatedOnce = false;
 onActivated(() => { if (activatedOnce) void load(); activatedOnce = true; });

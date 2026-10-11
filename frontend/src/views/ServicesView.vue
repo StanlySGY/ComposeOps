@@ -96,6 +96,7 @@ import { useToastStore } from '../stores/toast.js';
 import { useKeyboardNavigation } from '../composables/useKeyboardNavigation.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { api, streamComposeControl, wsUrl } from '../api/client.js';
 import ProjectActivityDrawer from '../components/ProjectActivityDrawer.vue';
 import ProjectEnvModal from '../components/services/ProjectEnvModal.vue';
@@ -416,8 +417,8 @@ watch(autoRefresh, (value) => {
 });
 onActivated(() => startRealtime());
 watch([() => route.query.focus, () => store.projects], focusProject, { deep: true });
+usePullRefresh(refresh, { keepAlive: true });
 onMounted(async () => {
-  window.addEventListener('composeops:refresh', refresh);
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
   // 后续 WS 打开成功会做一次非重连刷新,失败则降级轮询。
   await store.refresh(false);
@@ -481,8 +482,5 @@ function pausePage() {
   stopRealtime();
 }
 onDeactivated(pausePage);
-onUnmounted(() => {
-  window.removeEventListener('composeops:refresh', refresh);
-  pausePage();
-});
+onUnmounted(pausePage);
 </script>

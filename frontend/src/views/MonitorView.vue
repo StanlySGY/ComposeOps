@@ -24,6 +24,7 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { Activity, ChartNoAxesCombined, RefreshCw } from 'lucide-vue-next'; import { api } from '../api/client.js'; import StatCard from '../components/StatCard.vue'; import SparklineChart from '../components/common/SparklineChart.vue'; import Skeleton from '../components/common/Skeleton.vue'; import EmptyState from '../components/common/EmptyState.vue'; import ResourceMonitorView from './ResourceMonitorView.vue'; import { monitorTrends, pushMonitorTrend, resetMonitorTrends } from '../lib/monitor-trends.js';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 const route = useRoute();
 const router = useRouter();
 const tab = ref(route.query.tab === 'history' ? 'history' : 'live');
@@ -106,10 +107,11 @@ async function loadPreferences() {
   const seconds = prefs.status === 'fulfilled' ? Number(prefs.value?.refreshInterval) : NaN;
   if (Number.isFinite(seconds) && seconds > 0) intervalMs.value = Math.max(1, seconds) * 1000;
 }
+// 只在「实时」tab 响应:历史指标 tab 由嵌入的 ResourceMonitorView 自己刷新。
+usePullRefresh(refresh, { enabled: () => tab.value === 'live' });
 onMounted(() => {
   mounted = true;
   window.addEventListener('composeops:host-changed', onHostChanged);
-  window.addEventListener('composeops:refresh', refresh);
   void loadPreferences();
   void refresh();
   setTimer();
@@ -119,5 +121,5 @@ watch(tab, () => {
   setTimer();
   void refresh();
 });
-onUnmounted(() => { mounted = false; invalidateRequest(); clearInterval(timer); window.removeEventListener('composeops:host-changed', onHostChanged); window.removeEventListener('composeops:refresh', refresh); });
+onUnmounted(() => { mounted = false; invalidateRequest(); clearInterval(timer); window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>

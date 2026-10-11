@@ -1,3 +1,4 @@
+import './helpers/isolated-db.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { extractCompactFacts, assembleFallback, buildCompactSummary, compactSummaryPrompt } from '../src/services/agent/compaction.js';

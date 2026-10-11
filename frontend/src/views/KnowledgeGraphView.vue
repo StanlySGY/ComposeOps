@@ -185,6 +185,7 @@
 <script setup>
 defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { AlertTriangle, Bot, Boxes, ChevronRight, Database, GitMerge, HardDrive, RefreshCw, Server, Waypoints } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
@@ -306,6 +307,8 @@ function toggleSource() {
   void load();
 }
 
+// 只作为资产中心的「知识图谱」tab 嵌入,跟随父页面的保活状态。
+usePullRefresh(load, { keepAlive: true });
 onMounted(async () => {
   await store.refresh(false);
   await load();

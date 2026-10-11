@@ -110,6 +110,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Clock3, DatabaseBackup, Bot, Play, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
@@ -238,6 +239,7 @@ async function confirmRemove() {
 watch(editor, (value) => {
   if (value) updateAgentContext({ state: JSON.stringify(value) });
 }, { deep: true });
+usePullRefresh(load);
 onMounted(() => {
   load();
   window.addEventListener('composeops:cron-agent-created', handleAgentCreated);

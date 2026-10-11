@@ -114,6 +114,7 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { AlertTriangle, ArrowRight, Bot, Boxes, Container, Cpu, FileCode2, Gauge, MemoryStick, RefreshCw, ScrollText } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
@@ -269,6 +270,7 @@ function onHostChanged() {
   loadError.value = '';
   void load();
 }
-onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); window.addEventListener('composeops:refresh', load); void load(); });
-onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListener('composeops:host-changed', onHostChanged); window.removeEventListener('composeops:refresh', load); });
+usePullRefresh(load);
+onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void load(); });
+onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>

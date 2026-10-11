@@ -96,6 +96,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { ArrowLeftRight, RefreshCw, SearchCheck, ShieldCheck } from 'lucide-vue-next';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
@@ -212,5 +213,6 @@ async function load() {
   }
 }
 
+usePullRefresh(load);
 onMounted(load);
 </script>

@@ -165,6 +165,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 // embedded 模式供 MonitorView 的「历史指标」tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
 import { Activity, AlertTriangle, Bell, Cpu, Database, HardDrive, Minus, Network, RefreshCw, TrendingDown, TrendingUp, X } from 'lucide-vue-next';
@@ -367,6 +368,12 @@ async function deleteAlertRule(ruleId) {
   }
 }
 
+// 只作为实时监控的「历史指标」tab 嵌入;父页面只在「实时」tab 响应,两者不重复发请求。
+usePullRefresh(async () => {
+  await loadProjects();
+  await loadAlerts();
+  await loadMetrics();
+});
 onMounted(async () => {
   await loadProjects();
   await loadAlerts();

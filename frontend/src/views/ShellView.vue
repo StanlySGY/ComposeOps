@@ -44,6 +44,7 @@
 </template>
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute } from 'vue-router';
 import { Plug, Unplug } from 'lucide-vue-next';
 import Skeleton from '../components/common/Skeleton.vue';
@@ -76,6 +77,8 @@ const socket = useWebSocket(
 );
 const connected = socket.connected;
 const containers = computed(() => projects.value.find((p) => p.id === projectId.value)?.containers || []);
+// 终端刻意不自动重连(maxReconnectAttempts: 0),下拉刷新只重读项目列表,不动现有会话。
+usePullRefresh(async () => { projects.value = (await api.getProjects()).projects.filter((project) => project.managed); });
 onMounted(async () => {
   [projects.value, capabilities.value] = await Promise.all([api.getProjects().then((r) => r.projects.filter((project) => project.managed)), api.getCapabilities()]);
   window.addEventListener('composeops:host-changed', onHostChanged);

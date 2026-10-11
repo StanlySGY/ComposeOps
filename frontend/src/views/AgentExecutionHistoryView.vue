@@ -139,6 +139,7 @@
 
 <script setup>
 import { onActivated, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { api } from '../api/client.js';
 import { RefreshCw, ChevronDown, CircleCheck, CircleX, Clock, AlertCircle } from 'lucide-vue-next';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -339,6 +340,7 @@ function resultBorderClass(status) {
   return 'border-zinc-800 bg-zinc-900/40';
 }
 
+usePullRefresh(load, { keepAlive: true });
 onMounted(() => load());
 let historyActivatedOnce = false;
 onActivated(() => { if (historyActivatedOnce) void load(); historyActivatedOnce = true; });

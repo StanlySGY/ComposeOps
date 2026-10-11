@@ -153,6 +153,7 @@
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { FileCode2, GitBranch, HardDrive, History, RefreshCw, RotateCcw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
@@ -363,6 +364,7 @@ function confirmAction() {
   if (action) void action();
 }
 
+usePullRefresh(load);
 onMounted(async () => {
   await store.refresh(false);
   await load();

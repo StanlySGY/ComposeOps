@@ -1,3 +1,4 @@
+import './helpers/isolated-db.js';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';

@@ -93,6 +93,7 @@
 
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { RefreshCw, Trash2 } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import Skeleton from '../components/common/Skeleton.vue';
@@ -356,6 +357,7 @@ watch(activeTab, () => {
   selected.value = [];
 });
 
+usePullRefresh(refresh, { keepAlive: true });
 onMounted(refresh);
 let activatedOnce = false;
 onActivated(() => { if (activatedOnce) void refresh(); activatedOnce = true; });

@@ -78,7 +78,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, AlertTriangle, BellRing, CircleAlert, History, ListChecks, RefreshCw, Trash2, Workflow } from 'lucide-vue-next';
 import { useEventStore } from '../stores/events.js';
@@ -157,6 +158,7 @@ async function prune() {
 }
 
 watch(typeFilter, load);
-onMounted(() => { window.addEventListener('composeops:refresh', load); if (tab.value === 'events') load(); });
-onBeforeUnmount(() => { window.removeEventListener('composeops:refresh', load); });
+// 只在「告警事件」tab 响应下拉刷新:时间线与操作 tab 分别由 EventTimeline、OperationsView 负责,避免一次下拉发两遍请求。
+usePullRefresh(load, { enabled: () => tab.value === 'events' });
+onMounted(() => { if (tab.value === 'events') load(); });
 </script>

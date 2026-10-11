@@ -68,6 +68,7 @@
 <script setup>
 // 运维时间机器:客户端聚合操作/Agent/告警/定时/GitOps 五路事件的只读时间线,嵌入事件中心 tab
 import { computed, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../../composables/usePullRefresh.js';
 import { Bot, CircleX, Clock3, GitBranch, History, Search } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import Skeleton from '../common/Skeleton.vue';
@@ -230,5 +231,6 @@ function agentStatusLabel(status) {
   return ({ pending: '待执行', pending_confirmation: '待确认', executing: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' })[status] || status;
 }
 
+usePullRefresh(load);
 onMounted(load);
 </script>

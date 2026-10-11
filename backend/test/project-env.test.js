@@ -1,3 +1,4 @@
+import './helpers/isolated-db.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, chmod, rm, symlink, stat, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';

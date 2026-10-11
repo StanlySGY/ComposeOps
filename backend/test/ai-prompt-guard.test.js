@@ -1,3 +1,4 @@
+import './helpers/isolated-db.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { UNTRUSTED_GUARD, callOpenAI, fenceUntrusted, formatWebSources, newFenceNonce, parseTextToolCalls, stripTextToolProtocol } from '../src/services/ai.js';

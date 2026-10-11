@@ -52,6 +52,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute } from 'vue-router';
 import { Download, Layers, Pause, Play, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, wsUrl } from '../api/client.js';
@@ -143,6 +144,8 @@ const filtered = computed(() => {
   return result;
 });
 
+// 只重读项目列表:日志流本身由 WebSocket 推,下拉刷新不主动断流重建连接。
+usePullRefresh(reloadProjects);
 onMounted(() => {
   nextTick(syncViewport);
   window.addEventListener('composeops:host-changed', onHostChanged);

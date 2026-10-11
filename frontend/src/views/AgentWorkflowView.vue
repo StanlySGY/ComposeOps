@@ -110,6 +110,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, reactive, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, ArrowDownToLine, Bot, Brain, Check, ChevronRight, Copy, Download, Edit3, Eraser, FileEdit, FileText, FoldVertical, FolderKanban, FolderOpen, Globe2, MessageCircle, MessageSquare, Mic, MoreHorizontal, Pencil, Play, Plus, RefreshCw, ScrollText, Search, Send, ThumbsDown, ThumbsUp, ShieldAlert, Sparkles, Square, Terminal, Trash2, UserRound, Wand2, Wrench, X } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -641,6 +642,11 @@ onMounted(async () => {
 // 之前 onDeactivated 会把订阅者静音,那一轮的执行动态就整段丢了,
 // 切回来右侧空空如也 —— 这正是"切走再切回,执行动态都没了"的原因。
 // 动态是按会话分组的,后台累积不会互相污染。
+// 下拉刷新只重读侧栏(项目/会话/记忆);Agent 正在执行时不动话面,避免打断这一轮。
+usePullRefresh(() => {
+  if (running.value) return;
+  return Promise.all([loadProjects(), loadSessions(), loadMemories()]);
+});
 onActivated(() => { mobileSessionsOpen.value = false; setSubscriberActive(true); });
 onDeactivated(() => { mobileSessionsOpen.value = false; resetViewState(); });
 </script>

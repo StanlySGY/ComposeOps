@@ -122,6 +122,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, RefreshCw, Rocket, Sparkles } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
@@ -230,6 +231,7 @@ async function load() {
   }
 }
 
+usePullRefresh(load);
 onMounted(async () => {
   await store.refresh(false);
   await load();

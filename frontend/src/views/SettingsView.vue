@@ -280,6 +280,7 @@
 
 <script setup>
 import { computed, markRaw, onMounted, ref, watch } from 'vue';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, Bell, Bot, Download, FolderCog, Github, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Star, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
 import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import StatCard from '../components/StatCard.vue';
@@ -419,7 +420,14 @@ async function confirmRemoveHost() {
   } catch (e) { fail(e); }
 }
 
-onMounted(async () => { try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } });
+async function loadSettings() { try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; updateResults.value = updateConfig.lastResults || []; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } }
+onMounted(loadSettings);
+// 下拉刷新只重读只读面板(磁盘占用、渠道健康、节点、告警事件),不动用户正在编辑的配置表单。
+usePullRefresh(async () => {
+  void hostsStore.load();
+  await Promise.all([loadUsage(), refreshChannelHealth()]);
+  try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ }
+}, { keepAlive: true });
 async function saveAi() {
   if (savingAi.value) return;
   savingAi.value = true;
