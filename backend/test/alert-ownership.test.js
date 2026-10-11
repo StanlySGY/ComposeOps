@@ -20,6 +20,8 @@ test('告警归属:health-alerter 是 exit/oom/unhealthy 的唯一发出方', ()
   assert.ok(healthAlerterSource.includes('key: `${container.id}:${event}`'), 'health-alerter 应保留统一事件 key');
   assert.ok(healthAlerterSource.includes("const DEFAULT_EVENTS = ['exit', 'oom', 'unhealthy'];"), '默认触发事件清单应保留');
   assert.ok(healthAlerterSource.includes("priority: event === 'crashloop' ? 'warning' : 'danger'"), 'exit/oom/unhealthy 事件应为 danger 级');
+  // 退出码/重启次数/OOM 只存在于 inspect 结果上,正文必须取 enriched,否则推送里全是 N/A。
+  assert.ok(healthAlerterSource.includes('buildBody(project, enriched, event, logs)'), '推送正文应基于 inspect 后的 enriched 字段');
 });
 
 test('告警归属:alert-monitor 仍负责内存与 Docker 空间告警', () => {

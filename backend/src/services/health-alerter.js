@@ -126,7 +126,8 @@ async function poll() {
       for (const event of events) {
         const logs = await containerTailLogs(container.id, 8).catch(() => '');
         const title = buildTitle(project, container, event);
-        const body = buildBody(project, container, event, logs);
+        // 退出码/重启次数/OOM/健康状态只在 inspect 结果上,传 enriched 才不会全是 N/A。
+        const body = buildBody(project, enriched, event, logs);
         recordAlertEventAndNotify({
           key: `${container.id}:${event}`,
           title,
