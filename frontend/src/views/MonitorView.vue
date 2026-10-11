@@ -109,6 +109,7 @@ async function loadPreferences() {
 onMounted(() => {
   mounted = true;
   window.addEventListener('composeops:host-changed', onHostChanged);
+  window.addEventListener('composeops:refresh', refresh);
   void loadPreferences();
   void refresh();
   setTimer();
@@ -118,5 +119,5 @@ watch(tab, () => {
   setTimer();
   void refresh();
 });
-onUnmounted(() => { mounted = false; invalidateRequest(); clearInterval(timer); window.removeEventListener('composeops:host-changed', onHostChanged); });
+onUnmounted(() => { mounted = false; invalidateRequest(); clearInterval(timer); window.removeEventListener('composeops:host-changed', onHostChanged); window.removeEventListener('composeops:refresh', refresh); });
 </script>

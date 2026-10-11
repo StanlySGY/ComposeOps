@@ -53,7 +53,7 @@
     </section>
 
     <div v-if="!loading && !executions.length" class="card p-8">
-      <EmptyState icon="history" title="暂无执行记录" message="Agent 工作流执行后会在此显示" />
+      <EmptyState icon="history" title="暂无执行记录" description="Agent 工作流执行后会在此显示" />
     </div>
 
     <div v-else class="space-y-3">

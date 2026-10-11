@@ -115,3 +115,14 @@ test('API boundary: workflow approval of nonexistent instance returns 4xx', asyn
   const response = await app.inject({ method: 'POST', url: '/api/v1/workflows/instances/not-a-real-instance/approve', headers: headers(), payload: { approved: true, note: 'isolated test' } });
   assert.ok(response.statusCode >= 400 && response.statusCode < 500, response.body);
 });
+
+test('API boundary: 通知设置支持全部 7 个渠道回存(含钉钉/飞书)', async () => {
+  const current = await app.inject({ method: 'GET', url: '/api/v1/personal/notifications', headers: headers() });
+  assert.equal(current.statusCode, 200, current.body);
+  const channels = current.json().channels;
+  assert.equal(channels.length, 7);
+  // 前端回存时会原样带回 GET 拿到的全部渠道:schema 上限与枚举不足会直接 400。
+  const save = await app.inject({ method: 'PUT', url: '/api/v1/personal/notifications', headers: headers(), payload: { enabled: false, channels } });
+  assert.equal(save.statusCode, 200, save.body);
+  assert.equal(save.json().channels.length, 7);
+});

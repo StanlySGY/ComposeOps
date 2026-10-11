@@ -3,7 +3,13 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { listProjectEnvBackups, restoreProjectEnvBackup } from '../src/services/project-env-backups.js';
+import fs from 'node:fs';
+
+// 本文件的写入会落 operation_history:不隔离 DB_PATH 时,并发跑测试会共用 data/opsdash.db,
+// 撞上其它测试进程的写锁(database is locked)。这里把库指到临时目录。
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-env-backups-db-'));
+process.env.DB_PATH = path.join(tempDir, 'test.db');
+const { listProjectEnvBackups, restoreProjectEnvBackup } = await import('../src/services/project-env-backups.js');
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'composeops-env-backups-'));

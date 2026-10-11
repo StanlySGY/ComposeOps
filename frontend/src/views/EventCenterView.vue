@@ -78,7 +78,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, AlertTriangle, BellRing, CircleAlert, History, ListChecks, RefreshCw, Trash2, Workflow } from 'lucide-vue-next';
 import { useEventStore } from '../stores/events.js';
@@ -157,5 +157,6 @@ async function prune() {
 }
 
 watch(typeFilter, load);
-onMounted(() => { if (tab.value === 'events') load(); });
+onMounted(() => { window.addEventListener('composeops:refresh', load); if (tab.value === 'events') load(); });
+onBeforeUnmount(() => { window.removeEventListener('composeops:refresh', load); });
 </script>

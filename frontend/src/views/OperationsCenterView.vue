@@ -35,7 +35,7 @@
           <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3">
             <div class="flex items-center justify-between">
               <span class="text-sm text-surface-300">自动巡检</span>
-              <label class="toggle-label"><input v-model="enableInspection" type="checkbox" /></label>
+              <label class="toggle-label"><input v-model="enableInspection" type="checkbox" aria-label="自动巡检" /></label>
             </div>
             <p class="mt-1 text-xs text-surface-500">按同一周期执行只读 AI 巡检并留存报告</p>
           </div>

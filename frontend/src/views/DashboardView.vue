@@ -269,6 +269,6 @@ function onHostChanged() {
   loadError.value = '';
   void load();
 }
-onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void load(); });
-onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListener('composeops:host-changed', onHostChanged); });
+onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); window.addEventListener('composeops:refresh', load); void load(); });
+onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListener('composeops:host-changed', onHostChanged); window.removeEventListener('composeops:refresh', load); });
 </script>

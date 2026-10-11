@@ -88,6 +88,13 @@ export function getNotificationConfig(maskSecrets = false) {
   return config;
 }
 
+/** 用户在"触发事件"里勾选的告警类型;空/非法时回退默认三项。 */
+export function enabledAlertEvents(config = null) {
+  const cfg = config || getNotificationConfig(false);
+  const events = cfg?.events;
+  return Array.isArray(events) && events.length ? events : [...DEFAULTS.events];
+}
+
 function mirrorPrimary(next) {
   const primary = next.channels.find((channel) => channel.enabled) || next.channels[0];
   if (!primary) return next;

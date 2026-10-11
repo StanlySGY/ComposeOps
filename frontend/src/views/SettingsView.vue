@@ -19,8 +19,8 @@
           <label class="toggle-label"><input v-model="ai.failoverEnabled" type="checkbox" aria-label="故障时自动切换备用渠道" /></label>
         </div>
         <div class="ios-row-stack">
-          <label class="text-xs font-medium text-surface-400">系统 Prompt</label>
-          <textarea v-model="ai.systemPrompt" rows="6" class="input block w-full"></textarea>
+          <label for="ai-system-prompt" class="text-xs font-medium text-surface-400">系统 Prompt</label>
+          <textarea id="ai-system-prompt" v-model="ai.systemPrompt" rows="6" class="input block w-full"></textarea>
         </div>
         <div class="ios-row-stack">
           <h3 class="section-title">联网检索 Grounding</h3>

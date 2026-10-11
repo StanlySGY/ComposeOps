@@ -66,7 +66,7 @@
 import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { ChevronDown, CircleHelp, Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
+import { ChevronDown, CircleHelp, Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
 const primaryItems = [
   { to: '/dashboard', icon: Activity, label: '总览' },
   { to: '/services', icon: Boxes, label: '服务' },
@@ -88,7 +88,7 @@ const navGroups = [
   {
     label: '自动化',
     items: [
-      { to: '/ops-center', icon: Workflow, label: '运维任务' },
+      { to: '/ops-center', icon: ClipboardList, label: '运维任务' },
       { to: '/workflows', icon: Workflow, label: '工作流' },
       { to: '/cron', icon: Clock3, label: '定时任务' },
       { to: '/gitops', icon: GitBranch, label: 'GitOps' },

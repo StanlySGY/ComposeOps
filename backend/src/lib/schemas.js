@@ -10,17 +10,20 @@
 /**
  * 必须与 services/notifications.js 的 DEFAULTS 键集一一对应:
  * saveNotificationConfig 遍历 Object.keys(DEFAULTS) 取值,少声明一个键该项就存不进去。
+ * 渠道枚举与数量上限必须与 CHANNEL_TYPES(7 种)对齐:getNotificationConfig 恒返回
+ * 7 个渠道,前端回存时会原样带回全部渠道,上限不足会直接 400 导致保存失败。
  * 数值区间沿用服务端 clamp(memoryThreshold 1..100、intervalSeconds 30..3600 等),
  * schema 只挡非数值类型,不额外收紧,否则越界值的行为会从"钳到边界"变成"400"。
  * token/smtpPassword 只设长度上限:getNotificationConfig(true) 会把它们掩成
  * 'configured',保存时再跳过该值,掩码需要能原样回传。
  */
+const NOTIFICATION_CHANNEL_TYPES = ['bark', 'telegram', 'wecom', 'dingtalk', 'feishu', 'email', 'webhook'];
 export const notificationConfigBody = {
   type: 'object',
   additionalProperties: false,
   properties: {
     enabled: { type: 'boolean' },
-    type: { type: 'string', enum: ['bark', 'telegram', 'wecom', 'email', 'webhook'] },
+    type: { type: 'string', enum: NOTIFICATION_CHANNEL_TYPES },
     endpoint: { type: 'string', maxLength: 2048 },
     token: { type: 'string', maxLength: 512 },
     chatId: { type: 'string', maxLength: 128 },
@@ -37,12 +40,12 @@ export const notificationConfigBody = {
     events: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 32 } },
     channels: {
       type: 'array',
-      maxItems: 5,
+      maxItems: NOTIFICATION_CHANNEL_TYPES.length,
       items: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          type: { type: 'string', enum: ['bark', 'telegram', 'wecom', 'email', 'webhook'] },
+          type: { type: 'string', enum: NOTIFICATION_CHANNEL_TYPES },
           enabled: { type: 'boolean' },
           endpoint: { type: 'string', maxLength: 2048 },
           token: { type: 'string', maxLength: 512 },

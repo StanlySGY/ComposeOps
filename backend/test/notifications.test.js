@@ -7,7 +7,7 @@ import test from 'node:test';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-notifications-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
-const { getNotificationConfig, saveNotificationConfig } = await import('../src/services/notifications.js');
+const { enabledAlertEvents, getNotificationConfig, saveNotificationConfig } = await import('../src/services/notifications.js');
 
 test('notifications: 旧版 bark 配置只落到 bark 渠道', () => {
   saveNotificationConfig({ enabled: true, type: 'bark', endpoint: 'https://bark.example/push' });
@@ -67,4 +67,14 @@ test('notifications: 钉钉与飞书渠道保存且互不串扰', () => {
   assert.equal(wecom.enabled, false);
   // 新渠道加入后,旧渠道(bark/webhook)配置不丢
   assert.equal(config.channels.find((channel) => channel.type === 'bark').endpoint, 'https://bark.example/a');
+});
+
+test('notifications: 触发事件默认三项,自定义勾选可持久化', () => {
+  assert.deepEqual(enabledAlertEvents(null), ['exit', 'oom', 'unhealthy']);
+  saveNotificationConfig({ events: ['oom'] });
+  assert.deepEqual(enabledAlertEvents(getNotificationConfig(false)), ['oom']);
+  assert.deepEqual(getNotificationConfig(true).events, ['oom']);
+  // 空数组回退默认,避免"全不勾选"变成静默无告警的歧义状态
+  saveNotificationConfig({ events: [] });
+  assert.deepEqual(enabledAlertEvents(getNotificationConfig(false)), ['exit', 'oom', 'unhealthy']);
 });

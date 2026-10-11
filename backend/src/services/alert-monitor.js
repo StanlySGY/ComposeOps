@@ -1,7 +1,7 @@
 import { getActivityDocker } from './docker-hosts.js';
 import { getSetting, setSetting } from '../lib/db.js';
 import { scanProjects } from './scanner.js';
-import { getNotificationConfig, sendNotification } from './notifications.js';
+import { enabledAlertEvents, getNotificationConfig, sendNotification } from './notifications.js';
 import { checkImageUpdates } from './maintenance.js';
 import { recordAlertEventAndNotify } from './events.js';
 import { parseContainerStat } from './stats.js';
@@ -129,12 +129,14 @@ async function poll() {
     }
     if (config.enabled) {
       const activity = getActivityDocker();
+      const alertEvents = enabledAlertEvents(config);
       for (const project of managedProjects) {
         for (const item of project.containers) {
           const previous = previousStates.get(item.id);
           const previousState = typeof previous === 'string' ? previous : previous?.state;
           const memHigh = typeof previous === 'object' && !!previous?.memHigh;
-          if (previousState === 'running' && item.state !== 'running') {
+          // 退出告警同样尊重"触发事件"勾选:此前取消 exit 勾选也拦不住这条推送。
+          if (alertEvents.includes('exit') && previousState === 'running' && item.state !== 'running') {
             recordAlertEventAndNotify({
               key: `${item.id}:exit`,
               title: 'ComposeOps:容器已退出',

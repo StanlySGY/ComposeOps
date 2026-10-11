@@ -52,7 +52,7 @@
           <thead>
             <tr>
               <th class="w-12">
-                <input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleAll" class="checkbox" />
+                <input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleAll" class="checkbox" aria-label="全选可删除资源" />
               </th>
               <th v-if="activeTab === 'images'">镜像</th>
               <th v-else-if="activeTab === 'volumes'">卷名</th>
@@ -71,7 +71,7 @@
             </tr>
             <tr v-for="row in filteredRows" :key="row.key" class="hover:bg-surface-800/25">
               <td class="text-center">
-                <input v-if="row.deletable" type="checkbox" :checked="selected.includes(row.key)" @change="toggleRow(row.key)" class="checkbox" />
+                <input v-if="row.deletable" type="checkbox" :checked="selected.includes(row.key)" :aria-label="`选择资源 ${row.primary}`" @change="toggleRow(row.key)" class="checkbox" />
               </td>
               <td class="max-w-xs truncate font-mono tabular-nums" :title="row.title">{{ row.primary }}<span v-if="row.note" class="ml-2 text-muted text-xs">{{ row.note }}</span></td>
               <td><span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium" :class="row.toneCls">{{ row.statusLabel }}</span></td>
