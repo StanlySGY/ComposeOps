@@ -1,7 +1,7 @@
 import { getActivityDocker } from './docker-hosts.js';
 import { getSetting, setSetting } from '../lib/db.js';
 import { scanProjects } from './scanner.js';
-import { enabledAlertEvents, getNotificationConfig, sendNotification } from './notifications.js';
+import { getNotificationConfig, sendNotification } from './notifications.js';
 import { checkImageUpdates } from './maintenance.js';
 import { recordAlertEventAndNotify } from './events.js';
 import { parseContainerStat } from './stats.js';
@@ -129,24 +129,10 @@ async function poll() {
     }
     if (config.enabled) {
       const activity = getActivityDocker();
-      const alertEvents = enabledAlertEvents(config);
       for (const project of managedProjects) {
         for (const item of project.containers) {
           const previous = previousStates.get(item.id);
-          const previousState = typeof previous === 'string' ? previous : previous?.state;
           const memHigh = typeof previous === 'object' && !!previous?.memHigh;
-          // 退出告警同样尊重"触发事件"勾选:此前取消 exit 勾选也拦不住这条推送。
-          if (alertEvents.includes('exit') && previousState === 'running' && item.state !== 'running') {
-            recordAlertEventAndNotify({
-              key: `${item.id}:exit`,
-              title: 'ComposeOps:容器已退出',
-              detail: `${project.projectName} / ${item.name} · ${item.statusText}`,
-              priority: 'danger',
-              to: `/services?focus=${project.id}`,
-            });
-            await sendNotification('ComposeOps：容器已退出', `${project.projectName} / ${item.name}\n${item.statusText}`)
-              .catch(() => {});
-          }
           let nextMemHigh = false;
           if (item.state === 'running') {
             try {
@@ -172,7 +158,7 @@ async function poll() {
               console.error(`[alert-monitor] Failed to check stats for ${project.projectName}/${item.name}:`, err.message);
             }
           }
-          previousStates.set(item.id, { state: item.state, memHigh: nextMemHigh });
+          previousStates.set(item.id, { memHigh: nextMemHigh });
         }
       }
       const usage = await activity.df().then((data) => {

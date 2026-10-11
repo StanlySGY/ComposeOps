@@ -131,7 +131,7 @@ async function poll() {
           key: `${container.id}:${event}`,
           title,
           detail: `${project.projectName} / ${container.name} · ${container.statusText || ''}`,
-          priority: event === 'unhealthy' || event === 'oom' ? 'danger' : 'warning',
+          priority: event === 'crashloop' ? 'warning' : 'danger',
           to: `/services?focus=${project.id}`,
           logs,
         });
