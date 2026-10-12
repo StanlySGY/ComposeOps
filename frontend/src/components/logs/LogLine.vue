@@ -17,6 +17,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
+import { hashColor } from '../../lib/log-colors.js';
 
 // 单容器日志流的帧里没有 containerName,由调用方补一个 fallbackName,徽章颜色仍按名字哈希取色。
 const props = defineProps({
@@ -25,19 +26,6 @@ const props = defineProps({
 });
 const jsonOpen = ref(false);
 
-const PALETTES = [
-  'text-sky-300 border-sky-500/40 bg-sky-500/10',
-  'text-cyan-300 border-cyan-500/40 bg-cyan-500/10',
-  'text-emerald-300 border-emerald-500/40 bg-emerald-500/10',
-  'text-violet-300 border-violet-500/40 bg-violet-500/10',
-  'text-amber-300 border-amber-500/40 bg-amber-500/10',
-  'text-rose-300 border-rose-500/40 bg-rose-500/10',
-];
-function hashColor(name = '') {
-  let hash = 0;
-  for (const char of String(name)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return PALETTES[Math.abs(hash) % PALETTES.length];
-}
 const containerName = computed(() => props.line.containerName || props.fallbackName || '');
 const badgeClass = computed(() => hashColor(containerName.value));
 

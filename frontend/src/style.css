@@ -1042,6 +1042,21 @@
 .json-block.open { @apply text-emerald-100 whitespace-pre-wrap; }
 .json-toggle { @apply shrink-0 text-[10px] text-accent hover:underline; }
 .scroll-resume-chip { @apply fixed bottom-24 right-6 z-60 rounded-full border border-accent/50 bg-surface-900 px-3 py-1.5 text-xs text-accent shadow-lg shadow-black/40 transition-colors hover:bg-surface-800; }
+/* 日志页:开关态图标按钮、查询语法表、按容器分栏(每栏自带标题与独立虚拟滚动) */
+.icon-btn-on { @apply bg-accent/15 text-accent ring-1 ring-accent/40; }
+.query-token { @apply inline-block rounded-sm border border-surface-700/70 bg-surface-950/70 px-1.5 py-0.5 font-mono text-[11px] text-accent; }
+.log-pane { @apply flex min-w-0 flex-1 flex-col gap-1.5; }
+/* 单栏沿用旧日志区的高度;分栏时栏高由网格行决定,允许收缩。 */
+.log-pane-single { @apply min-h-[420px]; }
+.log-pane-grid {
+  @apply grid min-h-0 flex-1 gap-2 overflow-x-auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  grid-auto-rows: minmax(240px, 1fr);
+}
+.log-pane-grid .log-pane { @apply min-h-0; }
+.log-pane-head { @apply flex flex-wrap items-center gap-2 px-0.5; }
+/* 复用 terminal-output 的滚动/等宽底色与 card 的面板边框,这里只补分栏的高度与间距。 */
+.log-pane-body { @apply min-h-0 flex-1; }
 .shortcut-key { @apply inline-flex min-w-[22px] items-center justify-center rounded-sm border border-surface-600 bg-surface-800 px-1.5 py-0.5 font-mono text-[11px] leading-none text-surface-200 shadow-xs; }
 /* AI 助手底部悬浮输入栏(Linear 风格) */
 .ai-composer {

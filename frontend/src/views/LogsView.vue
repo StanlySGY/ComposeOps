@@ -6,7 +6,9 @@
         <select v-model="projectId" class="input" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
         <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
         <select v-model="levelFilter" class="input w-28" title="级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
-        <label class="search-field w-44"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" placeholder="搜索或 /regex/" /></label>
+        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" placeholder="level:error | container:api" /></label>
+        <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
+        <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
         <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
         <button v-else class="btn-danger" @click="disconnect"><Square class="w-4 h-4" />断开</button>
         <button class="icon-btn" :title="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /></button>
@@ -44,10 +46,13 @@
     </div>
 
     <p v-if="error" class="alert-error">{{ error }}</p>
+    <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
+    <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
     <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
     <div class="flex flex-wrap items-center gap-3 text-muted">
       <span :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
+      <span v-if="splitMode" class="text-surface-400">{{ panes.length }} 栏</span>
       <span v-if="levelCounts.error" class="text-rose-400">ERROR {{ levelCounts.error }}</span>
       <span v-if="levelCounts.warn" class="text-amber-400">WARN {{ levelCounts.warn }}</span>
       <span v-if="paused" class="text-amber-400">已暂停 · {{ pending.length }} 条待显示</span>
@@ -55,31 +60,51 @@
       <label class="toggle-label ml-auto"><input v-model="autoScroll" type="checkbox" />自动滚动</label>
     </div>
 
-    <div ref="boxEl" class="terminal-output card flex-1 min-h-[420px]" @scroll="onScroll" @wheel="onWheel">
-      <template v-if="filtered.length">
-        <div :style="{ height: scrollPadTop + 'px' }" aria-hidden="true"></div>
-        <!-- 单容器与聚合共用 LogLine:单容器流的帧里没有 containerName,由 fallback-name 补上徽章。 -->
-        <LogLine v-for="line in visibleLines" :key="line.id" :line="line" :fallback-name="activeContainerName" />
-        <div :style="{ height: scrollPadBottom + 'px' }" aria-hidden="true"></div>
-      </template>
-      <p v-else class="text-muted px-2 py-1">等待日志…</p>
+    <!-- 分栏模式:聚合流的每条日志都带 containerName,按容器拆成并排栏,每栏各自虚拟滚动。 -->
+    <div v-if="splitMode" class="log-pane-grid">
+      <LogPane
+        v-for="pane in panes"
+        :key="pane.key"
+        :lines="pane.lines"
+        :heading="pane.name"
+        :container-id="pane.id"
+        :fallback-name="pane.name"
+        :auto-scroll="autoScroll"
+        :connected="connected"
+        :paused="paused"
+        :revision="revision"
+        :resume-signal="resumeSignal"
+      />
+      <p v-if="!panes.length" class="text-muted px-2 py-1">没有匹配当前查询的容器日志。</p>
     </div>
+    <LogPane
+      v-else
+      :lines="filtered"
+      :fallback-name="activeContainerName"
+      :empty-text="queryError ? '查询语法有误,已保留上一次结果' : '等待日志…'"
+      :auto-scroll="autoScroll"
+      :connected="connected"
+      :paused="paused"
+      :revision="revision"
+      :resume-signal="resumeSignal"
+    />
 
-    <button v-if="connected && autoScrollPaused && !paused" class="scroll-resume-chip" @click="resumeScroll">已暂停自动滚动(向上) · 点击回到底部</button>
-
+    <QuerySyntaxModal :open="syntaxOpen" @close="syntaxOpen = false" />
     <AIDiagnosisModal v-if="diagnosis" :open="diagnosis" :project-id="projectId" :project-name="projectName" :container-id="containerId" :raw-logs="recentErrorLogs" :exit-code="null" @close="diagnosis = false" />
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute } from 'vue-router';
-import { Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
-import LogLine from '../components/logs/LogLine.vue';
+import LogPane from '../components/logs/LogPane.vue';
+import QuerySyntaxModal from '../components/logs/QuerySyntaxModal.vue';
 import { filterContainers } from '../lib/container-match.js';
+import { matchLogQuery, parseLogQuery } from '../lib/log-query.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 
 const route = useRoute();
@@ -90,6 +115,12 @@ const aggregateMode = ref(!!route.query.projectId && !route.query.containerId);
 const selectedContainers = ref([]);
 const containerQuery = ref('');
 const levelFilter = ref('');
+// 分栏视图只在聚合流上有意义:每条日志都带 containerName,才能按容器拆栏。
+const splitMode = ref(false);
+const syntaxOpen = ref(false);
+const queryError = ref('');
+const revision = ref(0);
+const resumeSignal = ref(0);
 const tail = ref(200);
 const lines = ref([]);
 const pending = ref([]);
@@ -101,9 +132,7 @@ const MAX_LINES = 5000;
 let disposed = false;
 let loadId = 0;
 const autoScroll = ref(true);
-const autoScrollPaused = ref(false);
 const error = ref('');
-const boxEl = ref(null);
 const searchEl = ref(null);
 const diagnosis = ref(false);
 const sequence = ref(0);
@@ -112,12 +141,6 @@ const levelCounts = ref({ error: 0, warn: 0, info: 0 });
 const sawError = ref(false);
 const retainedCount = ref(0);
 const liveStats = ref({});
-const LINE_H = 24;
-const OVERSCAN = 30;
-const viewStart = ref(0);
-const viewEnd = ref(0);
-let followFrame = 0;
-let resizeObserver;
 let statsController = null;
 
 /** 单容器与聚合两条流各自持有一个连接实例,URL 用 getter 读取最新筛选条件。 */
@@ -151,37 +174,48 @@ const projectName = computed(() => projects.value.find((p) => p.id === projectId
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
-const scrollPadTop = computed(() => viewStart.value * LINE_H);
-const scrollPadBottom = computed(() => Math.max(0, (filtered.value.length - viewEnd.value) * LINE_H));
-const visibleLines = computed(() => viewEnd.value > viewStart.value ? filtered.value.slice(viewStart.value, viewEnd.value) : []);
-watch(levelFilter, () => nextTick(syncViewport));
-watch(search, () => nextTick(syncViewport));
+
+/**
+ * 结构化查询(Dozzle 式字段谓词)。解析失败时保留上一次可用的查询,
+ * 让正在输入的中间态(未闭合引号、写错的字段)不会把整屏日志清空。
+ */
+const activeQuery = ref({ branches: [], error: '', active: false });
+watch(search, (value) => {
+  const parsed = parseLogQuery(value);
+  if (parsed.error) { queryError.value = parsed.error; return; }
+  queryError.value = '';
+  activeQuery.value = parsed;
+}, { immediate: true });
 
 const filtered = computed(() => {
   let result = lines.value;
+  // 下拉框是 level: 谓词的快捷入口,两者叠加生效。
   if (levelFilter.value) result = result.filter((line) => (line.level || classifyLevel(line.data)) === levelFilter.value);
-  const needle = search.value.trim();
-  if (needle) {
-    let regex = null;
-    if (needle.length > 2 && needle.startsWith('/') && needle.endsWith('/')) {
-      try { regex = new RegExp(needle.slice(1, -1), 'i'); }
-      catch { regex = null; }
-    }
-    result = result.filter((line) => regex ? regex.test(line.data) : line.data.toLowerCase().includes(needle.toLowerCase()));
-  }
+  if (activeQuery.value.active) result = result.filter((line) => matchLogQuery(activeQuery.value, line));
   return result;
+});
+
+/** 分栏:按 containerName 归组(聚合流的每一行都由服务端打上容器名),栏头顺序稳定。 */
+const panes = computed(() => {
+  if (!splitMode.value) return [];
+  const groups = new Map();
+  for (const line of filtered.value) {
+    const name = line.containerName || '未命名容器';
+    let group = groups.get(name);
+    if (!group) {
+      group = { key: name, name, id: line.containerId || '', lines: [] };
+      groups.set(name, group);
+    }
+    group.lines.push(line);
+  }
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
 });
 
 // 只重读项目列表:日志流本身由 WebSocket 推,下拉刷新不主动断流重建连接。
 usePullRefresh(reloadProjects);
 onMounted(() => {
-  nextTick(syncViewport);
   window.addEventListener('composeops:host-changed', onHostChanged);
   window.addEventListener('keydown', onKeydown);
-  if (boxEl.value) {
-    resizeObserver = new ResizeObserver(syncViewport);
-    resizeObserver.observe(boxEl.value);
-  }
   void reloadProjects();
 });
 
@@ -294,7 +328,7 @@ function append(item) {
       }
     }
   }
-  if (autoScroll.value && !autoScrollPaused.value) scheduleFollow();
+  bumpRevision();
 }
 function clearLines() {
   lines.value = [];
@@ -304,9 +338,7 @@ function clearLines() {
   levelCounts.value = { error: 0, warn: 0, info: 0 };
   sawError.value = false;
   retainedCount.value = 0;
-  viewStart.value = 0;
-  viewEnd.value = 0;
-  nextTick(syncViewport);
+  revision.value += 1;
 }
 function classifyLevel(text = '') {
   const t = String(text || '');
@@ -314,32 +346,16 @@ function classifyLevel(text = '') {
   if (/(warn|deprecat)/i.test(t)) return 'warn';
   return 'info';
 }
-/** rAF 合并的滚底调度:高频日志每帧只滚一次,避免反复强制 reflow 卡死主线程。 */
-function scheduleFollow() {
-  if (!autoScroll.value || autoScrollPaused.value || followFrame) return;
-  followFrame = requestAnimationFrame(() => {
-    followFrame = 0;
-    if (!boxEl.value) return;
-    boxEl.value.scrollTop = boxEl.value.scrollHeight;
-    syncViewport();
-  });
-}
-function syncViewport() {
-  if (!boxEl.value) return;
-  const height = boxEl.value.clientHeight || 420;
-  const scrollTop = boxEl.value.scrollTop;
-  viewStart.value = Math.max(0, Math.floor(scrollTop / LINE_H) - OVERSCAN);
-  viewEnd.value = Math.min(filtered.value.length, Math.ceil((scrollTop + height) / LINE_H) + OVERSCAN);
-}
-function onScroll() { syncViewport(); }
 function togglePause() { paused.value = !paused.value; if (!paused.value) flushPending(); }
-function onWheel(event) {
-  if (!connected.value || !autoScroll.value) return;
-  if (event.deltaY < 0) { autoScrollPaused.value = true; return; }
-  autoScrollPaused.value = false;
-  scheduleFollow();
+/** 虚拟滚动与跟随都在 LogPane 内部,这里只广播"有新行"和"回到底部"两个信号。 */
+function bumpRevision() { revision.value += 1; }
+function resumeScroll() { resumeSignal.value += 1; }
+/** 分栏只在聚合流可用:单容器流本来就只有一路日志。 */
+function toggleSplit() {
+  if (!aggregateMode.value) return;
+  splitMode.value = !splitMode.value;
+  resumeSignal.value += 1;
 }
-function resumeScroll() { autoScrollPaused.value = false; scheduleFollow(); }
 function disconnect() {
   logSocket.close();
   aggSocket.close();
@@ -351,7 +367,7 @@ function isTyping(target) {
   if (ACTIVE_TAG.has(target.tagName) || target.isContentEditable) return true;
   return !!target.closest?.('.monaco-editor');
 }
-/** 与速查表一致的日志页快捷键:/ 聚焦搜索,Space 暂停/继续,End 恢复自动滚动。 */
+/** 与速查表一致的日志页快捷键:/ 聚焦搜索,Space 暂停/继续,End 恢复滚动,s 切换分栏。 */
 function onKeydown(event) {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === '/') {
@@ -365,6 +381,7 @@ function onKeydown(event) {
   if (event.target?.closest?.('button')) return;
   if (event.key === ' ') { event.preventDefault(); togglePause(); }
   else if (event.key === 'End') { event.preventDefault(); resumeScroll(); }
+  else if (event.key === 's' || event.key === 'S') { event.preventDefault(); toggleSplit(); }
 }
 
 function numberValue(value) {
@@ -410,8 +427,6 @@ onBeforeUnmount(() => {
   loadId += 1;
   disconnect();
   closeStats();
-  if (followFrame) cancelAnimationFrame(followFrame);
-  resizeObserver?.disconnect();
   window.removeEventListener('composeops:host-changed', onHostChanged);
   window.removeEventListener('keydown', onKeydown);
 });
