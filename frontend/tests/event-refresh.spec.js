@@ -33,7 +33,7 @@ describe('事件中心下拉刷新', () => {
     wrapper = mount(EventCenterView, {
       global: {
         plugins: [router, createPinia()],
-        stubs: { EventTimeline: true, OperationsView: true, ConfirmDialog: true },
+        stubs: { EventTimeline: true, OperationsView: true, ConfirmDialog: true, StateHistoryPanel: true },
       },
     });
     await flushPromises();
@@ -57,5 +57,20 @@ describe('事件中心下拉刷新', () => {
     window.dispatchEvent(new CustomEvent('composeops:refresh'));
     await flushPromises();
     expect(api.getEvents).toHaveBeenCalledTimes(calls);
+  });
+  it('?tab=state 渲染状态历史面板,且不重复发告警事件请求', async () => {
+    await start({ tab: 'state' });
+    expect(api.getEvents).not.toHaveBeenCalled();
+    expect(wrapper.findComponent({ name: 'StateHistoryPanel' }).exists()).toBe(true);
+
+    // 下拉刷新归面板自己:视图层不能再发一遍事件请求
+    window.dispatchEvent(new CustomEvent('composeops:refresh'));
+    await flushPromises();
+    expect(api.getEvents).not.toHaveBeenCalled();
+  });
+  it('未知 tab 参数回落到告警事件', async () => {
+    await start({ tab: 'nope' });
+    expect(api.getEvents).toHaveBeenCalledTimes(1);
+    expect(wrapper.findComponent({ name: 'StateHistoryPanel' }).exists()).toBe(false);
   });
 });

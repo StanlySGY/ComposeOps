@@ -22,6 +22,7 @@ import costAnalysisRoutes from './routes/cost-analysis.js';
 import cmdbRoutes from './routes/cmdb.js';
 import workflowRoutes from './routes/workflow.js';
 import eventCenterRoutes from './routes/event-center.js';
+import stateHistoryRoutes from './routes/state-history.js';
 import mcpRoutes from './routes/mcp.js';
 import docker from './services/docker.js';
 import { isAuthenticated, isConfigured, setPassword, validateOrigin } from './lib/auth.js';
@@ -30,6 +31,7 @@ import { stopHealthAlerter } from './services/health-alerter.js';
 import { stopCronScheduler } from './services/cron-scheduler.js';
 import { closeAllWorkspaceRunners } from './services/compose-workspace.js';
 import { stopAllGitOpsWatchers } from './services/gitops.js';
+import { stopStateRecorder } from './services/container-events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -142,6 +144,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       await api.register(cmdbRoutes, { prefix: '/cmdb' });
       await api.register(workflowRoutes, { prefix: '/workflows' });
       await api.register(eventCenterRoutes, { prefix: '/events' });
+      await api.register(stateHistoryRoutes, { prefix: '/state' });
     },
     { prefix: '/api/v1' }
   );
@@ -179,9 +182,12 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     try {
       const fastifyStatic = (await import('@fastify/static')).default;
       // decorateReply 保持默认 true:下方 SPA fallback 依赖 reply.sendFile。
+      // preCompressed:前端构建已为文本产物写出 .br/.gz 同名兄弟文件(见 frontend/vite.config.js),
+      // 这里按 Accept-Encoding 依次选 brotli → gzip → 原文件,并补 Vary: Accept-Encoding。
       await fastify.register(fastifyStatic, {
         root: staticRoot,
         prefix: '/',
+        preCompressed: true,
       });
       // SPA fallback
       fastify.setNotFoundHandler((request, reply) => {
@@ -200,6 +206,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     stopHealthAlerter();
     stopCronScheduler();
     stopAllGitOpsWatchers();
+    stopStateRecorder();
     await closeAllWorkspaceRunners();
   });
 

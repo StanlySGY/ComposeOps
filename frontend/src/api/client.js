@@ -326,6 +326,13 @@ export const api = {
   getWorkflowInstance: (id) => request(`/workflows/instances/${id}`),
   approveWorkflowInstance: (id, payload) => request(`/workflows/instances/${id}/approve`, { method: 'POST', body: JSON.stringify(payload) }),
   cancelWorkflowInstance: (id) => request(`/workflows/instances/${id}/cancel`, { method: 'POST' }),
+  // 容器状态历史(uptime-kuma 式服务端持久化):分析型视图,读取频率低但必须实时,
+  // 因此不走 SWR 缓存 —— 下拉刷新要看到新数据,不能先回缓存再后台重验。
+  getStateHistory: (params = {}) => request(`/state/history?${new URLSearchParams(params)}`),
+  getStateContainers: (params = {}) => request(`/state/containers?${new URLSearchParams(params)}`),
+  getStateUptime: (params = {}) => request(`/state/uptime?${new URLSearchParams(params)}`),
+  getStateExits: (params = {}) => request(`/state/exits?${new URLSearchParams(params)}`),
+  pruneStateHistory: (days = 90) => request('/state/prune', { method: 'POST', body: JSON.stringify({ days }) }),
 };
 
 /**

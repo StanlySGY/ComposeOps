@@ -8,10 +8,10 @@ import test from 'node:test';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-container-events-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
-const { subscribeContainerEvents } = await import('../src/services/container-events.js');
+const { subscribeContainerEvents, startStateRecorder } = await import('../src/services/container-events.js');
 const { getActivityDocker, setActiveHost, upsertHost } = await import('../src/services/docker-hosts.js');
 const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
-const { setProjectPreference } = await import('../src/lib/db.js');
+const { setProjectPreference, listContainerStateEvents } = await import('../src/lib/db.js');
 const docker = getActivityDocker();
 const row = { Id: 'test-container', Names: ['/测试'], State: 'running', Labels: { 'com.docker.compose.project': 'events-audit', 'com.docker.compose.project.working_dir': tempDir } };
 const event = { Type: 'container', Action: 'start', Actor: { ID: row.Id, Attributes: { name: '测试容器', ...row.Labels } } };
@@ -35,6 +35,67 @@ test('Docker Events 跨 chunk/UTF-8 JSON 保留完整事件,坏行不吞后续�
   await settle();
   assert.deepEqual(events.map(value => value.action), ['start', 'die']);
   assert.equal(events[0].containerName, '测试容器');
+});
+
+test('状态记录器把 die 退出码落库,扫描快照缺失的容器靠事件标签补项目', async (t) => {
+  t.mock.method(docker, 'listContainers', async () => [row]);
+  invalidateScanCache();
+  const [project] = await scanProjects();
+  setProjectPreference(project.id, { managed: true });
+  invalidateScanCache();
+  await scanProjects();
+
+  const stream = new PassThrough();
+  t.mock.method(docker, 'getEvents', async () => stream);
+  const stopRecorder = startStateRecorder();
+  const unsubscribe = subscribeContainerEvents(() => {});
+  t.after(() => { unsubscribe(); stopRecorder(); });
+  await settle();
+
+  const base = Math.floor(Date.now() / 1000);
+  // Docker Events API 的 attributes 全是字符串,exitCode/execDuration 也一样(实测 daemon 29.x)
+  const dieEvent = {
+    ...event,
+    Action: 'die',
+    time: base + 1,
+    Actor: { ...event.Actor, Attributes: { ...event.Actor.Attributes, exitCode: '137', execDuration: '42' } },
+  };
+  // 该容器不在 listContainers 快照里(销毁后已消失),只能靠事件自带的 compose 标签还原项目
+  const destroyEvent = {
+    Type: 'container',
+    Action: 'destroy',
+    time: base + 2,
+    Actor: { ID: 'ghost-container', Attributes: { name: '已销毁容器', ...row.Labels } },
+  };
+  stream.write(`${JSON.stringify(dieEvent)}\n${JSON.stringify(destroyEvent)}\n`);
+
+  // handleDockerEvent 走串行队列且内部 await scanProjects(),轮询等待比固定 settle 次数稳
+  let rows = [];
+  for (let i = 0; i < 40 && rows.length < 2; i += 1) {
+    await settle();
+    rows = listContainerStateEvents({ projectId: project.id, limit: 100 });
+  }
+  assert.equal(rows.length, 2);
+  // 按时间倒序:destroy(base+2) 在 die(base+1) 之前
+  assert.deepEqual(rows.map((item) => item.action), ['destroy', 'die']);
+
+  const destroyed = rows.find((item) => item.containerId === 'ghost-container');
+  assert.equal(destroyed.projectId, project.id);
+  assert.equal(destroyed.projectName, project.projectName);
+  assert.equal(destroyed.containerName, '已销毁容器');
+  // 非 die 事件不得带退出码
+  assert.equal(destroyed.exitCode, null);
+
+  const die = rows.find((item) => item.containerId === row.Id);
+  assert.equal(die.containerName, '测试容器');
+  // 字符串退出码要落成整数,列表页才能按 137 判定异常退出
+  assert.equal(die.exitCode, 137);
+  assert.equal(die.execDuration, 42);
+
+  // 记录器必须真正退订:否则它会长期留在订阅者集合里,事件流再也停不下来
+  unsubscribe();
+  stopRecorder();
+  assert.equal(stream.destroyed, true);
 });
 
 test('getEvents 等待期间退订,不会留下无订阅者的流', async (t) => {

@@ -95,6 +95,26 @@ test('pruneComposeBackups 每个项目只保留最新 N 份', () => {
   assert.deepEqual(remaining.map((r) => r.file_path), ['a2', 'a3', 'b1']);
 });
 
+test('pruneDataHistory 按 stateHistoryDays 清理容器状态历史', () => {
+  db.prepare('DELETE FROM container_state_events').run();
+  const now = Math.floor(Date.now() / 1000);
+  const insertEvent = (containerId, timestamp) => db.prepare(
+    "INSERT INTO container_state_events(container_id, container_name, project_id, project_name, action, timestamp) VALUES(?, ?, 'pm', 'P', 'die', ?)"
+  ).run(containerId, containerId, timestamp);
+  insertEvent('old', now - 40 * 86400);
+  insertEvent('fresh', now - 3600);
+
+  const pruned = pruneDataHistory({ stateHistoryDays: 30 });
+  assert.equal(pruned.stateHistoryDeleted, 1);
+  assert.deepEqual(
+    db.prepare('SELECT container_id FROM container_state_events ORDER BY container_id').all().map((r) => r.container_id),
+    ['fresh']
+  );
+  // 非法天数不能让 pruneStateHistory 回退成"清 90 天"以外的破坏性窗口
+  assert.equal(pruneDataHistory({ stateHistoryDays: 0 }).stateHistoryDeleted, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS c FROM container_state_events').get().c, 1);
+});
+
 test('runDataMaintenance 幂等且返回各表删除计数', () => {
   db.prepare('DELETE FROM ai_history').run();
   db.prepare('DELETE FROM operation_history').run();
@@ -107,6 +127,8 @@ test('runDataMaintenance 幂等且返回各表删除计数', () => {
   assert.equal(typeof result.operationHistoryDeleted, 'number');
   assert.equal(result.aiHistoryDeleted >= 1, true);
   assert.equal(typeof result.composeBackupsDeleted, 'number');
+  // 状态历史纳入周期清理,否则 health_status 抖动会让 container_state_events 只增不删
+  assert.equal(typeof result.stateHistoryDeleted, 'number');
 
   const second = runDataMaintenance();
   assert.equal(typeof second.agentPlansDeleted, 'number');

@@ -18,6 +18,7 @@
       <button :class="{ active: tab === 'events' }" role="tab" :aria-selected="tab === 'events'" @click="setTab('events')"><BellRing class="h-4 w-4" />告警事件</button>
       <button :class="{ active: tab === 'timeline' }" role="tab" :aria-selected="tab === 'timeline'" @click="setTab('timeline')"><History class="h-4 w-4" />时间线</button>
       <button :class="{ active: tab === 'operations' }" role="tab" :aria-selected="tab === 'operations'" @click="setTab('operations')"><ListChecks class="h-4 w-4" />操作与任务</button>
+      <button :class="{ active: tab === 'state' }" role="tab" :aria-selected="tab === 'state'" @click="setTab('state')"><Gauge class="h-4 w-4" />状态历史</button>
     </div>
 
     <template v-if="tab === 'events'">
@@ -73,6 +74,7 @@
       </section>
     </template>
     <EventTimeline v-else-if="tab === 'timeline'" />
+    <StateHistoryPanel v-else-if="tab === 'state'" />
     <OperationsView v-else embedded />
   </div>
 </template>
@@ -81,10 +83,11 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
-import { Activity, AlertTriangle, BellRing, CircleAlert, History, ListChecks, RefreshCw, Trash2, Workflow } from 'lucide-vue-next';
+import { Activity, AlertTriangle, BellRing, CircleAlert, Gauge, History, ListChecks, RefreshCw, Trash2, Workflow } from 'lucide-vue-next';
 import { useEventStore } from '../stores/events.js';
 import { useToastStore } from '../stores/toast.js';
 import EventTimeline from '../components/events/EventTimeline.vue';
+import StateHistoryPanel from '../components/events/StateHistoryPanel.vue';
 import OperationsView from './OperationsView.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 
@@ -92,7 +95,8 @@ const route = useRoute();
 const router = useRouter();
 const store = useEventStore();
 const toast = useToastStore();
-const tab = ref(['timeline', 'operations'].includes(route.query.tab) ? route.query.tab : 'events');
+const TABS = ['timeline', 'operations', 'state'];
+const tab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'events');
 const typeFilter = ref('');
 
 function setTab(next) {
@@ -102,7 +106,7 @@ function setTab(next) {
   router.replace({ query });
   if (next === 'events') load();
 }
-watch(() => route.query.tab, (value) => { tab.value = ['timeline', 'operations'].includes(value) ? value : 'events'; });
+watch(() => route.query.tab, (value) => { tab.value = TABS.includes(value) ? value : 'events'; });
 
 const typeFilters = [
   { value: '', label: '全部' },
@@ -158,7 +162,7 @@ async function prune() {
 }
 
 watch(typeFilter, load);
-// 只在「告警事件」tab 响应下拉刷新:时间线与操作 tab 分别由 EventTimeline、OperationsView 负责,避免一次下拉发两遍请求。
+// 只在「告警事件」tab 响应下拉刷新:时间线、状态历史与操作 tab 分别由 EventTimeline、StateHistoryPanel、OperationsView 负责,避免一次下拉发两遍请求。
 usePullRefresh(load, { enabled: () => tab.value === 'events' });
 onMounted(() => { if (tab.value === 'events') load(); });
 </script>

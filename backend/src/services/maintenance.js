@@ -4,6 +4,7 @@ import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
 import db, { pruneAgentPlans, pruneAiUsage, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { pruneEvents } from './event-center.js';
+import { pruneStateHistory } from './state-history.js';
 
 function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
@@ -85,16 +86,18 @@ const DATA_DEFAULTS = {
   agentPlansDays: 90,        // agent_plans(含 CASCADE agent_executions)保留天数
   operationHistoryDays: 30,  // operation_history 保留天数
   aiHistoryDays: 30,         // ai_history 保留天数
+  stateHistoryDays: 90,      // container_state_events 保留天数(每行不足 200 B,90 天足够回看宕机规律)
   composeBackupKeep: COMPOSE_BACKUP_KEEP, // 与 addComposeBackup 共用同一常量,避免"写入留 20 份、清理裁 5 份"的漂移
   runIntervalMs: 6 * 60 * 60 * 1000, // 每 6 小时
 };
 
 /** 清理超过保留天数的 AI 对话历史。 */
-export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPlansDays } = {}) {
+export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPlansDays, stateHistoryDays } = {}) {
   const clear = {
     aiHistoryDays,
     operationHistoryDays,
     agentPlansDays,
+    stateHistoryDays,
   };
   const days = clear.aiHistoryDays ?? DATA_DEFAULTS.aiHistoryDays;
   const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
@@ -109,11 +112,16 @@ export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPla
   const planDays = clear.agentPlansDays ?? DATA_DEFAULTS.agentPlansDays;
   const agent = pruneAgentPlans(planDays);
 
+  // 状态历史只追加,不清理会随 health_status 抖动无限增长。
+  let stateEvents = 0;
+  try { stateEvents = pruneStateHistory(clear.stateHistoryDays ?? DATA_DEFAULTS.stateHistoryDays).changes; } catch { /* 表缺失等异常不阻断其他清理。 */ }
+
   return {
     aiHistoryDeleted: ai.changes,
     aiUsageDeleted: aiUsage.changes,
     operationHistoryDeleted: operations.changes,
     agentPlansDeleted: agent.changes,
+    stateHistoryDeleted: stateEvents,
   };
 }
 

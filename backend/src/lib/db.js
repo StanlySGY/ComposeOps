@@ -519,6 +519,32 @@ const MIGRATIONS = [
       addColumn(database, 'alert_events', 'diagnosis', 'TEXT');
     },
   },
+  {
+    version: 16,
+    name: '容器状态转换历史(container_state_events)',
+    up(database) {
+      // 此前容器状态转换只经 WebSocket 广播,刷新即丢;落库后宕机历史与可用率统计才能跨重启保留。
+      // timestamp 存事件自身的 unix 秒(Docker 的 time 字段),而非入库时间,重放历史时顺序才正确。
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS container_state_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          container_id TEXT NOT NULL,
+          container_name TEXT NOT NULL DEFAULT '',
+          project_id TEXT NOT NULL,
+          project_name TEXT NOT NULL DEFAULT '',
+          action TEXT NOT NULL,               -- start | stop | die | kill | pause | unpause | restart | health_status | create | destroy
+          health_status TEXT NOT NULL DEFAULT '',
+          exit_code INTEGER,                  -- die 事件的 exitCode,非退出事件为 NULL
+          exec_duration INTEGER,              -- die 事件的 execDuration,单位秒(实测 daemon 29.7.2)
+          timestamp INTEGER NOT NULL,         -- 事件发生时间(unix 秒)
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_container_state_container ON container_state_events(container_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_container_state_project ON container_state_events(project_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_container_state_time ON container_state_events(timestamp DESC);
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1694,6 +1720,124 @@ function mapEventRecordRow(row) {
     read: Number(row.read) || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+// ===== 容器状态转换历史 =====
+
+/**
+ * 记录一次容器状态转换。timestamp 为事件自身的 unix 秒,便于跨重启重放出正确顺序。
+ * exitCode/execDuration 只在 die 事件存在,execDuration 单位为秒。
+ */
+function toNullableNumber(value) {
+  // Number(null) === 0,直接 Number() 会把"没有退出码"写成退出码 0,
+  // 也会让非 die 事件的 exit_code 从 NULL 变成 0,列表页就会误显示"退出码 0"。
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+export function addContainerStateEvent({ containerId, containerName = '', projectId, projectName = '', action, healthStatus = '', exitCode = null, execDuration = null, timestamp }) {
+  const result = db.prepare(`
+    INSERT INTO container_state_events(container_id, container_name, project_id, project_name, action, health_status, exit_code, exec_duration, timestamp)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    String(containerId || ''),
+    String(containerName || ''),
+    String(projectId || ''),
+    String(projectName || ''),
+    String(action || ''),
+    String(healthStatus || ''),
+    toNullableNumber(exitCode),
+    toNullableNumber(execDuration),
+    Math.floor(toNullableNumber(timestamp) ?? Date.now() / 1000)
+  );
+  return getContainerStateEvent(Number(result.lastInsertRowid));
+}
+
+export function getContainerStateEvent(id) {
+  const row = db.prepare('SELECT * FROM container_state_events WHERE id = ?').get(Number(id));
+  return row ? mapContainerStateRow(row) : null;
+}
+
+export function listContainerStateEvents({ projectId = '', containerId = '', action = '', limit = 200 } = {}) {
+  const conditions = [];
+  const params = [];
+  if (projectId) { conditions.push('project_id = ?'); params.push(projectId); }
+  if (containerId) { conditions.push('container_id = ?'); params.push(containerId); }
+  if (action) { conditions.push('action = ?'); params.push(action); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 200, 1000));
+  const rows = db.prepare(`SELECT * FROM container_state_events ${where} ORDER BY timestamp DESC, id DESC LIMIT ?`).all(...params, safeLimit);
+  return rows.map(mapContainerStateRow);
+}
+
+/** 取某个时间点(含)之前最近的一条事件,用于推断统计窗口起点的状态。 */
+export function getContainerStateEventBefore(containerId, timestamp) {
+  const row = db.prepare(
+    'SELECT * FROM container_state_events WHERE container_id = ? AND timestamp <= ? ORDER BY timestamp DESC, id DESC LIMIT 1'
+  ).get(String(containerId), Math.floor(Number(timestamp)));
+  return row ? mapContainerStateRow(row) : null;
+}
+
+/** 按窗口批量取事件,按容器分组返回(升序),供可用率计算一次查询完成。 */
+export function listContainerStateEventsWindow({ projectId = '', since = 0, until = Date.now() / 1000, limit = 5000 } = {}) {
+  const conditions = ['timestamp >= ?', 'timestamp <= ?'];
+  const params = [Math.floor(Number(since) || 0), Math.floor(Number(until))];
+  if (projectId) { conditions.push('project_id = ?'); params.push(projectId); }
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 5000, 20000));
+  const rows = db.prepare(
+    `SELECT * FROM container_state_events WHERE ${conditions.join(' AND ')} ORDER BY container_id, timestamp ASC, id ASC LIMIT ?`
+  ).all(...params, safeLimit);
+  const grouped = new Map();
+  for (const row of rows) {
+    const event = mapContainerStateRow(row);
+    if (!grouped.has(event.containerId)) grouped.set(event.containerId, []);
+    grouped.get(event.containerId).push(event);
+  }
+  return { groups: grouped, truncated: rows.length >= safeLimit };
+}
+
+/** 窗口内每个容器的最近事件与退出统计,用于列表页的"当前状态"列。 */
+export function listContainerStateLatest({ projectId = '', since = 0, limit = 500 } = {}) {
+  const conditions = [];
+  const params = [];
+  if (projectId) { conditions.push('project_id = ?'); params.push(projectId); }
+  if (since) { conditions.push('timestamp >= ?'); params.push(Math.floor(Number(since))); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 500, 2000));
+  const rows = db.prepare(`
+    SELECT * FROM container_state_events
+    ${where}
+    ORDER BY timestamp DESC, id DESC
+    LIMIT ?
+  `).all(...params, safeLimit);
+  const latest = new Map();
+  for (const row of rows) {
+    const event = mapContainerStateRow(row);
+    if (!latest.has(event.containerId)) latest.set(event.containerId, event);
+  }
+  return latest;
+}
+
+export function pruneContainerStateEvents(days = 90) {
+  const safeDays = Math.max(1, Number(days) || 90);
+  return db.prepare('DELETE FROM container_state_events WHERE timestamp < ?').run(Math.floor(Date.now() / 1000) - safeDays * 86400);
+}
+
+function mapContainerStateRow(row) {
+  return {
+    id: Number(row.id),
+    containerId: row.container_id,
+    containerName: row.container_name,
+    projectId: row.project_id,
+    projectName: row.project_name,
+    action: row.action,
+    healthStatus: row.health_status,
+    exitCode: row.exit_code === null || row.exit_code === undefined ? null : Number(row.exit_code),
+    execDuration: row.exec_duration === null || row.exec_duration === undefined ? null : Number(row.exec_duration),
+    timestamp: Number(row.timestamp),
+    createdAt: row.created_at,
   };
 }
 

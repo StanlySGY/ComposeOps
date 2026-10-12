@@ -9,6 +9,7 @@ import { initializeBackgroundJobs } from './services/background-jobs.js';
 import { initGitOps } from './services/gitops.js';
 import { startMetricsCollection } from './services/metrics-collector.js';
 import { startDataMaintenance } from './services/maintenance.js';
+import { startStateRecorder, stopStateRecorder } from './services/container-events.js';
 import { getCostAnalysisReport } from './services/cost-analysis.js';
 
 const PORT = parseInt(process.env.PORT || process.env.APP_PORT || '3000', 10);
@@ -59,7 +60,9 @@ const start = async () => {
       if (metricsTimers?.intervalId) clearInterval(metricsTimers.intervalId);
       if (metricsTimers?.pruneIntervalId) clearInterval(metricsTimers.pruneIntervalId);
     };
-    startDataMaintenance(); // 周期清理 ai_history / operation_history / agent_plans / compose_backups
+    startDataMaintenance(); // 周期清理 ai_history / operation_history / agent_plans / compose_backups / container_state_events
+    // 状态历史常驻记录:事件流原本只在浏览器订阅时运行,无订阅者时宕机历史不会累积。
+    startStateRecorder();
     stopCostWarmup = startCostWarmup();
     fastify.log.info(`OpsDash backend listening on http://${HOST}:${PORT}`);
   } catch (err) {
@@ -74,6 +77,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   fastify.log.info({ signal }, 'shutting down');
   try { stopMetricsTimers?.(); } catch { /* 未启动时无需清理 */ }
+  try { stopStateRecorder(); } catch { /* 未启动时无需清理 */ }
   try { stopCostWarmup?.(); } catch { /* 未启动时无需清理 */ }
   try {
     const { stopInspectionScheduler } = await import('./services/inspection.js');
