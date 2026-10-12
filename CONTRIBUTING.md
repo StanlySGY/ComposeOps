@@ -38,7 +38,7 @@ Thank you for your interest in contributing! This document provides guidelines a
 
 4. **Install dependencies**
    ```bash
-   npm run install:all
+   npm install
    ```
 
 5. **Run tests** to verify setup
@@ -49,10 +49,10 @@ Thank you for your interest in contributing! This document provides guidelines a
 6. **Start development servers**
    ```bash
    # Terminal 1: Backend (http://localhost:3001)
-   npm run dev:backend
+   npm run dev --workspace=backend
 
    # Terminal 2: Frontend (http://localhost:5173)
-   npm run dev:frontend
+   npm run dev --workspace=frontend
    ```
 
 ## 📋 Development Workflow

@@ -28,7 +28,7 @@
 
 [在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [备份与恢复](docs/public/BACKUP_RESTORE.md)
 
-预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.5.0；AI 为可选功能。
+预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.5.1；AI 为可选功能。
 
 ## 🚀 为什么选择 ComposeOps
 
@@ -249,7 +249,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 ```bash
 mkdir composeops && cd composeops
 # 下载固定版本、无需源码构建的安装清单
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.5.0/deploy/compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.5.1/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 
@@ -386,11 +386,11 @@ services:
 在仓库根目录一次完成前后端操作：
 
 ```bash
-npm run install:all   # 安装 backend + frontend 依赖
+npm install            # 根目录 npm workspaces 一次安装前后端依赖
 npm test              # 后端 + 前端全量测试
 npm run lint          # ESLint 代码检查
-npm run dev:backend   # 后端开发服务器（3001）
-npm run dev:frontend  # 前端开发服务器（5173，自动代理 API）
+npm run dev --workspace=backend   # 后端开发服务器（3001）
+npm run dev --workspace=frontend  # 前端开发服务器（5173，自动代理 API）
 npm run build         # 构建前端生产版本
 ```
 
