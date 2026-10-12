@@ -28,3 +28,7 @@ frontend/preview-dist/
 frontend/playwright-report/
 frontend/test-results/
 backend/data/snapshots/
+
+# 本地写作素材(含 linux.do 导出页)与根 docker-compose.yml 的重复副本
+Linuxdo-article/
+composeops/
