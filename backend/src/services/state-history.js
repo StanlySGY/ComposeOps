@@ -1,8 +1,8 @@
 import {
   listContainerStateEvents,
   listContainerStateEventsWindow,
+  listContainerStateEventsBeforeWindow,
   listContainerStateLatest,
-  getContainerStateEventBefore,
   pruneContainerStateEvents,
 } from '../lib/db.js';
 
@@ -113,12 +113,25 @@ function computeContainerWindow(events, preceding, since, until) {
 export function getStateUptime({ projectId = '', since, until = Date.now() / 1000 } = {}) {
   const start = Math.floor(Number(since) || 0);
   const end = Math.floor(Number(until) || Date.now() / 1000);
-  const { groups, truncated } = listContainerStateEventsWindow({ projectId, since: start, until: end });
+  const { groups, truncated: windowTruncated } = listContainerStateEventsWindow({ projectId, since: start, until: end });
+  const { events: precedingEvents, stateEvents, truncated: precedingTruncated } = listContainerStateEventsBeforeWindow({ projectId, before: start });
+  const latestBeforeById = new Map(precedingEvents.map((event) => [event.containerId, event]));
+  const precedingStateById = new Map(stateEvents.map((event) => [event.containerId, event]));
 
+  // 合并窗口内有事件的容器与仅有窗口前历史的容器。若窗口前最近的状态转换是
+  // destroy,容器在窗口开始前已销毁,即使之后出现 health_status 也不能重新纳入统计。
+  for (const event of precedingEvents) {
+    const precedingState = precedingStateById.get(event.containerId);
+    if (precedingState?.action !== 'destroy' && !groups.has(event.containerId)) groups.set(event.containerId, []);
+  }
+  const truncated = windowTruncated || precedingTruncated;
   const containers = [];
   for (const [containerId, events] of groups) {
-    const latest = events[events.length - 1];
-    const window = computeContainerWindow(events, getContainerStateEventBefore(containerId, start), start, end);
+    const preceding = precedingStateById.get(containerId) || null;
+    const latestBefore = latestBeforeById.get(containerId) || null;
+    if (events.length === 0 && (!latestBefore || preceding?.action === 'destroy')) continue;
+    const latest = events[events.length - 1] || latestBefore;
+    const window = computeContainerWindow(events, preceding, start, end);
     const measurable = window.upSeconds + window.downSeconds;
     containers.push({
       containerId,

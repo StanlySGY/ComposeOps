@@ -1798,6 +1798,46 @@ export function listContainerStateEventsWindow({ projectId = '', since = 0, unti
   return { groups: grouped, truncated: rows.length >= safeLimit };
 }
 
+/**
+ * 每个容器在统计窗口开始之前的最近历史事件与最近状态转换。
+ * health_status/create 等事件不改变运行状态,因此状态推断必须单独找最近一次
+ * start/stop/die 等状态转换;同时保留最近任意事件用于展示最后活动时间。
+ */
+export function listContainerStateEventsBeforeWindow({ projectId = '', before = 0, limit = 5000 } = {}) {
+  const conditions = ['timestamp < ?'];
+  const params = [Math.floor(Number(before) || 0)];
+  if (projectId) { conditions.push('project_id = ?'); params.push(projectId); }
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 5000, 20000));
+  const latestSql = `
+    SELECT * FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY container_id ORDER BY timestamp DESC, id DESC) AS row_rank
+      FROM container_state_events
+      WHERE ${conditions.join(' AND ')}
+    )
+    WHERE row_rank = 1
+    ORDER BY container_id
+    LIMIT ?
+  `;
+  const events = db.prepare(latestSql).all(...params, safeLimit).map(mapContainerStateRow);
+  const stateActions = ['start', 'unpause', 'restart', 'stop', 'die', 'kill', 'pause', 'destroy'];
+  const stateConditions = [...conditions, `action IN (${stateActions.map(() => '?').join(', ')})`];
+  const stateEvents = db.prepare(`
+    SELECT * FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY container_id ORDER BY timestamp DESC, id DESC) AS row_rank
+      FROM container_state_events
+      WHERE ${stateConditions.join(' AND ')}
+    )
+    WHERE row_rank = 1
+    ORDER BY container_id
+    LIMIT ?
+  `).all(...params, ...stateActions, safeLimit).map(mapContainerStateRow);
+  return {
+    events,
+    stateEvents,
+    truncated: events.length >= safeLimit || stateEvents.length >= safeLimit,
+  };
+}
+
 /** 窗口内每个容器的最近事件与退出统计,用于列表页的"当前状态"列。 */
 export function listContainerStateLatest({ projectId = '', since = 0, limit = 500 } = {}) {
   const conditions = [];

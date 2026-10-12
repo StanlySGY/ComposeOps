@@ -55,6 +55,8 @@ seed('c-web', 'web', [
   { action: 'start', at: NOW - 1700 },
 ]);
 seed('c-api', 'api', [{ action: 'die', at: NOW - 600, exitCode: 0, execDuration: 300 }]);
+// 最近状态转换早于 7 天窗口,但窗口内无新事件:uptime API 仍应纳入该稳定容器。
+seed('c-steady', 'steady', [{ action: 'start', at: NOW - 10 * 86400 }]);
 // 超期行:专用项目,便于 prune 后单独确认它已消失
 seed('c-expired', 'expired', [{ action: 'die', at: NOW - 10 * 86400, exitCode: 1 }], 'state-routes-expired');
 
@@ -81,8 +83,8 @@ test('状态历史路由: /history 返回按时间倒序的转换明细', async 
   });
   assert.equal(response.statusCode, 200);
   const { history } = response.json();
-  // c-web 3 条 + c-api 1 条;超期行属于另一个项目,不在这里
-  assert.equal(history.length, 4);
+  // c-web 3 条 + c-api 1 条 + 窗口外的稳定容器最近状态 1 条
+  assert.equal(history.length, 5);
   assert.deepEqual(
     history.map((item) => item.timestamp),
     [...history.map((item) => item.timestamp)].sort((a, b) => b - a)
@@ -123,7 +125,7 @@ test('状态历史路由: /containers 与 /uptime 给出窗口视图', async () 
   assert.equal(uptime.statusCode, 200);
   const report = uptime.json();
   assert.equal(report.window.seconds, 7 * 86400);
-  assert.equal(report.summary.containers, 2);
+  assert.equal(report.summary.containers, 3);
   assert.equal(report.truncated, false);
   // 可用率必须是 0..100 的数值或 null(不可判定),不能是 NaN/字符串
   for (const item of report.containers) {
@@ -135,6 +137,11 @@ test('状态历史路由: /containers 与 /uptime 给出窗口视图', async () 
   assert.equal(web.lastExitCode, 137);
   assert.equal(web.lastExitAt, NOW - 1800);
   assert.equal(web.abnormalExits, 1);
+  const steady = report.containers.find((item) => item.containerId === 'c-steady');
+  assert.ok(steady, '窗口内无状态变化的稳定容器必须纳入可用率统计');
+  assert.equal(steady.availability, 100);
+  assert.equal(steady.upSeconds, 7 * 86400);
+  assert.equal(steady.lastAction, 'start');
 });
 
 test('状态历史路由: /exits 返回退出明细且异常优先', async () => {
@@ -171,7 +178,7 @@ test('状态历史路由: 查询参数越界走全站校验契约', async () => 
   const stripped = await app.inject({ method: 'GET', url: `/api/v1/state/history?projectId=${PROJECT}&bogus=1`, headers });
   assert.equal(stripped.statusCode, 200);
   // 脏参数被剥掉后按 projectId 正常返回,等价于不带 bogus 的同一查询
-  assert.equal(stripped.json().history.length, 4);
+  assert.equal(stripped.json().history.length, 5);
 });
 
 test('状态历史路由: POST /prune 按保留天数清理并回报行数', async () => {
@@ -199,8 +206,8 @@ test('状态历史路由: POST /prune 按保留天数清理并回报行数', asy
   assert.equal(response.statusCode, 200);
   const body = response.json();
   assert.equal(body.ok, true);
-  // 只有 10 天前那条超期行被清掉,窗口内的近期事件必须留下
-  assert.equal(body.removed, 1);
+  // 10 天前的退出事件与稳定容器基线都应被清掉,窗口内近期事件必须留下
+  assert.equal(body.removed, 2);
 
   const expired = await app.inject({
     method: 'GET',

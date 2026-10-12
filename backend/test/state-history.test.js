@@ -55,10 +55,24 @@ seed('c-preceding', 'preceding', [
   { action: 'stop', at: BASE - 500 },
   { action: 'health_status', at: BASE + 1500, healthStatus: 'healthy' },
 ]);
+// 窗口内没有任何事件的容器也必须纳入可用率;非状态事件不能抹掉之前的状态。
+seed('c-steady', 'steady', [
+  { action: 'start', at: BASE - 86400 },
+  { action: 'health_status', at: BASE - 120, healthStatus: 'healthy' },
+]);
+seed('c-stopped', 'stopped', [
+  { action: 'stop', at: BASE - 600 },
+  { action: 'health_status', at: BASE - 120, healthStatus: 'unhealthy' },
+]);
+// 窗口前已销毁的容器即使有后续健康检查事件,也不应重新被纳入统计。
+seed('c-destroyed-before-window', 'destroyed-before-window', [
+  { action: 'destroy', at: BASE - 200 },
+  { action: 'health_status', at: BASE - 100, healthStatus: 'healthy' },
+]);
 
 test('状态历史: 按项目/容器/动作过滤,按时间倒序返回', () => {
   const all = listStateHistory({ projectId: PROJECT, limit: 100 });
-  assert.equal(all.length, 9);
+  assert.equal(all.length, 15);
   assert.deepEqual(
     all.map((item) => item.timestamp),
     [...all.map((item) => item.timestamp)].sort((a, b) => b - a)
@@ -73,7 +87,7 @@ test('状态历史: 按项目/容器/动作过滤,按时间倒序返回', () => 
   // limit 非法时回退/夹紧,不会因 0/负数退化成全表扫描
   assert.equal(listStateHistory({ projectId: PROJECT, limit: 2 }).length, 2);
   assert.equal(listStateHistory({ projectId: PROJECT, limit: -5 }).length, 1);
-  assert.equal(listStateHistory({ projectId: PROJECT, limit: 0 }).length, 9);
+  assert.equal(listStateHistory({ projectId: PROJECT, limit: 0 }).length, 15);
 });
 
 test('状态历史: 窗口起点的状态取自窗口前最近一条事件', () => {
@@ -88,7 +102,7 @@ test('状态历史: 逐容器换算运行/宕机/未知时长,未知不参与可
   const report = getStateUptime({ projectId: PROJECT, ...WINDOW });
   assert.deepEqual(report.window, { since: BASE, until: BASE + 3000, seconds: 3000 });
   assert.equal(report.truncated, false);
-  assert.equal(report.summary.containers, 5);
+  assert.equal(report.summary.containers, 7);
 
   const byId = new Map(report.containers.map((item) => [item.containerId, item]));
 
@@ -121,6 +135,23 @@ test('状态历史: 逐容器换算运行/宕机/未知时长,未知不参与可
   );
   assert.equal(unknown.availability, null);
 
+  // 窗口内无新事件但历史显示一直运行:整段窗口仍可判定为运行中。
+  const steady = byId.get('c-steady');
+  assert.ok(steady, '窗口内无事件的稳定容器也应出现在报表');
+  assert.deepEqual(
+    { up: steady.upSeconds, down: steady.downSeconds, unknown: steady.unknownSeconds, availability: steady.availability, lastAction: steady.lastAction, lastEventAt: steady.lastEventAt },
+    { up: 3000, down: 0, unknown: 0, availability: 100, lastAction: 'health_status', lastEventAt: BASE - 120 }
+  );
+
+  // 窗口内无新事件但历史显示已停止:整段窗口计为宕机,而非从报表中漏掉。
+  const stopped = byId.get('c-stopped');
+  assert.ok(stopped, '窗口内无事件的停止容器也应出现在报表');
+  assert.deepEqual(
+    { up: stopped.upSeconds, down: stopped.downSeconds, unknown: stopped.unknownSeconds, availability: stopped.availability, lastAction: stopped.lastAction },
+    { up: 0, down: 3000, unknown: 0, availability: 0, lastAction: 'health_status' }
+  );
+  assert.equal(byId.has('c-destroyed-before-window'), false, '窗口开始前已销毁的容器应排除');
+
   // destroy 之后状态不可知:窗口尾部不再延续,避免把"已删除"算成宕机时长。
   const destroyed = byId.get('c-destroyed');
   assert.deepEqual(
@@ -137,13 +168,13 @@ test('状态历史: 逐容器换算运行/宕机/未知时长,未知不参与可
   assert.equal(preceding.availability, 0);
 
   // 可用率升序置顶最不稳的容器;null(不可判定)排最后。abnormal/destroyed 同为 50,按名称定序保证稳定。
-  assert.deepEqual(report.containers.map((item) => item.containerName), ['preceding', 'abnormal', 'destroyed', 'up', 'unknown']);
+  assert.deepEqual(report.containers.map((item) => item.containerName), ['preceding', 'stopped', 'abnormal', 'destroyed', 'up', 'steady', 'unknown']);
 
   assert.deepEqual(report.summary, {
-    containers: 5,
-    availability: 40,
-    upSeconds: 4400,
-    downSeconds: 6600,
+    containers: 7,
+    availability: 43.53,
+    upSeconds: 7400,
+    downSeconds: 9600,
     unknownSeconds: 3000,
     transitions: 6,
     exits: 2,
@@ -167,7 +198,7 @@ test('状态历史: 窗口批量查询按容器分组且组内升序', () => {
 
 test('状态历史: 容器列表返回窗口内每个容器的最近一次转换', () => {
   const containers = listStateContainers({ projectId: PROJECT, since: BASE - 1000, limit: 100 });
-  assert.equal(containers.length, 5);
+  assert.equal(containers.length, 8);
   const web = containers.find((item) => item.containerId === 'c-up');
   assert.equal(web.action, 'start');
   assert.equal(web.timestamp, BASE + 2100);
