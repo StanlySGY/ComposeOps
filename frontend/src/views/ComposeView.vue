@@ -176,6 +176,11 @@ import ServiceEditor from '../components/compose/ServiceEditor.vue';
 import * as YAML from 'yaml';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { configureMonacoYaml } from 'monaco-yaml';
+// monaco-yaml 只注册 yaml 语言与 worker 能力(hover/校验/补全/格式化),不提供 Monarch 词法;
+// 缺了它编辑器只有纯文本着色。这里补 monaco 自带的 yaml 语法(约 7 kB,按需懒加载)。
+// 放在 configureMonacoYaml 之后触发:两份 setLanguageConfiguration 同优先级时后注册的胜出,
+// monaco 的 conf 更全(带 onEnterRules/indentationRules)。
+import 'monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import YamlWorker from 'monaco-yaml/yaml.worker?worker';
 import { api } from '../api/client.js';
