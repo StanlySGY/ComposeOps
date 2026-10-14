@@ -54,7 +54,7 @@ export const TOOL_CATEGORIES = {
     description: '日志查看、资源监控、健康检查',
     icon: 'stethoscope',
     risk: 'low',
-    tools: ['diagnostic.probe', 'diagnostic.analyze', 'compose.logs', 'compose.ps', 'metrics.query', 'network.inspect', 'server.inspect', 'server.command']
+    tools: ['diagnostic.probe', 'diagnostic.analyze', 'database.probe', 'compose.logs', 'compose.ps', 'metrics.query', 'network.inspect', 'server.inspect', 'server.command']
   },
   maintenance: {
     label: '运维维护',

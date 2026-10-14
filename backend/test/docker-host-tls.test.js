@@ -70,6 +70,53 @@ sbAHk8MGcLykwels5xjNMzbN5y1eCAVxxoZyOYastErXmf6DMoxZp+v7d5RergfL
 u18tpsPl3geKm6MZYdABRDexqVZY2KBdP/s58xrbUuEcJP71JFzpEmTl9g==
 -----END CERTIFICATE-----`;
 
+test('TLS Docker API: one node certificate failure does not poison a second healthy node', async (t) => {
+  const createFixture = async () => {
+    const server = https.createServer({
+      key: SERVER_KEY,
+      cert: SERVER_CERT,
+      ca: SERVER_CERT,
+      requestCert: true,
+      rejectUnauthorized: true,
+    }, (request, response) => {
+      if (request.url !== '/_ping') {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'text/plain' }).end('OK');
+    });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    t.after(() => new Promise((resolve) => {
+      server.closeAllConnections();
+      server.close(resolve);
+    }));
+    return { server, port: server.address().port };
+  };
+
+  const [nodeA, nodeB] = await Promise.all([createFixture(), createFixture()]);
+  const { createDockerClient } = await import('../src/services/docker-hosts.js');
+  const client = (node, ca, cert = SERVER_CERT, key = SERVER_KEY) => createDockerClient({
+    id: `tls-${node.port}`,
+    type: 'tcp',
+    host: '127.0.0.1',
+    port: node.port,
+    tls: { ca, cert, key },
+  });
+
+  await client(nodeA, SERVER_CERT).ping();
+  await client(nodeB, SERVER_CERT).ping();
+  await assert.rejects(client(nodeA, WRONG_CA).ping(), /certificate|self-signed|issuer|unable to verify/i);
+  // A's failure must not contaminate the client cache or trust configuration for B.
+  await client(nodeB, SERVER_CERT).ping();
+  nodeA.server.closeAllConnections();
+  await new Promise((resolve) => nodeA.server.close(resolve));
+  await assert.rejects(client(nodeA, SERVER_CERT).ping());
+  await client(nodeB, SERVER_CERT).ping();
+});
+
 test('TLS Docker API: validates CA, supports client certificates and rejects bad trust', async (t) => {
   const server = https.createServer({ key: SERVER_KEY, cert: SERVER_CERT, ca: SERVER_CERT, requestCert: true, rejectUnauthorized: true }, (request, response) => {
     if (request.url !== '/_ping') {

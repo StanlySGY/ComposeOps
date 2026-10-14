@@ -22,18 +22,29 @@ RUN npm run build --workspace frontend
 # ---------- Stage 2: install backend deps ----------
 # SQLite 已切到 Node 22 内置的 node:sqlite(backend/src/lib/sqlite.js),
 # 不再依赖 better-sqlite3 原生模块:无需预编译下载/源码编译,也就不需要 apt
-# 装编译器 —— 国内构建最容易被 deb.debian.org 卡住的一整段风险随之消失。
+# ---------- Stage 2: install backend deps ----------
+# better-sqlite3-multiple-ciphers has a native addon. Keep its compiler toolchain in this
+# disposable build stage only; the runtime image receives just node_modules + app files.
 FROM node:22-bookworm-slim AS backend-build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
 COPY frontend/package.json frontend/package.json
-RUN npm config set registry https://registry.npmmirror.com \
+
+# Seed the CA bundle from the already pinned official Docker CLI image so HTTPS apt works in slim.
+COPY --from=docker:cli /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ARG APT_MIRROR="mirrors.tuna.tsinghua.edu.cn"
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g; s|http://$APT_MIRROR|https://$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+ && apt-get update -o Acquire::Retries=5 -o Acquire::https::Timeout=30 \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && npm config set registry https://registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
- && npm ci --workspace backend --no-audit --no-fund
-
+ && npm ci --workspace backend --no-audit --no-fund \
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------- Stage 3: runtime ----------
 # Node 22 base (matches local dev v22) + docker CLI + compose plugin
@@ -47,6 +58,7 @@ FROM node:22-bookworm-slim AS runtime
 COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker:cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY --from=docker:cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+COPY --from=docker:cli /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # 这一层仍需 apt,但只装 git / ssh / curl,体量远小于 docker-ce-cli+compose-plugin。
 #   - ca-certificates:git 走 https 克隆、curl 访问外部都要它
@@ -55,9 +67,9 @@ COPY --from=docker:cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/
 #     此前镜像里两者都缺失,GitOps 在容器内直接 ENOENT。
 ARG APT_MIRROR="mirrors.tuna.tsinghua.edu.cn"
 RUN if [ -n "$APT_MIRROR" ]; then \
-      sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g; s|http://$APT_MIRROR|https://$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
     fi \
- && apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+ && apt-get update -o Acquire::Retries=5 -o Acquire::https::Timeout=30 \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg git openssh-client \
  && rm -rf /var/lib/apt/lists/* \
  # 构建期断言:任何一项缺失都让构建当场失败,而不是运行到用户点按钮时才报错。

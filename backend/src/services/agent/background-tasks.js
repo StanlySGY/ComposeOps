@@ -12,18 +12,24 @@
 const RING_LIMIT = 200 * 1024;
 const OUTPUT_TAIL = 20000;
 const MAX_TASKS = 10;
+const MAX_RETAINED_TASKS = 100; // 为未消费任务与异常长会话设置硬上限，避免运行数天后常驻堆无限增长
 const TASK_TTL_MS = 60 * 60 * 1000; // 已完成任务读取后保留 1 小时供回看
 
 const tasks = new Map();
 let seq = 0;
 
-function tail(text, limit = RING_LIMIT) {
-  return String(text || '').slice(-limit);
+function tailUtf8(text, limit = RING_LIMIT) {
+  const buffer = Buffer.from(String(text || ''), 'utf8');
+  if (buffer.length <= limit) return buffer.toString('utf8');
+  let start = buffer.length - limit;
+  // Start on a UTF-8 code point boundary so retained logs never contain replacement glyphs.
+  while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) start++;
+  return buffer.subarray(start).toString('utf8');
 }
 
 function pushOutput(task, chunk) {
-  task.output = tail(`${task.output}${chunk}`);
-  task.outputBytes = task.output.length;
+  task.output = tailUtf8(`${task.output}${chunk}`);
+  task.outputBytes = Buffer.byteLength(task.output, 'utf8');
 }
 
 function summarize(task) {
@@ -66,14 +72,18 @@ export function createBackgroundTask({ sessionId = 0, projectId = null, label = 
     consumed: false,
     child: null,
   };
+  task.settled = new Promise((resolve) => { task.resolveSettled = resolve; });
   tasks.set(task.id, task);
+  pruneExpired();
   Promise.resolve()
-    .then(() => run((chunk) => pushOutput(task, chunk), (child) => { task.child = child; }))
+    .then(() => run((chunk) => { if (task.status === 'running') pushOutput(task, chunk); }, (child) => { task.child = child; }))
     .then((result) => {
       const stopped = task.status === 'stopped';
-      if (!stopped) task.status = 'completed';
+      if (!stopped) {
+        task.status = 'completed';
+        if (result?.output) pushOutput(task, `\n${result.output}`);
+      }
       task.exitCode = Number(result?.exitCode ?? result ?? 0);
-      if (result?.output) pushOutput(task, `\n${result.output}`);
     })
     .catch((error) => {
       if (task.status === 'stopped') return;
@@ -82,8 +92,10 @@ export function createBackgroundTask({ sessionId = 0, projectId = null, label = 
       pushOutput(task, `\n[error] ${task.error}`);
     })
     .finally(() => {
-      task.finishedAt = new Date().toISOString();
-      if (!task.child) task.child = null;
+      if (!task.finishedAt) task.finishedAt = new Date().toISOString();
+      task.child = null;
+      task.resolveSettled?.();
+      pruneExpired();
     });
   return task.id;
 }
@@ -94,6 +106,13 @@ function pruneExpired() {
     if (task.status !== 'running' && task.consumed && task.finishedAt && now - Date.parse(task.finishedAt) > TASK_TTL_MS) {
       tasks.delete(id);
     }
+  }
+  const terminal = [...tasks.values()]
+    .filter((task) => task.status !== 'running')
+    .sort((a, b) => Date.parse(a.finishedAt || a.startedAt) - Date.parse(b.finishedAt || b.startedAt));
+  while (terminal.length > MAX_RETAINED_TASKS) {
+    const oldest = terminal.shift();
+    if (oldest) tasks.delete(oldest.id);
   }
 }
 
@@ -116,9 +135,17 @@ export function getBackgroundTask(taskId) {
 export async function waitForTaskOutput(taskId, waitMs = 0) {
   const task = getBackgroundTask(taskId);
   if (!task) throw Object.assign(new Error(`后台任务不存在:${taskId}`), { statusCode: 404 });
-  const deadline = Date.now() + Math.min(Math.max(Number(waitMs) || 0, 0), 300000);
-  while (task.status === 'running' && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  const boundedWait = Math.min(Math.max(Number(waitMs) || 0, 0), 300000);
+  if (task.status === 'running' && boundedWait > 0) {
+    let timer;
+    try {
+      await Promise.race([
+        task.settled,
+        new Promise((resolve) => { timer = setTimeout(resolve, boundedWait); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
   const stillRunning = task.status === 'running';
   if (!stillRunning) task.consumed = true;

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -82,6 +83,48 @@ test('notifications: 临时 503 与网络错误会有界重试,成功后停止',
     },
   });
   assert.equal(calls, 3);
+});
+
+test('notifications: real loopback webhook receives JSON and recovers after a 503 retry', async (t) => {
+  let calls = 0;
+  const requests = [];
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on('end', () => {
+      calls++;
+      requests.push({
+        method: request.method,
+        contentType: request.headers['content-type'],
+        authorization: request.headers.authorization,
+        body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+      });
+      if (calls === 1) response.writeHead(503, { 'Retry-After': '0' }).end('temporary outage');
+      else response.writeHead(204).end();
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const payload = { event: 'redis-unhealthy', service: 'cache', timestamp: 'test-fixture' };
+  await postJson(
+    `http://127.0.0.1:${server.address().port}/hooks/composeops`,
+    payload,
+    { Authorization: 'Bearer local-fixture-token' },
+    { attempts: 3, baseDelayMs: 0 },
+  );
+  assert.equal(calls, 2);
+  assert.equal(requests[0].method, 'POST');
+  assert.equal(requests[0].contentType, 'application/json');
+  assert.equal(requests[0].authorization, 'Bearer local-fixture-token');
+  assert.deepEqual(requests[0].body, payload);
+  assert.deepEqual(requests[1].body, payload);
 });
 
 test('notifications: 鉴权类 4xx 不重试,避免无效凭据重复投递', async () => {

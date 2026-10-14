@@ -10,9 +10,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 const candidate = process.argv[2];
 const baseline = process.argv[3];
 if (!candidate) throw new Error('Usage: node scripts/image-smoke.mjs <candidate-image> [upgrade-from-image]');
-// Run the isolated named-volume backup/restore integration once in the fresh-install CI leg.
-// The upgrade leg passes a baseline image and skips this duplicate integration run.
+// Run external-service recovery integrations once in the fresh-install CI leg.
+// The upgrade leg passes a baseline image and skips these duplicate integration runs.
 if (!baseline) {
+  console.log('Running isolated Redis/PostgreSQL Agent health and recovery integration');
+  await import('./database-service-integration.mjs');
   console.log('Running isolated Docker named-volume backup/restore integration');
   await import('./volume-backup-integration.mjs');
 }

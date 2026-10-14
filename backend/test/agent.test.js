@@ -28,17 +28,17 @@ const {
 } = await import('../src/lib/db.js');
 const { readAgentAlertRules } = await import('../src/services/alert-monitor.js');
 
-test('agent: 注册 63 个工具并暴露元数据(含风险等级)', () => {
+test('agent: 注册 64 个工具并暴露元数据(含风险等级)', () => {
   const agent = getAgent();
   const tools = agent.listTools();
-  assert.equal(tools.length, 63);
+  assert.equal(tools.length, 64);
   const names = new Set(tools.map((tool) => tool.name));
   for (const expected of [
     'compose.up', 'compose.restart', 'config.edit', 'diagnostic.probe', 'maintenance.clean', 'metrics.query',
     'compose.scale', 'compose.exec', 'config.rollback', 'config.diff', 'environment.get', 'environment.set',
     'network.inspect', 'security.audit', 'volume.mount', 'backup.trigger', 'notification.test', 'cron.create', 'performance.baseline',
     'project.list_managed', 'web.search', 'memory.search', 'memory.save', 'memory.delete', 'memory.sleep', 'config.inspect', 'config.propose', 'server.inspect', 'server.command', 'app.list', 'app.deploy', 'cron.list',
-    'inspection.run', 'inspection.status', 'gitops.drift', 'task.list', 'task.output', 'task.stop',
+    'inspection.run', 'inspection.status', 'gitops.drift', 'task.list', 'task.output', 'task.stop', 'database.probe',
     'volume.backup', 'volume.restore', 'volume.verify', 'volume.list_backups', 'event.list', 'event.update', 'event.diagnose',
     'skill.list', 'skill.use',
   ]) {
@@ -59,6 +59,7 @@ test('agent: 注册 63 个工具并暴露元数据(含风险等级)', () => {
 test('agent: 风险等级与多角色元数据可用', () => {
   assert.equal(RISK_LEVELS['maintenance.clean'], 'critical');
   assert.equal(RISK_LEVELS['compose.restart'], 'medium');
+  assert.equal(RISK_LEVELS['database.probe'], 'low');
   assert.equal(typeof AGENT_ROLES.planner, 'object');
   assert.deepEqual(AGENT_ROLES.validator.allowedTools.includes('compose.ps'), true);
 });

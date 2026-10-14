@@ -1,0 +1,10 @@
+# Optional encrypted database overlay.
+# Generate the host key out-of-band; never keep it in the Docker data volume or this repository.
+# Once enabled, ALWAYS use both compose files for up/down/maintenance:
+# docker compose -f docker-compose.yml -f docker-compose.encrypted.yml up -d
+services:
+  opsdash:
+    environment:
+      DB_ENCRYPTION_KEY_FILE: /run/secrets/composeops-db-key
+    volumes:
+      - ${COMPOSEOPS_DB_ENCRYPTION_KEY_FILE:?Set COMPOSEOPS_DB_ENCRYPTION_KEY_FILE to an external secret file}:/run/secrets/composeops-db-key:ro

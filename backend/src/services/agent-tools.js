@@ -18,6 +18,7 @@ import { registerInspectionTools } from './tools/inspection-tools.js';
 import { registerGitopsTools } from './tools/gitops-tools.js';
 import { registerTaskTools } from './tools/task-tools.js';
 import { registerSkillTools } from './tools/skill-tools.js';
+import { registerDatabaseTools } from './tools/database-tools.js';
 import { MACRO_TOOLS } from './agent-tool-categories.js';
 
 /**
@@ -44,6 +45,7 @@ export const RISK_LEVELS = {
   'environment.set': 'high',
   'volume.mount': 'high',
   'diagnostic.probe': 'low',
+  'database.probe': 'low',
   'diagnostic.analyze': 'low',
   'network.inspect': 'low',
   'security.audit': 'low',
@@ -126,5 +128,6 @@ export function registerAgentTools(agent) {
   registerGitopsTools(agent);
   registerTaskTools(agent);
   registerSkillTools(agent);
+  registerDatabaseTools(agent);
   return agent;
 }

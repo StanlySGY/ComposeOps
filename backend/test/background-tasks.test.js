@@ -124,6 +124,31 @@ test('background-tasks: stop 之后 run 结算不得把状态改回 completed', 
   assert.equal(getBackgroundTask(id).exitCode, 0);
 });
 
+test('background-tasks: output buffer is byte-bounded and keeps UTF-8 boundaries intact', async () => {
+  resetBackgroundTasks();
+  const id = createBackgroundTask({
+    sessionId: 21,
+    run: async (onOutput) => {
+      onOutput('日志🌧️'.repeat(100000));
+      return { exitCode: 0 };
+    },
+  });
+  const result = await waitForTaskOutput(id, 3000);
+  assert.equal(result.status, 'completed');
+  assert.ok(result.outputBytes <= 200 * 1024, `retained output was ${result.outputBytes} bytes`);
+  assert.ok(!result.output.includes('�'), 'tail should start at a UTF-8 boundary');
+});
+
+test('background-tasks: completed task registry remains bounded under sustained task churn', async () => {
+  resetBackgroundTasks();
+  for (let index = 0; index < 125; index++) {
+    const id = createBackgroundTask({ sessionId: 22, label: `task-${index}`, run: async () => ({ exitCode: 0 }) });
+    const result = await waitForTaskOutput(id, 3000);
+    assert.equal(result.status, 'completed');
+  }
+  assert.ok(listBackgroundTasks(22).length <= 100);
+});
+
 test('background-tasks: listBackgroundTasks 按会话过滤', async () => {
   resetBackgroundTasks();
   createBackgroundTask({ sessionId: 1, run: async () => ({ exitCode: 0 }) });
