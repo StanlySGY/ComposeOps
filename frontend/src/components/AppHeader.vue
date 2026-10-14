@@ -22,16 +22,16 @@
         <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span class="hidden sm:inline">服务离线</span>
       </span>
       <div class="relative">
-        <button class="btn-secondary min-h-8! px-2.5! py-1! text-xs" title="快速切换项目" aria-label="快速切换项目" @click="toggleProjectSwitcher">
+        <button ref="projectSwitcherTriggerRef" class="btn-secondary min-h-8! px-2.5! py-1! text-xs" title="快速切换项目" aria-label="快速切换项目" :aria-expanded="projectSwitcherOpen" :aria-controls="projectSwitcherOpen ? 'project-switcher-panel' : undefined" @click="toggleProjectSwitcher">
           <Layers class="w-3.5 h-3.5" /><span class="hidden min-[380px]:inline">项目</span>
           <ChevronDown class="w-3 h-3" />
         </button>
         <div v-if="projectSwitcherOpen" class="command-backdrop" @click.self="projectSwitcherOpen = false"></div>
-        <div v-if="projectSwitcherOpen" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60">
-          <div class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
-          <label class="search-field mx-2 my-2 flex-none" aria-label="搜索项目">
+        <div v-if="projectSwitcherOpen" id="project-switcher-panel" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60" role="group" aria-labelledby="project-switcher-title">
+          <div id="project-switcher-title" class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
+          <label class="search-field mx-2 my-2 flex-none">
             <Search class="h-3.5 w-3.5 shrink-0" />
-            <input v-model="projectQuery" type="search" placeholder="搜索项目、归属或路径" />
+            <input ref="projectSwitcherSearchRef" v-model="projectQuery" type="search" aria-label="搜索项目" placeholder="搜索项目、归属或路径" />
           </label>
           <div class="max-h-80 overflow-y-auto p-1.5">
             <button v-for="p in quickProjects" :key="p.id" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-800/60" @click="goProject(p)">
@@ -70,7 +70,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, Bot, Boxes, ChartNoAxesCombined, ChevronDown, FileCode2, FileSearch, BellRing, History, KeyRound, Layers, LogOut, Play, RotateCw, Rows3, ScrollText, Search, Settings, ShieldCheck, Square, Store, TerminalSquare } from 'lucide-vue-next';
 import EventCenter from './EventCenter.vue';
@@ -80,6 +80,7 @@ import ConfirmDialog from './common/ConfirmDialog.vue';
 import { api, bumpHostEpoch } from '../api/client.js';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
+import { useEscapeKey } from '../composables/useEscapeKey.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -90,6 +91,20 @@ const currentTime = ref('');
 const commandOpen = ref(false);
 const projectSwitcherOpen = ref(false);
 const projectQuery = ref('');
+const projectSwitcherTriggerRef = ref(null);
+const projectSwitcherSearchRef = ref(null);
+let previousProjectSwitcherFocus = null;
+watch(projectSwitcherOpen, async (isOpen) => {
+  if (isOpen) {
+    previousProjectSwitcherFocus = projectSwitcherTriggerRef.value || document.activeElement;
+    await nextTick();
+    if (projectSwitcherOpen.value) projectSwitcherSearchRef.value?.focus({ preventScroll: true });
+    return;
+  }
+  if (previousProjectSwitcherFocus?.isConnected) previousProjectSwitcherFocus.focus({ preventScroll: true });
+  previousProjectSwitcherFocus = null;
+});
+useEscapeKey({ active: projectSwitcherOpen, onClose: () => { projectSwitcherOpen.value = false; }, layer: 'event' });
 const pendingProjectAction = ref(null);
 const projectActionBusy = ref(false);
 const density = ref(localStorage.getItem('composeops:density') || 'comfortable');

@@ -1,6 +1,6 @@
 <template>
   <div class="relative">
-    <button class="host-switch" title="切换 Docker 节点" aria-label="切换 Docker 节点" @click="toggle">
+    <button ref="triggerRef" class="host-switch" title="切换 Docker 节点" aria-label="切换 Docker 节点" :aria-expanded="open" :aria-controls="open ? 'docker-host-switcher-panel' : undefined" @click="toggle">
       <span v-if="!active || active.status === 'online'" class="status-ping bg-emerald-400"></span>
       <span v-else class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
       <span class="max-w-10 truncate sm:hidden">{{ active?.type === 'local' ? '本机' : (active?.name || '节点') }}</span>
@@ -8,10 +8,10 @@
       <ChevronDown class="w-3 h-3 text-surface-500" />
     </button>
     <div v-if="open" class="fixed inset-0 z-50" @click="open = false"></div>
-    <section v-if="open" class="host-dropdown z-50">
+    <section v-if="open" id="docker-host-switcher-panel" class="host-dropdown z-50" role="group" aria-labelledby="docker-host-switcher-title">
       <header class="flex items-center justify-between border-b border-surface-800 px-3 py-2">
-        <span class="text-xs font-medium text-surface-300">Docker 节点</span>
-        <button class="icon-btn" title="刷新节点状态" :disabled="loading" @click="reload"><RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" /></button>
+        <span id="docker-host-switcher-title" class="text-xs font-medium text-surface-300">Docker 节点</span>
+        <button class="icon-btn" title="刷新节点状态" aria-label="刷新节点状态" :disabled="store.loading" @click="reload"><RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': store.loading }" /></button>
       </header>
       <div class="max-h-72 overflow-y-auto p-1.5">
         <button v-for="host in store.hosts" :key="host.id" class="host-item" :class="{ active: host.id === store.activeHostId }" @click="select(host)">
@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { useRouter } from 'vue-router';
 import { useHostsStore } from '../stores/hosts.js';
@@ -44,6 +44,16 @@ const toast = useToastStore();
 const router = useRouter();
 const goManage = () => { open.value = false; router.push('/settings?tab=hosts'); };
 const open = ref(false);
+const triggerRef = ref(null);
+let previousTriggerFocus = null;
+watch(open, (isOpen) => {
+  if (isOpen) {
+    previousTriggerFocus = triggerRef.value || document.activeElement;
+    return;
+  }
+  if (previousTriggerFocus?.isConnected) previousTriggerFocus.focus({ preventScroll: true });
+  previousTriggerFocus = null;
+});
 const active = computed(() => store.active);
 
 async function toggle() {
