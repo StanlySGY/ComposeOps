@@ -16,6 +16,8 @@
     "dev": "npm run build --workspace=frontend && node backend/src/index.js",
     "start": "node backend/src/index.js",
     "test": "npm run test --workspace=backend && npm run test --workspace=frontend",
-    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend"
+    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
+    "test:agent-soak": "node scripts/agent-soak.mjs",
+    "recovery:drill": "node backend/scripts/encryption-recovery-drill.js"
   }
 }

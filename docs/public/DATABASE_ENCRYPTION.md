@@ -93,6 +93,16 @@ docker exec opsdash node scripts/database-backup.js --verify /tmp/opsdash-encryp
 
 备份从容器拷到宿主机或异地存储后，应限制访问权限。恢复到新卷时，必须先准备同一密钥的受控副本，再使用加密 overlay 启动应用。不要先以不含密钥的版本打开加密文件。
 
+## 5. 恢复演练（不会修改在线数据库）
+
+恢复前先确保加密快照和密钥分别存储，二者都在仓库目录之外；密钥文件应为 `0600`，密钥目录应为 `0700`。可对现有加密快照进行只读来源校验，并将其复制到一次性临时目录，使用外置密钥打开副本、执行完整性检查、核对 schema、迁移版本及核心表行数。演练退出时自动删除临时副本；在线数据库、备份和密钥都不会被改写。
+
+```sh
+install -d -m 700 "$HOME/.local/share/composeops-recovery/reports"
+npm run recovery:drill -- --backup="$HOME/.local/share/composeops-recovery/opsdash-encrypted-snapshot.db" --key-file="$HOME/.config/composeops/db-encryption-key" --report-file="$HOME/.local/share/composeops-recovery/reports/recovery-drill-$(date +%Y%m%d-%H%M%S).json"
+```
+报告使用 `0600` 权限创建，且不会包含密钥内容。演练会拒绝明文数据库、错误密钥、权限过宽的密钥文件、仓库内备份，以及与备份位于同一目录树的密钥。它验证的是**当前机器上的可恢复性**，不能代替异地副本、独立密钥托管、另一台主机上的恢复或正式灾难恢复时间目标验收。
+
 ## 安全边界
 
 - 加密保护 SQLite 主数据库文件的静态内容；运行中的进程仍会在内存中访问解密后的数据。
