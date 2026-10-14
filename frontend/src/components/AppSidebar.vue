@@ -34,7 +34,7 @@
         <component :is="item.icon" class="h-[18px] w-[18px] shrink-0" />
         <span class="max-w-full truncate">{{ item.label }}</span>
       </router-link>
-      <button class="nav-link flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] text-surface-400" :class="{ 'nav-link-active': moreOpen }" aria-label="更多功能" @click="moreOpen = true">
+      <button ref="moreTriggerRef" class="nav-link flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] text-surface-400" :class="{ 'nav-link-active': moreOpen }" aria-label="更多功能" :aria-expanded="moreOpen" :aria-controls="moreOpen ? 'mobile-more-dialog' : undefined" @click="moreOpen = true">
         <Menu class="h-[18px] w-[18px]" />
         <span>更多</span>
       </button>
@@ -46,9 +46,9 @@
   </aside>
   <teleport to="body">
     <div v-if="moreOpen" class="fixed inset-0 z-51 bg-black/55 md:hidden" @click.self="moreOpen = false">
-      <section class="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-2xl border-t border-surface-700 bg-surface-950 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl" role="dialog" aria-modal="true" aria-label="更多功能">
+      <section ref="moreDialogRef" id="mobile-more-dialog" class="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-2xl border-t border-surface-700 bg-surface-950 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="mobile-more-dialog-title" tabindex="-1" @keydown="trapMoreDialogTab">
         <button class="btn-secondary mb-3 w-full" @click="moreOpen = false; openGuide()"><CircleHelp class="h-4 w-4" />入门指南</button>
-        <div class="mb-3 flex items-center justify-between"><div><h2 class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" title="关闭" @click="moreOpen = false">×</button></div>
+        <div class="mb-3 flex items-center justify-between"><div><h2 id="mobile-more-dialog-title" class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" aria-label="关闭更多功能" @click="moreOpen = false">×</button></div>
         <div v-for="group in mobileGroups" :key="group.label" class="mb-4 last:mb-0">
           <h3 class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">{{ group.label }}</h3>
           <div class="grid grid-cols-2 gap-2">
@@ -63,7 +63,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { ChevronDown, CircleHelp, Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
@@ -132,5 +132,48 @@ watch(() => route.path, (value) => {
 const moreOpen = ref(false);
 const mobileItems = [primaryItems[0], primaryItems[1], primaryItems[3], primaryItems[4]];
 const mobileGroups = navGroups;
+const moreTriggerRef = ref(null);
+const moreDialogRef = ref(null);
+let previousMoreFocus = null;
+
+function getMoreFocusableElements() {
+  const dialog = moreDialogRef.value;
+  if (!dialog) return [];
+  return [...dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true' && !element.closest('[hidden], [inert]'));
+}
+
+watch(moreOpen, async (isOpen) => {
+  if (isOpen) {
+    previousMoreFocus = document.activeElement || moreTriggerRef.value;
+    await nextTick();
+    if (!moreOpen.value || !moreDialogRef.value) return;
+    (getMoreFocusableElements()[0] || moreDialogRef.value).focus({ preventScroll: true });
+    return;
+  }
+  if (previousMoreFocus?.isConnected) previousMoreFocus.focus({ preventScroll: true });
+  previousMoreFocus = null;
+});
+
+function trapMoreDialogTab(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = moreDialogRef.value;
+  if (!dialog) return;
+  const focusables = getMoreFocusableElements();
+  if (!focusables.length) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
 useEscapeKey({ active: moreOpen, layer: 'drawer', onClose: () => { moreOpen.value = false; }, lockBody: true });
 </script>

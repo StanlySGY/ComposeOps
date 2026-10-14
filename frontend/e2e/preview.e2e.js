@@ -175,17 +175,38 @@ test('快速跳转支持键盘搜索、执行与 Escape 关闭', async ({ page }
   await expect(trigger).toBeFocused();
 });
 
-test('移动端更多功能抽屉可导航、Escape 可关闭且页面不横向溢出', async ({ page, isMobile }) => {
+test('移动端更多功能抽屉可访问、焦点受限、Escape 可关闭且页面不横向溢出', async ({ page, isMobile }) => {
   test.skip(!isMobile, '仅在移动设备项目中验证移动端导航抽屉');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('./#/dashboard');
-  const more = page.getByRole('button', { name: '更多功能' });
+  const more = page.getByRole('button', { name: '更多功能', exact: true });
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
   await more.click();
   const drawer = page.getByRole('dialog', { name: '更多功能' });
   await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveAttribute('aria-labelledby', 'mobile-more-dialog-title');
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const guide = drawer.getByRole('button', { name: '入门指南' });
+  await expect(guide).toBeFocused();
   await expect(drawer.getByRole('link', { name: '设置' })).toBeVisible();
+
+  // Tab 顺序在抽屉内部循环，不允许键盘焦点落到背景页面。
+  const lastLink = drawer.getByRole('link', { name: '设置' });
+  await page.keyboard.press('Shift+Tab');
+  await expect(lastLink).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(guide).toBeFocused();
+
   await page.keyboard.press('Escape');
   await expect(drawer).toHaveCount(0);
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(more).toBeFocused();
+
+  await more.click();
+  await drawer.getByRole('button', { name: '关闭更多功能' }).click();
+  await expect(drawer).toHaveCount(0);
+  await expect(more).toBeFocused();
+
   await more.click();
   await drawer.getByRole('link', { name: '设置' }).click();
   await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
