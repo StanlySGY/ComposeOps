@@ -13,6 +13,8 @@ if (!candidate) throw new Error('Usage: node scripts/image-smoke.mjs <candidate-
 // Run external-service recovery integrations once in the fresh-install CI leg.
 // The upgrade leg passes a baseline image and skips these duplicate integration runs.
 if (!baseline) {
+  // Let the external-service integration invoke the tool from the candidate image that the job built.
+  process.env.COMPOSEOPS_TEST_IMAGE = candidate;
   console.log('Running isolated Redis/PostgreSQL Agent health and recovery integration');
   await import('./database-service-integration.mjs');
   console.log('Running isolated Docker named-volume backup/restore integration');

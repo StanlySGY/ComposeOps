@@ -10,8 +10,7 @@ const suffix = randomBytes(6).toString('hex');
 const projectName = `composeops-db-it-${suffix}`;
 const workDir = mkdtempSync(path.join(os.tmpdir(), `${projectName}-`));
 const composeFile = path.join(workDir, 'compose.yaml');
-const databasePath = path.join(workDir, 'agent-test.db');
-process.env.DB_PATH = databasePath;
+const probeImage = process.env.COMPOSEOPS_TEST_IMAGE || 'stanly1997/opsdash:latest';
 
 function docker(args, { expectFailure = false, timeout = 120000 } = {}) {
   const result = spawnSync('docker', args, {
@@ -81,18 +80,33 @@ try {
   assert.ok(redisId, 'Redis container should be discovered');
   assert.ok(postgresId, 'PostgreSQL container should be discovered');
 
-  // The registered Agent tool runs exactly the same fixed argv commands against actual containers.
-  const { registerDatabaseTools } = await import('../backend/src/services/tools/database-tools.js');
-  const registered = new Map();
-  registerDatabaseTools({ registerTool(name, config) { registered.set(name, config); return this; } });
-  const probeTool = registered.get('database.probe');
-  assert.ok(probeTool, 'database.probe Agent tool should be registered');
-  const fixtureProject = { id: projectName, projectName: 'Database Integration', managed: true };
+  // Run the real registered Agent tool inside the candidate application image, with its own
+  // dependency graph, while sharing only the isolated runner Docker socket. This mirrors deployment
+  // and avoids relying on node_modules being installed on the CI host.
   async function probe(engine, id) {
-    return probeTool.execute(
-      { engine, projectId: projectName, containerId: id },
-      { project: fixtureProject, container: { id, name: engine } },
-    );
+    const params = { engine, projectId: projectName, containerId: id };
+    const source = `
+      import { registerDatabaseTools } from './src/services/tools/database-tools.js';
+      const request = ${JSON.stringify(params)};
+      const registry = new Map();
+      registerDatabaseTools({ registerTool(name, config) { registry.set(name, config); return this; } });
+      const tool = registry.get('database.probe');
+      if (!tool) throw new Error('database.probe Agent tool is not registered');
+      const result = await tool.execute(request, {
+        project: { id: request.projectId, projectName: 'Database Integration', managed: true },
+        container: { id: request.containerId, name: request.engine },
+      });
+      console.log('__COMPOSEOPS_DATABASE_PROBE__' + JSON.stringify(result));
+    `;
+    const output = docker([
+      'run', '--rm', '--label', `com.composeops.integration=${projectName}`,
+      '--volume', '/var/run/docker.sock:/var/run/docker.sock',
+      '--entrypoint', 'node', probeImage, '--input-type=module', '-e', source,
+    ], { timeout: 120000 });
+    const marker = '__COMPOSEOPS_DATABASE_PROBE__';
+    const markerIndex = output.lastIndexOf(marker);
+    assert.notEqual(markerIndex, -1, 'probe helper should return structured output');
+    return JSON.parse(output.slice(markerIndex + marker.length).trim());
   }
 
   const redisHealth = await probe('redis', redisId);
