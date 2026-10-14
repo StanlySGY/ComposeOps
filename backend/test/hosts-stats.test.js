@@ -53,12 +53,14 @@ test('hosts: 默认本地节点永远存在且不可删除', () => {
 });
 
 test('hosts: upsert 保存/更新节点并隐藏敏感字段', () => {
-  const created = upsertHost({ name: 'Worker-1', type: 'ssh', host: '10.0.0.5', port: 22, username: 'root', password: 'hunter2', privateKey: 'KEYDATA' });
+  const created = upsertHost({ name: 'Worker-1', type: 'ssh', host: '10.0.0.5', port: 22, username: 'root', password: 'hunter2', privateKey: 'KEYDATA', hostFingerprint: 'a'.repeat(64) });
   assert.ok(created.id);
   assert.equal(created.password, '••••••••••••');
   assert.equal(created.hasPassword, true);
   assert.equal(created.privateKey, '••••••••••••');
   assert.equal(created.hasPrivateKey, true);
+  assert.equal(created.hostFingerprint, 'a'.repeat(64));
+  assert.equal(getHost(created.id).hostFingerprint, 'a'.repeat(64));
 
   // 更新时保留旧凭据(传掩码跳过)
   const updated = upsertHost({ id: created.id, name: 'Worker-1 v2', type: 'ssh', host: '10.0.0.5', port: 22, username: 'root', password: '••••••••••••', privateKey: '••••••••••••' });
@@ -66,6 +68,12 @@ test('hosts: upsert 保存/更新节点并隐藏敏感字段', () => {
   const stored = getHost(created.id);
   assert.equal(stored.password, 'hunter2'); // 内部仍保留明文
   assert.equal(stored.privateKey, 'KEYDATA');
+  assert.equal(stored.hostFingerprint, 'a'.repeat(64)); // 编辑其他字段时保留指纹
+  assert.equal(listHosts().find((host) => host.id === created.id).hostFingerprint, 'a'.repeat(64));
+});
+
+test('hosts: 主机指纹格式无效时拒绝保存且不绕过校验', () => {
+  assert.throws(() => upsertHost({ name: 'Bad fingerprint', type: 'ssh', host: '127.0.0.1', hostFingerprint: 'not-a-fingerprint' }), { statusCode: 400 });
 });
 
 test('hosts: setActiveHost 切换并持久化,删除后回落本地', () => {

@@ -7,7 +7,7 @@ import test from 'node:test';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-notifications-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
-const { enabledAlertEvents, getNotificationConfig, saveNotificationConfig } = await import('../src/services/notifications.js');
+const { enabledAlertEvents, getNotificationConfig, saveNotificationConfig, postJson } = await import('../src/services/notifications.js');
 
 test('notifications: 旧版 bark 配置只落到 bark 渠道', () => {
   saveNotificationConfig({ enabled: true, type: 'bark', endpoint: 'https://bark.example/push' });
@@ -67,6 +67,60 @@ test('notifications: 钉钉与飞书渠道保存且互不串扰', () => {
   assert.equal(wecom.enabled, false);
   // 新渠道加入后,旧渠道(bark/webhook)配置不丢
   assert.equal(config.channels.find((channel) => channel.type === 'bark').endpoint, 'https://bark.example/a');
+});
+
+test('notifications: 临时 503 与网络错误会有界重试,成功后停止', async () => {
+  let calls = 0;
+  await postJson('http://notification.test/hook', { title: 'test' }, {}, {
+    attempts: 3,
+    baseDelayMs: 0,
+    fetchImpl: async () => {
+      calls++;
+      if (calls === 1) return new Response('temporary failure', { status: 503 });
+      if (calls === 2) throw new TypeError('connection reset');
+      return new Response(null, { status: 204 });
+    },
+  });
+  assert.equal(calls, 3);
+});
+
+test('notifications: 鉴权类 4xx 不重试,避免无效凭据重复投递', async () => {
+  let calls = 0;
+  await assert.rejects(postJson('http://notification.test/hook', {}, {}, {
+    attempts: 4,
+    baseDelayMs: 0,
+    fetchImpl: async () => { calls++; return new Response('unauthorized', { status: 401 }); },
+  }), /通知服务返回 401/);
+  assert.equal(calls, 1);
+});
+
+test('notifications: honours Retry-After for rate-limited responses', async () => {
+  let calls = 0;
+  const delays = [];
+  await postJson('http://notification.test/hook', {}, {}, {
+    attempts: 3,
+    baseDelayMs: 0,
+    sleep: async (ms) => { delays.push(ms); },
+    fetchImpl: async () => {
+      calls++;
+      return calls === 1
+        ? new Response('rate limited', { status: 429, headers: { 'retry-after': '2' } })
+        : new Response(null, { status: 204 });
+    },
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [2000]);
+});
+
+test('notifications: caller cancellation stops attempts without retry', async () => {
+  const controller = new AbortController();
+  controller.abort(new DOMException('cancelled', 'AbortError'));
+  let calls = 0;
+  await assert.rejects(postJson('http://notification.test/hook', {}, {}, {
+    signal: controller.signal,
+    fetchImpl: async () => { calls++; return new Response(null, { status: 204 }); },
+  }), /cancelled|aborted/i);
+  assert.equal(calls, 0);
 });
 
 test('notifications: 触发事件默认三项,自定义勾选可持久化', () => {

@@ -1,4 +1,5 @@
 import ssh2 from 'ssh2';
+import { createSshHostVerifier } from '../lib/ssh-fingerprint.js';
 
 const { Client } = ssh2;
 
@@ -45,6 +46,10 @@ function connect(host) {
     };
     if (host.privateKey) options.privateKey = host.privateKey;
     if (host.password) options.password = host.password;
+    if (host.hostFingerprint) {
+      options.hostHash = 'sha256';
+      options.hostVerifier = createSshHostVerifier(host.hostFingerprint);
+    }
     if (!options.privateKey && !options.password && process.env.SSH_AUTH_SOCK) {
       options.agent = process.env.SSH_AUTH_SOCK;
     }

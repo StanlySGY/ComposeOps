@@ -161,20 +161,70 @@ export function saveNotificationConfig(input = {}) {
   return getNotificationConfig(true);
 }
 
-async function postJson(url, body, headers = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`通知服务返回 ${response.status}`);
-  } finally {
-    clearTimeout(timer);
+const NOTIFICATION_ATTEMPTS = 3;
+const NOTIFICATION_TIMEOUT_MS = 10000;
+const NOTIFICATION_RETRY_BASE_MS = 250;
+
+function notificationRetryDelay(error, attempt, baseDelayMs) {
+  if (Number.isFinite(error.retryAfterMs) && error.retryAfterMs >= 0) {
+    return Math.min(error.retryAfterMs, 5000);
   }
+  return Math.min(baseDelayMs * (2 ** attempt), 2000);
+}
+
+function isRetryableNotificationError(error) {
+  if (error?.retryable === false) return false;
+  if (error?.status) return [408, 425, 429].includes(Number(error.status)) || Number(error.status) >= 500;
+  return error?.code === 'NOTIFICATION_TIMEOUT' || error?.name === 'TypeError';
+}
+
+/** Retry transient network failures, rate limiting and 5xx responses with a strict bounded budget. */
+export async function postJson(url, body, headers = {}, options = {}) {
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const attempts = Math.max(1, Math.min(Number(options.attempts) || NOTIFICATION_ATTEMPTS, 5));
+  const timeoutMs = Math.max(1, Math.min(Number(options.timeoutMs) || NOTIFICATION_TIMEOUT_MS, 60000));
+  const baseDelayMs = Math.max(0, Math.min(Number(options.baseDelayMs ?? NOTIFICATION_RETRY_BASE_MS), 5000));
+  const sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  let lastError;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    options.signal?.throwIfAborted();
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(Object.assign(new Error('通知请求超时'), { code: 'NOTIFICATION_TIMEOUT' }));
+    }, timeoutMs);
+    timer.unref?.();
+    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    try {
+      const response = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!response.ok) {
+        const retryAfter = response.headers?.get?.('retry-after');
+        const seconds = retryAfter != null ? Number(retryAfter) : NaN;
+        const date = retryAfter && !Number.isFinite(seconds) ? Date.parse(retryAfter) : NaN;
+        const retryAfterMs = Number.isFinite(seconds) ? Math.max(0, seconds * 1000)
+          : Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+        throw Object.assign(new Error(`通知服务返回 ${response.status}`), {
+          status: response.status,
+          retryAfterMs,
+          retryable: [408, 425, 429].includes(response.status) || response.status >= 500,
+        });
+      }
+      return;
+    } catch (error) {
+      if (options.signal?.aborted) throw options.signal.reason || error;
+      lastError = controller.signal.aborted ? controller.signal.reason || error : error;
+      if (attempt + 1 >= attempts || !isRetryableNotificationError(lastError)) throw lastError;
+      await sleep(notificationRetryDelay(lastError, attempt, baseDelayMs));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error('通知发送失败');
 }
 
 async function deliver(type, config, title, body) {

@@ -28,6 +28,7 @@ import { redactSecretValue } from '../lib/secret-redactor.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
 import { compactSessionHistory } from '../services/agent/compaction.js';
 import { randomUUID } from 'node:crypto';
+import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
 
 export default async function agentRoutes(fastify) {
 
@@ -168,10 +169,15 @@ function aiRateLimit(limit, windowMs = 60000) {
       'X-Accel-Buffering': 'no',
     });
 
+    const abortController = new AbortController();
+    const streamWriter = createBoundedSseWriter(reply.raw, {
+      maxQueuedBytes: 256 * 1024,
+      onOverflow: () => abortController.abort(new DOMException('客户端接收速度过慢，执行已中断', 'AbortError')),
+    });
     const send = (event) => {
       if (reply.raw.destroyed || reply.raw.writableEnded) return;
       const publicEvent = toPublicAgentEvent(event);
-      if (publicEvent) reply.raw.write(`data: ${JSON.stringify(publicEvent)}\n\n`);
+      if (publicEvent) streamWriter.send(publicEvent);
     };
 
     const agent = getAgent();
@@ -181,7 +187,6 @@ function aiRateLimit(limit, windowMs = 60000) {
     const context = { projectId, containerId, sessionId, gateKey, role, webSearchEnabled, attachedLogs, history, pageContext };
 
     // 客户端断开时中断执行
-    const abortController = new AbortController();
     let completed = false;
     reply.raw.on('close', () => {
       if (!completed) {
@@ -204,7 +209,7 @@ function aiRateLimit(limit, windowMs = 60000) {
       // 保证前端 running 状态一定在 SSE 关闭前清理。
       send({ type: 'done', content: null, closed: true });
       completed = true;
-      reply.raw.end();
+      await streamWriter.end();
     }
   });
 

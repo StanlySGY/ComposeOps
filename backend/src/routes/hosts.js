@@ -26,6 +26,7 @@ const hostFields = {
   host: { type: 'string', maxLength: 255 },
   port: { anyOf: [{ type: 'integer', minimum: 1, maximum: 65535 }, { type: 'string', maxLength: 5 }] },
   username: { type: 'string', maxLength: 128 },
+  hostFingerprint: { type: 'string', maxLength: 128 },
   password: secretField,
   privateKey: secretField,
   tls: {

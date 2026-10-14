@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { randomUUID } from 'node:crypto';
 import { getSetting, setSetting } from '../lib/db.js';
+import { createSshHostVerifier, normalizeSshFingerprint } from '../lib/ssh-fingerprint.js';
 import localDocker from './docker.js';
 
 const SETTINGS_KEY = 'docker.hosts';
@@ -118,6 +119,9 @@ export function upsertHost(input = {}) {
     host: normalizedType === 'local' ? '' : String(host).trim(),
     port: port ? Number(port) : (normalizedType === 'ssh' ? 22 : 2375),
     username: String(username || 'root').trim(),
+    hostFingerprint: normalizedType === 'ssh'
+      ? (input.hostFingerprint === undefined ? (existing?.hostFingerprint || '') : normalizeSshFingerprint(input.hostFingerprint))
+      : '',
     password: keepSecret(existing, input.password),
     privateKey: keepPrivateKey(existing, input.privateKey),
     tls: normalizeTls(existing, input.tls),
@@ -178,6 +182,10 @@ export function createDockerClient(host) {
       if (host.password) sshOptions.passphrase = host.password;
     } else if (host.password) {
       sshOptions.password = host.password;
+    }
+    if (host.hostFingerprint) {
+      sshOptions.hostHash = 'sha256';
+      sshOptions.hostVerifier = createSshHostVerifier(host.hostFingerprint);
     }
     return new Docker({
       protocol: 'ssh',
@@ -250,6 +258,7 @@ export function probeHost(input = {}) {
     host: String(input.host || '').trim(),
     port: input.port ? Number(input.port) : (type === 'ssh' ? 22 : 2375),
     username: String(input.username || 'root').trim(),
+    hostFingerprint: normalizeSshFingerprint(input.hostFingerprint),
     password: String(input.password || ''),
     privateKey: String(input.privateKey || ''),
     tls: { ca: String(input.tls?.ca || ''), cert: String(input.tls?.cert || ''), key: String(input.tls?.key || '') },

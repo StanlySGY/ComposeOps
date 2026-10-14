@@ -209,7 +209,9 @@
           <div class="form-grid">
             <label class="md:col-span-2">SSH 密码<input v-model="hostEditor.password" type="password" class="input" :placeholder="hostEditor.hasPassword ? '已配置,留空保持不变' : '…'" /></label>
             <label class="md:col-span-2">私钥(可选)<textarea v-model="hostEditor.privateKey" rows="4" class="input font-mono" :placeholder="hostEditor.hasPrivateKey ? '已配置,留空保持不变' : '-----BEGIN OPENSSH PRIVATE KEY-----…'"></textarea></label>
+            <label class="md:col-span-2">SSH 主机密钥指纹（推荐）<input v-model="hostEditor.hostFingerprint" maxlength="128" class="input font-mono" spellcheck="false" placeholder="SHA256:… 或 64 位 SHA-256 十六进制" /></label>
           </div>
+          <p class="text-xs text-amber-300/90">请通过可信渠道核对服务器指纹。配置后会校验 SSH 主机身份并拒绝不匹配的主机；留空仅为兼容旧节点，不启用主机指纹锁定。</p>
         </template>
         <template v-else>
           <details class="text-sm"><summary class="cursor-pointer text-surface-300">TLS 客户端证书(可选)</summary>
@@ -336,6 +338,7 @@ function openHostEditor(host) {
     host: host.host || '',
     port: host.port || (host.type === 'ssh' ? 22 : 2375),
     username: host.username || 'root',
+    hostFingerprint: host.hostFingerprint || '',
     password: host.hasPassword ? '' : '',
     privateKey: host.hasPrivateKey ? '' : '',
     hasPassword: host.hasPassword,
@@ -343,7 +346,7 @@ function openHostEditor(host) {
     tls: { ca: '', cert: '', key: '' },
     pingResult: null,
     pinging: false,
-  } : { id: '', name: '', type: 'tcp', host: '', port: 2375, username: 'root', password: '', privateKey: '', hasPassword: false, hasPrivateKey: false, tls: { ca: '', cert: '', key: '' }, pingResult: null, pinging: false };
+  } : { id: '', name: '', type: 'tcp', host: '', port: 2375, username: 'root', hostFingerprint: '', password: '', privateKey: '', hasPassword: false, hasPrivateKey: false, tls: { ca: '', cert: '', key: '' }, pingResult: null, pinging: false };
 }
 async function testHostConnection() {
   const editor = hostEditor.value;
@@ -373,6 +376,7 @@ function editorToPayload(editor) {
     payload.tls = { ca: editor.tls.ca, cert: editor.tls.cert, key: editor.tls.key };
   }
   if (editor.type === 'ssh') {
+    payload.hostFingerprint = editor.hostFingerprint || '';
     if (editor.password) payload.password = editor.password;
     if (editor.privateKey) payload.privateKey = editor.privateKey;
   }
