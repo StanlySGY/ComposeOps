@@ -175,7 +175,8 @@ test('快速跳转支持键盘搜索、执行与 Escape 关闭', async ({ page }
   await expect(trigger).toBeFocused();
 });
 
-test('移动端更多功能抽屉可导航、Escape 可关闭且页面不横向溢出', async ({ page }) => {
+test('移动端更多功能抽屉可导航、Escape 可关闭且页面不横向溢出', async ({ page, isMobile }) => {
+  test.skip(!isMobile, '仅在移动设备项目中验证移动端导航抽屉');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('./#/dashboard');
   const more = page.getByRole('button', { name: '更多功能' });

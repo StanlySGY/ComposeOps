@@ -20,23 +20,73 @@ import { registerTaskTools } from './tools/task-tools.js';
 import { registerSkillTools } from './tools/skill-tools.js';
 import { MACRO_TOOLS } from './agent-tool-categories.js';
 
-/** 工具风险等级:低/中/高/极高,前端据此决定确认强度。单一事实来源。 */
+/**
+ * Agent 工具的风险单一事实来源。所有注册工具必须显式列出；新增工具时，
+ * 缺少条目会在注册阶段失败，不能因遗漏元数据而静默落到 low。
+ */
 export const RISK_LEVELS = {
   'compose.up': 'high',
   'compose.stop': 'high',
   'compose.restart': 'medium',
   'compose.pull': 'low',
+  'compose.logs': 'low',
+  'compose.ps': 'low',
+  'compose.scale': 'medium',
+  'compose.exec': 'high',
+  'config.inspect': 'low',
+  'config.preview': 'low',
+  'config.validate': 'low',
+  'config.propose': 'low',
   'config.edit': 'high',
   'config.rollback': 'high',
+  'config.diff': 'low',
+  'environment.get': 'low',
   'environment.set': 'high',
   'volume.mount': 'high',
+  'diagnostic.probe': 'low',
+  'diagnostic.analyze': 'low',
+  'network.inspect': 'low',
+  'security.audit': 'low',
+  'server.inspect': 'low',
+  'server.command': 'low',
+  'alert.create': 'medium',
+  'alert.configure': 'medium',
+  'alert.list': 'low',
+  'alert.delete': 'medium',
   'maintenance.clean': 'critical',
-  'compose.exec': 'high',
-  'compose.scale': 'medium',
+  'maintenance.update': 'low',
+  'metrics.query': 'low',
+  'backup.trigger': 'low',
+  'notification.test': 'medium',
+  // 测试夹具同样走完整的注册校验路径。
+  'test.approval': 'low',
+  'test.noop': 'low',
   'cron.create': 'medium',
-  'app.deploy': 'critical',
-  // 数据卷恢复会用备份 tar 覆盖卷内现有数据,与 maintenance.clean 同级的破坏性操作。
+  'cron.list': 'low',
+  'performance.baseline': 'low',
+  'volume.backup': 'low',
   'volume.restore': 'critical',
+  'volume.verify': 'low',
+  'volume.list_backups': 'low',
+  'event.list': 'low',
+  'event.update': 'low',
+  'event.diagnose': 'low',
+  'project.list_managed': 'low',
+  'web.search': 'low',
+  'app.list': 'low',
+  'app.deploy': 'critical',
+  'memory.search': 'low',
+  'memory.save': 'low',
+  'memory.delete': 'medium',
+  'memory.sleep': 'medium',
+  'inspection.run': 'low',
+  'inspection.status': 'low',
+  'gitops.drift': 'low',
+  'task.list': 'low',
+  'task.output': 'low',
+  'task.stop': 'medium',
+  'skill.list': 'low',
+  'skill.use': 'low',
 };
 
 /**
@@ -47,13 +97,15 @@ export const RISK_LEVELS = {
  * @returns {string} 动态评估后的风险等级
  */
 export function assessRisk(toolName, params, context) {
-  // 宏工具不在 RISK_LEVELS 里:必须读宏注册表自带的 risk(如 macro.full_cleanup = critical),
-  // 否则会落到默认 'low',在 full/allow_writes 模式下绕过审批门直接执行 critical 级宏。
-  const baseRisk = RISK_LEVELS[toolName] || MACRO_TOOLS[toolName]?.risk || 'low';
+  // 未知工具必须拒绝信任：它可能是新加但尚未完成风险定级的写操作。
+  const baseRisk = Object.prototype.hasOwnProperty.call(RISK_LEVELS, toolName)
+    ? RISK_LEVELS[toolName]
+    : MACRO_TOOLS[toolName]?.risk;
+  if (!['low', 'medium', 'high', 'critical'].includes(baseRisk)) return 'critical';
 
-  // 生产项目提升风险等级
+  // 生产项目提升风险等级，避免相同动作在生产环境沿用较低风险。
   const project = context?.project;
-  if (project && (project.tags?.includes('production') || project.projectName?.match(/prod|production/i))) {
+  if (project && (project.tags?.includes('production') || /prod|production/i.test(project.projectName || ''))) {
     if (baseRisk === 'medium') return 'high';
     if (baseRisk === 'high') return 'critical';
   }

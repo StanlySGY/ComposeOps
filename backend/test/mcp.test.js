@@ -241,6 +241,7 @@ test('mcp: readonly 模式工具清单非空、含注解、不含 critical 与�
   // 只读工具的 readOnlyHint 与 destructiveHint 互斥
   const ping = tools.find((tool) => tool.name === 'server.command');
   assert.equal(ping.annotations.readOnlyHint, true);
+  assert.ok(!names.includes('notification.test'), '只读模式不可调用会向外发送消息的测试通知');
 });
 
 test('mcp: all 模式下高危工具带 destructiveHint,且清单里出现需确认工具', async () => {
@@ -259,6 +260,9 @@ test('mcp: all 模式下高危工具带 destructiveHint,且清单里出现需确
   assert.ok(restart, 'all 模式应包含 compose.restart');
   assert.equal(restart.annotations.readOnlyHint, false);
   assert.equal(restart.annotations.destructiveHint, true);
+  const notification = tools.find((tool) => tool.name === 'notification.test');
+  assert.ok(notification, 'all 模式允许发现需要确认的测试通知工具');
+  assert.equal(notification.annotations.destructiveHint, true);
   assert.ok(!tool_names_includes(tools, 'maintenance.clean'), 'critical 在 all 模式下仍不暴露');
 });
 

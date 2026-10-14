@@ -84,6 +84,23 @@ export function redactSecrets(text) {
   return out;
 }
 
+/**
+ * 对将要持久化或输出的结构化数据递归脱敏。
+ * 既处理敏感字段名，也处理此前从配置/日志中收割到的秘密值及自由文本中的重复出现。
+ */
+export function redactSecretValue(value, key = '') {
+  if (isSensitiveKey(key)) return '[REDACTED]';
+  if (typeof value === 'string') return redactSecrets(value);
+  if (Array.isArray(value)) return value.map((item) => redactSecretValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [
+      entryKey,
+      redactSecretValue(entryValue, entryKey),
+    ]));
+  }
+  return value;
+}
+
 /** 仅供测试:清空已收割集合。 */
 export function resetSecretRedactor() {
   harvested.clear();

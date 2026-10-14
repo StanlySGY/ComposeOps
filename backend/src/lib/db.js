@@ -3,7 +3,8 @@ import { chmodSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { createHash } from 'node:crypto';
-import { redactValue } from './redaction.js';
+import { isSensitiveKey } from './redaction.js';
+import { redactSecretValue } from './secret-redactor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/opsdash.db');
@@ -611,9 +612,12 @@ function toSessionId(value) {
 
 export function addAiMessage(role, content, context = null, sessionId = null) {
   const sid = toSessionId(sessionId);
+  // 原始消息可用于本轮推理，但历史落库只保存脱敏版本。
+  const safeContent = String(redactSecretValue(String(content ?? '')));
+  const safeContext = context ? JSON.stringify(redactSecretValue(context)) : null;
   db.prepare(
     'INSERT INTO ai_history(role, content, context, session_id) VALUES(?, ?, ?, ?)'
-  ).run(role, content, context ? JSON.stringify(context) : null, sid);
+  ).run(role, safeContent, safeContext, sid);
   // 必须在下面那次 ai_sessions 写入之前取 rowid:会话行是新建时,后续的
   // last_insert_rowid() 会变成 ai_sessions 的 rowid,返回值就不再是消息 id
   // (调用方拿它做历史截断定位,错位会删到别的区间)。
@@ -961,9 +965,15 @@ export function sleepAiMemories({ decayDays = 30, pruneDays = 90, decayFactor = 
 const VERACITY_ENUM = ['stated', 'inferred', 'tool', 'unknown'];
 
 export function upsertAiMemory(memoryKey, value, source = 'conversation', confidence = 'medium', { importance, veracity } = {}) {
-  const key = String(memoryKey || '').trim().slice(0, 160);
-  const content = String(value || '').trim().slice(0, 4000);
-  if (!key || !content) throw Object.assign(new Error('记忆 key 和内容不能为空'), { statusCode: 400 });
+  const rawKey = String(memoryKey || '').trim().slice(0, 160);
+  if (isSensitiveKey(rawKey) || String(redactSecretValue(rawKey)) !== rawKey) {
+    throw Object.assign(new Error('长期记忆不能使用密钥字段名或包含已知密钥值的 key'), { statusCode: 400 });
+  }
+  const key = rawKey;
+  const content = String(redactSecretValue(String(value || '').trim())).slice(0, 4000);
+  if (!key || !content || content === '[REDACTED]') {
+    throw Object.assign(new Error('记忆 key 和非敏感内容不能为空'), { statusCode: 400 });
+  }
   const importanceValue = Number.isFinite(Number(importance))
     ? Math.min(Math.max(Number(importance), 0), 1)
     : 0.5;
@@ -998,7 +1008,7 @@ export function createAgentPlan(sessionId, userMessage, planJson, projectId = nu
   ).run(
     planId,
     toSessionId(sessionId),
-    String(userMessage || ''),
+    String(redactSecretValue(String(userMessage || ''))),
     JSON.stringify(planJson || {}),
     'pending',
     projectId || null,
@@ -1015,10 +1025,10 @@ export function updateAgentPlan(planId, patch = {}) {
   const current = getAgentPlan(planId);
   if (!current) return null;
   const status = patch.status !== undefined ? String(patch.status) : current.status;
-  const resultJson = patch.resultJson !== undefined ? JSON.stringify(redactValue(patch.resultJson)) : current.result_json;
+  const resultJson = patch.resultJson !== undefined ? JSON.stringify(redactSecretValue(patch.resultJson)) : current.result_json;
   const executedAt = patch.executedAt !== undefined ? patch.executedAt : current.executed_at;
-  // 计划参数可能包含用户明确要求写入的 secret,必须保留给后续执行;
-  // 对外读取统一经过路由层脱敏,执行结果与审计结果仍在这里脱敏。
+  // plan_json 也承担待恢复执行的输入载荷；不能在落库时改写它，否则会改变 env/config 等写操作语义。
+  // 所有 API 返回计划前统一执行递归脱敏；SQLite 文件本身不提供静态加密，须限制文件与备份访问。
   const planJson = patch.planJson !== undefined ? JSON.stringify(patch.planJson) : current.plan_json;
   const progressStage = patch.progressStage !== undefined ? String(patch.progressStage || '') : current.progress_stage;
   const progressPercent = patch.progressPercent !== undefined ? Number(patch.progressPercent) : current.progress_percent;
@@ -1040,11 +1050,14 @@ export function listAgentPlans(limit = 30) {
 
 export function recordAgentExecution(planId, toolName, params, status = 'pending') {
   const execId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  // 参数正文与指纹均基于脱敏视图，避免在审计字段或可离线猜测的哈希中保存秘密。
+  const safeParams = redactSecretValue(params || {});
+  const safeParamsJson = JSON.stringify(safeParams);
   db.prepare(
     'INSERT INTO agent_executions(id, plan_id, tool_name, parameters, status) VALUES(?, ?, ?, ?, ?)'
-  ).run(execId, planId, String(toolName || ''), JSON.stringify(redactValue(params || {})), String(status || 'pending'));
+  ).run(execId, planId, String(toolName || ''), safeParamsJson, String(status || 'pending'));
   db.prepare('UPDATE agent_executions SET parameters_hash = ? WHERE id = ?')
-    .run(createHash('sha256').update(JSON.stringify(params || {})).digest('hex'), execId);
+    .run(createHash('sha256').update(safeParamsJson).digest('hex'), execId);
   return execId;
 }
 
@@ -1052,8 +1065,8 @@ export function updateAgentExecution(execId, { status, result, error, durationMs
   const current = db.prepare('SELECT * FROM agent_executions WHERE id = ?').get(execId);
   if (!current) return null;
   const nextStatus = status !== undefined ? String(status) : current.status;
-  const nextResult = result !== undefined ? JSON.stringify(redactValue(result)) : current.result;
-  const nextError = error !== undefined ? redactValue(String(error)) : current.error;
+  const nextResult = result !== undefined ? JSON.stringify(redactSecretValue(result)) : current.result;
+  const nextError = error !== undefined ? redactSecretValue(String(error)) : current.error;
   const nextDuration = durationMs !== undefined ? Number(durationMs) : current.duration_ms;
   const nextConfirmedBy = confirmedBy !== undefined ? confirmedBy : current.confirmed_by;
   const nextConfirmedAt = confirmedAt !== undefined ? confirmedAt : current.confirmed_at;
@@ -1085,7 +1098,7 @@ export function recordAgentFeedback(planId, rating, feedbackText = '') {
     UPDATE agent_plans
     SET rating = ?, feedback_text = ?, feedback_at = ?
     WHERE id = ?
-  `).run(safeRating, String(feedbackText || '').slice(0, 2000), new Date().toISOString(), planId);
+  `).run(safeRating, String(redactSecretValue(String(feedbackText || ''))).slice(0, 2000), new Date().toISOString(), planId);
   return getAgentPlan(planId);
 }
 
@@ -1257,7 +1270,7 @@ export function addOperation({ projectId = null, projectName = null, action, sta
   const result = db.prepare(`
     INSERT INTO operation_history(project_id, project_name, action, status, detail)
     VALUES(?, ?, ?, ?, ?)
-  `).run(projectId, projectName, action, status, String(detail || '').slice(-20000));
+  `).run(projectId, projectName, action, status, String(redactSecretValue(String(detail || ''))).slice(-20000));
   return Number(result.lastInsertRowid);
 }
 

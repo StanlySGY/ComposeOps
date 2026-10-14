@@ -41,7 +41,7 @@ import { getSetting, setSetting } from '../lib/db.js';
 import { getAgent } from '../services/agent.js';
 import { assessRisk } from '../services/agent-tools.js';
 import { resolveToolContext } from '../services/agent/planning.js';
-import { redactValue } from '../lib/redaction.js';
+import { redactSecretValue } from '../lib/secret-redactor.js';
 import { validateOrigin } from '../lib/auth.js';
 import { checkRateLimit } from '../lib/rate-limit.js';
 
@@ -146,7 +146,7 @@ export function truncateMcpText(text, max = TOOL_RESULT_MAX) {
 
 /** 统一结果包装:脱敏 → 截断 → 结构化内容(未被截断时才给 structuredContent)。 */
 export function wrapToolResult(payload, failed = false) {
-  const safe = redactValue(payload);
+  const safe = redactSecretValue(payload);
   let text;
   try {
     text = JSON.stringify(safe, null, 2) ?? String(safe);

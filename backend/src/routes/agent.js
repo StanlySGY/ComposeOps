@@ -24,7 +24,7 @@ import {
 import { getAgent } from '../services/agent.js';
 import { idField, limitField, numericId } from '../lib/schemas.js';
 import { checkRateLimit } from '../lib/rate-limit.js';
-import { redactRows, redactValue } from '../lib/redaction.js';
+import { redactSecretValue } from '../lib/secret-redactor.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
 import { compactSessionHistory } from '../services/agent/compaction.js';
 import { randomUUID } from 'node:crypto';
@@ -68,7 +68,7 @@ function aiRateLimit(limit, windowMs = 60000) {
   // GET /api/v1/ai/agent/memories —— 长期记忆管理页/侧栏
   fastify.get('/agent/memories', {
     schema: { querystring: { type: 'object', properties: { limit: limitField(200), query: { type: 'string', maxLength: 200 } } } },
-  }, async (request) => ({ memories: listAiMemories(request.query?.limit, request.query?.query) }));
+  }, async (request) => ({ memories: listAiMemories(request.query?.limit, request.query?.query).map((row) => redactSecretValue(row)) }));
 
   // GET /api/v1/ai/agent/executions —— 执行历史(审计)
   // 同一个 limit 同时喂 listAgentPlans(上限 100)与 listAgentExecutions(上限 500),
@@ -83,9 +83,12 @@ function aiRateLimit(limit, windowMs = 60000) {
   }, async (request) => {
     const planId = request.query?.planId;
     if (planId) {
-      return { plan: redactValue(getAgentPlan(planId)), executions: redactRows(listAgentExecutions(planId, request.query?.limit)) };
+      return { plan: redactSecretValue(getAgentPlan(planId)), executions: listAgentExecutions(planId, request.query?.limit).map((row) => redactSecretValue(row)) };
     }
-    return { plans: redactRows(listAgentPlans(request.query?.limit)), executions: redactRows(listAgentExecutions(null, request.query?.limit)) };
+    return {
+      plans: listAgentPlans(request.query?.limit).map((row) => redactSecretValue(row)),
+      executions: listAgentExecutions(null, request.query?.limit).map((row) => redactSecretValue(row)),
+    };
   });
 
   // GET /api/v1/ai/agent/usage —— token usage aggregate for observability, without session content
@@ -106,7 +109,7 @@ function aiRateLimit(limit, windowMs = 60000) {
         properties: { limit: limitField(200) },
       },
     },
-  }, async (request) => ({ feedback: redactRows(listAgentFeedback(request.query?.limit)) }));
+  }, async (request) => ({ feedback: listAgentFeedback(request.query?.limit).map((row) => redactSecretValue(row)) }));
 
   // POST /api/v1/ai/agent/execute-stream —— Tool-calling 原生循环 + SSE 流式推送
   fastify.post('/agent/execute-stream', {

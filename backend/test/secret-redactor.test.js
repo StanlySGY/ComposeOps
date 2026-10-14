@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { harvestSecretValues, redactSecrets, resetSecretRedactor } from '../src/lib/secret-redactor.js';
+import { harvestSecretValues, redactSecrets, redactSecretValue, resetSecretRedactor } from '../src/lib/secret-redactor.js';
 
 test('secret-redactor: 键名敏感的 KEY=VALUE 被收割并能在任意文本中抹除', () => {
   resetSecretRedactor();
@@ -36,4 +36,19 @@ test('secret-redactor: harvest 后 redactSecrets 对同值多次出现全部替�
   harvestSecretValues('DB_PASSWORD=LongSecretValue99');
   const text = 'a=LongSecretValue99 b=LongSecretValue99 LongSecretValue99';
   assert.equal((redactSecrets(text).match(/LongSecretValue99/g) || []).length, 0);
+});
+
+test('secret-redactor: 深层对象、数组及自由文本中的重复秘密值均脱敏', () => {
+  resetSecretRedactor();
+  const secret = 'AuditSecretValue-47';
+  harvestSecretValues(`API_KEY=${secret}`);
+  const result = redactSecretValue({
+    nested: { token: secret, note: `command failed using ${secret}; retry with ${secret}` },
+    list: [`first ${secret}`, { output: `TOKEN=${secret}` }],
+    safe: 'keep diagnostic context',
+  });
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.includes(secret), '不得在任何嵌套字段或重复文本中保留秘密');
+  assert.equal(result.nested.token, '[REDACTED]');
+  assert.equal(result.safe, 'keep diagnostic context');
 });

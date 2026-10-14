@@ -80,7 +80,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 | SSE(经典) | `GET /mcp/sse` | Claude Desktop、Cursor、Cline |
 | stdio 桥 | `node mcp/stdio-bridge.mjs` | 仅支持 stdio 的客户端(DeepSeek 系 harness 等) |
 
-启用方式:**设置 → MCP → 启用 → 复制客户端配置**,粘贴进任意客户端的 `mcpServers` 即可。只读模式下 32 个运维工具(状态/日志/指标/巡检/GitOps 漂移/告警)即刻可被你常用的 AI 编码助手调用;切到"包含高风险工具"后 48 个工具开放,但 critical 级(清理、部署)在任何模式下都不经此通道。
+启用方式:**设置 → MCP → 启用 → 复制客户端配置**,粘贴进任意客户端的 `mcpServers` 即可。只读模式默认只暴露低风险且无需确认的运维查询工具；切到"包含高风险工具"后会增加需要显式确认的运维操作，但 critical 级(清理、部署)在任何模式下都不经此通道。可在设置页查看当前实际暴露数量。
 
 协议层面同时服务两个时代的客户端:
 
@@ -103,6 +103,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 - FAQ：`docs/public/FAQ.md`
 - ROADMAP：`docs/public/ROADMAP.md`
 - RELEASE_CHECKLIST：`docs/public/RELEASE_CHECKLIST.md`
+- MCP Agent 安全接入：`docs/public/MCP_AGENT_SETUP.md`
 - DEMO_SCRIPT：`docs/public/DEMO_SCRIPT.md`
 - Redis 升级案例：`docs/public/USE_CASE_REDIS.md`
 - PostgreSQL 故障恢复案例：`docs/public/USE_CASE_POSTGRESQL.md`

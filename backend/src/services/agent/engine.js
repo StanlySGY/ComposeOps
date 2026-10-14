@@ -22,8 +22,8 @@ import { compactSessionHistory } from './compaction.js';
 import { getApprovalGate } from './approval-gate.js';
 import { resolveToolContext, assertPermission, validateParams } from './planning.js';
 import { withProjectOperationLock } from '../project-operation-lock.js';
-import { redactValue } from '../../lib/redaction.js';
-import { harvestSecretValues, redactSecrets } from '../../lib/secret-redactor.js';
+
+import { harvestSecretValues, redactSecrets, redactSecretValue } from '../../lib/secret-redactor.js';
 
 /**
  * ComposeOps 自研轻量 Agent 编排引擎。
@@ -138,14 +138,23 @@ export class OperationsAgent {
     if (!name || typeof config?.execute !== 'function') {
       throw new Error(`工具 ${name} 缺少 execute 实现`);
     }
+    const risk = RISK_LEVELS[name];
+    if (!['low', 'medium', 'high', 'critical'].includes(risk)) {
+      throw new Error(`工具 ${name} 缺少明确风险等级，必须先补充 RISK_LEVELS 元数据`);
+    }
+    if (!['readonly', 'editable', 'managed', 'admin'].includes(config.requiredPermission)) {
+      throw new Error(`工具 ${name} 缺少明确的 requiredPermission 安全元数据`);
+    }
+    if (typeof config.confirmationRequired !== 'boolean') {
+      throw new Error(`工具 ${name} 必须显式声明 confirmationRequired`);
+    }
     this.tools.set(name, {
-      requiredPermission: 'managed',
-      confirmationRequired: false,
       category: 'maintenance',
       requiresProject: false,
       parameters: { type: 'object', properties: {} },
       ...config,
-      risk: RISK_LEVELS[name] || config.risk || 'low',
+      // 权限与确认策略需显式登记；风险只使用集中事实来源，不允许配置覆盖或默认降级。
+      risk,
       name,
     });
     return this;
@@ -186,7 +195,7 @@ export class OperationsAgent {
   }
 
   addThought(phase, content, metadata = {}, trace = this.thoughts) {
-    const thought = { timestamp: Date.now(), phase, content, metadata: redactValue(metadata) };
+    const thought = { timestamp: Date.now(), phase, content: redactSecrets(String(content ?? '')), metadata: redactSecretValue(metadata) };
     trace.push(thought);
     return thought;
   }

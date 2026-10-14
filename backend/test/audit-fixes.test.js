@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,7 +20,17 @@ const {
   setSetting,
   exportUserData,
   COMPOSE_BACKUP_KEEP,
+  createAgentPlan,
+  getAgentPlan,
+  updateAgentPlan,
+  recordAgentExecution,
+  updateAgentExecution,
+  listAgentExecutions,
+  upsertAiMemory,
+  addAiMessage,
+  getAiHistory,
 } = await import('../src/lib/db.js');
+const { harvestSecretValues, redactSecretValue, resetSecretRedactor } = await import('../src/lib/secret-redactor.js');
 
 /* ---------------- 审批门 fail-closed ---------------- */
 
@@ -133,4 +144,63 @@ test('export: docker.hosts 整键排除,SSH 凭据不外泄', () => {
   const data = exportUserData();
   assert.equal(data.settings['docker.hosts'], undefined, '导出不得包含 docker.hosts');
   assert.equal(data.settings['auth.password_hash'], undefined);
+});
+
+test('执行审计与对话历史只持久化脱敏参数、结果、错误与上下文', () => {
+  resetSecretRedactor();
+  const secret = 'AuditSecretValue-47';
+  harvestSecretValues(`API_KEY=${secret}`);
+  const planId = createAgentPlan(
+    null,
+    `审计脱敏回归 ${secret}`,
+    { role: 'planner', steps: [{ tool: 'config.edit', params: { apiToken: secret, note: `use ${secret} then ${secret}` } }], confirmations: [] },
+  );
+  const storedPlan = getAgentPlan(planId);
+  assert.ok(!String(storedPlan.user_message).includes(secret), '计划提示应在落库前脱敏');
+  assert.ok(JSON.stringify(storedPlan.plan_json).includes(secret), '用于恢复执行的计划载荷不应被改写，避免改变明确要求的配置写入语义');
+  assert.ok(!JSON.stringify(redactSecretValue(storedPlan)).includes(secret), '对外展示计划必须递归脱敏');
+  updateAgentPlan(planId, {
+    resultJson: { output: `result included ${secret}` },
+    planJson: { steps: [{ tool: 'config.edit', params: { password: secret, note: `repeat ${secret}` } }] },
+  });
+  const updatedPlan = getAgentPlan(planId);
+  assert.ok(JSON.stringify(updatedPlan.plan_json).includes(secret), '计划更新需保留运行时所需参数');
+  assert.ok(!JSON.stringify(updatedPlan.result_json).includes(secret), '结果更新仍必须脱敏');
+  assert.ok(!JSON.stringify(redactSecretValue(updatedPlan)).includes(secret), '更新后的计划 API 视图仍必须脱敏');
+  const rawParams = {
+    command: `apply config with ${secret} then repeat ${secret}`,
+    nested: { apiToken: secret },
+    comment: '保留可用的非敏感诊断上下文',
+  };
+  const execId = recordAgentExecution(planId, 'config.edit', rawParams, 'executing');
+  let [execution] = listAgentExecutions(planId);
+  assert.equal(execution.id, execId);
+  assert.ok(!JSON.stringify(execution).includes(secret), '执行参数或参数指纹附近不得残留秘密');
+  const safeParams = JSON.parse(execution.parameters);
+  assert.equal(safeParams.comment, '保留可用的非敏感诊断上下文');
+  assert.equal(
+    execution.parameters_hash,
+    createHash('sha256').update(JSON.stringify(safeParams)).digest('hex'),
+    '审计指纹只能来源于已脱敏参数',
+  );
+
+  updateAgentExecution(execId, {
+    status: 'failed',
+    result: { stdout: `output includes ${secret} and again ${secret}` },
+    error: `request failed for ${secret}`,
+  });
+  [execution] = listAgentExecutions(planId);
+  assert.ok(!JSON.stringify(execution).includes(secret), '结果与错误中的已知秘密值必须全部脱敏');
+
+  addAiMessage('user', `please inspect ${secret} twice: ${secret}`, { snapshot: `TOKEN=${secret}` }, null);
+  const history = getAiHistory(100);
+  const latest = history.at(-1);
+  assert.ok(latest, '消息应该继续写入对话历史');
+  assert.ok(!JSON.stringify(latest).includes(secret), '持久化对话及上下文不得保留已知秘密');
+  assert.ok(latest.content.includes('[REDACTED]'), '脱敏后应保留可理解的占位符');
+
+  const memory = upsertAiMemory('safe-diagnostic-note', `keep context but do not keep ${secret}`);
+  assert.ok(!JSON.stringify(memory).includes(secret), '长期记忆内容不得保存已知秘密');
+  assert.ok(String(memory.value).includes('[REDACTED]'), '记忆脱敏后仍应保留其余上下文');
+  assert.throws(() => upsertAiMemory('api_key', 'value'), /长期记忆不能使用密钥字段名/);
 });

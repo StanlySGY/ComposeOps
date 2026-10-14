@@ -276,7 +276,7 @@ export function registerMaintenanceTools(agent) {
       description: '发送测试通知以验证通知渠道配置',
       category: 'maintenance',
       requiredPermission: 'managed',
-      confirmationRequired: false,
+      confirmationRequired: true,
       requiresProject: false,
       parameters: {
         type: 'object',
