@@ -3,10 +3,10 @@
     <div class="page-header">
       <div><h1 class="page-title">实时日志</h1><p class="page-subtitle">多容器聚合、着色分流与即时过滤</p></div>
       <div class="page-actions">
-        <select v-model="projectId" class="input" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
-        <select v-model="levelFilter" class="input w-28" title="级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
-        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" placeholder="level:error | container:api" /></label>
+        <select v-model="projectId" class="input" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
+        <select v-model="levelFilter" class="input w-28" title="级别过滤" aria-label="按日志级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
+        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" aria-label="搜索和过滤实时日志" placeholder="level:error | container:api" /></label>
         <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
         <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
         <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
@@ -21,7 +21,7 @@
     <!-- 容器选择条(借鉴 Dozzle:模糊匹配容器名 + 名称旁直接挂实时 CPU/内存) -->
     <div v-if="containers.length" class="container-picker">
       <div class="flex flex-wrap items-center gap-2">
-        <label class="search-field w-44"><Filter class="h-4 w-4" /><input v-model="containerQuery" :placeholder="aggregateMode ? '过滤容器(可多选)' : '过滤容器(支持缩写)'" /></label>
+        <label class="search-field w-44"><Filter class="h-4 w-4" /><input v-model="containerQuery" aria-label="过滤容器列表" :placeholder="aggregateMode ? '过滤容器(可多选)' : '过滤容器(支持缩写)'" /></label>
         <span class="text-[11px] text-muted">{{ aggregateMode ? (selectedContainers.length ? `已选 ${selectedContainers.length} 个容器` : '未选择时聚合全部容器') : '点击容器切换日志源' }}</span>
         <template v-if="aggregateMode">
           <button class="btn-secondary min-h-7! px-2! py-0.5! text-[11px]!" @click="selectVisibleContainers">全选可见</button>
@@ -35,6 +35,7 @@
           class="container-chip"
           :class="{ active: aggregateMode ? selectedContainers.includes(c.id) : c.id === containerId }"
           :title="`${c.name} · ${c.state || '未知状态'}${c.image ? ' · ' + c.image : ''}`"
+          :aria-pressed="aggregateMode ? selectedContainers.includes(c.id) : c.id === containerId"
           @click="pickContainer(c)"
         >
           <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="c.state === 'running' ? 'bg-emerald-400' : 'bg-surface-600'"></span>
@@ -45,7 +46,7 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
     <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>

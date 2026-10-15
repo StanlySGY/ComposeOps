@@ -1,9 +1,9 @@
 <template>
   <div class="drawer max-w-[calc(100vw-2rem)] sm:max-w-[720px] z-51">
-    <div class="modal-header"><span>{{ label }} · {{ name }}</span><button class="icon-btn" title="关闭输出面板" @click="$emit('close')"><X class="w-4 h-4" /></button></div>
+    <div class="modal-header"><span>{{ label }} · {{ name }}</span><button class="icon-btn" title="关闭输出面板" aria-label="关闭输出面板" @click="$emit('close')"><X class="w-4 h-4" /></button></div>
     <div v-if="batchTasks.length" class="border-b border-surface-800 p-3">
-      <div class="mb-2 flex items-center justify-between text-muted"><span>任务进度</span><span>{{ completedCount }} / {{ batchTasks.length }}</span></div>
-      <div class="progress mb-3"><span :style="{ width: `${batchProgress}%` }"></span></div>
+      <div class="mb-2 flex items-center justify-between text-muted"><span>任务进度</span><span role="status" aria-live="polite" aria-atomic="true">{{ completedCount }} / {{ batchTasks.length }} 项任务已完成</span></div>
+      <div class="progress mb-3" role="progressbar" aria-label="批量任务总体进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.max(0, Math.min(100, batchProgress))" :aria-valuetext="`${completedCount} / ${batchTasks.length} 项任务已完成`"><span aria-hidden="true" :style="{ width: `${batchProgress}%` }"></span></div>
       <div class="grid gap-2 sm:grid-cols-2">
         <div v-for="task in batchTasks" :key="task.id" class="batch-task">
           <LoaderCircle v-if="task.status === 'running'" class="h-4 w-4 animate-spin text-accent" />
@@ -15,7 +15,7 @@
         </div>
       </div>
     </div>
-    <pre class="terminal-output flex-1">{{ text }}</pre>
+    <pre class="terminal-output flex-1" role="region" aria-label="操作执行输出" aria-live="off" tabindex="0">{{ text }}</pre>
     <div v-if="!running && projectId" class="ai-diagnose-bar">
       <template v-if="failed">
         <button class="btn-primary" @click="$emit('diagnose')"><Sparkles class="w-4 h-4" />一键 AI 诊断</button>

@@ -13,8 +13,15 @@
         <button v-else @click="disconnect" class="btn-disconnect">断开</button>
       </div>
     </div>
-    <div ref="terminalContainer" class="terminal-container"></div>
-    <div v-if="error" class="terminal-error">{{ error }}</div>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ connectionMessage }}</p>
+    <div
+      ref="terminalContainer"
+      class="terminal-container"
+      role="region"
+      :aria-label="`容器终端：${containerName}，Shell ${shell}`"
+      :aria-busy="connecting"
+    ></div>
+    <div v-if="error" class="terminal-error" role="alert">{{ error }}</div>
   </div>
 </template>
 
@@ -37,6 +44,7 @@ const terminalContainer = ref(null);
 const connected = ref(false);
 const connecting = ref(false);
 const error = ref('');
+const connectionMessage = ref('终端未连接');
 
 let terminal = null;
 let fitAddon = null;
@@ -87,6 +95,8 @@ function initTerminal() {
     },
     scrollback: 10000,
     convertEol: true,
+    // xterm 内置屏幕阅读器模式将终端行暴露为可读 DOM,而非仅依赖 canvas。
+    screenReaderMode: true,
   });
 
   fitAddon = new FitAddon();
@@ -116,6 +126,7 @@ function connect() {
   if (connecting.value || connected.value) return;
 
   connecting.value = true;
+  connectionMessage.value = '正在连接容器终端';
   error.value = '';
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -127,6 +138,7 @@ function connect() {
   ws.onopen = () => {
     connecting.value = false;
     connected.value = true;
+    connectionMessage.value = '容器终端已连接';
     terminal.clear();
     terminal.write('\r\n\x1b[32m✓ 已连接到容器终端\x1b[0m\r\n\r\n');
 
@@ -168,6 +180,7 @@ function connect() {
 
   ws.onerror = () => {
     connecting.value = false;
+    connectionMessage.value = '容器终端连接失败';
     error.value = '连接失败';
     terminal.write('\r\n\x1b[31m✗ 连接失败\x1b[0m\r\n');
   };
@@ -175,6 +188,7 @@ function connect() {
   ws.onclose = () => {
     connecting.value = false;
     connected.value = false;
+    connectionMessage.value = '容器终端连接已断开';
     terminal.write('\r\n\x1b[33m✗ 连接已断开\x1b[0m\r\n');
   };
 }

@@ -193,6 +193,22 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(wrapper.find('.log-pane-grid').exists()).toBe(false);
   });
 
+  it('日志筛选控件有明确名称，聚合容器按钮暴露选择状态', async () => {
+    api.getProjects.mockResolvedValue({ projects: [{ id: 'p', projectName: '测试', managed: true, containers: [{ id: 'c1', name: 'web', state: 'running' }, { id: 'c2', name: 'api', state: 'running' }] }] });
+    await start('/logs?projectId=p');
+
+    expect(wrapper.get('select[aria-label="选择日志项目"]').exists()).toBe(true);
+    expect(wrapper.get('select[aria-label="按日志级别过滤"]').exists()).toBe(true);
+    expect(wrapper.get('input[aria-label="搜索和过滤实时日志"]').exists()).toBe(true);
+    expect(wrapper.get('input[aria-label="过滤容器列表"]').exists()).toBe(true);
+    expect(wrapper.get('button[title="当前为聚合模式,点击切换为单容器"]').attributes('aria-pressed')).toBe('true');
+
+    const webChip = wrapper.findAll('.container-chip').find(button => button.text().includes('web'));
+    expect(webChip.attributes('aria-pressed')).toBe('false');
+    await webChip.trigger('click');
+    expect(webChip.attributes('aria-pressed')).toBe('true');
+  });
+
   it('查询语法弹窗列出解析器支持的写法', async () => {
     await start();
     await wrapper.get('button[title="查询语法"]').trigger('click');
