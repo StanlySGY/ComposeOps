@@ -6,7 +6,7 @@
         <h1 class="text-2xl font-bold text-zinc-100">历史指标</h1>
         <p class="mt-1 text-sm text-zinc-400">实时容器资源使用情况与告警配置</p>
       </div>
-      <button @click="showAlertModal = true" class="btn-primary">
+      <button ref="alertModalTrigger" @click="showAlertModal = true" class="btn-primary">
         <Bell class="h-4 w-4" />
         配置告警
       </button>
@@ -124,28 +124,28 @@
     </div>
 
     <!-- Alert Config Modal -->
-    <div v-if="showAlertModal" class="modal-overlay" @click.self="showAlertModal = false">
-      <div class="modal-content">
+    <div v-if="showAlertModal" class="modal-overlay" @click.self="closeAlertModal" @keydown="trapAlertModalTab">
+      <div ref="alertModalElement" class="modal-content" role="dialog" aria-modal="true" aria-labelledby="resource-alert-modal-title" tabindex="-1">
         <div class="mb-4 flex items-center justify-between">
-          <h3 class="text-lg font-semibold text-zinc-100">配置告警规则</h3>
-          <button @click="showAlertModal = false" class="text-zinc-400 hover:text-zinc-300" aria-label="关闭告警规则配置">
+          <h3 id="resource-alert-modal-title" class="text-lg font-semibold text-zinc-100">配置告警规则</h3>
+          <button @click="closeAlertModal" class="text-zinc-400 hover:text-zinc-300" aria-label="关闭告警规则配置">
             <X class="h-5 w-5" />
           </button>
         </div>
         <div class="space-y-3">
           <div>
-            <label class="mb-1 block text-sm text-zinc-300">指标类型</label>
-            <select v-model="alertForm.metric" class="input">
+            <label for="resource-alert-metric" class="mb-1 block text-sm text-zinc-300">指标类型</label>
+            <select id="resource-alert-metric" v-model="alertForm.metric" class="input">
               <option v-for="m in alertMetricTypes" :key="m.key" :value="m.key">{{ m.label }}</option>
             </select>
           </div>
           <div>
-            <label class="mb-1 block text-sm text-zinc-300">阈值</label>
-            <input v-model.number="alertForm.threshold" type="number" class="input" placeholder="例如: 80" />
+            <label for="resource-alert-threshold" class="mb-1 block text-sm text-zinc-300">阈值</label>
+            <input id="resource-alert-threshold" v-model.number="alertForm.threshold" type="number" class="input" placeholder="例如: 80" />
           </div>
           <div>
-            <label class="mb-1 block text-sm text-zinc-300">动作</label>
-            <select v-model="alertForm.action" class="input">
+            <label for="resource-alert-action" class="mb-1 block text-sm text-zinc-300">动作</label>
+            <select id="resource-alert-action" v-model="alertForm.action" class="input">
               <option v-for="a in alertActionOptions" :key="a.key" :value="a.key">{{ a.label }}</option>
             </select>
           </div>
@@ -154,7 +154,7 @@
           <button @click="createAlertRule" :disabled="!alertForm.metric || alertForm.threshold == null || !Number.isFinite(Number(alertForm.threshold))" class="btn-primary flex-1">
             创建规则
           </button>
-          <button @click="showAlertModal = false" class="btn-secondary flex-1">
+          <button @click="closeAlertModal" class="btn-secondary flex-1">
             取消
           </button>
         </div>
@@ -164,7 +164,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 // embedded 模式供 MonitorView 的「历史指标」tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
@@ -173,6 +173,7 @@ import { api, metricsApi } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import InteractiveChart from '../components/charts/InteractiveChart.vue';
+import { useEscapeKey } from '../composables/useEscapeKey.js';
 
 const projects = ref([]);
 const projectId = ref('');
@@ -182,6 +183,9 @@ const period = ref('5m');
 const metricsData = ref(null);
 const alerts = ref([]);
 const showAlertModal = ref(false);
+const alertModalTrigger = ref(null);
+const alertModalElement = ref(null);
+let previousAlertModalFocus = null;
 const loading = ref(false);
 const error = ref('');
 const historySeries = ref([]);
@@ -206,6 +210,51 @@ const alertActionOptions = [
   { key: 'auto_restart', label: '自动重启容器' },
   { key: 'scale', label: '自动扩容 (+1 副本)' }
 ];
+
+const ALERT_MODAL_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+function getAlertModalFocusable() {
+  return [...(alertModalElement.value?.querySelectorAll(ALERT_MODAL_FOCUSABLE) || [])]
+    .filter((element) => !element.closest('[hidden]') && element.getAttribute('aria-hidden') !== 'true');
+}
+function closeAlertModal() {
+  showAlertModal.value = false;
+}
+function trapAlertModalTab(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = alertModalElement.value;
+  if (!dialog) return;
+  const focusable = getAlertModalFocusable();
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+useEscapeKey({ active: showAlertModal, onClose: closeAlertModal, layer: 'modal', lockBody: true });
+watch(showAlertModal, async (visible) => {
+  if (visible) {
+    previousAlertModalFocus = document.activeElement;
+    await nextTick();
+    const dialog = alertModalElement.value;
+    if (!dialog) return;
+    const focusable = getAlertModalFocusable();
+    (focusable[0] || dialog).focus({ preventScroll: true });
+    return;
+  }
+  await nextTick();
+  const target = previousAlertModalFocus?.isConnected ? previousAlertModalFocus : alertModalTrigger.value;
+  previousAlertModalFocus = null;
+  target?.focus?.({ preventScroll: true });
+});
 
 const metricTypes = [
   { key: 'cpu', label: 'CPU', icon: Cpu, color: 'text-cyan-400', chartColor: '#06B6D4', unit: '%' },
