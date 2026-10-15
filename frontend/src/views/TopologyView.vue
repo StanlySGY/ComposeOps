@@ -19,7 +19,7 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <EmptyState v-if="!selectedProjectId && !crossProject" icon="Network" title="选择项目查看拓扑" description="从上方下拉框选择一个 Compose 项目,或开启跨项目模式查看全局依赖" class="flex-1" />
 

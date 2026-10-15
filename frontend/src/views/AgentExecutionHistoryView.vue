@@ -12,7 +12,7 @@
       </div>
     </div>
 
-    <div v-if="error" class="card border-rose-500/20 bg-rose-500/5 p-4 text-rose-300">{{ error }}</div>
+    <div v-if="error" class="card border-rose-500/20 bg-rose-500/5 p-4 text-rose-300" role="alert">{{ error }}</div>
 
     <section v-if="usage" class="space-y-3">
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">

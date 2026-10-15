@@ -7,8 +7,8 @@
         <button class="btn-primary" @click="openCreate()"><Clock3 class="w-4 h-4" />新建定时任务</button>
       </div>
     </div>
-    <p v-if="error" class="alert-error">{{ error }}</p>
-    <p v-if="message" class="alert-success">{{ message }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p>
 
     <div v-if="loading && !jobs.length" class="mt-2 space-y-2" aria-busy="true">
       <div v-for="i in 3" :key="i" class="card p-3 flex items-center gap-3">
@@ -84,7 +84,7 @@
         <button class="btn-secondary px-2.5! py-1.5! text-xs" title="让 Agent 根据当前表单创建任务" @click="openCronAgent"><Bot class="h-3.5 w-3.5" />让 Agent 创建</button>
       </template>
       <template v-if="editor">
-        <p v-if="editorError" class="alert-error">{{ editorError }}</p>
+        <p v-if="editorError" class="alert-error" role="alert">{{ editorError }}</p>
         <label>任务名称<input v-model="editor.name" class="input" placeholder="例如:每天凌晨自动备份数据库" /></label>
         <label>任务类型<select v-model="editor.type" class="input"><option v-for="(info, key) in types" :key="key" :value="key">{{ info.label }} — {{ info.description }}</option></select></label>
         <label>周期模板<select v-model="editor.cron" class="input" @change="onCronTemplateChange"><option value="0 3 * * *">每天凌晨 3:00</option><option value="0 0 * * 0">每周日 0:00</option><option value="0 * * * *">每小时整点</option><option value="*/5 * * * *">每 5 分钟(测试用)</option><option value="custom">自定义表达式…</option></select></label>

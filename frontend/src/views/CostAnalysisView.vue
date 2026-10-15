@@ -21,7 +21,7 @@
       <p>加载成本数据...</p>
     </div>
 
-    <div v-else-if="error" class="error-state">
+    <div v-else-if="error" class="error-state" role="alert">
       <p>{{ error }}</p>
       <button @click="refreshData" class="btn-secondary btn-retry">重试</button>
     </div>

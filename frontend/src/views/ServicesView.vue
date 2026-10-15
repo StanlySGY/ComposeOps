@@ -9,7 +9,7 @@
         <button class="icon-btn" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
       </div>
     </div>
-    <p v-if="store.error" class="alert-error">{{ store.error }}</p>
+    <p v-if="store.error" class="alert-error" role="alert">{{ store.error }}</p>
     <!-- AI 巡检结论卡:可折叠;折叠时保留一行概要(分数 + 异常项计数) -->
     <section v-if="inspection?.latest" class="card p-4">
       <div class="flex items-center gap-3">

@@ -6,7 +6,7 @@
       <button :class="{ active: tab === 'history' }" role="tab" :aria-selected="tab === 'history'" @click="setTab('history')"><Activity class="h-4 w-4" />历史指标</button>
     </div>
     <template v-if="tab === 'live'">
-      <p v-if="error" class="alert-error">{{ error }}</p>
+      <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
       <Skeleton v-if="loading && !data" variant="table" :rows="6" label="监控数据加载中" />
       <div v-if="data" class="grid grid-cols-2 xl:grid-cols-4 gap-4"><StatCard title="环境 CPU" :value="`${data.host.cpu.percent}%`" :sub="`${data.host.cpu.cores} 核 · Load ${numberValue(data.host.cpu.loadavg?.[0]).toFixed(2)}`" tone="bg-sky-400" :trend="trends.cpu"/><StatCard title="环境内存" :value="formatBytes(data.host.memory.used)" :sub="`${data.host.memory.percent}% / ${formatBytes(data.host.memory.total)}`" tone="bg-emerald-400" :trend="trends.mem"/><StatCard title="网络速率" :value="`↓ ${formatRate(data.network.rx)}`" :sub="`↑ ${formatRate(data.network.tx)}`" tone="bg-violet-400" :trend="trends.net"/><StatCard title="运行时间" :value="formatUptime(data.host.uptime)" :sub="lastUpdated"/></div>
       <div v-if="data" class="flex flex-wrap items-center gap-2 text-xs text-surface-400">

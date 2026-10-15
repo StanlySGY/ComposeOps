@@ -35,7 +35,7 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 图谱概览统计 -->
     <div class="metric-grid">

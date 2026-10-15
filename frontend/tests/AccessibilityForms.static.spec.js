@@ -38,6 +38,11 @@ function findNode(relativePath, tag, name, value) {
   return templateNodes(relativePath).find((node) => node.tag === tag && hasAttr(node, name, value));
 }
 
+function hasClassToken(node, token) {
+  const value = (node.props || []).find((prop) => prop.type === 6 && prop.name === 'class')?.value?.content || '';
+  return value.split(/\s+/).includes(token);
+}
+
 describe('跨页面表单可访问性契约', () => {
   it('Compose 编辑器的项目、配置文件和模板选择器有名称', () => {
     const file = '../src/views/ComposeView.vue';
@@ -92,6 +97,32 @@ describe('跨页面表单可访问性契约', () => {
     }
     expect(nodes.some(n => n.tag === 'input' && hasAttr(n, 'aria-label'))).toBe(true);
     expect(nodes.some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
+  });
+
+  it('页面级错误反馈通过 alert 播报，成功消息通过 polite status 播报', () => {
+    const pageAlertFiles = [
+      '../src/views/MonitorView.vue',
+      '../src/views/TopologyView.vue',
+      '../src/views/ComposeView.vue',
+      '../src/views/ServicesView.vue',
+      '../src/views/CronTasksView.vue',
+      '../src/views/CMDBView.vue',
+      '../src/views/DashboardView.vue',
+      '../src/views/KnowledgeGraphView.vue',
+      '../src/views/EventCenterView.vue',
+    ];
+    for (const file of pageAlertFiles) {
+      expect(templateNodes(file).some((node) => hasClassToken(node, 'alert-error') && hasAttr(node, 'role', 'alert')), file).toBe(true);
+    }
+
+    const historyNodes = templateNodes('../src/views/AgentExecutionHistoryView.vue');
+    expect(historyNodes.some((node) => node.tag === 'div' && hasClassToken(node, 'card') && hasAttr(node, 'role', 'alert'))).toBe(true);
+    const costNodes = templateNodes('../src/views/CostAnalysisView.vue');
+    expect(costNodes.some((node) => hasClassToken(node, 'error-state') && hasAttr(node, 'role', 'alert'))).toBe(true);
+
+    for (const file of ['../src/views/ComposeView.vue', '../src/views/CronTasksView.vue']) {
+      expect(templateNodes(file).some((node) => hasAttr(node, 'role', 'status') && hasAttr(node, 'aria-live', 'polite')), file).toBe(true);
+    }
   });
 
   it('Agent 工作台的项目、审批策略、重命名和消息输入控件有名称', () => {

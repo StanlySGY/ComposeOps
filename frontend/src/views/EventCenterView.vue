@@ -22,7 +22,7 @@
     </div>
 
     <template v-if="tab === 'events'">
-      <p v-if="error" class="alert-error">{{ error }}</p>
+      <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
       <!-- 统计 -->
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

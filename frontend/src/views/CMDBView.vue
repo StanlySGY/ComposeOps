@@ -17,7 +17,7 @@
     </div>
 
     <template v-if="tab === 'assets'">
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 概览统计 -->
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

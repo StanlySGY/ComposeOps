@@ -21,7 +21,7 @@
       <router-link to="/agent" class="dashboard-quick-link"><Bot class="h-4 w-4" /><span>AI 助手</span><ArrowRight class="dashboard-quick-arrow h-3.5 w-3.5" /></router-link>
     </nav>
 
-    <div v-if="loadError" class="alert-error flex items-center justify-between gap-3">
+    <div v-if="loadError" class="alert-error flex items-center justify-between gap-3" role="alert">
       <span>{{ loadError }}</span>
       <button class="btn-secondary px-2.5! py-1! text-xs" :disabled="loading" @click="load">重试</button>
     </div>
