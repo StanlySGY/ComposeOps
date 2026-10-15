@@ -6,7 +6,7 @@
         <span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">更新于 {{ lastUpdated }}</span>
         <label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label>
         <button class="btn-secondary" :disabled="store.loading" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': store.loading }" />刷新</button>
-        <button class="icon-btn" title="快捷键速查表(?)" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
+        <button class="icon-btn" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
       </div>
     </div>
     <p v-if="store.error" class="alert-error">{{ store.error }}</p>

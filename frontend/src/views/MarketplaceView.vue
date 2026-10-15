@@ -143,7 +143,7 @@
       <div class="modal">
         <div class="modal-header">
           <h2>{{ editingTemplate ? '编辑模板' : '创建模板' }}</h2>
-          <button @click="closeModal" class="icon-btn close-btn">×</button>
+          <button @click="closeModal" class="icon-btn close-btn" aria-label="关闭创建或编辑模板弹窗">×</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
@@ -175,7 +175,7 @@
       <div class="modal">
         <div class="modal-header">
           <h2>AI 找应用</h2>
-          <button @click="showAiModal = false" class="icon-btn close-btn">×</button>
+          <button @click="showAiModal = false" class="icon-btn close-btn" aria-label="关闭 AI 找应用弹窗">×</button>
         </div>
         <div class="modal-body">
           <p class="text-xs text-zinc-500 mb-3">输入应用名,Agent 会联网检索官方部署方式并生成可一键部署的 Compose 模板草稿,确认后保存为自定义模板。</p>
@@ -206,7 +206,7 @@
       <div class="modal view-modal">
         <div class="modal-header">
           <h2>{{ viewingTemplate.name }}</h2>
-          <button @click="viewingTemplate = null" class="icon-btn close-btn">×</button>
+          <button @click="viewingTemplate = null" class="icon-btn close-btn" aria-label="关闭模板详情">×</button>
         </div>
         <div class="modal-body">
           <div class="template-meta">
@@ -228,7 +228,7 @@
       <div class="modal deploy-modal">
         <div class="modal-header">
           <h2>部署应用: {{ deployTarget.name }}</h2>
-          <button @click="closeDeploy" class="icon-btn close-btn">×</button>
+          <button @click="closeDeploy" class="icon-btn close-btn" aria-label="关闭部署弹窗">×</button>
         </div>
         <div class="modal-body space-y-4">
           <p class="template-description">{{ deployTarget.description || '暂无描述' }}</p>

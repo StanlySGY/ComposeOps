@@ -58,7 +58,7 @@
                 <div class="flex gap-1">
                   <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" @click="approve(inst, true)">通过</button>
                   <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" @click="approve(inst, false)">拒绝</button>
-                  <button v-if="['pending', 'running', 'waiting_approval'].includes(inst.status)" class="icon-btn" title="取消" @click="cancel(inst)"><X class="w-4 h-4" /></button>
+                  <button v-if="['pending', 'running', 'waiting_approval'].includes(inst.status)" class="icon-btn" title="取消" :aria-label="`取消工作流 ${inst.name}`" @click="cancel(inst)"><X class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
@@ -102,7 +102,7 @@
                     <option value="action">执行</option>
                     <option value="verify">验证</option>
                   </select>
-                  <button class="icon-btn shrink-0" title="删除节点" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
+                  <button class="icon-btn shrink-0" title="删除节点" :aria-label="`删除节点 ${i + 1}`" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
                 </div>
                 <div class="mt-2 grid gap-2 sm:grid-cols-3">
                   <label class="form-grid-label sm:col-span-3"><span>下一节点(可选)</span><input v-model="node.next" class="input py-1! text-xs" list="workflow-node-ids" placeholder="留空按列表顺序执行" /></label>

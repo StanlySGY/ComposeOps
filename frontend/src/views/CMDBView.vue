@@ -58,7 +58,7 @@
               <td class="text-xs text-surface-400">{{ asset.environment || '—' }}</td>
               <td class="text-xs text-surface-400">{{ asset.owner || '—' }}</td>
               <td class="text-xs text-surface-500">{{ sourceLabel(asset.source) }}</td>
-              <td><button class="icon-btn" title="删除资产" @click="deleteTarget = asset"><Trash2 class="w-4 h-4" /></button></td>
+              <td><button class="icon-btn" title="删除资产" aria-label="删除资产" @click="deleteTarget = asset"><Trash2 class="w-4 h-4" /></button></td>
             </tr>
             <tr v-if="!filteredAssets.length"><td colspan="7" class="py-8 text-center text-sm text-surface-500">暂无资产,点击「同步资产」从 Docker 扫描重建</td></tr>
           </tbody>

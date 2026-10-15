@@ -59,7 +59,7 @@
             <span class="count-badge">{{ host.runningCount ?? 0 }}/{{ host.containerCount ?? 0 }} 运行</span>
             <span v-if="host.latencyMs != null" class="count-badge" :class="host.latencyMs < 300 ? 'text-emerald-300' : 'text-amber-300'">{{ host.latencyMs }}ms</span>
             <span v-if="host.active" class="count-badge text-emerald-300">活跃</span>
-            <button class="icon-btn" :title="host.active ? '当前活跃节点' : '切换到此节点'" :disabled="host.active || pinging === host.id" @click="switchHost(host)"><ArrowLeftRight class="w-4 h-4" /></button>
+            <button class="icon-btn" :title="host.active ? '当前活跃节点' : '切换到此节点'" :aria-label="host.active ? '当前活跃节点' : `切换到节点 ${host.name}`" :disabled="host.active || pinging === host.id" @click="switchHost(host)"><ArrowLeftRight class="w-4 h-4" /></button>
           </div>
         </div>
       </section>

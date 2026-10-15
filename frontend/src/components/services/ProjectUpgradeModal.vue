@@ -9,7 +9,7 @@
       <div class="flex items-center gap-2">
         <span class="count-badge" :class="data.hasUpdate ? 'text-amber-300' : 'text-emerald-300'">{{ data.hasUpdate ? '有可用更新' : '已是最新' }}</span>
         <span class="text-muted text-xs">{{ formatTime(data.checkedAt) }} 检测</span>
-        <button class="icon-btn ml-auto" title="立即刷新" :disabled="refreshing" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': refreshing }" /></button>
+        <button class="icon-btn ml-auto" title="立即刷新" aria-label="立即刷新" :disabled="refreshing" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': refreshing }" /></button>
       </div>
       <div class="space-y-2">
         <div v-for="image in data.images" :key="image.image" class="card p-3">

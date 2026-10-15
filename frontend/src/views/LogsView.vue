@@ -7,13 +7,13 @@
         <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
         <select v-model="levelFilter" class="input w-28" title="级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
         <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" placeholder="level:error | container:api" /></label>
-        <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
-        <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
+        <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
+        <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
         <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
         <button v-else class="btn-danger" @click="disconnect"><Square class="w-4 h-4" />断开</button>
-        <button class="icon-btn" :title="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /></button>
-        <button class="icon-btn" title="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
-        <button class="icon-btn" title="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
+        <button class="icon-btn" :title="paused ? '继续接收' : '暂停显示'" :aria-label="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /></button>
+        <button class="icon-btn" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
+        <button class="icon-btn" title="清屏" aria-label="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
         <button v-if="hasErrors" class="btn-primary" @click="diagnosis = true"><Sparkles class="w-4 h-4" />AI 诊断</button>
       </div>
     </div>

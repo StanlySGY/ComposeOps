@@ -6,7 +6,7 @@
   <article :id="`project-${project.id}`" class="card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused }">
     <header class="service-project-card__header min-h-16 flex items-center gap-1 px-2 md:px-4">
       <input type="checkbox" class="ml-2 accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @click.stop @change="$emit('toggle-select')" />
-      <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" @click="toggleFavorite(project)">
+      <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" @click="toggleFavorite(project)">
         <Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-amber-400' : ''" />
       </button>
       <button class="service-project-card__toggle min-w-0 flex-1 self-stretch flex items-center gap-3 text-left px-1" :aria-expanded="expanded" @click="$emit('toggle-expand')">
@@ -27,7 +27,7 @@
       </button>
       <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden md:inline-flex" />
       <button v-if="updateInfo?.hasUpdate" class="update-badge shrink-0" title="检测到镜像可更新,点击一键升级" @click.stop="$emit('upgrade')"><Sparkles class="w-3.5 h-3.5" />Update Available</button>
-      <button class="icon-btn" title="编辑备注" @click="editNote(project)"><Pencil class="w-4 h-4" /></button>
+      <button class="icon-btn" title="编辑备注" aria-label="编辑备注" @click="editNote(project)"><Pencil class="w-4 h-4" /></button>
     </header>
 
     <div v-if="expanded" class="border-t border-surface-800 p-3 md:p-4 space-y-3">

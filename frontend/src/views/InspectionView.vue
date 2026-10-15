@@ -42,7 +42,7 @@
           <span class="flex items-center gap-1.5"><i class="status-dot bg-rose-400"></i>{{ latest.counts?.critical || 0 }} 严重</span>
           <span class="flex items-center gap-1.5"><i class="status-dot bg-amber-400"></i>{{ latest.counts?.warning || 0 }} 关注</span>
           <span class="flex items-center gap-1.5"><i class="status-dot bg-surface-500"></i>{{ latest.counts?.info || 0 }} 提示</span>
-          <button class="icon-btn" title="查看完整报告" @click="openDetail(latest.id)"><FileText class="h-4 w-4" /></button>
+          <button class="icon-btn" title="查看完整报告" aria-label="查看完整报告" @click="openDetail(latest.id)"><FileText class="h-4 w-4" /></button>
         </div>
       </div>
 

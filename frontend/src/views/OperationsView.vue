@@ -38,7 +38,7 @@
               <td><span class="ops-project">{{ item.projectName || '系统' }}</span></td>
               <td><span class="ops-action">{{ actionLabel(item.action) }}</span><span class="ml-2 hidden font-mono text-[10px] text-surface-600 xl:inline">{{ item.action }}</span></td>
               <td><span class="ops-status" :class="item.status === 'success' ? 'ops-status-ok' : 'ops-status-fail'"><span class="h-1.5 w-1.5 rounded-full" :class="item.status === 'success' ? 'bg-emerald-400' : 'bg-rose-400'"></span>{{ item.status === 'success' ? '成功' : '失败' }}</span></td>
-              <td><button v-if="item.detail" class="icon-btn" title="查看输出" @click="selectedOperation = item"><Eye class="h-4 w-4" /></button></td>
+              <td><button v-if="item.detail" class="icon-btn" title="查看输出" aria-label="查看操作输出" @click="selectedOperation = item"><Eye class="h-4 w-4" /></button></td>
             </tr>
             <tr v-if="!filteredOperations.length"><td colspan="5"><EmptyState compact :icon="operations.length ? 'Search' : 'History'" :title="operations.length ? '没有匹配的操作记录' : '暂无操作记录'" :description="operations.length ? '调整筛选条件后重试' : '执行 Compose 操作后会自动记录审计日志'" /></td></tr>
           </tbody>
@@ -75,7 +75,7 @@
               <td>{{ job.total }} 个项目</td>
               <td><div class="mb-1 flex justify-between text-[11px] text-surface-500"><span>{{ job.completed }} / {{ job.total }}</span><span>{{ jobProgress(job) }}%</span></div><div class="progress"><span :style="{ width: `${jobProgress(job)}%` }"></span></div></td>
               <td><StatusBadge :status="job.status === 'running' ? 'task' : job.status" /></td>
-              <td><button class="icon-btn" title="查看任务详情" @click="openJob(job.id)"><Eye class="h-4 w-4" /></button></td>
+              <td><button class="icon-btn" title="查看任务详情" aria-label="查看任务详情" @click="openJob(job.id)"><Eye class="h-4 w-4" /></button></td>
             </tr>
             <tr v-if="!filteredJobs.length"><td colspan="6"><EmptyState compact :icon="jobs.length ? 'Search' : 'ListChecks'" :title="jobs.length ? '没有匹配的后台任务' : '暂无后台任务'" :description="jobs.length ? '调整筛选条件后重试' : '批量操作会以后台任务形式出现在这里'" /></td></tr>
           </tbody>

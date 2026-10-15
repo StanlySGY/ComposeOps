@@ -60,7 +60,7 @@
         <div class="flex shrink-0 items-center gap-2">
           <button class="btn-secondary" :disabled="runningId === job.id" @click="runNow(job)"><Play class="w-4 h-4" :class="{ 'animate-pulse': runningId === job.id }" />立即执行</button>
           <label class="toggle-label" :title="job.enabled ? '点击停用' : '点击启用'"><input type="checkbox" :checked="job.enabled" :aria-label="job.enabled ? `停用定时任务 ${job.name}` : `启用定时任务 ${job.name}`" @change="toggleEnabled(job)" /></label>
-          <button class="icon-btn" title="删除任务" @click="removeJob(job)"><Trash2 class="w-4 h-4 text-rose-300" /></button>
+          <button class="icon-btn" title="删除任务" :aria-label="`删除定时任务 ${job.name}`" @click="removeJob(job)"><Trash2 class="w-4 h-4 text-rose-300" /></button>
         </div>
       </article>
 

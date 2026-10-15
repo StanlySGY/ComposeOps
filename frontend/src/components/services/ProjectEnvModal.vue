@@ -62,16 +62,16 @@
                   spellcheck="false"
                 />
                 <div v-if="entry.isSecret" class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-                  <button class="icon-btn h-7! w-7!" :title="revealed.has(entry._uid) ? '隐藏' : '显示'" @click="toggleReveal(entry._uid)"><Eye v-if="!revealed.has(entry._uid)" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
-                  <button class="icon-btn h-7! w-7!" title="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
+                  <button class="icon-btn h-7! w-7!" :title="revealed.has(entry._uid) ? '隐藏' : '显示'" :aria-label="revealed.has(entry._uid) ? '隐藏' : '显示'" @click="toggleReveal(entry._uid)"><Eye v-if="!revealed.has(entry._uid)" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
+                  <button class="icon-btn h-7! w-7!" title="复制值" aria-label="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               <input v-model="entry.comment" class="input text-xs" placeholder="说明注释(可选)" />
             </div>
             <div class="flex shrink-0 items-center gap-1 self-end sm:self-center">
-              <button class="icon-btn h-7! w-7!" title="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn h-7! w-7!" title="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn h-7! w-7! hover:text-rose-400" title="删除" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn h-7! w-7!" title="上移" aria-label="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn h-7! w-7!" title="下移" aria-label="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn h-7! w-7! hover:text-rose-400" title="删除" aria-label="删除变量" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
             </div>
           </div>
           <div v-if="!filteredEntries.length" class="py-8 text-center text-sm text-surface-500">暂无变量{{ keyword ? '与过滤条件匹配' : ',点击下方添加' }}</div>

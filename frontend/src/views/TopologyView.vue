@@ -74,7 +74,7 @@
                   </div>
                   <p class="text-xs text-surface-400 mt-1 truncate">{{ selectedSvcData.image || '本地镜像构建' }}</p>
                 </div>
-                <button class="icon-btn text-surface-400 hover:text-surface-100" title="取消选中" @click="selectedService = ''">
+                <button class="icon-btn text-surface-400 hover:text-surface-100" title="取消选中" aria-label="取消选中服务" @click="selectedService = ''">
                   <X class="w-4 h-4" />
                 </button>
               </div>
