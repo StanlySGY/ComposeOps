@@ -1,5 +1,5 @@
 <template>
-  <div :class="embedded ? '' : 'page-shell'">
+  <div :class="embedded ? '' : 'page-shell'" :aria-busy="loading">
     <div v-if="!embedded" class="page-header">
       <div>
         <h1 class="page-title">AI 变更评审</h1>
@@ -22,7 +22,8 @@
       <button class="btn-secondary" :disabled="loading" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载变更评审</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <EmptyState v-if="!selectedProjectId" icon="ShieldCheck" title="选择项目进行变更评审" description="从上方下拉框选择一个 Compose 项目,自动分析当前配置的风险与影响" class="flex-1" />
 
@@ -97,7 +98,8 @@
           <div><h2 class="section-title">部署预言 · 宿主实况</h2><p class="mt-1 text-muted">对照宿主真实状态推演 up:镜像是否在位、端口是否被占、卷与 bind 路径是否存在、哪些容器会重建</p></div>
           <button class="btn-secondary" :disabled="hostPreview.loading" @click="runHostPreview"><Telescope class="w-4 h-4" :class="{ 'animate-spin': hostPreview.loading }" />{{ hostPreview.loading ? '推演中...' : '生成预言' }}</button>
         </div>
-        <p v-if="hostPreview.error" class="alert-error">{{ hostPreview.error }}</p>
+        <p v-if="hostPreview.loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在生成宿主实况预演</p>
+        <p v-if="hostPreview.error" class="alert-error" role="alert">{{ hostPreview.error }}</p>
         <template v-if="hostPreview.data">
           <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-center"><div class="text-lg font-semibold text-emerald-300">{{ hostPreview.data.summary.create }}</div><div class="text-xs text-surface-500">将新建</div></div>
@@ -216,9 +218,9 @@
     <!-- 部署输出抽屉 -->
     <BaseModal :show="deployOutput.open" :title="`部署输出 · ${project?.projectName || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="deployOutput.open = false">
       <template #header-actions>
-        <span v-if="deployOutput.running" class="count-badge text-sky-300">执行中</span>
+        <span v-if="deployOutput.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="deployOutput.running ? 'text-sky-300' : deployOutput.status === 'failed' ? 'text-rose-300' : deployOutput.status === 'cancelled' ? 'text-amber-300' : 'text-emerald-300'">{{ deployOutput.running ? '部署执行中' : deployOutput.status === 'failed' ? '部署失败' : deployOutput.status === 'cancelled' ? '部署已中断' : '部署完成' }}</span>
       </template>
-      <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4">{{ deployOutput.text || '等待输出...' }}</pre>
+      <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4" role="region" aria-label="部署执行输出" tabindex="0" aria-live="off" :aria-busy="deployOutput.running">{{ deployOutput.text || '等待输出...' }}</pre>
       <template #footer>
         <button class="btn-secondary" @click="deployOutput.open = false">关闭</button>
       </template>
@@ -247,7 +249,7 @@ const preview = ref({ added: [], changed: [], restarted: [], removed: [], portCo
 const services = ref([]);
 const showDeployConfirm = ref(false);
 const deploying = ref(false);
-const deployOutput = ref({ open: false, text: '', running: false });
+const deployOutput = ref({ open: false, text: '', running: false, status: 'completed' });
 let deployController = null;
 const hostPreview = ref({ loading: false, error: '', data: null });
 
@@ -345,18 +347,35 @@ function openDeployConfirm() {
 async function confirmDeploy() {
   showDeployConfirm.value = false;
   deploying.value = true;
-  deployOutput.value = { open: true, text: '', running: true };
+  deployOutput.value = { open: true, text: '', running: true, status: 'running' };
   deployController?.abort();
   deployController = new AbortController();
+  let exitCode = null;
+  let streamReportedError = false;
   try {
     await streamComposeControl(selectedProjectId.value, 'up', (frame) => {
       if (frame.type === 'stdout' || frame.type === 'stderr') deployOutput.value.text += frame.data;
-      else if (frame.type === 'error') deployOutput.value.text += `\n[错误] ${frame.data}`;
-      else if (frame.type === 'exit') deployOutput.value.text += `\n[退出码 ${frame.data.code}]`;
+      else if (frame.type === 'error') {
+        streamReportedError = true;
+        deployOutput.value.text += `\n[错误] ${frame.data}`;
+      }
+      else if (frame.type === 'exit') {
+        exitCode = Number(frame.data?.code);
+        deployOutput.value.text += `\n[退出码 ${frame.data.code}]`;
+      }
     }, null, null, deployController.signal);
+    if (streamReportedError || (exitCode !== null && exitCode !== 0)) {
+      deployOutput.value.status = 'failed';
+      return;
+    }
+    deployOutput.value.status = 'completed';
     await store.refresh(true);
   } catch (e) {
-    if (e.name !== 'AbortError') deployOutput.value.text += `\n[请求失败] ${e.message}`;
+    if (e.name === 'AbortError') deployOutput.value.status = 'cancelled';
+    else {
+      if (deployOutput.value.status !== 'completed') deployOutput.value.status = 'failed';
+      deployOutput.value.text += `\n[请求失败] ${e.message}`;
+    }
   } finally {
     deployController = null;
     deploying.value = false;
