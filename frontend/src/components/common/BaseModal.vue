@@ -3,7 +3,7 @@
     <Transition name="modal-fade">
       <div v-if="show" class="modal-backdrop" @click.self="!closeDisabled && emit('close')" @keydown="trapTab">
         <Transition name="modal-pop" appear>
-          <div class="modal" :class="sizeClass" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1">
+          <div ref="modalRef" class="modal" :class="sizeClass" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1">
             <div class="modal-header">
               <span class="truncate">{{ title }}</span>
               <div class="flex items-center gap-1">
@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { X } from 'lucide-vue-next';
 import { useEscapeKey } from '../../composables/useEscapeKey.js';
 
@@ -47,6 +47,7 @@ useEscapeKey({
   lockBody: true,
 });
 
+const modalRef = ref(null);
 let previousFocus = null;
 function focusableIn(root) {
   return [...root.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
@@ -72,7 +73,7 @@ watch(() => props.show, async (visible) => {
   if (visible) {
     previousFocus = document.activeElement;
     await nextTick();
-    const modal = document.querySelector('.modal-backdrop .modal');
+    const modal = modalRef.value;
     if (!modal) return;
     const focusables = focusableIn(modal);
     (focusables[0] || modal).focus({ preventScroll: true });
@@ -80,5 +81,5 @@ watch(() => props.show, async (visible) => {
     previousFocus.focus({ preventScroll: true });
     previousFocus = null;
   }
-});
+}, { immediate: true });
 </script>
