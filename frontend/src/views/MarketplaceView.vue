@@ -1,5 +1,5 @@
 <template>
-  <div class="marketplace-view">
+  <div class="marketplace-view" :aria-busy="loading || (statsLoading && !statsLoaded)">
     <header class="page-header">
       <div>
         <h1>应用市场</h1>
@@ -45,10 +45,15 @@
       </div>
     </section>
 
-    <p v-if="stats && !stats.communityAvailable" class="mx-4 mb-3 rounded-md border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 sm:mx-0">{{ stats.communityMessage || '社区模板源尚未接入,当前仅提供内置和自定义模板。' }}</p>
+    <p v-if="statsLoading && !statsLoaded" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载应用市场统计</p>
+    <p v-if="statsError" class="mx-4 mb-3 rounded-md border border-rose-900/50 bg-rose-950/20 px-3 py-2 text-xs text-rose-300 sm:mx-0" role="alert">
+      应用市场统计加载失败：{{ statsError }}<span v-if="statsLoaded">，以下显示的是上次成功读取的数据。</span><span v-else>，统计数据暂不可用。</span>
+      <button type="button" class="ml-2 underline underline-offset-2" @click="loadStats">重试统计</button>
+    </p>
+    <p v-if="statsLoaded && !stats.communityAvailable" class="mx-4 mb-3 rounded-md border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 sm:mx-0">{{ stats.communityMessage || '社区模板源尚未接入,当前仅提供内置和自定义模板。' }}</p>
 
     <!-- 统计卡片 -->
-    <section v-if="stats" class="stats-grid">
+    <section v-if="statsLoaded" class="stats-grid" :aria-busy="statsLoading">
       <div class="stat-card">
         <div class="label">内置模板</div>
         <div class="value">{{ stats.totalBuiltin }}</div>
@@ -67,12 +72,12 @@
       </div>
     </section>
 
-    <div v-if="loading" class="loading-state">
+    <div v-if="loading" class="loading-state" role="status" aria-live="polite" aria-atomic="true">
       <div class="spinner"></div>
       <p>加载模板...</p>
     </div>
 
-    <div v-else-if="error" class="error-state">
+    <div v-else-if="error" class="error-state" role="alert">
       <p>{{ error }}</p>
       <button @click="loadTemplates" class="btn-secondary btn-retry">重试</button>
     </div>
@@ -100,6 +105,8 @@
             @click="toggleFavorite(template.id)"
             class="favorite-btn"
             :class="{ active: template.favorited }"
+            :aria-label="template.favorited ? `取消收藏：${template.name}` : `收藏：${template.name}`"
+            :aria-pressed="Boolean(template.favorited)"
           >
             ★
           </button>
@@ -288,6 +295,10 @@ const { openAgent, updateAgentContext } = useAgentConsole();
 const loading = ref(false);
 const error = ref('');
 const stats = ref({ totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [], communityAvailable: false, communityMessage: '' });
+const statsLoaded = ref(false);
+const statsLoading = ref(false);
+const statsError = ref('');
+let statsRequestId = 0;
 const filteredTemplates = ref([]);
 const searchQuery = ref('');
 const selectedSource = ref('all');
@@ -312,15 +323,26 @@ const showDeleteDialog = ref(false);
 const pendingDeleteId = ref(null);
 
 async function loadStats() {
+  const requestId = ++statsRequestId;
+  statsLoading.value = true;
+  statsError.value = '';
   try {
     const data = await api.getMarketplaceStats();
+    if (requestId !== statsRequestId) return;
     stats.value = data;
+    statsLoaded.value = true;
   } catch (err) {
+    if (requestId !== statsRequestId) return;
+    statsError.value = err?.message || '未知错误';
     console.error('Failed to load stats:', err);
+  } finally {
+    if (requestId === statsRequestId) statsLoading.value = false;
   }
 }
 
+let templatesRequestId = 0;
 async function loadTemplates() {
+  const requestId = ++templatesRequestId;
   loading.value = true;
   error.value = '';
   try {
@@ -331,11 +353,13 @@ async function loadTemplates() {
     if (onlyFavorites.value) params.set('onlyFavorites', 'true');
 
     const data = await api.searchMarketplaceTemplates(params);
+    if (requestId !== templatesRequestId) return;
     filteredTemplates.value = data.results || [];
   } catch (err) {
+    if (requestId !== templatesRequestId) return;
     error.value = err.message || '加载失败';
   } finally {
-    loading.value = false;
+    if (requestId === templatesRequestId) loading.value = false;
   }
 }
 

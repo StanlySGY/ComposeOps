@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell">
+  <div class="page-shell" :aria-busy="loading || driftLoading">
     <div class="page-header">
       <div>
         <h1 class="page-title">GitOps 集成</h1>
@@ -10,28 +10,36 @@
       </div>
     </div>
 
-    <!-- 漂移状态条 -->
-    <div v-if="drift && drift.repos?.length" class="section-panel py-3! flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="font-medium text-surface-300">漂移检测</span>
-        <span class="count-badge text-emerald-300">一致 {{ drift.counts?.clean || 0 }}</span>
-        <span class="count-badge text-amber-300">有差异 {{ drift.counts?.diverged || 0 }}</span>
-        <span class="count-badge text-sky-300">落后远端 {{ drift.counts?.behind || 0 }}</span>
-        <span v-if="drift.counts?.detached" class="count-badge text-rose-300">游离提交 {{ drift.counts.detached }}</span>
-        <span v-if="drift.scannedAt" class="text-surface-500">扫描于 {{ new Date(drift.scannedAt).toLocaleString('zh-CN') }}</span>
+    <!-- 漂移状态条：加载失败不能静默等同于“无漂移” -->
+    <div v-if="(drift && drift.repos?.length) || driftLoading || driftError" class="section-panel py-3! flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 flex-col gap-2">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="font-medium text-surface-300">漂移检测</span>
+          <template v-if="drift && drift.repos?.length">
+            <span class="count-badge text-emerald-300">一致 {{ drift.counts?.clean || 0 }}</span>
+            <span class="count-badge text-amber-300">有差异 {{ drift.counts?.diverged || 0 }}</span>
+            <span class="count-badge text-sky-300">落后远端 {{ drift.counts?.behind || 0 }}</span>
+            <span v-if="drift.counts?.detached" class="count-badge text-rose-300">游离提交 {{ drift.counts.detached }}</span>
+            <span v-if="drift.scannedAt" class="text-surface-500">扫描于 {{ new Date(drift.scannedAt).toLocaleString('zh-CN') }}</span>
+          </template>
+        </div>
+        <p v-if="driftLoading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在检测 GitOps 漂移状态</p>
+        <p v-if="driftError" class="alert-error" role="alert">漂移检测失败：{{ driftError }}。现有结果可能已过期。</p>
       </div>
-      <button class="btn-secondary py-1.5! text-xs" @click="loadDrift">
-        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': driftLoading }" />重新检测
+      <button class="btn-secondary py-1.5! text-xs" :disabled="driftLoading" :aria-label="driftLoading ? '正在检测 GitOps 漂移状态' : '重新检测 GitOps 漂移状态'" @click="loadDrift">
+        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': driftLoading }" />{{ driftLoading ? '检测中…' : '重新检测' }}
       </button>
     </div>
 
-    <div v-if="loading" class="loading-state">
+    <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载 GitOps 仓库</p>
+    <p v-if="repoError" class="alert-error" role="alert">仓库列表加载失败：{{ repoError }}</p>
+    <div v-if="loading && repos.length === 0" class="loading-state" aria-hidden="true">
       <div class="spinner"></div>
       <p>加载仓库...</p>
     </div>
 
     <EmptyState
-      v-else-if="repos.length === 0"
+      v-else-if="!loading && !repoError && repos.length === 0"
       icon="Inbox"
       title="暂无 GitOps 仓库"
       description="添加第一个仓库开始同步代码:配置仓库地址、分支与本地路径,可开启自动同步与漂移检测。"
@@ -39,7 +47,7 @@
       @action="openAddModal"
     />
 
-    <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div v-else-if="repos.length > 0" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <article v-for="repo in repos" :key="repo.id" class="card p-4 flex flex-col gap-4">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
@@ -215,8 +223,12 @@ function showNotification(type, title, message) {
 
 const repos = ref([]);
 const loading = ref(false);
+const repoError = ref('');
+let reposRequestId = 0;
 const drift = ref(null);
 const driftLoading = ref(false);
+const driftError = ref('');
+let driftRequestId = 0;
 const syncingId = ref('');
 const driftMap = computed(() => {
   const map = {};
@@ -234,13 +246,18 @@ function driftDotClass(status) {
   }[status] || 'w-2 h-2 rounded-full shrink-0 mt-1 bg-surface-500';
 }
 async function loadDrift() {
+  const requestId = ++driftRequestId;
   driftLoading.value = true;
+  driftError.value = '';
   try {
-    drift.value = await api.getGitOpsDrift();
+    const data = await api.getGitOpsDrift();
+    if (requestId !== driftRequestId) return;
+    drift.value = data;
   } catch (err) {
-    drift.value = null;
+    if (requestId !== driftRequestId) return;
+    driftError.value = err?.message || '未知错误';
   } finally {
-    driftLoading.value = false;
+    if (requestId === driftRequestId) driftLoading.value = false;
   }
 }
 const showAddModal = ref(false);
@@ -273,14 +290,19 @@ async function loadProjects() {
 }
 
 async function loadRepos() {
+  const requestId = ++reposRequestId;
   loading.value = true;
+  repoError.value = '';
   try {
     const data = await api.getGitOpsRepos();
+    if (requestId !== reposRequestId) return;
     repos.value = data.repositories || [];
   } catch (err) {
-    showNotification('error', '加载仓库列表失败', err.message);
+    if (requestId !== reposRequestId) return;
+    repoError.value = err?.message || '未知错误';
+    showNotification('error', '加载仓库列表失败', repoError.value);
   } finally {
-    loading.value = false;
+    if (requestId === reposRequestId) loading.value = false;
   }
 }
 
