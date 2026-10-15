@@ -12,23 +12,23 @@
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto p-4">
         <div v-if="loading" class="flex min-h-32 flex-col items-center justify-center gap-3 text-surface-500">
-        <span class="loading-mark"></span><span class="text-sm">正在加载项目活动...</span>
+        <span class="loading-mark" aria-hidden="true"></span><span class="text-sm" role="status" aria-live="polite" aria-atomic="true">正在加载项目活动...</span>
       </div>
-        <div v-else-if="error" class="alert-error">{{ error }}</div>
+        <div v-else-if="error" class="alert-error" role="alert">{{ error }}</div>
         <div v-else-if="tab === 'activity'" class="activity-list">
           <button v-for="item in operations" :key="item.id" class="activity-item" @click="selectedOperation = item">
             <span class="timeline-dot" :class="item.status === 'success' ? 'success' : 'failed'"></span>
             <span class="min-w-0 flex-1"><span class="flex items-center justify-between gap-3"><strong>{{ actionLabel(item.action) }}</strong><time>{{ formatRelative(item.createdAt) }}</time></span><small>{{ operationSummary(item) }}</small></span>
             <ChevronRight class="h-4 w-4 shrink-0 text-surface-600" />
           </button>
-          <EmptyState icon="History" compact title="该项目暂无操作记录" description="对项目执行启动、停止等操作后会显示在这里" />
+          <EmptyState v-if="!operations.length" icon="History" compact title="该项目暂无操作记录" description="对项目执行启动、停止等操作后会显示在这里" />
         </div>
         <div v-else class="space-y-3">
           <article v-for="backup in backups" :key="backup.id" class="version-card">
             <div class="flex items-start gap-3"><span class="version-icon"><FileCode2 class="h-4 w-4" /></span><div class="min-w-0 flex-1"><strong>{{ reasonLabel(backup.reason) }}</strong><p class="mt-1 truncate font-mono text-muted" :title="backup.filePath">{{ backup.filePath }}</p><p class="mt-1 text-xs text-surface-600">{{ formatTime(backup.createdAt) }} · {{ backup.size }} 字符</p></div></div>
             <div class="mt-3 flex justify-end gap-2"><router-link class="btn-ghost" :to="`/compose?projectId=${project.id}`" @click="$emit('close')"><Eye class="h-4 w-4" />打开编辑器</router-link><button class="btn-secondary" :disabled="restoring || !project.editable" :title="project.editable ? '恢复到该版本' : '项目未启用 Compose 编辑能力'" @click="restore(backup)"><Undo2 class="h-4 w-4" />恢复</button></div>
           </article>
-          <EmptyState icon="FileClock" compact title="暂无配置备份" description="保存配置后会自动生成版本历史" />
+          <EmptyState v-if="!backups.length" icon="FileClock" compact title="暂无配置备份" description="保存配置后会自动生成版本历史" />
         </div>
       </div>
       <footer class="flex items-center justify-between border-t border-surface-800 px-4 py-3 text-muted"><span>保留最近 20 个配置版本</span><button class="btn-ghost" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" />刷新</button></footer>
@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { Activity, ChevronRight, Eye, FileClock, FileCode2, History, RefreshCw, Undo2, X } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -59,15 +59,32 @@ const props = defineProps({ project: Object });
 const emit = defineEmits(['close', 'restored']);
 const tab = ref('activity'); const loading = ref(false); const restoring = ref(false); const error = ref(''); const operations = ref([]); const backups = ref([]); const selectedOperation = ref(null);
 const restoreTarget = ref(null);
+let loadRequestId = 0;
 
 useEscapeKey({ active: computed(() => !!props.project), onClose: () => emit('close'), layer: 'drawer', lockBody: true });
 
 async function load() {
-  if (!props.project) return;
-  loading.value = true; error.value = '';
-  try { const data = await api.getProjectActivity(props.project.id); operations.value = data.operations || []; backups.value = data.backups || []; }
-  catch (e) { error.value = e.message; }
-  finally { loading.value = false; }
+  const projectId = props.project?.id;
+  const requestId = ++loadRequestId;
+  if (!projectId) {
+    loading.value = false;
+    operations.value = [];
+    backups.value = [];
+    return;
+  }
+  loading.value = true;
+  error.value = '';
+  try {
+    const data = await api.getProjectActivity(projectId);
+    // Project prop may change while the previous project's request is still in flight.
+    if (requestId !== loadRequestId || projectId !== props.project?.id) return;
+    operations.value = data.operations || [];
+    backups.value = data.backups || [];
+  } catch (e) {
+    if (requestId === loadRequestId && projectId === props.project?.id) error.value = e.message || '项目活动加载失败';
+  } finally {
+    if (requestId === loadRequestId) loading.value = false;
+  }
 }
 async function restore(backup) {
   restoreTarget.value = backup;
@@ -87,6 +104,14 @@ function reasonLabel(reason) { return reason === 'restore' ? '恢复前自动备
 function formatTime(value) { return value ? new Date(`${value}Z`).toLocaleString() : ''; }
 function formatRelative(value) { const diff = Date.now() - new Date(`${value}Z`).getTime(); const min = Math.floor(diff / 60000); if (min < 1) return '刚刚'; if (min < 60) return `${min} 分钟前`; const hour = Math.floor(min / 60); if (hour < 24) return `${hour} 小时前`; const day = Math.floor(hour / 24); return day < 7 ? `${day} 天前` : formatTime(value); }
 
-watch(() => props.project?.id, load);
+watch(() => props.project?.id, (nextId, previousId) => {
+  if (nextId !== previousId) {
+    selectedOperation.value = null;
+    restoreTarget.value = null;
+    tab.value = 'activity';
+  }
+  void load();
+});
 onMounted(load);
+onBeforeUnmount(() => { loadRequestId += 1; });
 </script>
