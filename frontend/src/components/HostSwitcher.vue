@@ -14,7 +14,7 @@
         <button class="icon-btn" title="刷新节点状态" aria-label="刷新节点状态" :disabled="store.loading" @click="reload"><RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': store.loading }" /></button>
       </header>
       <div class="max-h-72 overflow-y-auto p-1.5">
-        <button v-for="host in store.hosts" :key="host.id" class="host-item" :class="{ active: host.id === store.activeHostId }" @click="select(host)">
+        <button v-for="host in store.hosts" :key="host.id" class="host-item" :class="{ active: host.id === store.activeHostId }" :aria-current="host.id === store.activeHostId ? 'true' : undefined" @click="select(host)">
           <span class="w-2 h-2 rounded-full shrink-0" :class="host.status === 'online' ? 'bg-emerald-400' : host.status === 'offline' ? 'bg-rose-400' : 'bg-surface-500'"></span>
           <span class="min-w-0 flex-1 text-left">
             <strong class="block truncate text-sm font-medium text-surface-200">{{ host.name }}</strong>

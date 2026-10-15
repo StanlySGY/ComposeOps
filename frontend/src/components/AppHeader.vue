@@ -49,7 +49,7 @@
       <HostSwitcher />
       <EventCenter />
       <button class="icon-btn" title="打开页面 Agent" aria-label="打开页面 Agent" @click="emitAgentOpen"><Bot class="w-4 h-4 text-accent" /></button>
-      <button class="icon-btn hidden sm:inline-flex header-density" :title="density === 'compact' ? '切换为舒适视图' : '切换为紧凑视图'" aria-label="视图密度" @click="toggleDensity"><Rows3 class="w-4 h-4" /></button>
+      <button class="icon-btn hidden sm:inline-flex header-density" :title="density === 'compact' ? '切换为舒适视图' : '切换为紧凑视图'" aria-label="紧凑布局" :aria-pressed="density === 'compact'" @click="toggleDensity"><Rows3 class="w-4 h-4" /></button>
       <span class="hidden lg:inline text-muted">{{ currentTime }}</span>
       <span class="hidden sm:inline h-5 w-px bg-surface-800"></span>
       <button class="icon-btn" title="退出登录" aria-label="退出登录" @click="$emit('logout')"><LogOut class="w-4 h-4" /></button>

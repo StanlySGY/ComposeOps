@@ -88,12 +88,33 @@ describe('顶部下拉控件的可访问性与焦点恢复', () => {
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(trigger.getAttribute('aria-controls')).toBe('docker-host-switcher-panel');
     expect(panel.querySelector('button[aria-label="刷新节点状态"]')).not.toBeNull();
+    const hostItems = [...panel.querySelectorAll('button.host-item')];
+    expect(hostItems[0].getAttribute('aria-current')).toBe('true');
+    expect(hostItems[1].hasAttribute('aria-current')).toBe(false);
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await flushPromises();
     expect(document.querySelector('#docker-host-switcher-panel')).toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('视图密度控件以稳定名称公布紧凑布局的当前状态', async () => {
+    localStorage.setItem('composeops:density', 'comfortable');
+    await start(AppHeader);
+    const toggle = document.querySelector('button.header-density');
+    expect(toggle.getAttribute('aria-label')).toBe('紧凑布局');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+    toggle.click();
+    await flushPromises();
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('composeops:density')).toBe('compact');
+
+    toggle.click();
+    await flushPromises();
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(localStorage.getItem('composeops:density')).toBe('comfortable');
   });
 
   it('项目切换器打开后聚焦到有名称的搜索框，Escape 后焦点返回入口', async () => {
