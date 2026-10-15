@@ -170,10 +170,15 @@
       body-class="flex h-[65vh] flex-col overflow-hidden p-0"
       @close="showHistoryModal = false"
     >
-      <div class="flex-1 overflow-auto p-6">
-        <EmptyState v-if="commitHistory.length === 0" compact icon="History" title="暂无提交历史" description="仓库尚未克隆或没有任何提交记录。" />
+      <div class="flex-1 overflow-auto p-6" :aria-busy="historyLoading">
+        <p v-if="historyLoading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载 {{ currentRepo?.name || 'GitOps 仓库' }} 的提交历史</p>
+        <p v-if="historyError" class="alert-error" role="alert">
+          提交历史加载失败：{{ historyError }}
+          <button type="button" class="ml-2 underline underline-offset-2" @click="loadHistory(currentRepo?.id)">重试</button>
+        </p>
+        <EmptyState v-if="!historyLoading && !historyError && commitHistory.length === 0" compact icon="History" title="暂无提交历史" description="仓库尚未克隆或没有任何提交记录。" />
 
-        <div v-else class="space-y-3">
+        <div v-else-if="!historyLoading && !historyError && commitHistory.length > 0" class="space-y-3">
           <article v-for="commit in commitHistory" :key="commit.hash" class="flex items-start gap-4 rounded-lg border border-surface-800 bg-surface-950/40 p-4">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
@@ -265,6 +270,9 @@ const showEditModal = ref(false);
 const showHistoryModal = ref(false);
 const currentRepo = ref(null);
 const commitHistory = ref([]);
+const historyLoading = ref(false);
+const historyError = ref('');
+let historyRequestId = 0;
 const deleteTarget = ref(null);
 const rollbackTarget = ref(null);
 
@@ -378,13 +386,23 @@ async function syncRepo(id) {
 }
 
 async function loadHistory(id) {
-  currentRepo.value = repos.value.find(r => r.id === id);
+  const repo = repos.value.find(r => r.id === id);
+  if (!repo) return;
+  const requestId = ++historyRequestId;
+  currentRepo.value = repo;
+  commitHistory.value = [];
+  historyError.value = '';
+  historyLoading.value = true;
+  showHistoryModal.value = true;
   try {
     const data = await api.getGitOpsHistory(id, 50);
+    if (requestId !== historyRequestId || currentRepo.value?.id !== id) return;
     commitHistory.value = data.commits || [];
-    showHistoryModal.value = true;
   } catch (err) {
-    showNotification('error', '加载历史失败', err.message);
+    if (requestId !== historyRequestId || currentRepo.value?.id !== id) return;
+    historyError.value = err?.message || '未知错误';
+  } finally {
+    if (requestId === historyRequestId && currentRepo.value?.id === id) historyLoading.value = false;
   }
 }
 

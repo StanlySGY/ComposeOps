@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 
 const getGitOpsRepos = vi.hoisted(() => vi.fn());
 const getGitOpsDrift = vi.hoisted(() => vi.fn());
+const getGitOpsHistory = vi.hoisted(() => vi.fn());
 const getProjects = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -12,7 +13,7 @@ const toast = vi.hoisted(() => ({
 const pullRefresh = vi.hoisted(() => ({ callback: null }));
 
 vi.mock('../src/api/client.js', () => ({
-  api: { getGitOpsRepos, getGitOpsDrift, getProjects },
+  api: { getGitOpsRepos, getGitOpsDrift, getGitOpsHistory, getProjects },
 }));
 vi.mock('../src/stores/toast.js', () => ({ useToastStore: () => toast }));
 vi.mock('../src/composables/usePullRefresh.js', () => ({
@@ -26,6 +27,7 @@ let wrapper;
 beforeEach(() => {
   getGitOpsRepos.mockReset().mockResolvedValue({ repositories: [] });
   getGitOpsDrift.mockReset().mockResolvedValue({ repos: [], counts: {} });
+  getGitOpsHistory.mockReset().mockResolvedValue({ commits: [] });
   getProjects.mockReset().mockResolvedValue({ projects: [] });
   toast.error.mockReset();
   toast.success.mockReset();
@@ -57,6 +59,49 @@ function mountView() {
 }
 
 describe('GitOps 页面加载反馈与异步状态语义', () => {
+  it('提交历史加载失败会明确播报原因并可重试，不伪装成空历史', async () => {
+    getGitOpsRepos.mockResolvedValueOnce({ repositories: [{ id: 'repo-a', name: '仓库 A', url: 'https://example.invalid/a.git', status: 'synced' }] });
+    getGitOpsHistory.mockRejectedValueOnce(new Error('git history offline'));
+    wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.findAll('article').find(article => article.text().includes('仓库 A')).findAll('button').find(button => button.text().includes('历史')).trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('提交历史加载失败');
+    expect(wrapper.get('[role="alert"]').text()).toContain('git history offline');
+    expect(wrapper.find('.empty-state').exists()).toBe(false);
+
+    await wrapper.get('[role="alert"] button').trigger('click');
+    await flushPromises();
+    expect(getGitOpsHistory).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.find('.empty-state').exists()).toBe(true);
+  });
+
+  it('快速切换仓库历史时旧请求不能覆盖新仓库结果', async () => {
+    getGitOpsRepos.mockResolvedValueOnce({ repositories: [
+      { id: 'repo-a', name: '仓库 A', url: 'https://example.invalid/a.git', status: 'synced', lastCommit: 'a-current' },
+      { id: 'repo-b', name: '仓库 B', url: 'https://example.invalid/b.git', status: 'synced', lastCommit: 'b-current' },
+    ] });
+    let resolveA;
+    getGitOpsHistory
+      .mockImplementationOnce(() => new Promise(resolve => { resolveA = resolve; }))
+      .mockResolvedValueOnce({ commits: [{ hash: 'b-commit', date: 'today', message: '仓库 B 的新提交', author: 'tester' }] });
+    wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.findAll('article').find(article => article.text().includes('仓库 A')).findAll('button').find(button => button.text().includes('历史')).trigger('click');
+    await wrapper.findAll('article').find(article => article.text().includes('仓库 B')).findAll('button').find(button => button.text().includes('历史')).trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('仓库 B 的新提交');
+
+    resolveA({ commits: [{ hash: 'a-commit', date: 'yesterday', message: 'STALE 仓库 A 的历史', author: 'tester' }] });
+    await flushPromises();
+    expect(wrapper.text()).toContain('仓库 B 的新提交');
+    expect(wrapper.text()).not.toContain('STALE 仓库 A 的历史');
+  });
+
   it('仓库列表加载失败时播报原因，不把失败伪装成空仓库列表', async () => {
     getGitOpsRepos.mockRejectedValueOnce(new Error('repository service offline'));
     wrapper = mountView();
