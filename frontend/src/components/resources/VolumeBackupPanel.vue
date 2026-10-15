@@ -3,7 +3,7 @@
     <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份。</p>
     <div class="flex flex-wrap items-end gap-2">
       <label class="form-grid-label"><span>项目</span>
-        <select v-model="projectId" class="input min-h-9! w-56 text-xs" @change="loadVolumes">
+        <select v-model="projectId" class="input min-h-9! w-56 text-xs" aria-label="选择要备份卷的项目" @change="loadVolumes">
           <option value="">选择项目</option>
           <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option>
         </select>
@@ -22,16 +22,20 @@
         <span v-else-if="volume.external" class="shrink-0 text-[10px] text-cyan-400">external</span>
       </label>
     </div>
-    <p v-else-if="projectId && !loadingVolumes" class="text-xs text-zinc-600">该项目 compose 中没有声明卷。</p>
+    <p v-if="volumeError" class="text-xs text-rose-400" role="alert">卷列表加载失败：{{ volumeError }}</p>
+    <p v-else-if="loadingVolumes" class="text-xs text-zinc-500" role="status" aria-live="polite">正在读取卷列表…</p>
+    <p v-else-if="projectId && !volumes.length" class="text-xs text-zinc-600">该项目 compose 中没有声明卷。</p>
 
     <div class="rounded-xl border border-surface-800 bg-surface-950/40">
       <div class="flex items-center justify-between border-b border-surface-800/80 px-3 py-2 text-xs text-zinc-400">
         <span>备份记录<button class="ml-2 text-cyan-400 hover:text-cyan-300" @click="loadBackups">刷新</button></span>
         <label class="flex items-center gap-1.5">仅看项目
-          <select v-model="filterProjectId" class="input min-h-7! py-0.5! text-[11px]" @change="loadBackups"><option value="">全部</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
+          <select v-model="filterProjectId" class="input min-h-7! py-0.5! text-[11px]" aria-label="筛选备份记录的项目" @change="loadBackups"><option value="">全部</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
         </label>
       </div>
-      <div class="max-h-72 overflow-y-auto">
+      <p v-if="backupsError" class="px-3 py-2 text-xs text-rose-400" role="alert">备份记录加载失败：{{ backupsError }}</p>
+      <p v-else-if="loadingBackups" class="px-3 py-2 text-xs text-zinc-500" role="status" aria-live="polite">正在读取备份记录…</p>
+      <div v-else class="max-h-72 overflow-y-auto">
         <table v-if="backups.length" class="w-full text-left text-xs">
           <thead class="sticky top-0 bg-surface-950/95 text-[10px] uppercase tracking-wide text-zinc-600">
             <tr><th class="px-3 py-2 font-medium">项目 / 卷</th><th class="px-3 py-2 font-medium">文件</th><th class="px-3 py-2 font-medium">大小</th><th class="px-3 py-2 font-medium">时间</th><th class="px-3 py-2 font-medium">宿主</th><th class="px-3 py-2 font-medium">演练</th><th class="px-3 py-2"></th></tr>
@@ -62,6 +66,7 @@
       </div>
     </div>
 
+    <p v-if="backupStatus" class="text-xs leading-5" :role="backupStatusError ? 'alert' : 'status'" :aria-live="backupStatusError ? 'assertive' : 'polite'" aria-atomic="true">{{ backupStatus }}</p>
     <ConfirmDialog :show="restoreTarget !== null" :busy="restoringId === restoreTarget?.id" title="恢复数据卷" :message="`将先验证 ${restoreTarget?.file} 并在临时卷演练；仅演练通过后才会用 ${restoreTarget?.host || 'local'} 节点上的备份覆盖卷「${restoreTarget?.volume}」的现有内容。若验证失败，将拒绝恢复。建议先停止正在写入的容器。继续?`" tone="warning" confirm-text="验证并恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
     <ConfirmDialog :show="deleteTarget !== null" title="删除备份" :message="`删除备份文件 ${deleteTarget?.file}?该操作不可恢复。`" tone="danger" confirm-text="删除" @confirm="doDelete" @cancel="deleteTarget = null" />
   </div>
@@ -82,6 +87,13 @@ const volumes = ref([]);
 const selected = ref([]);
 const backups = ref([]);
 const loadingVolumes = ref(false);
+const volumeError = ref('');
+const loadingBackups = ref(false);
+const backupsError = ref('');
+const backupStatus = ref('');
+const backupStatusError = ref(false);
+let volumeRequest = 0;
+let backupRequest = 0;
 const backing = ref(false);
 const restoreTarget = ref(null);
 const deleteTarget = ref(null);
@@ -97,26 +109,49 @@ function formatTime(value) {
   return value ? new Date(`${String(value).replace(' ', 'T')}Z`).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 }
 async function loadVolumes() {
+  const request = ++volumeRequest;
+  const requestedProject = projectId.value;
   selected.value = [];
   volumes.value = [];
-  if (!projectId.value) return;
+  volumeError.value = '';
+  if (!requestedProject) { loadingVolumes.value = false; return; }
   loadingVolumes.value = true;
   try {
-    volumes.value = (await api.getProjectVolumes(projectId.value)).volumes || [];
+    const result = await api.getProjectVolumes(requestedProject);
+    // 切换项目后,旧请求的迟到结果不可再写入当前卷列表。
+    if (request === volumeRequest && requestedProject === projectId.value) volumes.value = result.volumes || [];
   } catch (error) {
-    toast.error(error.message);
+    if (request === volumeRequest && requestedProject === projectId.value) {
+      volumeError.value = error.message || '未知错误';
+      toast.error(`卷列表加载失败：${volumeError.value}`);
+    }
+  } finally {
+    if (request === volumeRequest) loadingVolumes.value = false;
   }
-  loadingVolumes.value = false;
 }
 async function loadBackups() {
+  const request = ++backupRequest;
+  const requestedProject = filterProjectId.value;
+  loadingBackups.value = true;
+  backupsError.value = '';
   try {
-    backups.value = (await api.getVolumeBackups(filterProjectId.value)).backups || [];
+    const result = await api.getVolumeBackups(requestedProject);
+    if (request === backupRequest && requestedProject === filterProjectId.value) backups.value = result.backups || [];
   } catch (error) {
-    toast.error(error.message);
+    if (request === backupRequest && requestedProject === filterProjectId.value) {
+      backups.value = [];
+      backupsError.value = error.message || '未知错误';
+      toast.error(`备份记录加载失败：${backupsError.value}`);
+    }
+  } finally {
+    if (request === backupRequest) loadingBackups.value = false;
   }
 }
 async function backupSelected() {
+  if (backing.value || !projectId.value || !selected.value.length) return;
   backing.value = true;
+  backupStatus.value = `正在备份 ${selected.value.length} 个卷…`;
+  backupStatusError.value = false;
   let ok = 0;
   const errors = [];
   for (const volume of selected.value) {
@@ -128,8 +163,15 @@ async function backupSelected() {
     }
   }
   backing.value = false;
-  if (ok) toast.success(`已备份 ${ok} 个卷`);
-  if (errors.length) toast.error(errors[0]);
+  if (errors.length) {
+    backupStatus.value = `备份部分失败：成功 ${ok} 个，失败 ${errors.length} 个。${errors[0]}`;
+    backupStatusError.value = true;
+    toast.error(backupStatus.value);
+  } else {
+    backupStatus.value = `备份完成：已备份 ${ok} 个卷`;
+    backupStatusError.value = false;
+    toast.success(backupStatus.value);
+  }
   await loadBackups();
 }
 function askRestore(backup) { restoreTarget.value = backup; }
@@ -138,10 +180,11 @@ async function doVerify(backup) {
   verifyingId.value = backup.id;
   try {
     const result = await api.verifyVolumeBackup(backup.id);
-    if (result.status === 'verified') toast.success(`演练通过:还原出 ${result.files} 个文件(${(result.durationMs / 1000).toFixed(1)}s)`);
-    else if (result.status === 'empty') toast.info('备份可正常解压,但内容为空');
-    else toast.error('演练失败:备份疑似损坏');
+    if (result.status === 'verified') { backupStatus.value = `备份演练通过：还原出 ${result.files} 个文件`; backupStatusError.value = false; toast.success(`演练通过:还原出 ${result.files} 个文件(${(result.durationMs / 1000).toFixed(1)}s)`); }
+    else if (result.status === 'empty') { backupStatus.value = '备份可正常解压，但内容为空'; backupStatusError.value = false; toast.info(backupStatus.value); }
+    else { backupStatus.value = '演练失败：备份疑似损坏'; backupStatusError.value = true; toast.error(backupStatus.value); }
   } catch (error) {
+    backupStatus.value = `演练失败：${error.message}`; backupStatusError.value = true;
     toast.error(`演练失败:${error.message}`);
   } finally {
     verifyingId.value = '';
@@ -154,10 +197,12 @@ async function doRestore() {
   restoringId.value = backup.id;
   try {
     await api.restoreVolumeBackup(backup.id);
+    backupStatus.value = `卷 ${backup.volume} 已通过还原演练并完成恢复`; backupStatusError.value = false;
     toast.success(`卷 ${backup.volume} 已通过还原演练并完成恢复`);
     restoreTarget.value = null;
   } catch (error) {
-    toast.error(`恢复失败：${error.message}。请检查目标卷状态并确认服务健康。`);
+    backupStatus.value = `恢复失败：${error.message}。请检查目标卷状态并确认服务健康。`; backupStatusError.value = true;
+    toast.error(backupStatus.value);
   } finally {
     restoringId.value = '';
     await loadBackups();
@@ -170,9 +215,11 @@ async function doDelete() {
   if (!backup) return;
   try {
     await api.deleteVolumeBackup(backup.id);
+    backupStatus.value = `备份 ${backup.file} 已删除`; backupStatusError.value = false;
     toast.success('备份已删除');
     await loadBackups();
   } catch (error) {
+    backupStatus.value = `删除备份失败：${error.message}`; backupStatusError.value = true;
     toast.error(error.message);
   }
 }

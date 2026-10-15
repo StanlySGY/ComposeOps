@@ -1,10 +1,10 @@
 <template>
   <BaseModal :show="open" title="Docker 磁盘空间与清理" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[88vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-4" @close="close">
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <template v-if="df">
       <div>
         <div class="mb-2 flex items-center justify-between text-sm"><span class="text-surface-200">磁盘占用</span><span class="text-muted">{{ formatBytes(df.total) }}</span></div>
-        <div class="storage-bar">
+        <div class="storage-bar" role="img" :aria-label="`Docker 磁盘占用分布：镜像 ${formatBytes(df.images?.total)}，卷 ${formatBytes(df.volumes?.total)}，容器 ${formatBytes(df.containers?.total)}，构建缓存 ${formatBytes(df.buildCache?.total)}`">
           <span v-if="df.images?.total" class="storage-seg bg-blue-500" :style="{ width: segPercent(df.images.total) }" title="镜像"></span>
           <span v-if="df.volumes?.total" class="storage-seg bg-violet-500" :style="{ width: segPercent(df.volumes.total) }" title="卷"></span>
           <span v-if="df.containers?.total" class="storage-seg bg-amber-500" :style="{ width: segPercent(df.containers.total) }" title="容器"></span>
@@ -34,9 +34,10 @@
         </div>
       </div>
     </template>
-    <div v-else class="text-muted py-8 text-center">正在读取磁盘占用…</div>
+    <div v-else-if="loadingDf" class="text-muted py-8 text-center" role="status" aria-live="polite">正在读取磁盘占用…</div>
+    <div v-else class="text-muted py-8 text-center">磁盘占用暂不可用，请检查 Docker 连接后重试。</div>
     <template #footer>
-      <span v-if="lastReclaimed" class="mr-auto text-sm text-emerald-400">已释放 {{ formatBytes(lastReclaimed) }}</span>
+      <span v-if="lastReclaimed" class="mr-auto text-sm text-emerald-400" role="status" aria-live="polite" aria-atomic="true">已释放 {{ formatBytes(lastReclaimed) }}</span>
       <button class="btn-secondary" @click="close">关闭</button>
     </template>
   </BaseModal>
@@ -54,6 +55,7 @@ const emit = defineEmits(['close', 'reclaimed']);
 const toast = useToastStore();
 const df = ref(null);
 const error = ref('');
+const loadingDf = ref(true);
 const pruning = ref(false);
 const lastReclaimed = ref(0);
 const options = ref({ volumes: false, builder: false });
@@ -62,7 +64,9 @@ const totalMax = computed(() => Math.max(df.value?.total || 1, 1));
 
 async function load() {
   error.value = '';
-  try { df.value = await api.getStorageDf(); } catch (e) { error.value = e.message; }
+  loadingDf.value = true;
+  try { df.value = await api.getStorageDf(); } catch (e) { error.value = e.message || '未知错误'; }
+  finally { loadingDf.value = false; }
 }
 function segPercent(size) { return `${Math.max(1, Math.min(100, (Number(size) || 0) / totalMax.value * 100))}%`; }
 async function runPrune(mode) {
