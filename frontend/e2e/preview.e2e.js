@@ -264,6 +264,35 @@ test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) 
   await expect(dialog).toHaveCount(0);
 });
 
+test('应用市场创建弹窗支持读屏语义、焦点循环、Escape 关闭和焦点恢复', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/marketplace');
+  const trigger = page.getByRole('button', { name: /创建模板/ }).first();
+  await trigger.focus();
+  await trigger.click();
+
+  const dialog = page.getByRole('dialog', { name: '创建模板' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  await expect(dialog.getByRole('heading', { name: '创建模板' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '关闭创建或编辑模板弹窗' })).toBeFocused();
+
+  const focusable = dialog.locator('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])');
+  const first = focusable.first();
+  const last = focusable.last();
+  await last.focus();
+  await page.keyboard.press('Tab');
+  await expect(first).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(last).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
 test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page }) => {
   await page.goto('./#/gitops');
   await page.getByRole('button', { name: '添加仓库' }).first().click();
