@@ -1,6 +1,6 @@
 <template>
-  <div class="drawer max-w-[calc(100vw-2rem)] sm:max-w-[720px] z-51">
-    <div class="modal-header"><span>{{ label }} · {{ name }}</span><button class="icon-btn" title="关闭输出面板" aria-label="关闭输出面板" @click="$emit('close')"><X class="w-4 h-4" /></button></div>
+  <div ref="drawerRef" class="drawer max-w-[calc(100vw-2rem)] sm:max-w-[720px] z-51" role="dialog" aria-labelledby="operation-output-title" tabindex="-1">
+    <div class="modal-header"><h2 id="operation-output-title" class="min-w-0 truncate">{{ label }} · {{ name }} 操作输出</h2><button class="icon-btn" title="关闭输出面板" aria-label="关闭输出面板" @click="$emit('close')"><X class="w-4 h-4" /></button></div>
     <div v-if="batchTasks.length" class="border-b border-surface-800 p-3">
       <div class="mb-2 flex items-center justify-between text-muted"><span>任务进度</span><span role="status" aria-live="polite" aria-atomic="true">{{ completedCount }} / {{ batchTasks.length }} 项任务已完成</span></div>
       <div class="progress mb-3" role="progressbar" aria-label="批量任务总体进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.max(0, Math.min(100, batchProgress))" :aria-valuetext="`${completedCount} / ${batchTasks.length} 项任务已完成`"><span aria-hidden="true" :style="{ width: `${batchProgress}%` }"></span></div>
@@ -31,7 +31,7 @@
 
 <script setup>
 import { CircleCheck, CircleX, LoaderCircle, Sparkles, X } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useEscapeKey } from '../../composables/useEscapeKey.js';
 
 const props = defineProps({
@@ -46,6 +46,22 @@ const props = defineProps({
   completedCount: { type: Number, default: 0 },
 });
 const emit = defineEmits(['close', 'diagnose', 'inspect']);
+const drawerRef = ref(null);
+const activeElementBeforeOpen = document.activeElement;
+let previousFocus = activeElementBeforeOpen instanceof HTMLElement && activeElementBeforeOpen !== document.body
+  ? activeElementBeforeOpen
+  : null;
+
+onMounted(async () => {
+  await nextTick();
+  drawerRef.value?.focus({ preventScroll: true });
+});
+
+onBeforeUnmount(() => {
+  if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+  previousFocus = null;
+});
+
 const failed = computed(() => {
   if (props.exitCode != null) return props.exitCode !== 0;
   return /(fatal|error|crash|exception|failed|failed to|error:|exited with code)/i.test(props.text);
