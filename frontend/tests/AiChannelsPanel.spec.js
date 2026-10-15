@@ -1,23 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { defineComponent, ref, KeepAlive } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import AiChannelsPanel from '../src/components/settings/AiChannelsPanel.vue';
 
 const api = vi.hoisted(() => ({ fetchAiModels: vi.fn(), testAiChannel: vi.fn(), saveAiChannel: vi.fn(), deleteAiChannel: vi.fn(), reorderAiChannels: vi.fn(), revealAiChannelKey: vi.fn(), getAiConfig: vi.fn() }));
 vi.mock('../src/api/client.js', () => ({ api }));
 const channel = (id) => ({ id, name: id, baseUrl: `http://${id}.test/v1`, apiKey: '', hasApiKey: true, model: 'model', enabled: true, supportsTools: true, streamToolCalls: true, firstTokenTimeoutMs: 30000, saved: true, dirty: false, revision: `rev-${id}` });
 const wrappers = [];
+let router;
 function render(channels = [channel('primary'), channel('backup')]) {
   const wrapper = mount(defineComponent({ components: { AiChannelsPanel, KeepAlive }, setup: () => ({ channels: ref(channels), shown: ref(true) }),
-    template: '<KeepAlive><AiChannelsPanel v-if="shown" v-model:channels="channels" /></KeepAlive>' }));
+    template: '<KeepAlive><AiChannelsPanel v-if="shown" v-model:channels="channels" /></KeepAlive>' }), { global: { plugins: [router] } });
   wrappers.push(wrapper); return wrapper;
 }
 const row = (wrapper, id = 'primary') => wrapper.find(`[data-channel-id="${id}"]`);
 const action = (wrapper, name) => wrapper.find(`[data-action="${name}"]`);
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks();
   api.saveAiChannel.mockImplementation(async (id, payload) => ({ channel: { ...channel(id), ...payload, apiKey: '••••test', revision: `saved-${id}` } }));
   api.reorderAiChannels.mockResolvedValue({ ok: true });
+  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main>测试路由</main>' } }] });
+  await router.push('/');
+  await router.isReady();
 });
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.useRealTimers(); });
 

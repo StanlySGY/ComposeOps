@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { createMemoryHistory, createRouter } from 'vue-router';
 
 const { api } = vi.hoisted(() => ({
   api: Object.fromEntries(
@@ -41,18 +42,22 @@ const history = () => ({
 
 describe('状态历史面板', () => {
   let wrapper;
-  beforeEach(() => {
+  let router;
+  beforeEach(async () => {
     vi.clearAllMocks();
     api.getProjects.mockResolvedValue(PROJECTS);
     api.getStateUptime.mockResolvedValue(report());
     api.getStateExits.mockResolvedValue(exits());
     api.getStateHistory.mockResolvedValue(history());
     api.pruneStateHistory.mockResolvedValue({ ok: true, removed: 0 });
+    router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main>测试路由</main>' } }] });
+    await router.push('/');
+    await router.isReady();
   });
-  afterEach(() => { wrapper?.unmount(); });
+  afterEach(() => { wrapper?.unmount(); wrapper = null; });
 
   async function start() {
-    wrapper = mount(StateHistoryPanel);
+    wrapper = mount(StateHistoryPanel, { global: { plugins: [router] } });
     await flushPromises();
   }
 

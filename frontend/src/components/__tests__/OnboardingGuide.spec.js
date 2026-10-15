@@ -1,16 +1,21 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import OnboardingGuide from '../common/OnboardingGuide.vue';
 import { api } from '../../api/client.js';
 vi.mock('../../api/client.js', () => ({ api: { getProjects: vi.fn(), getAiConfig: vi.fn() } }));
 let wrapper;
-beforeEach(() => {
+let router;
+beforeEach(async () => {
   localStorage.clear();
   api.getProjects.mockReset().mockResolvedValue([{ managed: false }]);
   api.getAiConfig.mockReset().mockResolvedValue({ channels: [] });
+  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main>测试路由</main>' } }] });
+  await router.push('/');
+  await router.isReady();
 });
-afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; });
-function render() { wrapper = mount(OnboardingGuide, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } }); }
+afterEach(() => { wrapper?.unmount(); wrapper = null; document.body.innerHTML = ''; });
+function render() { wrapper = mount(OnboardingGuide, { global: { plugins: [router], stubs: { RouterLink: { template: '<a><slot /></a>' } } } }); }
 it('发现未纳管项目仍显示入门，并明确 AI 可选', async () => {
   render(); await flushPromises();
   expect(document.body.textContent).toContain('自动发现不会自动授权');

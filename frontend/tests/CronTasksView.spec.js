@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { createMemoryHistory, createRouter } from 'vue-router';
 
 const { listCronJobs, getCronHistory, openAgent, updateAgentContext, resetAgentContext } = vi.hoisted(() => ({
   listCronJobs: vi.fn(),
@@ -34,8 +35,9 @@ function backdropExists() {
 
 describe('CronTasksView Agent integration', () => {
   let wrapper;
+  let router;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     setActivePinia(createPinia());
     listCronJobs.mockClear();
     getCronHistory.mockClear();
@@ -44,12 +46,15 @@ describe('CronTasksView Agent integration', () => {
     openAgent.mockClear();
     updateAgentContext.mockClear();
     resetAgentContext.mockClear();
+    router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main>测试路由</main>' } }] });
+    await router.push('/');
+    await router.isReady();
   });
 
-  afterEach(() => wrapper?.unmount());
+  afterEach(() => { wrapper?.unmount(); wrapper = null; });
 
   it('从新建任务弹窗打开 Agent 时携带 cron-editor 上下文', async () => {
-    wrapper = mount(CronTasksView);
+    wrapper = mount(CronTasksView, { global: { plugins: [router] } });
     await nextTick();
     await wrapper.find('button.btn-primary').trigger('click');
     await nextTick();
@@ -65,7 +70,7 @@ describe('CronTasksView Agent integration', () => {
   });
 
   it('收到 cron.create 成功事件后关闭编辑器并刷新列表', async () => {
-    wrapper = mount(CronTasksView);
+    wrapper = mount(CronTasksView, { global: { plugins: [router] } });
     await nextTick();
     await wrapper.find('button.btn-primary').trigger('click');
     await nextTick();

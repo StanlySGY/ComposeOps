@@ -1,8 +1,10 @@
 import { afterEach, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import CommandPalette from '../CommandPalette.vue';
 
 let wrapper;
+let router;
 afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
@@ -10,6 +12,9 @@ afterEach(() => {
 });
 
 it('shows common destinations first and keeps the rest searchable', async () => {
+  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main>测试路由</main>' } }] });
+  await router.push('/');
+  await router.isReady();
   const commands = Array.from({ length: 12 }, (_, index) => ({
     id: `route-${index}`,
     label: `入口 ${index}`,
@@ -21,6 +26,7 @@ it('shows common destinations first and keeps the rest searchable', async () => 
   wrapper = mount(CommandPalette, {
     attachTo: document.body,
     props: { show: true, commands },
+    global: { plugins: [router] },
   });
   await flushPromises();
 
