@@ -43,8 +43,16 @@
     <div v-if="containerId && metricsData" class="space-y-4">
       <!-- Metric Cards -->
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div v-for="m in metricTypes" :key="m.key" 
+        <div
+             v-for="m in metricTypes"
+             :key="m.key"
+             role="button"
+             tabindex="0"
+             :aria-label="`选择${m.label}指标`"
+             :aria-pressed="selectedMetric === m.key"
              @click="selectedMetric = m.key"
+             @keydown="handleMetricCardKeydown($event, m.key)"
+             @keyup="handleMetricCardKeyup($event, m.key)"
              :class="['metric-card', selectedMetric === m.key && 'metric-card-active']">
           <component :is="m.icon" :class="['h-5 w-5', m.color]" />
           <div class="mt-2">
@@ -272,6 +280,22 @@ const periods = [
 
 const containers = computed(() => projects.value.find(p => p.id === projectId.value)?.containers || []);
 const currentContainer = computed(() => containers.value.find(c => c.id === containerId.value));
+
+function handleMetricCardKeydown(event, metric) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    selectedMetric.value = metric;
+  } else if (event.key === ' ') {
+    // 与原生按钮一致：Space 按下时阻止页面滚动，松开时才激活。
+    event.preventDefault();
+  }
+}
+
+function handleMetricCardKeyup(event, metric) {
+  if (event.key !== ' ') return;
+  event.preventDefault();
+  selectedMetric.value = metric;
+}
 const containerAlerts = computed(() => alerts.value.filter(a => a.containerId === containerId.value));
 
 const chartData = computed(() => {

@@ -6,6 +6,9 @@ const { api, metricsApi } = vi.hoisted(() => ({
   api: { getProjects: vi.fn() },
   metricsApi: {
     getAlerts: vi.fn(),
+    getContainerMetrics: vi.fn(),
+    getHistoricalMetrics: vi.fn(),
+    detectAnomalies: vi.fn(),
     createAlert: vi.fn(),
     deleteAlert: vi.fn(),
   },
@@ -22,6 +25,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   api.getProjects.mockResolvedValue({ projects: [] });
   metricsApi.getAlerts.mockResolvedValue({ alerts: [] });
+  metricsApi.getContainerMetrics.mockResolvedValue({ data: { current: 25, unit: '%' } });
+  metricsApi.getHistoricalMetrics.mockResolvedValue({ metrics: [] });
+  metricsApi.detectAnomalies.mockResolvedValue({ anomalies: [] });
   metricsApi.createAlert.mockResolvedValue({ ok: true });
   metricsApi.deleteAlert.mockResolvedValue({ ok: true });
   router = createRouter({
@@ -100,6 +106,48 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(document.body.style.overflow).toBe('');
+  });
+
+  it('指标卡片可通过 Enter 和 Space 选择，且向读屏器暴露按钮及选中状态', async () => {
+    api.getProjects.mockResolvedValue({
+      projects: [{
+        id: 'p1',
+        projectName: 'web-stack',
+        managed: true,
+        containers: [{ id: 'c1', name: 'api', state: 'running', health: 'healthy' }],
+      }],
+    });
+    await mountView();
+
+    const selects = [...document.querySelectorAll('select')];
+    selects[1].value = 'c1';
+    selects[1].dispatchEvent(new Event('change', { bubbles: true }));
+    await flushPromises();
+
+    const cpu = document.querySelector('[aria-label="选择CPU指标"]');
+    const memory = document.querySelector('[aria-label="选择内存指标"]');
+    expect(cpu).not.toBeNull();
+    expect(memory).not.toBeNull();
+    expect(cpu.getAttribute('role')).toBe('button');
+    expect(cpu.getAttribute('tabindex')).toBe('0');
+    expect(cpu.getAttribute('aria-pressed')).toBe('true');
+    expect(memory.getAttribute('aria-pressed')).toBe('false');
+
+    memory.focus();
+    memory.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await flushPromises();
+    expect(memory.getAttribute('aria-pressed')).toBe('true');
+    expect(cpu.getAttribute('aria-pressed')).toBe('false');
+
+    cpu.focus();
+    const spaceDown = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    cpu.dispatchEvent(spaceDown);
+    expect(spaceDown.defaultPrevented).toBe(true);
+    expect(cpu.getAttribute('aria-pressed')).toBe('false');
+    cpu.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    await flushPromises();
+    expect(cpu.getAttribute('aria-pressed')).toBe('true');
+    expect(memory.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('点击遮罩或关闭按钮也会关闭弹窗并恢复焦点', async () => {
