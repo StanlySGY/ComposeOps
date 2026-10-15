@@ -16,7 +16,7 @@
         <button class="btn-secondary" :disabled="!projectId || !envEditable" @click="goEnv"><KeyRound class="w-4 h-4" />跳转 Env 编辑器</button>
       </aside>
     </div>
-    <footer v-if="statusText" class="shrink-0 border-t border-surface-800 px-4 py-2 text-xs" :class="statusClass">{{ statusText }}</footer>
+    <footer v-if="statusText" :role="status === 'error' ? 'alert' : 'status'" :aria-live="status === 'error' ? 'assertive' : 'polite'" aria-atomic="true" class="shrink-0 border-t border-surface-800 px-4 py-2 text-xs" :class="statusClass">{{ statusText }}</footer>
   </BaseModal>
 </template>
 
