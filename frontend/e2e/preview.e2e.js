@@ -293,6 +293,38 @@ test('应用市场创建弹窗支持读屏语义、焦点循环、Escape 关闭�
   expect(observed.network).toEqual([]);
 });
 
+test('移动端 Agent 会话列表支持对话框语义、焦点循环、Escape 关闭和焦点恢复', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) >= 760, '移动端专用会话抽屉测试');
+  const observed = observe(page);
+  await page.goto('./#/agent');
+
+  const trigger = page.getByRole('button', { name: '打开会话列表' });
+  await expect(trigger).toBeVisible();
+  await trigger.focus();
+  await trigger.click();
+
+  const dialog = page.getByRole('dialog', { name: '会话', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  await expect(dialog.getByRole('heading', { name: '会话', exact: true })).toBeVisible();
+  await expect(dialog).toBeFocused();
+
+  const focusable = dialog.locator('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])');
+  const first = focusable.first();
+  const last = focusable.last();
+  await last.focus();
+  await page.keyboard.press('Tab');
+  await expect(first).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(last).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
 test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page }) => {
   await page.goto('./#/gitops');
   await page.getByRole('button', { name: '添加仓库' }).first().click();

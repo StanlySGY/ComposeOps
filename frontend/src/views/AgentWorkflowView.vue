@@ -22,7 +22,7 @@
         <div class="agent-session-list"><div v-if="!sessions.length" class="agent-empty-side">发送第一条消息后，会话会自动保存。</div><div v-else-if="!filteredSessions.length" class="agent-empty-side">没有匹配的会话。</div><div v-for="session in filteredSessions" :key="session.sessionId" class="agent-session-row" :class="{ active: session.sessionId === sessionId, selected: selectedSessions.includes(session.sessionId) }"><input class="agent-session-check" type="checkbox" :checked="selectedSessions.includes(session.sessionId)" :aria-label="`选择会话 ${session.title || session.sessionId}`" @click.stop @change="toggleSession(session.sessionId)" /><template v-if="editingSessionId === session.sessionId"><input ref="renameInput" v-model="editingTitle" class="agent-session-rename" :aria-label="`重命名会话 ${session.title || session.sessionId}`" maxlength="80" @keydown.enter.prevent="saveRename(session)" @keydown.esc="cancelRename" @blur="saveRename(session)" /></template><button v-else class="agent-session-open" @click="openSession(session.sessionId)"><MessageSquare class="h-4 w-4 shrink-0" /><span class="min-w-0"><strong>{{ session.title || '未命名会话' }}</strong><small>{{ formatDate(session.createdAt) }} · {{ session.messageCount }} 条消息</small></span></button><button class="agent-session-edit" title="重命名会话" :aria-label="`重命名会话 ${session.title || session.sessionId}`" @click.stop="beginRename(session)"><Pencil class="h-3.5 w-3.5" /></button><button class="agent-session-delete" title="删除会话" :aria-label="`删除会话 ${session.title || session.sessionId}`" @click.stop="deleteSession(session.sessionId)"><Trash2 class="h-3.5 w-3.5" /></button></div></div>
       </aside>
       <main class="agent-chat card"><div class="agent-chat-head">
-          <button class="agent-mobile-session-btn" title="打开会话" aria-label="打开会话列表" @click="mobileSessionsOpen = true"><MessageSquare class="h-4 w-4" /></button>
+          <button ref="mobileSessionsTrigger" class="agent-mobile-session-btn" title="打开会话" aria-label="打开会话列表" @click="mobileSessionsOpen = true"><MessageSquare class="h-4 w-4" /></button>
           <div class="agent-head-id"><Bot class="h-4 w-4 shrink-0 text-cyan-400" /><div class="agent-head-text"><strong>{{ activeTitle }}</strong><span class="agent-status">{{ webSearchEnabled ? '联网资料已开启' : '仅使用本地工具' }}</span></div></div>
           <div class="agent-head-menu">
             <button class="icon-btn" title="更多操作" aria-label="更多操作" :disabled="!messages.length" @click="headMenuOpen = !headMenuOpen"><MoreHorizontal class="h-4 w-4" /></button>
@@ -96,7 +96,7 @@
     <ConfirmDialog :show="deleteDialog.show" title="删除会话" message="删除该会话及其全部消息?" tone="warning" confirm-text="删除" @confirm="confirmDeleteSession" @cancel="deleteDialog.show = false" />
     <ConfirmDialog :show="bulkDeleteDialog" title="批量删除会话" :message="`确认删除选中的 ${selectedSessions.length} 个会话及其全部消息?`" tone="danger" confirm-text="批量删除" @confirm="confirmDeleteSelected" @cancel="bulkDeleteDialog = false" />
     <ConfirmDialog :show="clearDialog" title="清空当前会话" message="确认清空当前会话的全部消息?" tone="danger" confirm-text="清空" @confirm="confirmClearSession" @cancel="clearDialog = false" />
-    <teleport to="body"><div v-if="mobileSessionsOpen" class="agent-mobile-sheet-mask" @click.self="mobileSessionsOpen = false"><aside class="agent-mobile-sheet"><div class="agent-side-head"><div><h2>会话</h2><span>{{ filteredSessions.length }}/{{ sessions.length }} 个会话</span></div><button class="icon-btn" title="关闭" aria-label="关闭会话列表" @click="mobileSessionsOpen = false">×</button></div><div class="px-3 pb-2"><label class="search-field min-h-8!"><Search class="h-3.5 w-3.5" /><input v-model="sessionQuery" class="py-1! text-xs" placeholder="搜索会话..." /></label></div><div v-if="sessions.length" class="agent-session-bulk"><label><input type="checkbox" :checked="allSessionsSelected" :indeterminate="someSessionsSelected" @change="toggleAllSessions" />全选当前列表</label><button v-if="selectedSessions.length" class="text-rose-300 hover:text-rose-200" @click="deleteSelectedSessions">删除 {{ selectedSessions.length }} 个</button></div><div class="agent-session-list agent-mobile-sheet-list"><div v-if="!sessions.length" class="agent-empty-side">发送第一条消息后，会话会自动保存。</div><div v-else-if="!filteredSessions.length" class="agent-empty-side">没有匹配的会话。</div><div v-for="session in filteredSessions" :key="session.sessionId" class="agent-session-row" :class="{ active: session.sessionId === sessionId, selected: selectedSessions.includes(session.sessionId) }"><input class="agent-session-check" type="checkbox" :checked="selectedSessions.includes(session.sessionId)" :aria-label="`选择会话 ${session.title || session.sessionId}`" @click.stop @change="toggleSession(session.sessionId)" /><button class="agent-session-open" @click="openSession(session.sessionId); mobileSessionsOpen = false"><MessageSquare class="h-4 w-4 shrink-0" /><span class="min-w-0"><strong>{{ session.title || '未命名会话' }}</strong><small>{{ formatDate(session.createdAt) }} · {{ session.messageCount }} 条消息</small></span></button><button class="agent-session-delete" title="删除会话" @click.stop="deleteSession(session.sessionId)"><Trash2 class="h-3.5 w-3.5" /></button></div></div></aside></div></teleport>
+    <teleport to="body"><div v-if="mobileSessionsOpen" class="agent-mobile-sheet-mask" @click.self="mobileSessionsOpen = false"><aside ref="mobileSessionsDialog" class="agent-mobile-sheet" role="dialog" aria-modal="true" aria-labelledby="agent-mobile-sessions-title" tabindex="-1" @keydown="trapMobileSessionsTab"><div class="agent-side-head"><div><h2 id="agent-mobile-sessions-title">会话</h2><span>{{ filteredSessions.length }}/{{ sessions.length }} 个会话</span></div><button class="icon-btn" title="关闭" aria-label="关闭会话列表" @click="mobileSessionsOpen = false">×</button></div><div class="px-3 pb-2"><label class="search-field min-h-8!"><Search class="h-3.5 w-3.5" /><input v-model="sessionQuery" class="py-1! text-xs" placeholder="搜索会话..." /></label></div><div v-if="sessions.length" class="agent-session-bulk"><label><input type="checkbox" :checked="allSessionsSelected" :indeterminate="someSessionsSelected" @change="toggleAllSessions" />全选当前列表</label><button v-if="selectedSessions.length" class="text-rose-300 hover:text-rose-200" @click="deleteSelectedSessions">删除 {{ selectedSessions.length }} 个</button></div><div class="agent-session-list agent-mobile-sheet-list"><div v-if="!sessions.length" class="agent-empty-side">发送第一条消息后，会话会自动保存。</div><div v-else-if="!filteredSessions.length" class="agent-empty-side">没有匹配的会话。</div><div v-for="session in filteredSessions" :key="session.sessionId" class="agent-session-row" :class="{ active: session.sessionId === sessionId, selected: selectedSessions.includes(session.sessionId) }"><input class="agent-session-check" type="checkbox" :checked="selectedSessions.includes(session.sessionId)" :aria-label="`选择会话 ${session.title || session.sessionId}`" @click.stop @change="toggleSession(session.sessionId)" /><button class="agent-session-open" @click="openSession(session.sessionId); mobileSessionsOpen = false"><MessageSquare class="h-4 w-4 shrink-0" /><span class="min-w-0"><strong>{{ session.title || '未命名会话' }}</strong><small>{{ formatDate(session.createdAt) }} · {{ session.messageCount }} 条消息</small></span></button><button class="agent-session-delete" title="删除会话" @click.stop="deleteSession(session.sessionId)"><Trash2 class="h-3.5 w-3.5" /></button></div></div></aside></div></teleport>
     <teleport to="body">
       <div v-if="zoomOpen" class="rich-zoom-mask" @click.self="closeZoom()" @wheel.prevent="onZoomWheel">
         <div class="rich-zoom-card agent-markdown" :style="{ transform: `scale(${zoomScale})` }">
@@ -109,7 +109,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, ArrowDownToLine, Bot, Brain, Check, ChevronRight, Copy, Download, Edit3, Eraser, FileEdit, FileText, FoldVertical, FolderKanban, FolderOpen, Globe2, MessageCircle, MessageSquare, Mic, MoreHorizontal, Pencil, Play, Plus, RefreshCw, ScrollText, Search, Send, ThumbsDown, ThumbsUp, ShieldAlert, Sparkles, Square, Terminal, Trash2, UserRound, Wand2, Wrench, X } from 'lucide-vue-next';
@@ -143,6 +143,55 @@ const clearDialog = ref(false);
 const bulkDeleteDialog = ref(false);
 const selectedSessions = ref([]);
 useEscapeKey({ active: mobileSessionsOpen, layer: 'drawer', onClose: () => { mobileSessionsOpen.value = false; }, lockBody: true });
+const mobileSessionsTrigger = ref(null);
+const mobileSessionsDialog = ref(null);
+let previousMobileSessionsFocus = null;
+const MOBILE_SESSIONS_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+watch(mobileSessionsOpen, async (isOpen) => {
+  if (isOpen) {
+    const activeElement = document.activeElement;
+    previousMobileSessionsFocus = activeElement instanceof HTMLElement && activeElement !== document.body
+      ? activeElement
+      : mobileSessionsTrigger.value;
+    await nextTick();
+    mobileSessionsDialog.value?.focus({ preventScroll: true });
+    return;
+  }
+
+  const previousFocus = previousMobileSessionsFocus;
+  previousMobileSessionsFocus = null;
+  await nextTick();
+  if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+});
+
+function trapMobileSessionsTab(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = mobileSessionsDialog.value;
+  if (!dialog) return;
+  const focusable = [...dialog.querySelectorAll(MOBILE_SESSIONS_FOCUSABLE)].filter((element) => {
+    if (element.closest('[hidden]') || element.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
 const chat = useAgentChat({
   onEventExtra: (event) => {
     if (event.type === 'confirmation_required') appendActivity('需要确认', '请确认这项变更', { status: 'running' });
