@@ -96,7 +96,7 @@ describe('跨页面表单可访问性契约', () => {
 
   it('Agent 工作台的项目、审批策略、重命名和消息输入控件有名称', () => {
     const file = '../src/views/AgentWorkflowView.vue';
-    for (const label of ['选择 Agent 当前项目上下文', '选择本会话操作审批策略', '向 Agent 发送消息']) expect(findNamedControls(file, label)).toHaveLength(1);
+    for (const label of ['选择 Agent 当前项目上下文', '选择本会话操作审批策略', '向 Agent 发送消息', '确认执行参数 JSON']) expect(findNamedControls(file, label)).toHaveLength(1);
     expect(templateNodes(file).some(n => n.tag === 'input' && hasAttr(n, 'aria-label'))).toBe(true);
     expect(templateNodes(file).some(n => n.tag === 'div' && hasAttr(n, 'role', 'log') && hasAttr(n, 'aria-live', 'polite'))).toBe(true);
   });
