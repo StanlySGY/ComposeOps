@@ -8,11 +8,11 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
-    <p v-if="flash" class="alert-info">{{ flash }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="flash" class="alert-info" role="status" aria-live="polite">{{ flash }}</p>
 
     <!-- 批量删除进度:逐项删除可能较慢,实时显示已完成数与当前目标 -->
-    <section v-if="busy && batchProgress.total > 0" class="section-panel py-3!">
+    <section v-if="busy && batchProgress.total > 0" class="section-panel py-3!" role="status" aria-live="polite" aria-atomic="true">
       <div class="flex items-center justify-between gap-3 text-sm">
         <span class="text-surface-200">正在批量删除 <b class="text-sky-300 tabular-nums">{{ batchProgress.done }}</b> / {{ batchProgress.total }}</span>
         <span class="min-w-0 flex-1 truncate text-right font-mono text-xs text-surface-500">{{ batchProgress.current }}</span>
@@ -32,8 +32,8 @@
       </div>
       <div class="flex items-center gap-2 pb-2">
         <span v-if="searchQuery || filterStatus" class="text-xs text-surface-400">显示 <b class="text-sky-300">{{ filteredRows.length }}</b> / {{ rows.length }}</span>
-        <input v-model="searchQuery" type="text" class="input py-1! text-sm! w-48" placeholder="搜索..." />
-        <select v-model="filterStatus" class="input py-1! text-sm! w-32">
+        <input v-model="searchQuery" type="text" class="input py-1! text-sm! w-48" aria-label="搜索存储资源" placeholder="搜索..." />
+        <select v-model="filterStatus" class="input py-1! text-sm! w-32" aria-label="按资源状态筛选">
           <option value="">全部状态</option>
           <option v-for="status in statusOptions" :key="status.value" :value="status.value">{{ status.label }}</option>
         </select>

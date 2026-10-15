@@ -25,10 +25,10 @@
       </div>
       <div class="toolbar-panel">
         <label class="search-field"><Search class="h-4 w-4" /><input v-model="query" placeholder="搜索项目、操作或详情" /></label>
-        <select v-model="statusFilter" class="input sm:w-36"><option value="all">全部结果</option><option value="success">成功</option><option value="failed">失败</option></select>
+        <select v-model="statusFilter" class="input sm:w-36" aria-label="筛选操作记录结果"><option value="all">全部结果</option><option value="success">成功</option><option value="failed">失败</option></select>
         <span class="ml-auto whitespace-nowrap text-muted">{{ filteredOperations.length }} 条记录</span>
       </div>
-      <div v-if="error" class="alert-error mb-3 flex items-center justify-between gap-3"><span>{{ error }}</span><button class="btn-secondary min-h-8! py-1!" @click="load">重试</button></div>
+      <div v-if="error" class="alert-error mb-3 flex items-center justify-between gap-3" role="alert"><span>{{ error }}</span><button class="btn-secondary min-h-8! py-1!" @click="load">重试</button></div>
       <div v-else class="table-wrap flex-1 min-h-64">
         <table class="data-table">
           <thead><tr><th>时间</th><th>项目</th><th>操作</th><th>结果</th><th class="w-20">详情</th></tr></thead>
@@ -61,10 +61,10 @@
       </div>
       <div class="toolbar-panel">
         <label class="search-field"><Search class="h-4 w-4" /><input v-model="jobQuery" placeholder="搜索任务 ID 或动作" /></label>
-        <select v-model="jobStatusFilter" class="input sm:w-40"><option value="all">全部状态</option><option value="active">正在执行</option><option value="success">已完成</option><option value="abnormal">异常任务</option></select>
+        <select v-model="jobStatusFilter" class="input sm:w-40" aria-label="筛选后台任务状态"><option value="all">全部状态</option><option value="active">正在执行</option><option value="success">已完成</option><option value="abnormal">异常任务</option></select>
         <span class="ml-auto whitespace-nowrap text-muted">{{ filteredJobs.length }} 个任务</span>
       </div>
-      <div v-if="error" class="alert-error mb-3 flex items-center justify-between gap-3"><span>{{ error }}</span><button class="btn-secondary min-h-8! py-1!" @click="load">重试</button></div>
+      <div v-if="error" class="alert-error mb-3 flex items-center justify-between gap-3" role="alert"><span>{{ error }}</span><button class="btn-secondary min-h-8! py-1!" @click="load">重试</button></div>
       <div v-else class="table-wrap flex-1 min-h-64">
         <table class="data-table">
           <thead><tr><th>创建时间</th><th>任务</th><th>项目数</th><th class="min-w-44">进度</th><th>状态</th><th class="w-20">详情</th></tr></thead>

@@ -3,14 +3,14 @@
     <div class="page-header">
       <div><h1 class="page-title">容器终端</h1><p class="page-subtitle">受限于当前 Compose 项目的交互式 Shell</p></div>
       <div class="page-actions">
-        <select v-model="projectId" class="input" @change="containerId = ''"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <select v-model="containerId" class="input"><option value="">选择容器</option><option v-for="c in containers" :key="c.id" :value="c.id">{{ c.name }}</option></select>
-        <select v-model="cmd" class="input"><option value="sh">sh</option><option value="bash">bash</option></select>
+        <select v-model="projectId" class="input" aria-label="选择终端项目" @change="containerId = ''"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <select v-model="containerId" class="input" aria-label="选择终端容器"><option value="">选择容器</option><option v-for="c in containers" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+        <select v-model="cmd" class="input" aria-label="选择终端 Shell"><option value="sh">sh</option><option value="bash">bash</option></select>
         <button v-if="!connected" class="btn-primary" :disabled="!containerId || !capabilities.shellEnabled" @click="connect"><Plug class="w-4 h-4" />连接</button>
         <button v-else class="btn-danger" @click="disconnect"><Unplug class="w-4 h-4" />断开</button>
       </div>
     </div>
-    <p v-if="!capabilities.shellEnabled" class="alert-warning">Web Shell 当前未启用，请在部署环境设置 ENABLE_SHELL=1。</p><p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="!capabilities.shellEnabled" class="alert-warning" role="alert">Web Shell 当前未启用，请在部署环境设置 ENABLE_SHELL=1。</p><p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <div class="card relative flex-1 min-h-[420px] overflow-hidden terminal-host">
       <Skeleton v-if="!termReady" class="skeleton-workspace" rows="10" label="终端加载中" />
       <div ref="termEl" class="h-full w-full" :class="{ invisible: !termReady }"></div>

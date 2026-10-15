@@ -15,16 +15,16 @@
     <!-- Container Selector -->
     <div class="mb-4 grid grid-cols-2 gap-3">
       <div>
-        <label class="mb-1 block text-sm font-medium text-zinc-300">项目</label>
-        <select v-model="projectId" @change="onProjectChange" class="input">
+        <label for="resource-monitor-project" class="mb-1 block text-sm font-medium text-zinc-300">项目</label>
+        <select id="resource-monitor-project" v-model="projectId" aria-label="选择监控项目" @change="onProjectChange" class="input">
           <option value="">选择项目</option>
           <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
       </div>
       <div>
-        <label class="mb-1 block text-sm font-medium text-zinc-300">容器</label>
+        <label for="resource-monitor-container" class="mb-1 block text-sm font-medium text-zinc-300">容器</label>
         <div class="flex gap-2">
-          <select v-model="containerId" @change="loadMetrics" :disabled="!projectId" class="input flex-1">
+          <select id="resource-monitor-container" v-model="containerId" aria-label="选择监控容器" @change="loadMetrics" :disabled="!projectId" class="input flex-1">
             <option value="">选择容器</option>
             <option v-for="c in containers" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
@@ -33,11 +33,11 @@
       </div>
     </div>
 
-    <div v-if="error" class="mb-4 flex items-start gap-2 rounded-md border border-rose-900/50 bg-rose-950/20 p-3 text-sm text-rose-300">
+    <div v-if="error" class="mb-4 flex items-start gap-2 rounded-md border border-rose-900/50 bg-rose-950/20 p-3 text-sm text-rose-300" role="alert">
       <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
       <span>{{ error }}</span>
     </div>
-    <div v-if="loading" class="mb-4 text-sm text-zinc-500">正在加载指标...</div>
+    <div v-if="loading" class="mb-4 text-sm text-zinc-500" role="status" aria-live="polite">正在加载指标...</div>
 
     <!-- Metrics Dashboard -->
     <div v-if="containerId && metricsData" class="space-y-4">

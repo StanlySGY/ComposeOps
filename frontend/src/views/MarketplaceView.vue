@@ -21,19 +21,20 @@
         <input
           v-model="searchQuery"
           type="text"
+          aria-label="搜索应用模板"
           placeholder="搜索模板..."
           class="input search-input"
           @input="handleSearch"
         />
       </div>
       <div class="filters">
-        <select v-model="selectedSource" @change="loadTemplates" class="input filter-select">
+        <select v-model="selectedSource" @change="loadTemplates" class="input filter-select" aria-label="筛选模板来源">
           <option value="all">全部来源</option>
           <option value="builtin">内置模板</option>
           <option value="community" :disabled="!stats.communityAvailable">社区模板(未接入)</option>
           <option value="custom">自定义模板</option>
         </select>
-        <select v-model="selectedCategory" @change="loadTemplates" class="input filter-select">
+        <select v-model="selectedCategory" @change="loadTemplates" class="input filter-select" aria-label="筛选模板分类">
           <option value="all">全部分类</option>
           <option v-for="cat in stats.categories" :key="cat" :value="cat">{{ cat }}</option>
         </select>
@@ -147,20 +148,20 @@
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label>模板名称</label>
-            <input v-model="formData.name" type="text" class="input" placeholder="例如: LNMP Stack" />
+            <label for="market-template-name">模板名称</label>
+            <input id="market-template-name" v-model="formData.name" type="text" class="input" placeholder="例如: LNMP Stack" />
           </div>
           <div class="form-group">
-            <label>分类</label>
-            <input v-model="formData.category" type="text" class="input" placeholder="例如: Web" />
+            <label for="market-template-category">分类</label>
+            <input id="market-template-category" v-model="formData.category" type="text" class="input" placeholder="例如: Web" />
           </div>
           <div class="form-group">
-            <label>描述</label>
-            <textarea v-model="formData.description" rows="3" class="input" placeholder="简要描述模板用途"></textarea>
+            <label for="market-template-description">描述</label>
+            <textarea id="market-template-description" v-model="formData.description" rows="3" class="input" placeholder="简要描述模板用途"></textarea>
           </div>
           <div class="form-group">
-            <label>Compose 内容</label>
-            <textarea v-model="formData.defaultCompose" rows="10" class="input" placeholder="version: '3'..."></textarea>
+            <label for="market-template-compose">Compose 内容</label>
+            <textarea id="market-template-compose" v-model="formData.defaultCompose" rows="10" class="input" placeholder="version: '3'..."></textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -180,8 +181,8 @@
         <div class="modal-body">
           <p class="text-xs text-zinc-500 mb-3">输入应用名,Agent 会联网检索官方部署方式并生成可一键部署的 Compose 模板草稿,确认后保存为自定义模板。</p>
           <div class="form-group">
-            <label>应用名称</label>
-            <input v-model="aiQuery" type="text" class="input" placeholder="例如: umami / immich / gitea" @keydown.enter="runAiDiscover" />
+            <label for="market-ai-query">应用名称</label>
+            <input id="market-ai-query" v-model="aiQuery" type="text" class="input" placeholder="例如: umami / immich / gitea" @keydown.enter="runAiDiscover" />
           </div>
           <div v-if="aiPreview" class="form-group">
             <label>生成结果预览(确认后保存为自定义模板)</label>
@@ -233,21 +234,21 @@
         <div class="modal-body space-y-4">
           <p class="template-description">{{ deployTarget.description || '暂无描述' }}</p>
           <div class="form-group">
-            <label>项目名称</label>
-            <input v-model="deployProjectName" type="text" class="input" placeholder="留空使用默认名称" />
+            <label for="market-deploy-project-name">项目名称</label>
+            <input id="market-deploy-project-name" v-model="deployProjectName" type="text" class="input" placeholder="留空使用默认名称" />
           </div>
           <div class="form-group">
             <label>部署变量</label>
             <p class="text-xs text-muted">按需填写,空值使用模板默认配置。</p>
             <div v-if="deployVariables.length" class="space-y-2 mt-2">
               <div v-for="field in deployVariables" :key="field.key" class="form-row">
-                <label>{{ field.label || field.key }}</label>
-                <input v-model="deployValues[field.key]" :type="field.type === 'password' ? 'password' : 'text'" class="input" :placeholder="field.default || ''" />
+                <label :for="`market-deploy-variable-${field.key}`">{{ field.label || field.key }}</label>
+                <input :id="`market-deploy-variable-${field.key}`" v-model="deployValues[field.key]" :type="field.type === 'password' ? 'password' : 'text'" class="input" :placeholder="field.default || ''" />
               </div>
             </div>
             <p v-else class="text-xs text-muted mt-2">该模板无需额外配置。</p>
           </div>
-          <p v-if="deployError" class="text-xs text-rose-400">{{ deployError }}</p>
+          <p v-if="deployError" class="text-xs text-rose-400" role="alert">{{ deployError }}</p>
         </div>
         <div class="modal-footer">
           <button @click="closeDeploy" class="btn-secondary btn-cancel">取消</button>
@@ -279,7 +280,7 @@ import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
-import { Bot, LoaderCircle, Rocket } from 'lucide-vue-next';
+import { Bot, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
 
 const toast = useToastStore();
 const { openAgent, updateAgentContext } = useAgentConsole();

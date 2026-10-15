@@ -4,12 +4,12 @@
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
       <div class="page-actions">
         <button class="btn-secondary" title="返回服务总览" @click="router.push('/services')"><ArrowLeft class="w-4 h-4" />返回</button>
-        <select v-model="projectId" class="input min-w-52" @change="selectProject"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" @click="projectId = ''; selectProject()"><X class="w-4 h-4" /></button>
-        <select v-if="project?.composeFiles.length > 1" v-model.number="fileIndex" class="input" @change="load"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
+        <select v-model="projectId" class="input min-w-52" aria-label="选择 Compose 项目" @change="selectProject"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" @click="projectId = ''; selectProject()"><X class="w-4 h-4" /></button>
+        <select v-if="project?.composeFiles.length > 1" v-model.number="fileIndex" class="input" aria-label="选择 Compose 配置文件" @change="load"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
         <button class="btn-secondary" :disabled="!content" @click="toggleEditorMode"><Layout class="w-4 h-4" />{{ editorMode === 'code' ? '可视化' : '代码' }}</button>
         <button class="btn-secondary" :disabled="!content" @click="validateSemantics"><ShieldCheck class="w-4 h-4" />语义校验</button>
-        <select v-model="templateId" class="input w-40" title="常用服务模板" @change="insertTemplate">
+        <select v-model="templateId" class="input w-40" title="常用服务模板" aria-label="插入常用服务模板" @change="insertTemplate">
           <option value="">插入模板...</option>
           <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.label }} · {{ template.description }}</option>
           <option value="" disabled>──────────</option>

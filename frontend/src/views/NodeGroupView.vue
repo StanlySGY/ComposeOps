@@ -10,7 +10,7 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 舰队总览 -->
     <div class="metric-grid">
@@ -77,7 +77,7 @@
               <td><span class="count-badge text-sky-300">{{ host.type.toUpperCase() }}</span></td>
               <td class="font-mono text-xs text-surface-400">{{ host.type === 'local' ? '本机' : `${host.host}:${host.port}` }}</td>
               <td>
-                <select class="input py-1! text-xs" :value="groupOf(host.id)" @change="assignGroup(host, $event.target.value)">
+                <select class="input py-1! text-xs" :value="groupOf(host.id)" :aria-label="`设置节点 ${host.name} 的分组`" @change="assignGroup(host, $event.target.value)">
                   <option value="production">生产</option>
                   <option value="staging">测试</option>
                   <option value="edge">边缘</option>

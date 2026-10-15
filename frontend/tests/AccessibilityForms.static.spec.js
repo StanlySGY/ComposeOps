@@ -1,0 +1,103 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { parse as parseSfc } from '@vue/compiler-sfc';
+import { parse as parseTemplate } from '@vue/compiler-dom';
+
+function templateNodes(relativePath) {
+  const filename = new URL(relativePath, import.meta.url);
+  const source = readFileSync(filename, 'utf8');
+  const { descriptor, errors } = parseSfc(source, { filename: filename.pathname });
+  expect(errors).toEqual([]);
+  expect(descriptor.template).not.toBeNull();
+  const nodes = [];
+  function walk(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 1) {
+      nodes.push(node);
+      for (const child of node.children || []) walk(child);
+    } else {
+      for (const child of node.children || []) walk(child);
+    }
+  }
+  walk(parseTemplate(descriptor.template.content));
+  return nodes;
+}
+function hasAttr(node, name, expectedValue) {
+  return (node.props || []).some((prop) => {
+    const attrName = prop.type === 6 ? prop.name : prop.type === 7 && prop.name === 'bind' ? prop.arg?.content : null;
+    if (attrName !== name) return false;
+    if (expectedValue === undefined) return true;
+    if (prop.type === 6) return prop.value?.content === expectedValue;
+    return false;
+  });
+}
+function findNamedControls(relativePath, name) {
+  return templateNodes(relativePath).filter((node) => ['input', 'select', 'textarea'].includes(node.tag) && hasAttr(node, 'aria-label', name));
+}
+function findNode(relativePath, tag, name, value) {
+  return templateNodes(relativePath).find((node) => node.tag === tag && hasAttr(node, name, value));
+}
+
+describe('跨页面表单可访问性契约', () => {
+  it('Compose 编辑器的项目、配置文件和模板选择器有名称', () => {
+    const file = '../src/views/ComposeView.vue';
+    for (const label of ['选择 Compose 项目', '清除当前 Compose 项目', '选择 Compose 配置文件', '插入常用服务模板']) {
+      expect(findNamedControls(file, label).length + templateNodes(file).filter(n => n.tag === 'button' && hasAttr(n, 'aria-label', label)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('容器终端的项目、容器和 Shell 选择器有明确名称', () => {
+    const file = '../src/views/ShellView.vue';
+    for (const label of ['选择终端项目', '选择终端容器', '选择终端 Shell']) expect(findNamedControls(file, label)).toHaveLength(1);
+    expect(findNode(file, 'p', 'role', 'alert')).not.toBeUndefined();
+  });
+
+  it('历史资源监控将可见标签关联到项目和容器选择器，并声明加载/错误状态', () => {
+    const file = '../src/views/ResourceMonitorView.vue';
+    expect(findNode(file, 'select', 'id', 'resource-monitor-project')).toBeDefined();
+    expect(findNode(file, 'select', 'id', 'resource-monitor-container')).toBeDefined();
+    const nodes = templateNodes(file);
+    expect(nodes.some(n => n.tag === 'label' && hasAttr(n, 'for', 'resource-monitor-project'))).toBe(true);
+    expect(nodes.some(n => n.tag === 'label' && hasAttr(n, 'for', 'resource-monitor-container'))).toBe(true);
+    expect(nodes.some(n => hasAttr(n, 'role', 'status') && hasAttr(n, 'aria-live', 'polite'))).toBe(true);
+    expect(nodes.some(n => hasAttr(n, 'role', 'alert'))).toBe(true);
+  });
+
+  it('节点组选择器对每个节点提供动态可访问名称', () => {
+    const file = '../src/views/NodeGroupView.vue';
+    expect(templateNodes(file).some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
+  });
+
+  it('操作中心按类型区分操作记录和后台任务筛选器', () => {
+    const file = '../src/views/OperationsView.vue';
+    expect(findNamedControls(file, '筛选操作记录结果')).toHaveLength(1);
+    expect(findNamedControls(file, '筛选后台任务状态')).toHaveLength(1);
+  });
+
+  it('存储清理的搜索、状态筛选和批量删除反馈可被识别', () => {
+    const file = '../src/views/ResourcesView.vue';
+    expect(findNamedControls(file, '搜索存储资源')).toHaveLength(1);
+    expect(findNamedControls(file, '按资源状态筛选')).toHaveLength(1);
+    const nodes = templateNodes(file);
+    expect(nodes.some(n => hasAttr(n, 'role', 'alert'))).toBe(true);
+    expect(nodes.some(n => hasAttr(n, 'role', 'status') && hasAttr(n, 'aria-live', 'polite'))).toBe(true);
+  });
+
+  it('工作流编辑器的基础字段有标签关联，节点 ID 和类型有名称', () => {
+    const file = '../src/views/WorkflowCenterView.vue';
+    const nodes = templateNodes(file);
+    for (const [id, label] of [['workflow-name', '名称'], ['workflow-description', '描述'], ['workflow-trigger-type', '触发方式']]) {
+      expect(nodes.some(n => n.tag === 'label' && hasAttr(n, 'for', id) && n.children.some(c => c.type === 2 && c.content === label))).toBe(true);
+      expect(nodes.some(n => ['input', 'select'].includes(n.tag) && hasAttr(n, 'id', id))).toBe(true);
+    }
+    expect(nodes.some(n => n.tag === 'input' && hasAttr(n, 'aria-label'))).toBe(true);
+    expect(nodes.some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
+  });
+
+  it('Agent 工作台的项目、审批策略、重命名和消息输入控件有名称', () => {
+    const file = '../src/views/AgentWorkflowView.vue';
+    for (const label of ['选择 Agent 当前项目上下文', '选择本会话操作审批策略', '向 Agent 发送消息']) expect(findNamedControls(file, label)).toHaveLength(1);
+    expect(templateNodes(file).some(n => n.tag === 'input' && hasAttr(n, 'aria-label'))).toBe(true);
+    expect(templateNodes(file).some(n => n.tag === 'div' && hasAttr(n, 'role', 'log') && hasAttr(n, 'aria-live', 'polite'))).toBe(true);
+  });
+});

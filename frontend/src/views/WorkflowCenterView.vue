@@ -11,7 +11,7 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 工作流定义 -->
     <section class="section-panel">
@@ -72,16 +72,16 @@
     <BaseModal :show="showEditor" :title="editingId ? '编辑工作流' : '新建工作流'" size-class="max-w-2xl!" body-class="space-y-3 p-5 pt-0" @close="showEditor = false">
       <div class="space-y-3">
           <div>
-            <label class="form-label">名称</label>
-            <input v-model="form.name" class="input" placeholder="如:故障自动处理" />
+            <label class="form-label" for="workflow-name">名称</label>
+            <input id="workflow-name" v-model="form.name" class="input" placeholder="如:故障自动处理" />
           </div>
           <div>
-            <label class="form-label">描述</label>
-            <input v-model="form.description" class="input" placeholder="流程说明" />
+            <label class="form-label" for="workflow-description">描述</label>
+            <input id="workflow-description" v-model="form.description" class="input" placeholder="流程说明" />
           </div>
           <div>
-            <label class="form-label">触发方式</label>
-            <select v-model="form.triggerType" class="input">
+            <label class="form-label" for="workflow-trigger-type">触发方式</label>
+            <select id="workflow-trigger-type" v-model="form.triggerType" class="input">
               <option value="manual">手动</option>
               <option value="cron">定时</option>
               <option value="event">事件</option>
@@ -93,8 +93,8 @@
               <div v-for="(node, i) in form.nodes" :key="i" class="rounded-lg border border-surface-800 bg-surface-900/60 p-3">
                 <div class="flex items-center gap-2">
                   <span class="count-badge shrink-0 text-surface-400">{{ nodeLabel(node.type) }}</span>
-                  <input v-model="node.id" class="input py-1! text-xs" placeholder="节点 ID" />
-                  <select v-model="node.type" class="input py-1! text-xs" @change="normalizeNode(node)">
+                  <input v-model="node.id" class="input py-1! text-xs" :aria-label="`第 ${i + 1} 个节点 ID`" placeholder="节点 ID" />
+                  <select v-model="node.type" class="input py-1! text-xs" :aria-label="`第 ${i + 1} 个节点类型`" @change="normalizeNode(node)">
                     <option value="trigger">触发</option>
                     <option value="condition">条件</option>
                     <option value="agent">Agent</option>
