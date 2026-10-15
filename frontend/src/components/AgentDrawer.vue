@@ -24,7 +24,7 @@
     </aside>
     <teleport to="body">
       <div v-if="zoomOpen" class="rich-zoom-mask" @click.self="closeZoom()" @wheel.prevent="onZoomWheel">
-        <div class="rich-zoom-card agent-markdown" :style="{ transform: `scale(${zoomScale})` }">
+        <div ref="zoomDialogEl" class="rich-zoom-card agent-markdown" role="dialog" aria-modal="true" aria-label="放大预览" tabindex="-1" @keydown="trapZoomTab" :style="{ transform: `scale(${zoomScale})` }">
           <button class="rich-zoom-close" title="关闭(Esc)" aria-label="关闭放大预览" @click="closeZoom">×</button>
           <div class="rich-zoom-content" v-html="zoomContent"></div>
         </div>
@@ -48,11 +48,54 @@ const { open, context, closeAgent } = useAgentConsole();
 const chat = useAgentChat({ channel: PAGE_DRAWER_CHANNEL });
 // onScroll 必须绑定到消息容器:此前漏绑导致 atBottom 恒为 true,
 // 流式期间用户向上回看会被滚动跟随持续拽回底部。
-const { messages, input, running, scrollEl, onScroll, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom } = chat;
+const { messages, input, running, scrollEl, onScroll, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom } = chat;
 const inputEl = ref(null);
 const drawerEl = ref(null);
+const zoomDialogEl = ref(null);
+let zoomOpener = null;
+const ZOOM_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
 let drawerOpener = null;
 const DRAWER_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
+
+watch(zoomOpen, async (isOpen) => {
+  if (isOpen) {
+    const activeElement = zoomReturnFocus.value || document.activeElement;
+    zoomOpener = activeElement instanceof HTMLElement && activeElement !== document.body ? activeElement : null;
+    await nextTick();
+    const closeButton = zoomDialogEl.value?.querySelector('.rich-zoom-close');
+    (closeButton || zoomDialogEl.value)?.focus({ preventScroll: true });
+    return;
+  }
+  const opener = zoomOpener;
+  zoomOpener = null;
+  await nextTick();
+  if (opener?.isConnected) opener.focus({ preventScroll: true });
+});
+
+function trapZoomTab(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = zoomDialogEl.value;
+  if (!dialog) return;
+  const focusable = [...dialog.querySelectorAll(ZOOM_FOCUSABLE)].filter((element) => {
+    if (element.closest('[hidden]') || element.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
 
 function captureDrawerOpener() {
   const activeElement = document.activeElement;

@@ -1,9 +1,9 @@
 <template>
   <div v-if="project" class="drawer-backdrop z-55" @click.self="$emit('close')">
-    <aside class="activity-drawer z-51">
+    <aside ref="activityDialog" class="activity-drawer z-51" role="dialog" aria-modal="true" aria-labelledby="project-activity-title" tabindex="-1" @keydown="trapActivityTab">
       <header class="flex items-start gap-3 border-b border-surface-800 px-4 py-4">
         <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent"><History class="h-5 w-5" /></div>
-        <div class="min-w-0 flex-1"><h2 class="truncate font-mono text-base font-semibold text-surface-100">{{ project.projectName }}</h2><p class="mt-0.5 text-muted">活动记录与配置版本</p></div>
+        <div class="min-w-0 flex-1"><h2 id="project-activity-title" class="truncate font-mono text-base font-semibold text-surface-100">{{ project.projectName }}</h2><p class="mt-0.5 text-muted">活动记录与配置版本</p></div>
         <button class="icon-btn" title="关闭" aria-label="关闭项目活动" @click="$emit('close')"><X class="h-4 w-4" /></button>
       </header>
       <div class="tabs px-4 pt-2">
@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { Activity, ChevronRight, Eye, FileClock, FileCode2, History, RefreshCw, Undo2, X } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -59,7 +59,60 @@ const props = defineProps({ project: Object });
 const emit = defineEmits(['close', 'restored']);
 const tab = ref('activity'); const loading = ref(false); const restoring = ref(false); const error = ref(''); const operations = ref([]); const backups = ref([]); const selectedOperation = ref(null);
 const restoreTarget = ref(null);
+const activityDialog = ref(null);
+let activityOpener = null;
 let loadRequestId = 0;
+const ACTIVITY_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+function captureActivityOpener() {
+  const activeElement = document.activeElement;
+  activityOpener = activeElement instanceof HTMLElement
+    && activeElement !== document.body
+    && !activityDialog.value?.contains(activeElement)
+    ? activeElement
+    : null;
+}
+
+function restoreActivityFocus() {
+  const opener = activityOpener;
+  activityOpener = null;
+  if (opener?.isConnected) void nextTick(() => opener.focus({ preventScroll: true }));
+}
+
+function trapActivityTab(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = activityDialog.value;
+  if (!dialog) return;
+  const focusable = [...dialog.querySelectorAll(ACTIVITY_FOCUSABLE)].filter((element) => {
+    if (element.closest('[hidden]') || element.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
+watch(() => !!props.project, async (isOpen) => {
+  if (isOpen) {
+    captureActivityOpener();
+    await nextTick();
+    activityDialog.value?.focus({ preventScroll: true });
+    return;
+  }
+  restoreActivityFocus();
+}, { immediate: true });
 
 useEscapeKey({ active: computed(() => !!props.project), onClose: () => emit('close'), layer: 'drawer', lockBody: true });
 
@@ -113,5 +166,5 @@ watch(() => props.project?.id, (nextId, previousId) => {
   void load();
 });
 onMounted(load);
-onBeforeUnmount(() => { loadRequestId += 1; });
+onBeforeUnmount(() => { loadRequestId += 1; restoreActivityFocus(); });
 </script>

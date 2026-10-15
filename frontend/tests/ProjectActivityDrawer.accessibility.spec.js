@@ -18,10 +18,11 @@ beforeEach(() => {
   getProjectActivity.mockReset();
   getProjectActivity.mockResolvedValue({ operations: [], backups: [] });
 });
-afterEach(() => { wrapper?.unmount(); wrapper = null; });
+afterEach(() => { wrapper?.unmount(); wrapper = null; document.body.innerHTML = ''; });
 
-function mountDrawer(project = projectA) {
+function mountDrawer(project = projectA, attachTo = undefined) {
   return mount(ProjectActivityDrawer, {
+    ...(attachTo ? { attachTo } : {}),
     props: { project },
     global: {
       stubs: {
@@ -57,6 +58,37 @@ describe('项目活动抽屉的空状态、加载反馈和请求时序', () => {
     rejectRequest(new Error('连接失败'));
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toBe('连接失败');
+  });
+
+  it('作为模态对话框将焦点移入、循环 Tab，并在关闭后恢复焦点', async () => {
+    const opener = document.createElement('button');
+    opener.type = 'button';
+    opener.textContent = '打开项目活动';
+    document.body.appendChild(opener);
+    opener.focus();
+
+    wrapper = mountDrawer(projectA, document.body);
+    await flushPromises();
+
+    const dialog = wrapper.get('aside[role="dialog"][aria-modal="true"][aria-labelledby="project-activity-title"]');
+    expect(dialog.attributes('tabindex')).toBe('-1');
+    expect(dialog.get('h2#project-activity-title').text()).toBe('项目 A');
+    await vi.waitFor(() => expect(document.activeElement).toBe(dialog.element));
+
+    const focusable = [...dialog.element.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')];
+    expect(focusable.length).toBeGreaterThan(2);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    last.focus();
+    await dialog.trigger('keydown', { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    await dialog.trigger('keydown', { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    await wrapper.setProps({ project: null });
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener));
   });
 
   it('切换项目后旧请求不会覆盖新项目的数据或错误状态', async () => {

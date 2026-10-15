@@ -325,6 +325,50 @@ test('移动端 Agent 会话列表支持对话框语义、焦点循环、Escape 
   expect(observed.network).toEqual([]);
 });
 
+test('Agent 富内容放大预览提供模态语义、焦点循环、Escape 关闭和焦点恢复', async ({ page }) => {
+  const observed = observe(page);
+  await page.goto('./#/agent');
+  await page.locator('.agent-messages').waitFor();
+
+  await page.evaluate(() => {
+    const container = document.querySelector('.agent-messages');
+    if (!container) throw new Error('Agent 消息容器不存在');
+    container.insertAdjacentHTML('beforeend', '<div class="rich-block"><button type="button" class="rich-zoom-btn">打开图表预览</button><div class="rich-block-body"><svg role="img" aria-label="示例图表" viewBox="0 0 20 20" width="20" height="20"><circle cx="10" cy="10" r="8"></circle></svg><p>用于验证键盘可访问性的放大预览内容。</p></div></div>');
+  });
+
+  const trigger = page.getByRole('button', { name: '打开图表预览' });
+  await trigger.focus();
+  await trigger.click();
+
+  const dialog = page.getByRole('dialog', { name: '放大预览' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  await expect(dialog.getByRole('button', { name: '关闭放大预览' })).toBeFocused();
+
+  const focusable = dialog.locator('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])');
+  const first = focusable.first();
+  const last = focusable.last();
+  await last.focus();
+  await page.keyboard.press('Tab');
+  await expect(first).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(last).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  // Clicking the media itself should focus the accessible zoom control as the return target.
+  await page.locator('.rich-block-body svg').click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '关闭放大预览' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
 test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page }) => {
   await page.goto('./#/gitops');
   await page.getByRole('button', { name: '添加仓库' }).first().click();

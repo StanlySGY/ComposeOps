@@ -99,7 +99,7 @@
     <teleport to="body"><div v-if="mobileSessionsOpen" class="agent-mobile-sheet-mask" @click.self="mobileSessionsOpen = false"><aside ref="mobileSessionsDialog" class="agent-mobile-sheet" role="dialog" aria-modal="true" aria-labelledby="agent-mobile-sessions-title" tabindex="-1" @keydown="trapMobileSessionsTab"><div class="agent-side-head"><div><h2 id="agent-mobile-sessions-title">会话</h2><span>{{ filteredSessions.length }}/{{ sessions.length }} 个会话</span></div><button class="icon-btn" title="关闭" aria-label="关闭会话列表" @click="mobileSessionsOpen = false">×</button></div><div class="px-3 pb-2"><label class="search-field min-h-8!"><Search class="h-3.5 w-3.5" /><input v-model="sessionQuery" class="py-1! text-xs" placeholder="搜索会话..." /></label></div><div v-if="sessions.length" class="agent-session-bulk"><label><input type="checkbox" :checked="allSessionsSelected" :indeterminate="someSessionsSelected" @change="toggleAllSessions" />全选当前列表</label><button v-if="selectedSessions.length" class="text-rose-300 hover:text-rose-200" @click="deleteSelectedSessions">删除 {{ selectedSessions.length }} 个</button></div><div class="agent-session-list agent-mobile-sheet-list"><div v-if="!sessions.length" class="agent-empty-side">发送第一条消息后，会话会自动保存。</div><div v-else-if="!filteredSessions.length" class="agent-empty-side">没有匹配的会话。</div><div v-for="session in filteredSessions" :key="session.sessionId" class="agent-session-row" :class="{ active: session.sessionId === sessionId, selected: selectedSessions.includes(session.sessionId) }"><input class="agent-session-check" type="checkbox" :checked="selectedSessions.includes(session.sessionId)" :aria-label="`选择会话 ${session.title || session.sessionId}`" @click.stop @change="toggleSession(session.sessionId)" /><button class="agent-session-open" @click="openSession(session.sessionId); mobileSessionsOpen = false"><MessageSquare class="h-4 w-4 shrink-0" /><span class="min-w-0"><strong>{{ session.title || '未命名会话' }}</strong><small>{{ formatDate(session.createdAt) }} · {{ session.messageCount }} 条消息</small></span></button><button class="agent-session-delete" title="删除会话" @click.stop="deleteSession(session.sessionId)"><Trash2 class="h-3.5 w-3.5" /></button></div></div></aside></div></teleport>
     <teleport to="body">
       <div v-if="zoomOpen" class="rich-zoom-mask" @click.self="closeZoom()" @wheel.prevent="onZoomWheel">
-        <div class="rich-zoom-card agent-markdown" :style="{ transform: `scale(${zoomScale})` }">
+        <div ref="zoomDialogEl" class="rich-zoom-card agent-markdown" role="dialog" aria-modal="true" aria-label="放大预览" tabindex="-1" @keydown="trapZoomTab" :style="{ transform: `scale(${zoomScale})` }">
           <button class="rich-zoom-close" title="关闭(Esc)" aria-label="关闭放大预览" @click="closeZoom">×</button>
           <div class="rich-zoom-content" v-html="zoomContent"></div>
         </div>
@@ -216,7 +216,50 @@ const chat = useAgentChat({
   },
   onApproval: (message, kind) => { if (kind === 'approved') appendActivity('已确认', '变更继续执行', { status: 'done' }); else appendActivity('已拒绝', '变更未执行', { status: 'rejected' }); },
 });
-const { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom } = chat;
+const { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom } = chat;
+const zoomDialogEl = ref(null);
+let zoomOpener = null;
+const ZOOM_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
+
+watch(zoomOpen, async (isOpen) => {
+  if (isOpen) {
+    const activeElement = zoomReturnFocus.value || document.activeElement;
+    zoomOpener = activeElement instanceof HTMLElement && activeElement !== document.body ? activeElement : null;
+    await nextTick();
+    const closeButton = zoomDialogEl.value?.querySelector('.rich-zoom-close');
+    (closeButton || zoomDialogEl.value)?.focus({ preventScroll: true });
+    return;
+  }
+  const opener = zoomOpener;
+  zoomOpener = null;
+  await nextTick();
+  if (opener?.isConnected) opener.focus({ preventScroll: true });
+});
+
+function trapZoomTab(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = zoomDialogEl.value;
+  if (!dialog) return;
+  const focusable = [...dialog.querySelectorAll(ZOOM_FOCUSABLE)].filter((element) => {
+    if (element.closest('[hidden]') || element.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
 // 审批模式是后端会话级设置(ApprovalGate),这里切换后由 approval_mode 事件回执同步。
 async function changeApprovalMode(mode) {
   try {

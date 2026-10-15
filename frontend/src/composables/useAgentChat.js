@@ -371,8 +371,10 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   const zoomOpen = ref(false);
   const zoomContent = ref('');
   const zoomScale = ref(1);
+  const zoomReturnFocus = ref(null);
 
-  function openZoom(block) {
+  function openZoom(block, returnFocus = null) {
+    zoomReturnFocus.value = returnFocus || (typeof document !== 'undefined' ? document.activeElement : null);
     zoomContent.value = block.querySelector('.rich-block-body')?.innerHTML || block.innerHTML;
     zoomScale.value = 1;
     zoomOpen.value = true;
@@ -385,11 +387,15 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     const hitMedia = target.closest?.('.rich-block') && target.matches?.('svg, svg *, img');
     if (button) {
       const block = button.closest('.rich-block');
-      if (block) openZoom(block);
+      if (block) openZoom(block, button);
       return;
     }
     if (hitMedia) {
-      openZoom(target.closest('.rich-block'));
+      const block = target.closest('.rich-block');
+      // Direct media clicks should return keyboard focus to the block's accessible zoom control.
+      const zoomButton = block?.querySelector('.rich-zoom-btn');
+      zoomButton?.focus({ preventScroll: true });
+      if (block) openZoom(block, zoomButton);
     }
   }
 
@@ -430,5 +436,5 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     }
   }
 
-  return { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, ensureSession, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom, setSubscriberActive };
+  return { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, ensureSession, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom, setSubscriberActive };
 }
