@@ -63,13 +63,42 @@ function mountView() {
 }
 
 describe('AI 巡检报告列表键盘可访问性', () => {
+  it('刷新失败通过 alert 播报原因', async () => {
+    api.getInspectionOverview.mockRejectedValueOnce(new Error('inspection service offline'));
+    wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('加载巡检数据失败');
+    expect(wrapper.get('[role="alert"]').text()).toContain('inspection service offline');
+    expect(wrapper.attributes('aria-busy')).toBe('false');
+  });
+
+  it('刷新请求过程中提供读屏状态播报，完成后清除状态', async () => {
+    wrapper = mountView();
+    await flushPromises();
+
+    let resolveOverview;
+    api.getInspectionOverview.mockImplementationOnce(() => new Promise(resolve => { resolveOverview = resolve; }));
+    await wrapper.get('.page-actions button.btn-secondary').trigger('click');
+
+    expect(wrapper.get('[role="status"][aria-live="polite"]').text()).toContain('正在加载巡检数据');
+    expect(wrapper.attributes('aria-busy')).toBe('true');
+
+    resolveOverview({ latest: null, reports: [], schedule: { enabled: false, intervalHours: 24, lastRunAt: 0 } });
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.attributes('aria-busy')).toBe('false');
+  });
+
   it('每行报告都有可通过键盘聚焦的命名按钮打开明细', async () => {
     wrapper = mountView();
     await flushPromises();
 
-    const openReport = wrapper.get('tbody button[aria-label="查看巡检报告：2026/10/15 16:00:00，来源：手动"]');
+    // 时间格式取决于执行环境的时区；测试只验证控件语义和报告来源，不固定本地时间文本。
+    const openReport = wrapper.get('tbody button[aria-label^="查看巡检报告："]');
     expect(openReport.element.tagName).toBe('BUTTON');
     expect(openReport.attributes('type')).toBe('button');
+    expect(openReport.attributes('aria-label')).toContain('来源：手动');
 
     await openReport.trigger('click');
     await flushPromises();

@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell">
+  <div class="page-shell" :aria-busy="loading || running">
     <div class="page-header">
       <div>
         <h1 class="page-title">AI 巡检中心</h1>
@@ -18,7 +18,9 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载巡检数据</p>
+    <p v-else-if="running" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在执行只读巡检</p>
 
     <!-- 概览卡片 -->
     <div v-if="latest" class="card p-4 sm:p-5">
