@@ -100,7 +100,11 @@
           </thead>
           <tbody>
             <tr v-for="report in reports" :key="report.id" class="cursor-pointer" @click="openDetail(report.id)">
-              <td class="whitespace-nowrap">{{ formatTime(report.createdAt) }}</td>
+              <td class="whitespace-nowrap">
+                <button type="button" class="text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" :aria-label="`查看巡检报告：${formatTime(report.createdAt)}，来源：${sourceLabel(report.source)}`" @click.stop="openDetail(report.id)">
+                  {{ formatTime(report.createdAt) }}
+                </button>
+              </td>
               <td><span class="count-badge">{{ sourceLabel(report.source) }}</span></td>
               <td>
                 <span class="inline-flex items-center gap-1.5">

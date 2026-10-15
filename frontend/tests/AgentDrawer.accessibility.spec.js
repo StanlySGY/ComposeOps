@@ -34,6 +34,9 @@ describe('页面 Agent 抽屉可访问性', () => {
     expect(wrapper.get('textarea[aria-label="给页面 Agent 发送消息"]').exists()).toBe(true);
     expect(wrapper.get('textarea[aria-label="确认执行参数 JSON"]').exists()).toBe(true);
     expect(wrapper.get('button[aria-label="关闭 Agent"]').exists()).toBe(true);
+    const mobileHandle = wrapper.get('button.agent-drawer-handle');
+    expect(mobileHandle.attributes('type')).toBe('button');
+    expect(mobileHandle.attributes('aria-label')).toBe('关闭 Agent');
 
     const message = wrapper.vm.$.setupState.messages;
     message[0].streaming = true;
