@@ -61,7 +61,7 @@ function trapTab(event) {
   if (!focusables.length) { event.preventDefault(); modal.focus(); return; }
   const first = focusables[0];
   const last = focusables[focusables.length - 1];
-  if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === modal || !modal.contains(document.activeElement))) {
     event.preventDefault();
     last.focus();
   } else if (!event.shiftKey && document.activeElement === last) {
