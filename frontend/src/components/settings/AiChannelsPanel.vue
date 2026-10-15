@@ -4,7 +4,7 @@
       <div><h2 class="section-title">AI 渠道</h2><p class="mt-1 text-xs leading-5 text-surface-400">每条渠道独立保存。已启用渠道按顺序使用，排序调整即时生效。</p></div>
       <button class="btn-secondary" data-action="add" :disabled="channels.length >= 12 || ordering" @click="addChannel"><Plus class="w-4 h-4" />添加渠道</button>
     </div>
-    <p v-if="orderMessage" class="text-xs text-surface-300" role="status">{{ orderMessage }}</p>
+    <p v-if="orderMessage" class="text-xs text-surface-300" :role="orderMessageError ? 'alert' : 'status'" :aria-live="orderMessageError ? 'assertive' : 'polite'" aria-atomic="true">{{ orderMessage }}</p>
     <p v-if="!channels.length" class="rounded-xl border border-dashed border-surface-700 p-6 text-center text-sm text-surface-400">还没有 AI 渠道。添加直连接口或现有 New API 的地址和令牌。</p>
     <article v-for="(channel, index) in channels" :key="channel.id" class="card min-w-0 space-y-4 p-4 sm:p-5" :data-channel-id="channel.id" :aria-busy="!!busy[channel.id]">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-surface-800 pb-3">
@@ -61,13 +61,13 @@
         <button v-if="conflicts[channel.id]" class="btn-ghost" :disabled="!!busy[channel.id]" @click="reloadChannel(channel)">重新载入此渠道</button>
         <span class="text-xs text-surface-500">{{ channel.supportsTools ? '验证参数及结果回传，最多 3 次小请求。' : '验证聊天连接，发起 1 次小请求。' }}</span>
       </div>
-      <p v-if="notices[channel.id]" role="status" class="text-xs break-words" :class="notices[channel.id].ok ? 'text-emerald-400' : 'text-rose-400'">{{ notices[channel.id].text }}</p>
+      <p v-if="notices[channel.id]" :role="notices[channel.id].ok ? 'status' : 'alert'" :aria-live="notices[channel.id].ok ? 'polite' : 'assertive'" aria-atomic="true" class="text-xs break-words" :class="notices[channel.id].ok ? 'text-emerald-400' : 'text-rose-400'">{{ notices[channel.id].text }}</p>
       <div v-if="results[channel.id]" class="rounded-lg border border-surface-800 p-3 space-y-2" role="status">
         <p class="text-xs" :class="results[channel.id].ok ? 'text-emerald-400' : 'text-amber-400'">{{ results[channel.id].ok ? '测试通过' : '测试未全部通过' }} · {{ results[channel.id].latencyMs }} ms · {{ results[channel.id].mode === 'compatible' ? '兼容模式' : '流式模式' }}</p>
         <ul class="space-y-2"><li v-for="check in results[channel.id].checks" :key="check.id" class="flex items-start gap-2 text-xs"><component :is="check.status === 'passed' ? CheckCircle2 : check.status === 'failed' ? AlertCircle : MinusCircle" class="mt-0.5 h-3.5 w-3.5 shrink-0" :class="check.status === 'passed' ? 'text-emerald-400' : check.status === 'failed' ? 'text-amber-400' : 'text-surface-500'" /><span class="min-w-0 break-words text-surface-300">{{ check.label }}：{{ check.message }}</span></li></ul>
         <p v-if="results[channel.id].suggestion" class="text-xs leading-5 text-amber-400">{{ results[channel.id].suggestion }}</p>
       </div>
-      <p v-else-if="channel.health?.lastError && !channel.dirty" class="text-xs text-amber-400 break-words">最近故障：{{ channel.health.lastError }}</p>
+      <p v-else-if="channel.health?.lastError && !channel.dirty" class="text-xs text-amber-400 break-words" role="alert">最近故障：{{ channel.health.lastError }}</p>
     </article>
     <ConfirmDialog :show="!!removeTarget" title="删除 AI 渠道" :message="`确认删除「${removeTarget?.name || '新渠道'}」？${removeTarget?.saved ? '删除后立即停止使用此渠道。' : '尚未保存的内容将丢弃。'}`" tone="danger" confirm-text="删除渠道" :busy="!!busy[removeTarget?.id]" @confirm="removeChannel" @cancel="removeTarget = null" />
   </div>
@@ -82,7 +82,7 @@ import ConfirmDialog from '../common/ConfirmDialog.vue';
 const props = defineProps({ channels: { type: Array, default: () => [] } });
 const emit = defineEmits(['update:channels', 'health-change']);
 const busy = ref({}), results = ref({}), notices = ref({}), modelLists = ref({}), conflicts = ref({});
-const revealed = ref({}), removeTarget = ref(null), ordering = ref(false), orderMessage = ref('');
+const revealed = ref({}), removeTarget = ref(null), ordering = ref(false), orderMessage = ref(''), orderMessageError = ref(false);
 const modelOpenId = ref(null), modelSearch = ref({}), modelActiveIndex = ref({});
 const snapshots = new Map(), hideTimers = new Map(), keyInputs = {};
 const modelPickerRoots = {};
@@ -109,7 +109,7 @@ async function addChannel() {
 function canMove(index, offset) { return !listBusy.value && props.channels[index]?.saved && props.channels[index + offset]?.saved; }
 async function move(index, offset) {
   if (!canMove(index, offset)) return;
-  ordering.value = true; orderMessage.value = '';
+  ordering.value = true; orderMessage.value = ''; orderMessageError.value = false;
   const previousIds = props.channels.filter(item => item.saved).map(item => item.id);
   const ids = [...previousIds];
   const position = ids.indexOf(props.channels[index].id);
@@ -118,7 +118,7 @@ async function move(index, offset) {
     await api.reorderAiChannels(ids, previousIds);
     emit('update:channels', [...ids.map(id => props.channels.find(item => item.id === id)), ...props.channels.filter(item => !item.saved)]);
     orderMessage.value = '优先级顺序已保存';
-  } catch (error) { orderMessage.value = error.message; }
+  } catch (error) { orderMessage.value = error.message || '渠道排序保存失败'; orderMessageError.value = true; }
   finally { ordering.value = false; }
 }
 function reportError(id, error) {
