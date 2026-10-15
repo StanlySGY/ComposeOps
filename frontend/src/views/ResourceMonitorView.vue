@@ -93,7 +93,7 @@
       <div class="rounded-lg border border-zinc-800 bg-zinc-950/80 p-4">
         <div class="mb-3 flex items-center justify-between">
           <h2 class="font-semibold text-zinc-100">告警规则</h2>
-          <button @click="loadAlerts" class="text-xs text-zinc-400 hover:text-zinc-300">
+          <button @click="loadAlerts" class="text-xs text-zinc-400 hover:text-zinc-300" aria-label="刷新告警规则">
             <RefreshCw class="h-3 w-3" />
           </button>
         </div>
@@ -128,7 +128,7 @@
       <div class="modal-content">
         <div class="mb-4 flex items-center justify-between">
           <h3 class="text-lg font-semibold text-zinc-100">配置告警规则</h3>
-          <button @click="showAlertModal = false" class="text-zinc-400 hover:text-zinc-300">
+          <button @click="showAlertModal = false" class="text-zinc-400 hover:text-zinc-300" aria-label="关闭告警规则配置">
             <X class="h-5 w-5" />
           </button>
         </div>
