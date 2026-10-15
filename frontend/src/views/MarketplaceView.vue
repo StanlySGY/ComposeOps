@@ -148,9 +148,9 @@
 
     <!-- 创建/编辑模态框 -->
     <div v-if="showCreateModal || editingTemplate" class="modal-backdrop" @click.self="closeModal">
-      <div class="modal">
+      <div ref="createModalRef" class="modal" role="dialog" aria-modal="true" aria-labelledby="market-create-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, closeModal)">
         <div class="modal-header">
-          <h2>{{ editingTemplate ? '编辑模板' : '创建模板' }}</h2>
+          <h2 id="market-create-dialog-title">{{ editingTemplate ? '编辑模板' : '创建模板' }}</h2>
           <button @click="closeModal" class="icon-btn close-btn" aria-label="关闭创建或编辑模板弹窗">×</button>
         </div>
         <div class="modal-body">
@@ -180,9 +180,9 @@
 
     <!-- AI 发现应用模态框 -->
     <div v-if="showAiModal" class="modal-backdrop" @click.self="showAiModal = false">
-      <div class="modal">
+      <div ref="aiModalRef" class="modal" role="dialog" aria-modal="true" aria-labelledby="market-ai-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, () => { showAiModal = false })">
         <div class="modal-header">
-          <h2>AI 找应用</h2>
+          <h2 id="market-ai-dialog-title">AI 找应用</h2>
           <button @click="showAiModal = false" class="icon-btn close-btn" aria-label="关闭 AI 找应用弹窗">×</button>
         </div>
         <div class="modal-body">
@@ -211,9 +211,9 @@
 
     <!-- 查看模板模态框 -->
     <div v-if="viewingTemplate" class="modal-backdrop" @click.self="viewingTemplate = null">
-      <div class="modal view-modal">
+      <div ref="viewModalRef" class="modal view-modal" role="dialog" aria-modal="true" aria-labelledby="market-view-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, () => { viewingTemplate = null })">
         <div class="modal-header">
-          <h2>{{ viewingTemplate.name }}</h2>
+          <h2 id="market-view-dialog-title">{{ viewingTemplate.name }}</h2>
           <button @click="viewingTemplate = null" class="icon-btn close-btn" aria-label="关闭模板详情">×</button>
         </div>
         <div class="modal-body">
@@ -233,9 +233,9 @@
 
     <!-- 部署模板模态框 -->
     <div v-if="deployTarget" class="modal-backdrop" @click.self="closeDeploy" :class="{ 'pointer-events-none': deploying }">
-      <div class="modal deploy-modal">
+      <div ref="deployModalRef" class="modal deploy-modal" role="dialog" aria-modal="true" aria-labelledby="market-deploy-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, closeDeploy)">
         <div class="modal-header">
-          <h2>部署应用: {{ deployTarget.name }}</h2>
+          <h2 id="market-deploy-dialog-title">部署应用: {{ deployTarget.name }}</h2>
           <button @click="closeDeploy" class="icon-btn close-btn" aria-label="关闭部署弹窗">×</button>
         </div>
         <div class="modal-body space-y-4">
@@ -280,7 +280,7 @@
 </template>
 
 <script setup>
-import { computed, onActivated, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -307,11 +307,14 @@ const onlyFavorites = ref(false);
 
 const showCreateModal = ref(false);
 const editingTemplate = ref(null);
+const createModalRef = ref(null);
 const aiDiscovering = ref(false);
 const showAiModal = ref(false);
+const aiModalRef = ref(null);
 const aiQuery = ref('');
 const aiPreview = ref(null);
 const viewingTemplate = ref(null);
+const viewModalRef = ref(null);
 const formData = ref({
   name: '',
   category: '',
@@ -521,6 +524,7 @@ const deployProjectName = ref('');
 const deployValues = ref({});
 const deploying = ref(false);
 const deployError = ref('');
+const deployModalRef = ref(null);
 const deployVariables = computed(() => {
   const template = deployTarget.value;
   if (!template) return [];
@@ -530,6 +534,74 @@ const deployVariables = computed(() => {
     config && typeof config === 'object' ? { key: name, ...config } : { key: name, default: config }
   );
 });
+
+const MARKETPLACE_MODAL_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+let marketplaceModalOpener = null;
+
+function handleMarketplaceDialogKeydown(event, close) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+
+  const dialog = event.currentTarget;
+  const focusable = [...dialog.querySelectorAll(MARKETPLACE_MODAL_FOCUSABLE)]
+    .filter((element) => !element.closest('[hidden]') && element.getAttribute('aria-hidden') !== 'true');
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+watch(
+  () => [
+    showCreateModal.value || Boolean(editingTemplate.value),
+    showAiModal.value,
+    Boolean(viewingTemplate.value),
+    Boolean(deployTarget.value),
+  ],
+  async (openStates, previousStates = []) => {
+    const anyOpen = openStates.some(Boolean);
+    if (!anyOpen) {
+      if (marketplaceModalOpener?.isConnected) marketplaceModalOpener.focus();
+      marketplaceModalOpener = null;
+      return;
+    }
+
+    if (!previousStates.some(Boolean)) {
+      const activeElement = document.activeElement;
+      const modalRefs = [createModalRef, aiModalRef, viewModalRef, deployModalRef];
+      marketplaceModalOpener = activeElement instanceof HTMLElement
+        && !modalRefs.some((modalRef) => modalRef.value?.contains(activeElement))
+        ? activeElement
+        : null;
+    }
+
+    await nextTick();
+    const [createOpen, aiOpen, viewOpen, deployOpen] = openStates;
+    const dialog = createOpen ? createModalRef.value
+      : aiOpen ? aiModalRef.value
+        : viewOpen ? viewModalRef.value
+          : deployOpen ? deployModalRef.value
+            : null;
+    const focusTarget = dialog?.querySelector(MARKETPLACE_MODAL_FOCUSABLE) || dialog;
+    focusTarget?.focus();
+  },
+  { flush: 'post' },
+);
 
 function openDeploy(template) {
   deployTarget.value = template;

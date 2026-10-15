@@ -27,10 +27,10 @@ beforeEach(() => {
   mocks.api.searchMarketplaceTemplates.mockResolvedValue({ results: [] });
   mocks.api.toggleMarketplaceFavorite.mockResolvedValue(undefined);
 });
-afterEach(() => { wrapper?.unmount(); wrapper = null; });
+afterEach(() => { wrapper?.unmount(); wrapper = null; document.body.innerHTML = ''; });
 
 async function start() {
-  wrapper = mount(MarketplaceView, { global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
+  wrapper = mount(MarketplaceView, { attachTo: document.body, global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
   await flushPromises();
 }
 
@@ -45,7 +45,7 @@ describe('应用市场表单可访问性', () => {
 
   it('统计接口失败时说明数据不可用，并提供可访问的重试入口', async () => {
     mocks.api.getMarketplaceStats.mockRejectedValueOnce(new Error('stats service offline'));
-    wrapper = mount(MarketplaceView, { global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
+    wrapper = mount(MarketplaceView, { attachTo: document.body, global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
     await flushPromises();
 
     expect(wrapper.get('[role="alert"]').text()).toContain('应用市场统计加载失败');
@@ -98,7 +98,7 @@ describe('应用市场表单可访问性', () => {
       .mockImplementationOnce(() => new Promise(resolve => { resolveInitial = resolve; }))
       .mockResolvedValueOnce({ results: [{ ...deployable, name: 'latest template' }] });
 
-    wrapper = mount(MarketplaceView, { global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
+    wrapper = mount(MarketplaceView, { attachTo: document.body, global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
     await vi.waitFor(() => expect(mocks.api.searchMarketplaceTemplates).toHaveBeenCalledTimes(1));
     await wrapper.get('select[aria-label="筛选模板来源"]').setValue('custom');
     await flushPromises();
@@ -111,9 +111,18 @@ describe('应用市场表单可访问性', () => {
     expect(wrapper.text()).not.toContain('stale template');
   });
 
-  it('创建模板和 AI 找应用弹窗中的可见标签与控件正确关联', async () => {
+  it('创建与 AI 弹窗提供对话框语义、可见标签、初始焦点、焦点循环和 Escape 关闭', async () => {
     await start();
-    await wrapper.findAll('button').find(button => button.text().includes('创建模板')).trigger('click');
+    const createTrigger = wrapper.findAll('button').find(button => button.text().includes('创建模板'));
+    createTrigger.element.focus();
+    await createTrigger.trigger('click');
+    await flushPromises();
+
+    const createDialog = wrapper.get('[role="dialog"][aria-labelledby="market-create-dialog-title"]');
+    expect(createDialog.attributes('aria-modal')).toBe('true');
+    expect(createDialog.get('h2').text()).toBe('创建模板');
+    await vi.waitFor(() => expect(document.activeElement).toBe(createDialog.get('button[aria-label="关闭创建或编辑模板弹窗"]').element));
+
     for (const [id, label] of [
       ['market-template-name', '模板名称'],
       ['market-template-category', '分类'],
@@ -124,19 +133,70 @@ describe('应用市场表单可访问性', () => {
       expect(wrapper.get(`#${id}`).exists()).toBe(true);
     }
 
-    await wrapper.findAll('button').find(button => button.text().includes('取消')).trigger('click');
-    await wrapper.findAll('button').find(button => button.text().includes('AI 找应用')).trigger('click');
+    const focusables = [...createDialog.element.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]')];
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    last.focus();
+    await last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    await first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    expect(document.activeElement).toBe(last);
+
+    await first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    await vi.waitFor(() => expect(document.activeElement).toBe(createTrigger.element));
+
+    const aiTrigger = wrapper.findAll('button').find(button => button.text().includes('AI 找应用'));
+    aiTrigger.element.focus();
+    await aiTrigger.trigger('click');
+    await flushPromises();
+    const aiDialog = wrapper.get('[role="dialog"][aria-labelledby="market-ai-dialog-title"]');
+    expect(aiDialog.attributes('aria-modal')).toBe('true');
+    expect(aiDialog.get('h2').text()).toBe('AI 找应用');
+    await vi.waitFor(() => expect(document.activeElement).toBe(aiDialog.get('button[aria-label="关闭 AI 找应用弹窗"]').element));
     expect(wrapper.get('label[for="market-ai-query"]').text()).toBe('应用名称');
     expect(wrapper.get('#market-ai-query').exists()).toBe(true);
+    await aiDialog.get('button[aria-label="关闭 AI 找应用弹窗"]').trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    await vi.waitFor(() => expect(document.activeElement).toBe(aiTrigger.element));
   });
 
-  it('部署弹窗中的项目名称和动态环境变量标签正确关联', async () => {
-    mocks.api.searchMarketplaceTemplates.mockResolvedValueOnce({ results: [deployable] });
+  it('模板详情与部署弹窗可被读屏器识别并可用 Escape 关闭', async () => {
+    mocks.api.searchMarketplaceTemplates.mockResolvedValue({ results: [deployable] });
     await start();
-    await wrapper.get('.btn-deploy').trigger('click');
+
+    const viewTrigger = wrapper.get('.btn-view');
+    viewTrigger.element.focus();
+    await viewTrigger.trigger('click');
+    await flushPromises();
+    const viewDialog = wrapper.get('[role="dialog"][aria-labelledby="market-view-dialog-title"]');
+    expect(viewDialog.attributes('aria-modal')).toBe('true');
+    expect(viewDialog.get('h2').text()).toBe('nginx');
+    await vi.waitFor(() => expect(document.activeElement).toBe(viewDialog.get('button[aria-label="关闭模板详情"]').element));
+    await viewDialog.get('button[aria-label="关闭模板详情"]').trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    await vi.waitFor(() => expect(document.activeElement).toBe(viewTrigger.element));
+
+    const deployTrigger = wrapper.get('.btn-deploy');
+    deployTrigger.element.focus();
+    await deployTrigger.trigger('click');
+    await flushPromises();
+    const deployDialog = wrapper.get('[role="dialog"][aria-labelledby="market-deploy-dialog-title"]');
+    expect(deployDialog.attributes('aria-modal')).toBe('true');
+    expect(deployDialog.get('h2').text()).toContain('部署应用: nginx');
+    await vi.waitFor(() => expect(document.activeElement).toBe(deployDialog.get('button[aria-label="关闭部署弹窗"]').element));
     expect(wrapper.get('label[for="market-deploy-project-name"]').text()).toBe('项目名称');
     expect(wrapper.get('#market-deploy-project-name').exists()).toBe(true);
     expect(wrapper.get('label[for="market-deploy-variable-PORT"]').text()).toBe('HTTP 端口');
     expect(wrapper.get('#market-deploy-variable-PORT').exists()).toBe(true);
+    await deployDialog.get('button[aria-label="关闭部署弹窗"]').trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    await vi.waitFor(() => expect(document.activeElement).toBe(deployTrigger.element));
   });
 });
