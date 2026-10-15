@@ -6,7 +6,7 @@
       <span class="text-[11px] text-muted tabular-nums">{{ lines.length }} 条</span>
       <span v-if="paneErrorCount" class="text-[11px] text-rose-400">ERROR {{ paneErrorCount }}</span>
     </div>
-    <div ref="boxEl" class="terminal-output card log-pane-body" @scroll="onScroll" @wheel="onWheel">
+    <div ref="boxEl" class="terminal-output card log-pane-body" role="region" :aria-label="`${heading || fallbackName || '容器'}实时日志`" tabindex="0" aria-live="off" @scroll="onScroll" @wheel="onWheel">
       <template v-if="lines.length">
         <div :style="{ height: scrollPadTop + 'px' }" aria-hidden="true"></div>
         <!-- 单容器与聚合共用 LogLine:单容器流的帧里没有 containerName,由 fallback-name 补上徽章。 -->

@@ -4,7 +4,7 @@
     <span v-if="ts" class="line-ts">{{ shortTs }}</span>
     <template v-if="jsonState !== null">
       <pre class="json-block" :class="{ open: jsonOpen }">{{ jsonText }}</pre>
-      <button class="json-toggle" @click="jsonOpen = !jsonOpen">{{ jsonOpen ? '折叠' : '展开' }}</button>
+      <button class="json-toggle" :aria-expanded="jsonOpen" :aria-label="`${jsonOpen ? '折叠' : '展开'} JSON 日志：${text.slice(0, 80)}`" @click="jsonOpen = !jsonOpen">{{ jsonOpen ? '折叠' : '展开' }}</button>
     </template>
     <template v-else>
       <span v-if="levelBadge" class="level-badge" :class="levelBadgeClass">{{ levelBadge }}</span>
