@@ -4,17 +4,19 @@
       {{ template.description }}
     </div>
     <div v-for="variable in variables" :key="variable.name" class="space-y-1.5">
-      <label class="block text-sm font-medium text-surface-200">
+      <label :for="`${idPrefix}-${variable.name}`" class="block text-sm font-medium text-surface-200">
         {{ variable.label || variable.name }}
         <span v-if="variable.required" class="text-rose-400">*</span>
       </label>
       <input
+        :id="`${idPrefix}-${variable.name}`"
+        :aria-describedby="variable.description ? `${idPrefix}-${variable.name}-description` : undefined"
         v-model="values[variable.name]"
         :type="variable.type === 'password' ? 'password' : 'text'"
         :placeholder="variable.default || variable.placeholder || `请输入 ${variable.label || variable.name}`"
         class="input w-full"
       />
-      <p v-if="variable.description" class="text-xs text-surface-400">{{ variable.description }}</p>
+      <p v-if="variable.description" :id="`${idPrefix}-${variable.name}-description`" class="text-xs text-surface-400">{{ variable.description }}</p>
     </div>
     <template #footer>
       <button class="btn-ghost" @click="$emit('close')">取消</button>
@@ -26,7 +28,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, useId } from 'vue';
 import { Check } from 'lucide-vue-next';
 import BaseModal from './common/BaseModal.vue';
 
@@ -35,6 +37,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['close', 'confirm']);
+const idPrefix = `template-variable-${useId()}`;
 
 const variables = computed(() => {
   if (!props.template.variables) return [];
