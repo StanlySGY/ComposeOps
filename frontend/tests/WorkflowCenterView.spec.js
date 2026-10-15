@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import { api } from '../src/api/client.js';
 import WorkflowCenterView from '../src/views/WorkflowCenterView.vue';
 import { useWorkflowStore } from '../src/stores/workflow.js';
@@ -9,17 +10,27 @@ vi.mock('../src/api/client.js', () => ({ api: {
   getProjects: vi.fn(), getWorkflowDefinitions: vi.fn(), getWorkflowInstances: vi.fn(),
 } }));
 let wrapper;
-beforeEach(() => {
+let router;
+beforeEach(async () => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
   api.getProjects.mockResolvedValue({ projects: [] });
   api.getWorkflowDefinitions.mockResolvedValue({ definitions: [{ id: 'wf', name: '审查流程', enabled: true, nodes: [] }] });
   api.getWorkflowInstances.mockResolvedValue({ instances: [{ id: 'run', name: '审查实例', status: 'waiting_approval' }] });
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', component: { template: '<main>测试路由</main>' } }],
+  });
+  await router.push('/');
+  await router.isReady();
 });
-afterEach(() => wrapper?.unmount());
+afterEach(() => {
+  wrapper?.unmount();
+  wrapper = null;
+});
 
 it('异步加载的定义和待审批实例显示在页面,刷新状态保持响应性', async () => {
-  wrapper = mount(WorkflowCenterView);
+  wrapper = mount(WorkflowCenterView, { global: { plugins: [router] } });
   await flushPromises();
   expect(wrapper.text()).toContain('审查流程');
   expect(wrapper.text()).toContain('审查实例');
@@ -35,7 +46,7 @@ it('异步加载的定义和待审批实例显示在页面,刷新状态保持响
 });
 
 it('点击刷新获取服务端最新定义和实例', async () => {
-  wrapper = mount(WorkflowCenterView);
+  wrapper = mount(WorkflowCenterView, { global: { plugins: [router] } });
   await flushPromises();
   api.getWorkflowDefinitions.mockResolvedValue({ definitions: [{ id: 'wf', name: '更新流程', enabled: true, nodes: [] }] });
   await wrapper.findAll('button').find(button => button.text() === '刷新').trigger('click');
