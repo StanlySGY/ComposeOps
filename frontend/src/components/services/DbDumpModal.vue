@@ -3,7 +3,8 @@
     <template #header-actions>
       <Database class="w-4 h-4 text-emerald-300" />
     </template>
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="loading" class="text-sm text-surface-400" role="status" aria-live="polite">正在读取可备份的数据库容器…</p>
     <p v-if="!containers.length && !loading && !error" class="text-muted text-sm">该项目没有运行中的数据库容器(Postgres / MySQL / MariaDB / Redis / MongoDB)。</p>
     <div v-if="containers.length" class="space-y-3">
       <label>目标容器<select v-model="containerId" class="input"><option value="">选择数据库容器</option><option v-for="c in containers" :key="c.containerId" :value="c.containerId">{{ c.containerName }} ({{ c.type }})</option></select></label>

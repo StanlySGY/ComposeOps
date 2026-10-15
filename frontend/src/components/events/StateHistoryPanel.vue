@@ -1,6 +1,6 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4">
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <p v-if="truncated" class="alert-warning" role="status">窗口内事件量超出后端单次批量上限,下方时长为截断后的部分结果。</p>
 
     <!-- 窗口摘要 -->
@@ -28,7 +28,7 @@
         <option value="">全部动作</option>
         <option v-for="action in ACTIONS" :key="action" :value="action">{{ actionLabel(action) }}</option>
       </select>
-      <label class="search-field"><Search class="h-4 w-4" /><input v-model="query" placeholder="搜索容器或项目名" /></label>
+      <label class="search-field"><Search class="h-4 w-4" /><input v-model="query" aria-label="搜索容器或项目名" placeholder="搜索容器或项目名" /></label>
       <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />刷新</button>
       <button class="btn-secondary" @click="showPruneConfirm = true"><Trash2 class="h-4 w-4" />清理历史</button>
       <span class="ml-auto whitespace-nowrap text-muted">显示 {{ filteredContainers.length }} / {{ containers.length }} 个容器</span>
@@ -46,12 +46,12 @@
 
     <Skeleton v-if="loading && !containers.length" variant="table" :rows="6" label="状态历史加载中" class="flex-1" />
     <EmptyState
-      v-else-if="!containers.length"
+      v-else-if="!containers.length && !error"
       icon="FileClock"
       title="暂无状态历史"
       description="状态记录器常驻后,容器的启动、退出、销毁会持续落库;有事件之后这里会给出逐容器可用率与宕机明细。"
     />
-    <EmptyState v-else-if="!filteredContainers.length" icon="Search" title="没有匹配的容器" description="调整项目、窗口或搜索条件后重试" action-label="清除筛选" @action="resetFilters" />
+    <EmptyState v-else-if="!filteredContainers.length && !error" icon="Search" title="没有匹配的容器" description="调整项目、窗口或搜索条件后重试" action-label="清除筛选" @action="resetFilters" />
 
     <!-- 逐容器可用率 -->
     <section v-if="filteredContainers.length" class="section-panel">

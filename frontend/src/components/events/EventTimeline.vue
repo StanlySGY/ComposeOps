@@ -1,6 +1,6 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4">
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 摘要统计 -->
     <div class="metric-grid">
@@ -13,7 +13,7 @@
 
     <!-- 过滤器 -->
     <div class="toolbar-panel flex flex-wrap items-center gap-2">
-      <label class="search-field"><Search class="h-4 w-4" /><input v-model="query" placeholder="搜索事件标题、项目或详情" /></label>
+      <label class="search-field"><Search class="h-4 w-4" /><input v-model="query" aria-label="搜索事件标题、项目或详情" placeholder="搜索事件标题、项目或详情" /></label>
       <select v-model="sourceFilter" class="input sm:w-40" aria-label="来源筛选">
         <option value="all">全部来源</option>
         <option value="operation">操作记录</option>
@@ -35,13 +35,13 @@
         <option value="7d">最近 7 天</option>
         <option value="all">全部时间</option>
       </select>
-      <span class="ml-auto whitespace-nowrap text-muted">显示 {{ filteredEvents.length }} / {{ events.length }}</span>
+      <span class="ml-auto whitespace-nowrap text-muted" role="status" aria-live="polite" aria-atomic="true">显示 {{ filteredEvents.length }} / {{ events.length }}</span>
     </div>
 
     <!-- 时间轴 -->
     <Skeleton v-if="loading && !events.length" variant="table" :rows="6" label="事件加载中" class="flex-1" />
-    <EmptyState v-else-if="!events.length" icon="History" title="暂无事件" description="执行操作、运行 Agent 或触发定时任务后,事件会出现在这里" />
-    <EmptyState v-else-if="!filteredEvents.length" icon="Search" title="没有匹配的事件" description="调整筛选条件后重试" action-label="清除筛选" class="flex-1" @action="resetFilters" />
+    <EmptyState v-else-if="!events.length && !error" icon="History" title="暂无事件" description="执行操作、运行 Agent 或触发定时任务后,事件会出现在这里" />
+    <EmptyState v-else-if="!filteredEvents.length && !error" icon="Search" title="没有匹配的事件" description="调整筛选条件后重试" action-label="清除筛选" class="flex-1" @action="resetFilters" />
     <div v-else class="min-h-0 flex-1 overflow-y-auto pr-1">
       <div class="relative space-y-1">
         <div class="absolute left-[7px] top-2 bottom-2 w-px bg-surface-800"></div>
@@ -149,8 +149,15 @@ async function load() {
       api.getAgentExecutions(),
       api.getAlertEvents(50),
       api.getCronHistory(50),
-      fetch('/api/v1/gitops').then((res) => (res.ok ? res.json() : null)),
+      fetch('/api/v1/gitops').then((res) => { if (!res.ok) throw new Error('GitOps HTTP ' + res.status); return res.json(); }),
     ]);
+    const failedSources = [
+      ['操作记录', operationData], ['Agent 活动', agentData], ['告警事件', alertData],
+      ['定时任务', cronData], ['GitOps 同步', gitopsData],
+    ].filter(([, result]) => result.status === 'rejected').map(([label]) => label);
+    if (failedSources.length) {
+      error.value = '部分事件加载失败：' + failedSources.join('、') + '。已尽可能显示其他来源的数据。';
+    }
 
     // 操作记录
     if (operationData.status === 'fulfilled') {
