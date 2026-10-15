@@ -151,4 +151,29 @@ describe('事件中心弹层的键盘可访问性与资源清理', () => {
     expect(document.activeElement).toBe(trigger);
     expect(eventStream.close).toHaveBeenCalled();
   });
+
+  it('持久化告警的图标操作均提供明确的可访问名称', async () => {
+    api.getAlertEvents.mockResolvedValue({
+      events: [{
+        id: 'alert-1',
+        title: '磁盘空间告警',
+        detail: '剩余空间不足',
+        target: '/events',
+        priority: 'danger',
+        read: false,
+        muted: false,
+        logs: 'disk usage is high',
+        diagnosis: '',
+        created_at: '2026-10-15T00:00:00.000Z',
+      }],
+    });
+    await mountEventCenter();
+    document.querySelector('button[aria-label="打开事件中心"]').click();
+    await flushPromises();
+
+    const panel = document.querySelector('#event-center-panel');
+    for (const label of ['AI 诊断此告警(守护模式)', '展开日志', '标记已读', '静默此告警']) {
+      expect(panel.querySelector(`button[aria-label="${label}"]`), label).not.toBeNull();
+    }
+  });
 });

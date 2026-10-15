@@ -22,10 +22,10 @@
             </span>
           </router-link>
           <div class="flex shrink-0 items-center gap-1">
-            <button v-if="event.persisted" class="icon-btn h-6! w-6!" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-accent': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
-            <button v-if="event.logs" class="icon-btn h-6! w-6!" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
-            <button v-if="event.persisted && !event.read" class="icon-btn h-6! w-6!" title="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
-            <button v-if="event.persisted" class="icon-btn h-6! w-6!" title="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
+            <button v-if="event.persisted" class="icon-btn h-6! w-6!" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :aria-label="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-accent': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
+            <button v-if="event.logs" class="icon-btn h-6! w-6!" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" :aria-label="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
+            <button v-if="event.persisted && !event.read" class="icon-btn h-6! w-6!" title="标记已读" aria-label="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
+            <button v-if="event.persisted" class="icon-btn h-6! w-6!" title="静默此告警" aria-label="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
           </div>
           <div v-if="event.logs && expandedLogEventId === event.id" class="w-full basis-full"><pre class="event-logs">{{ event.logs }}</pre></div>
           <div v-if="expandedDiagnosisId === event.id" class="w-full basis-full rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5">
