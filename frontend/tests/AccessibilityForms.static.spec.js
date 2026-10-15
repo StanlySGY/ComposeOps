@@ -110,6 +110,7 @@ describe('跨页面表单可访问性契约', () => {
       '../src/views/DashboardView.vue',
       '../src/views/KnowledgeGraphView.vue',
       '../src/views/EventCenterView.vue',
+      '../src/components/services/ProjectUpgradeModal.vue',
     ];
     for (const file of pageAlertFiles) {
       expect(templateNodes(file).some((node) => hasClassToken(node, 'alert-error') && hasAttr(node, 'role', 'alert')), file).toBe(true);
@@ -119,6 +120,9 @@ describe('跨页面表单可访问性契约', () => {
     expect(historyNodes.some((node) => node.tag === 'div' && hasClassToken(node, 'card') && hasAttr(node, 'role', 'alert'))).toBe(true);
     const costNodes = templateNodes('../src/views/CostAnalysisView.vue');
     expect(costNodes.some((node) => hasClassToken(node, 'error-state') && hasAttr(node, 'role', 'alert'))).toBe(true);
+
+    const upgradeNodes = templateNodes('../src/components/services/ProjectUpgradeModal.vue');
+    expect(upgradeNodes.some((node) => hasAttr(node, 'role', 'status') && hasAttr(node, 'aria-live', 'polite'))).toBe(true);
 
     for (const file of ['../src/views/ComposeView.vue', '../src/views/CronTasksView.vue']) {
       expect(templateNodes(file).some((node) => hasAttr(node, 'role', 'status') && hasAttr(node, 'aria-live', 'polite')), file).toBe(true);

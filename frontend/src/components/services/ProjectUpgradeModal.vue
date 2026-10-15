@@ -3,8 +3,8 @@
     <template #header-actions>
       <Sparkles class="w-4 h-4 text-accent" />
     </template>
-    <p v-if="error" class="alert-error">{{ error }}</p>
-    <div v-if="!data && !error" class="text-muted py-8 text-center">正在检测镜像更新…</div>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <div v-if="!data && !error" class="text-muted py-8 text-center" role="status" aria-live="polite" aria-atomic="true">正在检测镜像更新…</div>
     <template v-else-if="data">
       <div class="flex items-center gap-2">
         <span class="count-badge" :class="data.hasUpdate ? 'text-amber-300' : 'text-emerald-300'">{{ data.hasUpdate ? '有可用更新' : '已是最新' }}</span>
@@ -32,7 +32,7 @@
     </template>
     <template #footer>
       <button v-if="data?.hasUpdate && !upgrading" class="btn-primary" :disabled="previewLoading" @click="startUpgrade"><Zap class="w-4 h-4" />一键平滑升级<span v-if="previewLoading" class="text-xs opacity-70">正在生成变更预览…</span></button>
-      <span v-if="upgrading" class="text-sm text-muted">正在升级,请查看输出面板…</span>
+      <span v-if="upgrading" class="text-sm text-muted" role="status" aria-live="polite" aria-atomic="true">正在升级,请查看输出面板…</span>
       <button class="btn-secondary" @click="close">关闭</button>
     </template>
   </BaseModal>
