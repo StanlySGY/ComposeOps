@@ -64,7 +64,9 @@ describe('下拉刷新订阅器 usePullRefresh', () => {
     });
     await router.push('/a');
     const Shell = defineComponent({
-      setup: () => () => h('div', [h(KeepAlive, null, [h(RouterView)])]),
+      setup: () => () => h(RouterView, null, {
+        default: ({ Component }) => h(KeepAlive, null, Component ? [h(Component)] : []),
+      }),
     });
     wrapper = mount(Shell, { global: { plugins: [router] } });
     await nextTick();
