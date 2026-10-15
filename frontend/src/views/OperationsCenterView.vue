@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell">
+  <div class="page-shell" :aria-busy="loading">
     <div class="page-header">
       <div>
         <h1 class="page-title">运维任务中心</h1>
@@ -10,7 +10,8 @@
       </div>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载运维任务中心</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 任务流生成器 -->
     <section class="section-panel">
@@ -63,7 +64,7 @@
               当前计划会创建“数据卷备份”“拉取镜像”和可选的“AI 巡检”定时任务；部署、健康检查和回滚仍需在服务/运维操作中执行，不会被假装成已自动化。
             </div>
             <div class="flex gap-2 pt-1">
-              <button class="btn-primary flex-1" :disabled="creating" @click="createFlowJobs"><Rocket class="w-4 h-4" :class="{ 'animate-pulse': creating }" />{{ creating ? '创建中...' : '创建定时任务' }}</button>
+              <button class="btn-primary flex-1" :disabled="creating || loading" @click="createFlowJobs"><Rocket class="w-4 h-4" :class="{ 'animate-pulse': creating }" />{{ creating ? '创建中...' : '创建定时任务' }}</button>
               <button class="btn-secondary" @click="flowSteps = []">清空</button>
             </div>
           </div>
@@ -77,7 +78,9 @@
         <div><h2 class="section-title">现有定时任务</h2><p class="mt-1 text-muted">当前已配置的自动运维任务</p></div>
         <router-link to="/cron" class="text-xs text-emerald-400 hover:text-emerald-300">管理全部 →</router-link>
       </div>
-      <div v-if="!jobs.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无定时任务。可通过上方任务流生成,或到定时任务页手动创建。</div>
+      <p v-if="loading && !loadErrors.jobs" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">正在加载定时任务…</p>
+      <p v-else-if="loadErrors.jobs" class="alert-error" role="alert">{{ loadErrors.jobs }}</p>
+      <div v-else-if="!jobs.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无定时任务。可通过上方任务流生成,或到定时任务页手动创建。</div>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>任务</th><th>类型</th><th>Cron</th><th>状态</th><th>最近执行</th></tr></thead>
@@ -104,7 +107,9 @@
           <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link>调整
         </div>
       </div>
-      <div v-if="latestInspection" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
+      <p v-if="loading && !loadErrors.inspection" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">正在加载巡检状态…</p>
+      <p v-else-if="loadErrors.inspection" class="alert-error" role="alert">{{ loadErrors.inspection }}</p>
+      <div v-else-if="latestInspection" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
         <div class="flex flex-wrap items-center gap-3">
           <span class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border font-mono text-lg font-semibold" :class="inspectionTileClass">{{ latestInspection.score }}</span>
           <div class="min-w-0 flex-1">
@@ -115,7 +120,7 @@
           <router-link to="/inspection" class="btn-secondary px-2.5! py-1.5! text-xs">查看报告</router-link>
         </div>
       </div>
-      <div v-else class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无巡检报告。前往 <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link> 生成第一份报告。</div>
+      <div v-else-if="!loading" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无巡检报告。前往 <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link> 生成第一份报告。</div>
     </section>
   </div>
 </template>
@@ -132,6 +137,7 @@ const loading = ref(false);
 const generating = ref(false);
 const creating = ref(false);
 const error = ref('');
+const loadErrors = ref({ jobs: '', inspection: '' });
 const targetProjectId = ref('');
 const scheduleCron = ref('0 3 * * *');
 const enableInspection = ref(true);
@@ -189,20 +195,25 @@ async function createFlowJobs() {
   creating.value = true;
   error.value = '';
   const name = targetProject.value.projectName;
+  const expectedCount = enableInspection.value ? 3 : 2;
   const created = [];
   try {
-    // 数据卷备份
+    // 顺序创建不是原子操作；若中途失败，必须提醒已成功创建的部分，防止用户直接重试造成重复任务。
     created.push(await api.createCronJob({ name: `${name} 数据卷备份`, cron: scheduleCron.value, type: 'volume-backup', enabled: true }));
-    // 拉取镜像
     created.push(await api.createCronJob({ name: `${name} 拉取镜像`, cron: scheduleCron.value, type: 'pull-images', enabled: true }));
-    // AI 巡检
     if (enableInspection.value) {
       created.push(await api.createCronJob({ name: `${name} AI 巡检`, cron: scheduleCron.value, type: 'inspection', enabled: true }));
     }
     await load();
     flowSteps.value = [];
   } catch (e) {
-    error.value = `创建任务失败: ${e.message}`;
+    if (created.length) {
+      flowSteps.value = [];
+      await load();
+      error.value = `任务仅部分创建：已创建 ${created.length}/${expectedCount} 项，后续创建失败（${e.message}）。请先核对现有定时任务，再手动补齐未创建项；不要直接重试整组计划，以免重复创建。`;
+    } else {
+      error.value = `创建任务失败：${e.message}`;
+    }
   } finally {
     creating.value = false;
   }
@@ -212,17 +223,24 @@ async function load() {
   if (loading.value) return;
   loading.value = true;
   error.value = '';
+  loadErrors.value = { jobs: '', inspection: '' };
   try {
     const [jobData, inspectionData] = await Promise.allSettled([
       api.listCronJobs(),
       api.getInspectionOverview(1),
     ]);
-    jobs.value = jobData.status === 'fulfilled' ? (jobData.value.jobs || []) : [];
-    latestInspection.value = inspectionData.status === 'fulfilled' ? (inspectionData.value.latest || null) : null;
-    const schedule = inspectionData.status === 'fulfilled' ? inspectionData.value.schedule : null;
-    if (schedule) {
-      inspectionEnabled.value = !!schedule.enabled;
-      inspectionInterval.value = schedule.intervalHours || 24;
+    if (jobData.status === 'fulfilled') jobs.value = jobData.value.jobs || [];
+    else loadErrors.value.jobs = `定时任务加载失败：${jobData.reason?.message || '未知错误'}`;
+
+    if (inspectionData.status === 'fulfilled') {
+      latestInspection.value = inspectionData.value.latest || null;
+      const schedule = inspectionData.value.schedule;
+      if (schedule) {
+        inspectionEnabled.value = !!schedule.enabled;
+        inspectionInterval.value = schedule.intervalHours || 24;
+      }
+    } else {
+      loadErrors.value.inspection = `AI 巡检状态加载失败：${inspectionData.reason?.message || '未知错误'}`;
     }
   } catch (e) {
     error.value = e.message || '加载失败';
