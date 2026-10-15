@@ -1,19 +1,20 @@
 <template>
   <div class="relative">
-    <button class="icon-btn relative" title="事件中心" aria-label="打开事件中心" @click="toggle">
+    <button ref="eventCenterTrigger" class="icon-btn relative" title="事件中心" aria-label="打开事件中心" :aria-expanded="open" :aria-controls="open ? 'event-center-panel' : undefined" @click="toggle">
       <Bell class="h-4 w-4" />
       <span v-if="unreadCount" class="event-count">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
     </button>
-    <div v-if="open" class="fixed inset-0 z-50" @click="open = false"></div>
-    <section v-if="open" class="event-panel z-50">
-      <header class="flex items-center justify-between border-b border-surface-800 px-4 py-3">
-        <div><h2 class="text-sm font-semibold text-surface-100">事件中心</h2><p class="mt-0.5 text-muted">需要关注的运行状态与系统操作</p></div>
+    <div v-if="open" class="fixed inset-0 z-50" aria-hidden="true" @click="closePanel"></div>
+    <section v-if="open" id="event-center-panel" ref="eventCenterPanel" class="event-panel z-50" role="dialog" aria-modal="true" aria-labelledby="event-center-title" tabindex="-1" @keydown="trapFocus">
+      <header class="flex flex-wrap items-center justify-between gap-2 border-b border-surface-800 px-4 py-3">
+        <div class="min-w-0 flex-1"><h2 id="event-center-title" class="text-sm font-semibold text-surface-100">事件中心</h2><p class="mt-0.5 text-muted">需要关注的运行状态与系统操作</p></div>
         <label class="toggle-label gap-1.5! text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="w-8! h-[18px]!" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
         <label class="toggle-label gap-1.5! text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="w-8! h-[18px]!" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
+        <button class="icon-btn" aria-label="关闭事件中心" @click="closePanel"><X class="h-4 w-4" /></button>
       </header>
       <div class="max-h-[min(68vh,32rem)] overflow-y-auto p-2">
         <div v-for="event in events" :key="event.key" class="event-item" :class="{ 'event-read': event.read }">
-          <router-link :to="event.to" class="flex min-w-0 flex-1 items-center gap-2" @click="open = false">
+          <router-link :to="event.to" class="flex min-w-0 flex-1 items-center gap-2" @click="closePanel">
             <span class="event-icon shrink-0" :class="event.tone"><component :is="event.icon" class="h-4 w-4" /></span>
             <span class="min-w-0 flex-1">
               <strong class="flex items-center gap-1.5">{{ event.title }}<span v-if="event.priority === 'danger'" class="event-priority">紧急</span></strong>
@@ -39,7 +40,7 @@
         <span>{{ unreadCount }} 未读 · {{ eventCount }} 个需要关注</span>
         <div class="flex items-center gap-2">
           <button class="text-muted hover:text-surface-200 text-xs" @click="pruneAll">清空 7 天前</button>
-          <router-link to="/events?tab=operations" class="text-accent hover:text-blue-300" @click="open = false">操作与任务</router-link>
+          <router-link to="/events?tab=operations" class="text-accent hover:text-blue-300" @click="closePanel">操作与任务</router-link>
         </div>
       </footer>
     </section>
@@ -48,17 +49,19 @@
 </template>
 
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
+import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 import { useToastStore } from '../stores/toast.js';
-import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, Sparkles, VolumeX, Wand2 } from 'lucide-vue-next';
+import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, Sparkles, VolumeX, Wand2, X } from 'lucide-vue-next';
 import { api, wsUrl } from '../api/client.js';
 import EmptyState from './common/EmptyState.vue';
 import ConfirmDialog from './common/ConfirmDialog.vue';
 
 const open = ref(false);
+const eventCenterTrigger = ref(null);
+const eventCenterPanel = ref(null);
 const loading = ref(false);
 const toast = useToastStore();
 const projects = ref([]);
@@ -284,6 +287,48 @@ async function load() {
 function connectEventStream() {
   eventStream.connect();
 }
+
+// Keep the stream lifecycle tied to panel visibility, regardless of whether it closes
+// through Escape, the close button, the backdrop, or navigation to an event target.
+watch(open, async (isOpen) => {
+  if (isOpen) {
+    void load();
+    connectEventStream();
+    await nextTick();
+    eventCenterPanel.value?.focus();
+    return;
+  }
+  eventStream.close();
+  await nextTick();
+  eventCenterTrigger.value?.focus();
+});
+
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function trapFocus(event) {
+  if (event.key !== 'Tab') return;
+  const panel = eventCenterPanel.value;
+  if (!panel) return;
+  const activeDialog = event.target instanceof Element ? event.target.closest('[role="dialog"]') : null;
+  // A nested confirmation dialog owns its own focus order.
+  if (activeDialog && activeDialog !== panel) return;
+  const focusable = [...panel.querySelectorAll(FOCUSABLE_SELECTOR)].filter((element) =>
+    element.closest('[role="dialog"]') === panel && !element.closest('[hidden]') && element.getAttribute('aria-hidden') !== 'true'
+  );
+  if (!focusable.length) {
+    event.preventDefault();
+    panel.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 async function markRead(eventItem) {
   if (!eventItem.id) return;
   const updated = await api.updateAlertEvent(eventItem.id, { read: true }).catch(() => null);
@@ -310,8 +355,9 @@ async function confirmPrune() {
 function toggleLogs(eventItem) {
   expandedLogEventId.value = expandedLogEventId.value === eventItem.id ? null : eventItem.id;
 }
-function toggle() { open.value = !open.value; if (open.value) { load(); connectEventStream(); } else eventStream.close(); }
-useEscapeKey({ active: open, onClose: () => { open.value = false; }, layer: 'event' });
+function toggle() { open.value = !open.value; }
+function closePanel() { open.value = false; }
+useEscapeKey({ active: open, onClose: closePanel, layer: 'event' });
 
 onMounted(() => { load(); timer = setInterval(load, 60000); });
 onUnmounted(() => { clearInterval(timer); eventStream.close(); });
