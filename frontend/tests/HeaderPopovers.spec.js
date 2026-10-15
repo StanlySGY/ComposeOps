@@ -127,11 +127,23 @@ describe('顶部下拉控件的可访问性与焦点恢复', () => {
 
     const panel = document.querySelector('#project-switcher-panel');
     const search = panel.querySelector('input[aria-label="搜索项目"]');
-    expect(panel.getAttribute('role')).toBe('group');
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(panel.getAttribute('aria-modal')).toBe('true');
     expect(panel.getAttribute('aria-labelledby')).toBe('project-switcher-title');
     expect(search).not.toBeNull();
     expect(document.activeElement).toBe(search);
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    const focusable = [...panel.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')];
+    expect(focusable.length).toBeGreaterThan(1);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    last.focus();
+    last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(last);
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await flushPromises();

@@ -27,7 +27,7 @@
           <ChevronDown class="w-3 h-3" />
         </button>
         <div v-if="projectSwitcherOpen" class="command-backdrop" @click.self="projectSwitcherOpen = false"></div>
-        <div v-if="projectSwitcherOpen" id="project-switcher-panel" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60" role="group" aria-labelledby="project-switcher-title">
+        <div v-if="projectSwitcherOpen" id="project-switcher-panel" ref="projectSwitcherPanelRef" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60" role="dialog" aria-modal="true" aria-labelledby="project-switcher-title" tabindex="-1" @keydown="trapProjectSwitcherTab">
           <div id="project-switcher-title" class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
           <label class="search-field mx-2 my-2 flex-none">
             <Search class="h-3.5 w-3.5 shrink-0" />
@@ -93,6 +93,7 @@ const projectSwitcherOpen = ref(false);
 const projectQuery = ref('');
 const projectSwitcherTriggerRef = ref(null);
 const projectSwitcherSearchRef = ref(null);
+const projectSwitcherPanelRef = ref(null);
 let previousProjectSwitcherFocus = null;
 watch(projectSwitcherOpen, async (isOpen) => {
   if (isOpen) {
@@ -104,6 +105,31 @@ watch(projectSwitcherOpen, async (isOpen) => {
   if (previousProjectSwitcherFocus?.isConnected) previousProjectSwitcherFocus.focus({ preventScroll: true });
   previousProjectSwitcherFocus = null;
 });
+function trapProjectSwitcherTab(event) {
+  if (event.key !== 'Tab') return;
+  const panel = projectSwitcherPanelRef.value;
+  if (!panel) return;
+  const focusable = [...panel.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')].filter((element) => {
+    if (element.closest('[hidden]') || element.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  if (!focusable.length) {
+    event.preventDefault();
+    panel.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
 useEscapeKey({ active: projectSwitcherOpen, onClose: () => { projectSwitcherOpen.value = false; }, layer: 'event' });
 const pendingProjectAction = ref(null);
 const projectActionBusy = ref(false);
