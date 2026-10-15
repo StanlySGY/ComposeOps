@@ -9,7 +9,7 @@
     <template #header-actions>
       <KeyRound class="h-4 w-4 shrink-0 text-accent" />
       <span class="hidden font-mono text-[11px] text-surface-500 sm:inline">{{ data.path || '.env' }}</span>
-      <select v-if="envFiles.length > 1 || activeFile !== '.env'" class="input min-h-8! w-auto! py-1! text-xs" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
+      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input min-h-8! w-auto! py-1! text-xs" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
       <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
     </template>
 
@@ -42,7 +42,7 @@
       <div v-if="mode === 'table'" class="shrink-0 px-4 py-2">
         <label class="search-field max-w-xl">
           <Search class="h-4 w-4" />
-          <input v-model="keyword" placeholder="按 Key 快速过滤变量" />
+          <input v-model="keyword" aria-label="按 Key 快速过滤变量" placeholder="按 Key 快速过滤变量" />
         </label>
       </div>
 
@@ -52,10 +52,11 @@
         <div v-if="mode === 'table'" class="space-y-2">
           <div v-for="(entry, index) in filteredEntries" :key="entry._uid" class="flex flex-col gap-1 rounded-lg border border-surface-800 bg-surface-950/40 p-2 sm:flex-row sm:items-center">
             <div class="grid flex-1 gap-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:gap-2">
-              <input v-model="entry.key" class="input font-mono text-xs" placeholder="KEY" spellcheck="false" @input="refreshSecret(entry)" />
+              <input v-model="entry.key" :aria-label="entry.key ? `${entry.key} 变量名` : `第 ${index + 1} 行变量名`" class="input font-mono text-xs" placeholder="KEY" spellcheck="false" @input="refreshSecret(entry)" />
               <div class="relative">
                 <input
                   v-model="entry.value"
+                  :aria-label="entry.key ? `${entry.key} 变量值` : `第 ${index + 1} 行变量值`"
                   class="input w-full font-mono text-xs pr-9"
                   :type="entry.isSecret && !revealed.has(entry._uid) ? 'password' : 'text'"
                   :placeholder="entry.isSecret ? '••••••••' : 'value'"
@@ -66,7 +67,7 @@
                   <button class="icon-btn h-7! w-7!" title="复制值" aria-label="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
                 </div>
               </div>
-              <input v-model="entry.comment" class="input text-xs" placeholder="说明注释(可选)" />
+              <input v-model="entry.comment" :aria-label="entry.key ? `${entry.key} 说明注释` : `第 ${index + 1} 行说明注释`" class="input text-xs" placeholder="说明注释(可选)" />
             </div>
             <div class="flex shrink-0 items-center gap-1 self-end sm:self-center">
               <button class="icon-btn h-7! w-7!" title="上移" aria-label="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
@@ -81,6 +82,7 @@
         <div v-else class="flex min-h-[40vh] flex-col">
           <textarea
             v-model="rawText"
+            aria-label="环境变量原始文本"
             class="flex-1 resize-none rounded-lg border border-surface-800 bg-surface-1000 p-3 font-mono text-xs leading-5 text-emerald-200/90 outline-hidden focus:border-surface-600"
             spellcheck="false"
             placeholder="# KEY=value&#10;SECRET_TOKEN=••••••••"
