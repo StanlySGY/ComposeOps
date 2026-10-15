@@ -2,8 +2,9 @@
   <div class="converter-wrapper">
     <div class="converter-body">
       <div class="input-section">
-        <label class="input-label">Docker Run 命令</label>
+        <label for="docker-run-command" class="input-label">Docker Run 命令</label>
         <textarea
+          id="docker-run-command"
           v-model="dockerRunCommand"
           class="input-textarea"
           placeholder="docker run -d --name myapp -p 8080:80 -e NODE_ENV=production -v /data:/app/data nginx:latest"
@@ -23,7 +24,7 @@
         <button @click="clear" class="btn-clear">清空</button>
       </div>
 
-      <div v-if="error" class="error-message">
+      <div v-if="error" class="error-message" role="alert">
         <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
         </svg>
@@ -32,22 +33,22 @@
 
       <div v-if="composeYaml" class="output-section">
         <div class="output-header">
-          <label class="output-label">docker-compose.yml</label>
+          <span class="output-label">docker-compose.yml</span>
           <div class="output-actions">
-            <button @click="copyToClipboard" class="btn-icon" title="复制">
+            <button @click="copyToClipboard" class="btn-icon" title="复制" aria-label="复制 Compose 配置">
               <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
               </svg>
             </button>
-            <button @click="downloadYaml" class="btn-icon" title="下载">
+            <button @click="downloadYaml" class="btn-icon" title="下载" aria-label="下载 Compose 配置">
               <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
               </svg>
             </button>
           </div>
         </div>
-        <pre class="output-code"><code>{{ composeYaml }}</code></pre>
-        <div v-if="copied" class="copy-toast">已复制到剪贴板</div>
+        <pre class="output-code" role="region" aria-label="转换后的 Docker Compose 配置"><code>{{ composeYaml }}</code></pre>
+        <div v-if="copied" class="copy-toast" role="status" aria-live="polite">已复制到剪贴板</div>
       </div>
     </div>
   </div>
