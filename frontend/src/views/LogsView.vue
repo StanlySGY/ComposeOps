@@ -51,7 +51,7 @@
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
     <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
     <div class="flex flex-wrap items-center gap-3 text-muted">
-      <span :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
+      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
       <span v-if="splitMode" class="text-surface-400">{{ panes.length }} 栏</span>
       <span v-if="levelCounts.error" class="text-rose-400">ERROR {{ levelCounts.error }}</span>

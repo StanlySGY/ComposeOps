@@ -41,6 +41,21 @@ describe('日志页面生命周期与数据完整性', () => {
   }
   const send = (data, aggregate = false) => channels[aggregate ? 1 : 0].options.onMessage({ data: JSON.stringify(data) });
 
+  it('连接状态变化通过礼貌状态区域播报', async () => {
+    await start();
+
+    const connectionStatus = wrapper.get('[role="status"][aria-live="polite"][aria-atomic="true"]');
+    expect(connectionStatus.text()).toContain('已连接');
+
+    await wrapper.findAll('button').find(button => button.text().includes('断开')).trigger('click');
+    await flushPromises();
+    expect(connectionStatus.text()).toContain('未连接');
+
+    await wrapper.findAll('button').find(button => button.text().includes('连接')).trigger('click');
+    await flushPromises();
+    expect(connectionStatus.text()).toContain('已连接');
+  });
+
   it('单容器 stdout ERROR 能完整带换行交给 AI 诊断', async () => {
     await start();
     send({ type: 'stdout', data: 'ERROR 第一行', level: 'error', ts: '2026-09-29T12:00:00Z' });
