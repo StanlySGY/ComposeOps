@@ -108,6 +108,33 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
     expect(document.body.style.overflow).toBe('');
   });
 
+  it('所选容器没有告警时显示空状态，不受其他容器的规则影响', async () => {
+    api.getProjects.mockResolvedValue({
+      projects: [{
+        id: 'p1',
+        projectName: 'web-stack',
+        managed: true,
+        containers: [
+          { id: 'c1', name: 'api', state: 'running', health: 'healthy' },
+          { id: 'c2', name: 'worker', state: 'running', health: 'healthy' },
+        ],
+      }],
+    });
+    metricsApi.getAlerts.mockResolvedValue({
+      alerts: [{ id: 'rule-c2', containerId: 'c2', metric: 'cpu', threshold: 80 }],
+    });
+    await mountView();
+
+    const selects = [...document.querySelectorAll('select')];
+    selects[1].value = 'c1';
+    selects[1].dispatchEvent(new Event('change', { bubbles: true }));
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('暂无告警规则');
+    expect(document.body.textContent).not.toContain('rule-c2');
+    expect(document.body.textContent).not.toContain('阈值: 80%');
+  });
+
   it('指标卡片可通过 Enter 和 Space 选择，且向读屏器暴露按钮及选中状态', async () => {
     api.getProjects.mockResolvedValue({
       projects: [{

@@ -105,7 +105,7 @@
             <RefreshCw class="h-3 w-3" />
           </button>
         </div>
-        <div v-if="alerts.length === 0" class="py-6 text-center text-sm text-zinc-500">
+        <div v-if="containerAlerts.length === 0" class="py-6 text-center text-sm text-zinc-500">
           暂无告警规则
         </div>
         <div v-else class="space-y-2">
