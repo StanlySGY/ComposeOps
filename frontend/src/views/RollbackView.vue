@@ -1,5 +1,5 @@
 <template>
-  <div :class="embedded ? '' : 'page-shell'">
+  <div :class="embedded ? '' : 'page-shell'" :aria-busy="loading || busy">
     <div v-if="!embedded" class="page-header">
       <div>
         <h1 class="page-title">自动回滚中心</h1>
@@ -22,7 +22,8 @@
       <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
     </div>
 
-    <p v-if="error" class="alert-error">{{ error }}</p>
+    <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载回滚中心数据</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <!-- 摘要统计 -->
     <div class="metric-grid">
@@ -35,7 +36,8 @@
     <!-- Compose 配置备份 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">Compose 配置备份</h2><p class="mt-1 text-muted">保存配置或升级时自动留存的版本,可一键恢复</p></div>
-      <div v-if="!composeBackups.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无 Compose 配置备份。保存配置或执行镜像升级后会自动生成。</div>
+      <p v-if="loadErrors.compose" class="alert-error" role="alert">{{ loadErrors.compose }}</p>
+      <div v-else-if="!loading && !composeBackups.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无 Compose 配置备份。保存配置或执行镜像升级后会自动生成。</div>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>原因</th><th>文件</th><th>时间</th><th class="text-right">操作</th></tr></thead>
@@ -57,7 +59,8 @@
     <!-- 数据卷备份 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">数据卷备份</h2><p class="mt-1 text-muted">命名卷的 tar 备份,可恢复到指定时间点</p></div>
-      <div v-if="!volumeBackups.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无数据卷备份。可在存储清理页或定时任务中创建卷备份。</div>
+      <p v-if="loadErrors.volume" class="alert-error" role="alert">{{ loadErrors.volume }}</p>
+      <div v-else-if="!loading && !volumeBackups.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无数据卷备份。可在存储清理页或定时任务中创建卷备份。</div>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>卷</th><th>大小</th><th>时间</th><th class="text-right">操作</th></tr></thead>
@@ -79,7 +82,8 @@
     <!-- GitOps 回滚 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">GitOps 回滚</h2><p class="mt-1 text-muted">将 GitOps 仓库工作区回滚到指定提交</p></div>
-      <div v-if="!gitopsRepos.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无 GitOps 仓库。可在 GitOps 页添加仓库。</div>
+      <p v-if="loadErrors.gitops" class="alert-error" role="alert">{{ loadErrors.gitops }}</p>
+      <div v-else-if="!loading && !gitopsRepos.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无 GitOps 仓库。可在 GitOps 页添加仓库。</div>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>仓库</th><th>分支</th><th>最后同步</th><th class="text-right">操作</th></tr></thead>
@@ -137,9 +141,9 @@
     <!-- 回滚输出抽屉 -->
     <BaseModal :show="output.open" :title="output.title" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="output.open = false">
       <template #header-actions>
-        <span v-if="output.running" class="count-badge text-sky-300">执行中</span>
+        <span v-if="output.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="output.running ? 'text-sky-300' : output.status === 'failed' ? 'text-rose-300' : output.status === 'cancelled' || output.status === 'unknown' ? 'text-amber-300' : 'text-emerald-300'">{{ output.running ? '回滚执行中' : output.status === 'failed' ? '回滚失败' : output.status === 'cancelled' ? '回滚已中断' : output.status === 'unknown' ? '回滚结果未确认' : '回滚完成' }}</span>
       </template>
-      <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4">{{ output.text || '等待输出...' }}</pre>
+      <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4" role="region" aria-label="回滚执行输出" tabindex="0" aria-live="off" :aria-busy="output.running">{{ output.text || '等待输出...' }}</pre>
       <template #footer>
         <button class="btn-secondary" @click="output.open = false">关闭</button>
       </template>
@@ -171,7 +175,9 @@ const gitopsRepos = ref([]);
 const showGitopsHistory = ref(false);
 const currentGitopsRepo = ref(null);
 const gitopsCommits = ref([]);
-const output = ref({ open: false, text: '', title: '', running: false });
+const output = ref({ open: false, text: '', title: '', running: false, status: 'completed' });
+const loadErrors = ref({ compose: '', volume: '', gitops: '' });
+let loadRequestId = 0;
 const confirmTarget = ref(null);
 let pendingAction = null;
 let rollbackController = null;
@@ -196,39 +202,61 @@ function formatBytes(value = 0) {
 }
 
 async function load() {
-  if (loading.value) return;
+  const requestId = ++loadRequestId;
+  const requestedProjectId = selectedProjectId.value;
   loading.value = true;
   error.value = '';
+  loadErrors.value = { compose: '', volume: '', gitops: '' };
+  composeBackups.value = [];
+  volumeBackups.value = [];
+  gitopsRepos.value = [];
   try {
     const [volumeData, gitopsData] = await Promise.allSettled([
-      api.getVolumeBackups(selectedProjectId.value),
-      fetch('/api/v1/gitops').then((res) => (res.ok ? res.json() : null)),
+      api.getVolumeBackups(requestedProjectId),
+      fetch('/api/v1/gitops').then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.message || `HTTP ${res.status}`);
+        }
+        return res.json();
+      }),
     ]);
-    volumeBackups.value = volumeData.status === 'fulfilled' ? (volumeData.value.backups || []) : [];
-    gitopsRepos.value = gitopsData.status === 'fulfilled' ? (gitopsData.value?.repositories || []) : [];
-    await loadComposeBackups();
+    if (requestId !== loadRequestId) return;
+    if (volumeData.status === 'fulfilled') volumeBackups.value = volumeData.value.backups || [];
+    else loadErrors.value.volume = `数据卷备份加载失败：${volumeData.reason?.message || '未知错误'}`;
+    if (gitopsData.status === 'fulfilled') gitopsRepos.value = gitopsData.value?.repositories || [];
+    else loadErrors.value.gitops = `GitOps 仓库加载失败：${gitopsData.reason?.message || '未知错误'}`;
+    await loadComposeBackups(requestId, requestedProjectId);
   } catch (e) {
-    error.value = e.message || '加载失败';
+    if (requestId === loadRequestId) error.value = e.message || '加载失败';
   } finally {
-    loading.value = false;
+    if (requestId === loadRequestId) loading.value = false;
   }
 }
-async function loadComposeBackups() {
-  composeBackups.value = [];
-  const projects = (selectedProjectId.value
-    ? store.projects.filter((p) => p.id === selectedProjectId.value)
+async function loadComposeBackups(requestId = loadRequestId, requestedProjectId = selectedProjectId.value) {
+  const projects = (requestedProjectId
+    ? store.projects.filter((p) => p.id === requestedProjectId)
     : store.projects
   ).filter((project) => project.managed);
   const results = await Promise.allSettled(projects.map((p) => api.getBackups(p.id)));
-  for (const result of results) {
+  if (requestId !== loadRequestId) return;
+  const backups = [];
+  const failures = [];
+  for (const [index, result] of results.entries()) {
     if (result.status === 'fulfilled') {
       for (const backup of result.value.backups || []) {
         const project = store.projects.find((p) => p.id === backup.projectId);
-        composeBackups.value.push({ ...backup, projectName: project?.projectName || backup.projectId });
+        backups.push({ ...backup, projectName: project?.projectName || backup.projectId });
       }
+    } else {
+      failures.push(projects[index]?.projectName || projects[index]?.id || '未知项目');
     }
   }
-  composeBackups.value.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  composeBackups.value = backups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  loadErrors.value = {
+    ...loadErrors.value,
+    compose: failures.length ? `部分 Compose 配置备份加载失败：${failures.join('、')}` : '',
+  };
 }
 async function loadProject() {
   await load();
@@ -245,17 +273,26 @@ function restoreCompose(backup) {
 }
 async function doRestoreCompose(backup) {
   busy.value = true;
-  output.value = { open: true, text: '', title: `恢复配置 · ${backup.projectName}`, running: true };
+  output.value = { open: true, text: '', title: `恢复配置 · ${backup.projectName}`, running: true, status: 'running' };
   try {
     await api.restoreBackup(backup.projectId, backup.id);
     output.value.text += '配置已恢复,正在重建容器...\n';
+    let exitCode = null;
+    let streamReportedError = false;
     await api.streamRollback(backup.projectId, (frame) => {
       if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text += frame.data;
-      else if (frame.type === 'error') output.value.text += `\n[错误] ${frame.data}`;
-      else if (frame.type === 'exit') output.value.text += `\n[退出码 ${frame.data.code}]`;
+      else if (frame.type === 'error') { streamReportedError = true; output.value.text += `\n[错误] ${frame.data}`; }
+      else if (frame.type === 'exit') { exitCode = Number(frame.data?.code); output.value.text += `\n[退出码 ${frame.data.code}]`; }
     }, rollbackController?.signal);
-    await store.refresh(true);
+    if (streamReportedError || exitCode !== 0) {
+      output.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
+      if (exitCode === null && !streamReportedError) output.value.text += '\n[未收到 Compose 退出码，恢复结果未确认]';
+      return;
+    }
+    output.value.status = 'completed';
+    try { await store.refresh(true); } catch (refreshError) { output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
   } catch (e) {
+    output.value.status = e.name === 'AbortError' ? 'cancelled' : 'failed';
     output.value.text += `\n[失败] ${e.message}`;
   } finally {
     busy.value = false;
@@ -274,11 +311,13 @@ function restoreVolume(backup) {
 }
 async function doRestoreVolume(backup) {
   busy.value = true;
-  output.value = { open: true, text: '', title: `恢复卷 · ${backup.volume}`, running: true };
+  output.value = { open: true, text: '', title: `恢复卷 · ${backup.volume}`, running: true, status: 'running' };
   try {
     const result = await api.restoreVolumeBackup(backup.id);
+    output.value.status = 'completed';
     output.value.text += result?.message || '数据卷恢复完成\n';
   } catch (e) {
+    output.value.status = 'failed';
     output.value.text += `\n[失败] ${e.message}`;
   } finally {
     busy.value = false;
@@ -290,6 +329,7 @@ async function openGitopsHistory(repo) {
   currentGitopsRepo.value = repo;
   try {
     const res = await fetch(`/api/v1/gitops/${repo.id}/history?limit=50`);
+    if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.message || `HTTP ${res.status}`); }
     const data = await res.json();
     gitopsCommits.value = data.commits || [];
     showGitopsHistory.value = true;
@@ -338,17 +378,26 @@ function rollbackUpgrade(project) {
 }
 async function doRollbackUpgrade(project) {
   busy.value = true;
-  output.value = { open: true, text: '', title: `回滚升级 · ${project.projectName}`, running: true };
+  output.value = { open: true, text: '', title: `回滚升级 · ${project.projectName}`, running: true, status: 'running' };
   rollbackController?.abort();
   rollbackController = new AbortController();
   try {
+    let exitCode = null;
+    let streamReportedError = false;
     await api.streamRollback(project.id, (frame) => {
       if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text += frame.data;
-      else if (frame.type === 'error') output.value.text += `\n[错误] ${frame.data}`;
-      else if (frame.type === 'exit') output.value.text += `\n[退出码 ${frame.data.code}]`;
+      else if (frame.type === 'error') { streamReportedError = true; output.value.text += `\n[错误] ${frame.data}`; }
+      else if (frame.type === 'exit') { exitCode = Number(frame.data?.code); output.value.text += `\n[退出码 ${frame.data.code}]`; }
     }, rollbackController.signal);
-    await store.refresh(true);
+    if (streamReportedError || exitCode !== 0) {
+      output.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
+      if (exitCode === null && !streamReportedError) output.value.text += '\n[未收到 Compose 退出码，回滚结果未确认]';
+      return;
+    }
+    output.value.status = 'completed';
+    try { await store.refresh(true); } catch (refreshError) { output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
   } catch (e) {
+    output.value.status = e.name === 'AbortError' ? 'cancelled' : 'failed';
     if (e.name !== 'AbortError') output.value.text += `\n[失败] ${e.message}`;
   } finally {
     rollbackController = null;

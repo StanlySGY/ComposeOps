@@ -31,7 +31,7 @@ beforeEach(() => {
   validateCompose.mockResolvedValue({ issues: [] });
   previewCompose.mockResolvedValue({ added: [], changed: [], restarted: [], removed: [], portConflicts: [] });
   previewDeploy.mockResolvedValue({ summary: { create: 1, recreate: 0, keep: 0, pulls: 0, conflicts: 0, orphan: 0 }, pullsNeeded: [], conflicts: [], volumeRisks: [], bindRisks: [], services: [] });
-  streamComposeControl.mockResolvedValue(undefined);
+  streamComposeControl.mockImplementation(async (_projectId, _action, onFrame) => { onFrame({ type: 'exit', data: { code: 0 } }); });
 });
 afterEach(() => { wrapper?.unmount(); wrapper = null; });
 function mountView() {
@@ -99,6 +99,20 @@ describe('变更评审异步反馈可访问性', () => {
     await flushPromises();
 
     expect(wrapper.get('[role="status"][aria-live="polite"]').text()).toBe('部署失败');
+    expect(store.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('SSE 未发出退出码时播报结果未确认，而不是部署成功', async () => {
+    streamComposeControl.mockResolvedValueOnce(undefined);
+    wrapper = mountView();
+    await wrapper.get('select[aria-label="选择项目"]').setValue('p1');
+    await vi.waitFor(() => expect(wrapper.attributes('aria-busy')).toBe('false'));
+    await wrapper.findAll('button').find(button => button.text().includes('一键部署')).trigger('click');
+    await wrapper.findAll('.modal-stub button').find(button => button.text().includes('确认部署')).trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[role="status"][aria-live="polite"]').text()).toBe('部署结果未确认');
+    expect(wrapper.get('[role="region"][aria-label="部署执行输出"]').text()).toContain('未收到 Compose 退出码');
     expect(store.refresh).toHaveBeenCalledTimes(1);
   });
 

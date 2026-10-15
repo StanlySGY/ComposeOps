@@ -218,7 +218,7 @@
     <!-- 部署输出抽屉 -->
     <BaseModal :show="deployOutput.open" :title="`部署输出 · ${project?.projectName || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="deployOutput.open = false">
       <template #header-actions>
-        <span v-if="deployOutput.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="deployOutput.running ? 'text-sky-300' : deployOutput.status === 'failed' ? 'text-rose-300' : deployOutput.status === 'cancelled' ? 'text-amber-300' : 'text-emerald-300'">{{ deployOutput.running ? '部署执行中' : deployOutput.status === 'failed' ? '部署失败' : deployOutput.status === 'cancelled' ? '部署已中断' : '部署完成' }}</span>
+        <span v-if="deployOutput.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="deployOutput.running ? 'text-sky-300' : deployOutput.status === 'failed' ? 'text-rose-300' : deployOutput.status === 'cancelled' || deployOutput.status === 'unknown' ? 'text-amber-300' : 'text-emerald-300'">{{ deployOutput.running ? '部署执行中' : deployOutput.status === 'failed' ? '部署失败' : deployOutput.status === 'cancelled' ? '部署已中断' : deployOutput.status === 'unknown' ? '部署结果未确认' : '部署完成' }}</span>
       </template>
       <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4" role="region" aria-label="部署执行输出" tabindex="0" aria-live="off" :aria-busy="deployOutput.running">{{ deployOutput.text || '等待输出...' }}</pre>
       <template #footer>
@@ -364,12 +364,16 @@ async function confirmDeploy() {
         deployOutput.value.text += `\n[退出码 ${frame.data.code}]`;
       }
     }, null, null, deployController.signal);
-    if (streamReportedError || (exitCode !== null && exitCode !== 0)) {
-      deployOutput.value.status = 'failed';
+    if (streamReportedError || exitCode !== 0) {
+      deployOutput.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
+      if (exitCode === null && !streamReportedError) deployOutput.value.text += '\n[未收到 Compose 退出码，部署结果未确认]';
       return;
     }
     deployOutput.value.status = 'completed';
-    await store.refresh(true);
+    try { await store.refresh(true); } catch (refreshError) {
+      // 部署命令已经以退出码 0 结束;后续状态刷新失败不能倒置部署结果。
+      deployOutput.value.text += `\n[部署已完成，但刷新项目状态失败] ${refreshError.message}`;
+    }
   } catch (e) {
     if (e.name === 'AbortError') deployOutput.value.status = 'cancelled';
     else {
