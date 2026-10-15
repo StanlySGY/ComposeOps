@@ -1,8 +1,8 @@
 <!-- eslint-disable vue/no-v-html -- 放大浮层内容来自 renderAgentMarkdown 的 DOMPurify 净化结果。 -->
 <template>
   <div v-if="open" class="agent-drawer-layer">
-    <button class="agent-drawer-backdrop" aria-label="关闭 Agent" @click="closeAgent"></button>
-    <aside class="agent-drawer" role="dialog" aria-modal="true" aria-label="页面 Agent">
+    <div class="agent-drawer-backdrop" aria-hidden="true" @click="closeAgent"></div>
+    <aside ref="drawerEl" class="agent-drawer" role="dialog" aria-modal="true" aria-label="页面 Agent" tabindex="-1" @keydown="trapDrawerTab">
       <button type="button" class="agent-drawer-handle flex w-full justify-center border-0 bg-transparent pt-2 pb-0 md:hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" aria-label="关闭 Agent" @click="closeAgent">
         <span aria-hidden="true" class="h-1 w-10 rounded-full bg-surface-600"></span>
       </button>
@@ -50,6 +50,50 @@ const chat = useAgentChat({ channel: PAGE_DRAWER_CHANNEL });
 // 流式期间用户向上回看会被滚动跟随持续拽回底部。
 const { messages, input, running, scrollEl, onScroll, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, onZoomWheel, closeZoom } = chat;
 const inputEl = ref(null);
+const drawerEl = ref(null);
+let drawerOpener = null;
+const DRAWER_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
+
+function captureDrawerOpener() {
+  const activeElement = document.activeElement;
+  drawerOpener = activeElement instanceof HTMLElement
+    && !drawerEl.value?.contains(activeElement)
+    && activeElement !== document.body
+    ? activeElement
+    : null;
+}
+
+function restoreDrawerFocus() {
+  const opener = drawerOpener;
+  drawerOpener = null;
+  if (opener?.isConnected) void nextTick(() => opener.focus());
+}
+
+function trapDrawerTab(event) {
+  if (event.key !== 'Tab') return;
+  const drawer = drawerEl.value;
+  if (!drawer) return;
+  const focusable = [...drawer.querySelectorAll(DRAWER_FOCUSABLE)].filter((element) => {
+    if (element.closest('[hidden]') || element.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  if (!focusable.length) {
+    event.preventDefault();
+    drawer.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === drawer)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 // 页面通过"交给 Agent"按钮携带一段预填 prompt 打开抽屉:事件可能早于
 // open 的 watch 派发,先暂存,startFreshSession 清空输入后再写入。
 let pendingPrompt = '';
@@ -80,14 +124,24 @@ function submit() {
 // 会话 id 在第一次发送时惰性创建(ensureSession),这里不做历史回填 ——
 // 抽屉是"就当前页面问一句"的轻入口,续上历史会让上下文与页面不符。
 watch(open, (value) => {
-  if (!value) return;
+  if (!value) {
+    restoreDrawerFocus();
+    return;
+  }
+  captureDrawerOpener();
   startFreshSession();
 });
 onMounted(() => {
-  if (open.value) startFreshSession();
+  if (open.value) {
+    captureDrawerOpener();
+    startFreshSession();
+  }
   window.addEventListener('composeops:agent-prompt', handleAgentPrompt);
 });
-onBeforeUnmount(() => window.removeEventListener('composeops:agent-prompt', handleAgentPrompt));
+onBeforeUnmount(() => {
+  window.removeEventListener('composeops:agent-prompt', handleAgentPrompt);
+  restoreDrawerFocus();
+});
 const TOOL_STATUS_LABELS = { requested: '已请求', executing: '执行中', done: '完成', failed: '失败', rejected: '已拒绝' };
 function toolStatusLabel(status) { return TOOL_STATUS_LABELS[status] || status; }
 /** 抽屉是精简视图,工具详情收进一个折叠块;没有可展示内容时不渲染。 */
