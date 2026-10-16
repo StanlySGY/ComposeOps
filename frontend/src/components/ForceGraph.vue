@@ -2,12 +2,12 @@
   <div class="ios-graph-wrap" :style="{ height: height + 'px' }">
     <!-- 顶部/右上角状态与布局模式切换 (iOS Segmented Control) -->
     <div class="ios-top-bar">
-      <div class="ios-segmented-control" role="tablist" aria-label="图谱布局模式">
+      <div class="ios-segmented-control" role="group" aria-label="图谱布局模式">
         <button
           class="ios-segment-btn"
           :class="{ active: layoutMode === 'dag' }"
-          role="tab"
-          :aria-selected="layoutMode === 'dag'"
+          type="button"
+          :aria-pressed="layoutMode === 'dag'"
           title="分层架构：按依赖深度有序排列，架构流向清晰一目了然"
           @click="setLayoutMode('dag')"
         >
@@ -17,8 +17,8 @@
         <button
           class="ios-segment-btn"
           :class="{ active: layoutMode === 'force' }"
-          role="tab"
-          :aria-selected="layoutMode === 'force'"
+          type="button"
+          :aria-pressed="layoutMode === 'force'"
           title="自由拓扑：弹性拖拽与力导向排布"
           @click="setLayoutMode('force')"
         >

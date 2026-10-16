@@ -1,10 +1,11 @@
 <template>
   <div class="page-shell">
     <div class="page-header"><div><h1 class="page-title">实时监控</h1><p class="page-subtitle">{{ tab === 'live' ? scopeLabel : '容器资源历史曲线与告警阈值' }}</p></div><div class="page-actions"><template v-if="tab === 'live'"><span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">{{ lastUpdated }}</span><label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label><button class="btn-secondary" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button></template></div></div>
-    <div class="tabs-segment" role="tablist" aria-label="监控视图">
-      <button :class="{ active: tab === 'live' }" role="tab" :aria-selected="tab === 'live'" @click="setTab('live')"><ChartNoAxesCombined class="h-4 w-4" />实时</button>
-      <button :class="{ active: tab === 'history' }" role="tab" :aria-selected="tab === 'history'" @click="setTab('history')"><Activity class="h-4 w-4" />历史指标</button>
+    <div class="tabs-segment" role="tablist" aria-label="监控视图" @keydown="handleTabKeydown">
+      <button id="monitor-tab-live" data-tab="live" :class="{ active: tab === 'live' }" role="tab" aria-controls="monitor-panel" :aria-selected="tab === 'live'" :tabindex="tab === 'live' ? 0 : -1" @click="setTab('live')"><ChartNoAxesCombined class="h-4 w-4" />实时</button>
+      <button id="monitor-tab-history" data-tab="history" :class="{ active: tab === 'history' }" role="tab" aria-controls="monitor-panel" :aria-selected="tab === 'history'" :tabindex="tab === 'history' ? 0 : -1" @click="setTab('history')"><Activity class="h-4 w-4" />历史指标</button>
     </div>
+    <section id="monitor-panel" role="tabpanel" :aria-labelledby="`monitor-tab-${tab}`" tabindex="0">
     <template v-if="tab === 'live'">
       <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
       <Skeleton v-if="loading && !data" variant="table" :rows="6" label="监控数据加载中" />
@@ -20,14 +21,17 @@
       <section v-if="usage" class="section-panel"><div class="mb-4"><h2 class="section-title">Docker 存储</h2><p class="mt-1 text-muted">镜像、构建缓存和可回收空间</p></div><div class="grid sm:grid-cols-3 gap-4"><StatCard title="镜像" :value="formatBytes(usage.images.total)" :sub="`可回收 ${formatBytes(usage.images.reclaimable)}`"/><StatCard title="构建缓存" :value="formatBytes(usage.buildCache.total)" :sub="`可回收 ${formatBytes(usage.buildCache.reclaimable)}`"/><StatCard title="总计可回收" :value="formatBytes(usage.reclaimable)" sub="可在设置中预览并清理"/></div></section>
     </template>
     <ResourceMonitorView v-else embedded />
+    </section>
   </div>
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { Activity, ChartNoAxesCombined, RefreshCw } from 'lucide-vue-next'; import { api } from '../api/client.js'; import StatCard from '../components/StatCard.vue'; import SparklineChart from '../components/common/SparklineChart.vue'; import Skeleton from '../components/common/Skeleton.vue'; import EmptyState from '../components/common/EmptyState.vue'; import ResourceMonitorView from './ResourceMonitorView.vue'; import { monitorTrends, pushMonitorTrend, resetMonitorTrends } from '../lib/monitor-trends.js';
+import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 const route = useRoute();
 const router = useRouter();
 const tab = ref(route.query.tab === 'history' ? 'history' : 'live');
+function handleTabKeydown(event) { handleTablistKeydown(event, setTab); }
 function setTab(next) {
   tab.value = next;
   const query = { ...route.query };

@@ -6,11 +6,12 @@
         <p class="page-subtitle">节点、项目、容器、存储卷与实时告警的关联视图 · 支撑故障根因追溯</p>
       </div>
       <div class="page-actions">
-        <div class="ios-segmented-control" role="tablist" aria-label="图谱呈现模式">
+        <div class="ios-segmented-control" role="group" aria-label="图谱呈现模式">
           <button
             class="ios-segment-btn"
             :class="{ active: viewMode === 'graph' }"
-            role="tab"
+            type="button"
+            :aria-pressed="viewMode === 'graph'"
             @click="viewMode = 'graph'"
           >
             <Waypoints class="w-3.5 h-3.5" />
@@ -19,7 +20,8 @@
           <button
             class="ios-segment-btn"
             :class="{ active: viewMode === 'tree' }"
-            role="tab"
+            type="button"
+            :aria-pressed="viewMode === 'tree'"
             @click="viewMode = 'tree'"
           >
             <GitMerge class="w-3.5 h-3.5" />

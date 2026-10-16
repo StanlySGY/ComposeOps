@@ -76,7 +76,7 @@
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-3">
-        <select v-model="intervalHours" class="input w-40! min-h-8! py-1.5! text-xs" :disabled="!schedule.enabled" title="自动巡检间隔">
+        <select v-model="intervalHours" class="input w-40! min-h-8! py-1.5! text-xs" :disabled="!schedule.enabled" aria-label="自动巡检间隔" title="自动巡检间隔">
           <option v-for="option in intervalOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
         <label class="toggle-label"><input type="checkbox" :checked="schedule.enabled" @change="toggleSchedule" /><span>{{ schedule.enabled ? '关闭自动巡检' : '开启自动巡检' }}</span></label>

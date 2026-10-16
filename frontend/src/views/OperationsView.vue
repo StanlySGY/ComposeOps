@@ -5,12 +5,12 @@
       <div class="page-actions"><button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />刷新</button></div>
     </div>
 
-    <div class="tabs" role="tablist" aria-label="操作中心视图">
-      <button :class="{ active: activeTab === 'operations' }" role="tab" :aria-selected="activeTab === 'operations'" @click="setTab('operations')"><History class="h-4 w-4" />操作记录 <span class="count-badge">{{ operations.length }}</span></button>
-      <button :class="{ active: activeTab === 'jobs' }" role="tab" :aria-selected="activeTab === 'jobs'" @click="setTab('jobs')"><ListChecks class="h-4 w-4" />后台任务 <span class="count-badge">{{ jobs.length }}</span></button>
+    <div class="tabs" role="tablist" aria-label="操作中心视图" @keydown="handleTabKeydown">
+      <button id="operations-tab-records" data-tab="operations" :class="{ active: activeTab === 'operations' }" role="tab" aria-controls="operations-panel-records" :aria-selected="activeTab === 'operations'" :tabindex="activeTab === 'operations' ? 0 : -1" @click="setTab('operations')"><History class="h-4 w-4" />操作记录 <span class="count-badge">{{ operations.length }}</span></button>
+      <button id="operations-tab-jobs" data-tab="jobs" :class="{ active: activeTab === 'jobs' }" role="tab" aria-controls="operations-panel-jobs" :aria-selected="activeTab === 'jobs'" :tabindex="activeTab === 'jobs' ? 0 : -1" @click="setTab('jobs')"><ListChecks class="h-4 w-4" />后台任务 <span class="count-badge">{{ jobs.length }}</span></button>
     </div>
 
-    <template v-if="activeTab === 'operations'">
+    <section id="operations-panel-records" v-show="activeTab === 'operations'" role="tabpanel" aria-labelledby="operations-tab-records" tabindex="0">
       <div class="metric-grid">
         <button class="metric-tile" :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">
           <span class="metric-icon text-blue-300"><History class="h-5 w-5" /></span><span><strong>{{ operations.length }}</strong><small>最近操作</small></span><span class="metric-meta">最多显示 100 条</span>
@@ -44,9 +44,9 @@
           </tbody>
         </table>
       </div>
-    </template>
+    </section>
 
-    <template v-else>
+    <section id="operations-panel-jobs" v-show="activeTab === 'jobs'" role="tabpanel" aria-labelledby="operations-tab-jobs" tabindex="0">
       <div class="metric-grid">
         <div class="metric-tile"><span class="metric-icon text-blue-300"><ListChecks class="h-5 w-5" /></span><span><strong>{{ jobs.length }}</strong><small>最近任务</small></span><span class="metric-meta">最多显示 100 条</span></div>
         <button class="metric-tile" :class="{ active: jobStatusFilter === 'active' }" @click="jobStatusFilter = jobStatusFilter === 'active' ? 'all' : 'active'">
@@ -81,7 +81,7 @@
           </tbody>
         </table>
       </div>
-    </template>
+    </section>
 
     <BaseModal :show="!!selectedOperation" :title="selectedOperation ? actionLabel(selectedOperation.action) : ''" @close="selectedOperation = null">
       <pre v-if="selectedOperation" class="terminal-output max-h-[70vh] min-h-48">{{ selectedOperation.detail }}</pre>
@@ -119,6 +119,7 @@ import { api } from '../api/client.js';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import BaseModal from '../components/common/BaseModal.vue';
+import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -179,6 +180,9 @@ async function load() {
     jobs.value = jobData.jobs || [];
   } catch (loadError) { error.value = loadError.message || '操作记录加载失败';
   } finally { loading.value = false; }
+}
+function handleTabKeydown(event) {
+  handleTablistKeydown(event, setTab);
 }
 function setTab(tab) {
   activeTab.value = tab;

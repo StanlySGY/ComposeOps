@@ -14,13 +14,14 @@
     </div>
     <ConfirmDialog :show="showPruneConfirm" title="清理过期事件" message="确认清理 30 天前的历史事件?该操作不可恢复。" tone="warning" confirm-text="清理" @confirm="prune" @cancel="showPruneConfirm = false" />
 
-    <div class="tabs-segment" role="tablist" aria-label="事件中心视图">
-      <button :class="{ active: tab === 'events' }" role="tab" :aria-selected="tab === 'events'" @click="setTab('events')"><BellRing class="h-4 w-4" />告警事件</button>
-      <button :class="{ active: tab === 'timeline' }" role="tab" :aria-selected="tab === 'timeline'" @click="setTab('timeline')"><History class="h-4 w-4" />时间线</button>
-      <button :class="{ active: tab === 'operations' }" role="tab" :aria-selected="tab === 'operations'" @click="setTab('operations')"><ListChecks class="h-4 w-4" />操作与任务</button>
-      <button :class="{ active: tab === 'state' }" role="tab" :aria-selected="tab === 'state'" @click="setTab('state')"><Gauge class="h-4 w-4" />状态历史</button>
+    <div class="tabs-segment" role="tablist" aria-label="事件中心视图" @keydown="handleTabKeydown">
+      <button id="event-tab-events" data-tab="events" :class="{ active: tab === 'events' }" role="tab" aria-controls="event-center-panel" :aria-selected="tab === 'events'" :tabindex="tab === 'events' ? 0 : -1" @click="setTab('events')"><BellRing class="h-4 w-4" />告警事件</button>
+      <button id="event-tab-timeline" data-tab="timeline" :class="{ active: tab === 'timeline' }" role="tab" aria-controls="event-center-panel" :aria-selected="tab === 'timeline'" :tabindex="tab === 'timeline' ? 0 : -1" @click="setTab('timeline')"><History class="h-4 w-4" />时间线</button>
+      <button id="event-tab-operations" data-tab="operations" :class="{ active: tab === 'operations' }" role="tab" aria-controls="event-center-panel" :aria-selected="tab === 'operations'" :tabindex="tab === 'operations' ? 0 : -1" @click="setTab('operations')"><ListChecks class="h-4 w-4" />操作与任务</button>
+      <button id="event-tab-state" data-tab="state" :class="{ active: tab === 'state' }" role="tab" aria-controls="event-center-panel" :aria-selected="tab === 'state'" :tabindex="tab === 'state' ? 0 : -1" @click="setTab('state')"><Gauge class="h-4 w-4" />状态历史</button>
     </div>
 
+    <section id="event-center-panel" role="tabpanel" :aria-labelledby="`event-tab-${tab}`" tabindex="0">
     <template v-if="tab === 'events'">
       <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
@@ -76,6 +77,7 @@
     <EventTimeline v-else-if="tab === 'timeline'" />
     <StateHistoryPanel v-else-if="tab === 'state'" />
     <OperationsView v-else embedded />
+    </section>
   </div>
 </template>
 
@@ -90,6 +92,7 @@ import EventTimeline from '../components/events/EventTimeline.vue';
 import StateHistoryPanel from '../components/events/StateHistoryPanel.vue';
 import OperationsView from './OperationsView.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -99,6 +102,7 @@ const TABS = ['timeline', 'operations', 'state'];
 const tab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'events');
 const typeFilter = ref('');
 
+function handleTabKeydown(event) { handleTablistKeydown(event, setTab); }
 function setTab(next) {
   tab.value = next;
   const query = { ...route.query };

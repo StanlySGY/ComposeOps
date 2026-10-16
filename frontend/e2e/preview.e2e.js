@@ -369,6 +369,45 @@ test('Agent 富内容放大预览提供模态语义、焦点循环、Escape 关�
   expect(observed.network).toEqual([]);
 });
 
+test('核心页面标签页支持方向键切换、面板关联和单一 Tab 停靠点', async ({ page }) => {
+  const observed = observe(page);
+  const cases = [
+    { path: './#/review', list: '变更与回滚视图', from: '变更评审', to: '自动回滚' },
+    { path: './#/events', list: '事件中心视图', from: '告警事件', to: '时间线' },
+    { path: './#/cmdb', list: '资产中心视图', from: '资产清单', to: '知识图谱' },
+    { path: './#/monitor', list: '监控视图', from: '实时', to: '历史指标' },
+    { path: './#/events?tab=operations', list: '操作中心视图', from: /操作记录/, to: /后台任务/ },
+  ];
+
+  for (const item of cases) {
+    await page.goto(item.path);
+    const tablist = page.getByRole('tablist', { name: item.list });
+    await expect(tablist).toBeVisible();
+    const firstTab = tablist.getByRole('tab', { name: item.from });
+    const secondTab = tablist.getByRole('tab', { name: item.to });
+    await expect(firstTab).toHaveAttribute('aria-selected', 'true');
+    await expect(firstTab).toHaveAttribute('tabindex', '0');
+    await expect(secondTab).toHaveAttribute('tabindex', '-1');
+
+    await firstTab.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(secondTab).toHaveAttribute('aria-selected', 'true');
+    await expect(secondTab).toHaveAttribute('tabindex', '0');
+    await expect(firstTab).toHaveAttribute('tabindex', '-1');
+    await expect(secondTab).toBeFocused();
+
+    const panelId = await secondTab.getAttribute('aria-controls');
+    const tabId = await secondTab.getAttribute('id');
+    const panel = page.locator(`#${panelId}`);
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute('role', 'tabpanel');
+    await expect(panel).toHaveAttribute('aria-labelledby', tabId);
+  }
+
+  expect(observed.errors).toEqual([]);
+  expect(observed.network).toEqual([]);
+});
+
 test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page }) => {
   await page.goto('./#/gitops');
   await page.getByRole('button', { name: '添加仓库' }).first().click();

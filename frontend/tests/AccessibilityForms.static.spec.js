@@ -68,6 +68,11 @@ describe('跨页面表单可访问性契约', () => {
     expect(nodes.some(n => hasAttr(n, 'role', 'alert'))).toBe(true);
   });
 
+  it('自动巡检间隔选择器具有稳定的无障碍名称', () => {
+    const file = '../src/views/InspectionView.vue';
+    expect(findNamedControls(file, '自动巡检间隔')).toHaveLength(1);
+  });
+
   it('节点组选择器对每个节点提供动态可访问名称', () => {
     const file = '../src/views/NodeGroupView.vue';
     expect(templateNodes(file).some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
@@ -97,6 +102,48 @@ describe('跨页面表单可访问性契约', () => {
     }
     expect(nodes.some(n => n.tag === 'input' && hasAttr(n, 'aria-label'))).toBe(true);
     expect(nodes.some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
+  });
+
+  it('标准标签页具有面板关联、单一 Tab 停靠点和键盘处理', () => {
+    const files = [
+      '../src/views/OperationsView.vue',
+      '../src/views/ReleaseView.vue',
+      '../src/views/EventCenterView.vue',
+      '../src/views/CMDBView.vue',
+      '../src/views/MonitorView.vue',
+    ];
+    for (const file of files) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+      const nodes = templateNodes(file);
+      const tablists = nodes.filter(node => hasAttr(node, 'role', 'tablist'));
+      const tabs = nodes.filter(node => hasAttr(node, 'role', 'tab'));
+      const panels = nodes.filter(node => hasAttr(node, 'role', 'tabpanel'));
+      expect(tablists.length, file).toBe(1);
+      expect(tabs.length, file).toBeGreaterThanOrEqual(2);
+      expect(panels.length, file).toBeGreaterThanOrEqual(1);
+      expect(tablists.some(node => (node.props || []).some(prop => prop.type === 7 && prop.name === 'on' && prop.arg?.content === 'keydown')), file).toBe(true);
+      for (const tab of tabs) {
+        expect(hasAttr(tab, 'id'), file).toBe(true);
+        expect(hasAttr(tab, 'data-tab'), file).toBe(true);
+        expect(hasAttr(tab, 'aria-controls'), file).toBe(true);
+        expect(hasAttr(tab, 'aria-selected'), file).toBe(true);
+        expect(hasAttr(tab, 'tabindex'), file).toBe(true);
+      }
+      for (const panel of panels) {
+        expect(hasAttr(panel, 'id'), file).toBe(true);
+        expect(hasAttr(panel, 'aria-labelledby'), file).toBe(true);
+      }
+      expect(source.includes('handleTablistKeydown'), file).toBe(true);
+    }
+  });
+
+  it('图谱呈现和布局模式使用带 pressed 状态的按钮组，而非不完整的标签页', () => {
+    for (const file of ['../src/components/ForceGraph.vue', '../src/views/KnowledgeGraphView.vue']) {
+      const nodes = templateNodes(file);
+      expect(nodes.some(node => hasAttr(node, 'role', 'group') && hasAttr(node, 'aria-label')), file).toBe(true);
+      expect(nodes.some(node => hasAttr(node, 'role', 'tablist')), file).toBe(false);
+      expect(nodes.filter(node => node.tag === 'button' && hasAttr(node, 'aria-pressed')).length, file).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('页面级错误反馈通过 alert 播报，成功消息通过 polite status 播报', () => {

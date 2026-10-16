@@ -11,11 +11,12 @@
       </div>
     </div>
 
-    <div class="tabs-segment" role="tablist" aria-label="资产中心视图">
-      <button :class="{ active: tab === 'assets' }" role="tab" :aria-selected="tab === 'assets'" @click="setTab('assets')"><Server class="h-4 w-4" />资产清单</button>
-      <button :class="{ active: tab === 'graph' }" role="tab" :aria-selected="tab === 'graph'" @click="setTab('graph')"><Waypoints class="h-4 w-4" />知识图谱</button>
+    <div class="tabs-segment" role="tablist" aria-label="资产中心视图" @keydown="handleTabKeydown">
+      <button id="cmdb-tab-assets" data-tab="assets" :class="{ active: tab === 'assets' }" role="tab" aria-controls="cmdb-panel" :aria-selected="tab === 'assets'" :tabindex="tab === 'assets' ? 0 : -1" @click="setTab('assets')"><Server class="h-4 w-4" />资产清单</button>
+      <button id="cmdb-tab-graph" data-tab="graph" :class="{ active: tab === 'graph' }" role="tab" aria-controls="cmdb-panel" :aria-selected="tab === 'graph'" :tabindex="tab === 'graph' ? 0 : -1" @click="setTab('graph')"><Waypoints class="h-4 w-4" />知识图谱</button>
     </div>
 
+    <section id="cmdb-panel" role="tabpanel" :aria-labelledby="`cmdb-tab-${tab}`" tabindex="0">
     <template v-if="tab === 'assets'">
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
@@ -67,6 +68,7 @@
     </section>
     </template>
     <KnowledgeGraphView v-else embedded />
+    </section>
     <ConfirmDialog :show="!!deleteTarget" title="删除资产" :message="`确认删除资产「${deleteTarget?.displayName || deleteTarget?.name}」?`" tone="danger" confirm-text="删除" @confirm="confirmRemove" @cancel="deleteTarget = null" />
   </div>
 </template>
@@ -80,10 +82,12 @@ import { useCmdbStore } from '../stores/cmdb.js';
 import { useToastStore } from '../stores/toast.js';
 import KnowledgeGraphView from './KnowledgeGraphView.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 
 const route = useRoute();
 const router = useRouter();
 const tab = ref(route.query.tab === 'graph' ? 'graph' : 'assets');
+function handleTabKeydown(event) { handleTablistKeydown(event, setTab); }
 function setTab(next) {
   tab.value = next;
   const query = { ...route.query };
