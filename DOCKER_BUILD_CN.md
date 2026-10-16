@@ -105,10 +105,10 @@ BuildKit 会自动把 `HTTP_PROXY`/`HTTPS_PROXY` 透传到构建阶段,apt 与 n
 docker run --rm --entrypoint sh stanly1997/opsdash:latest -c '
   docker --version && docker compose version &&
   git --version && ssh -V &&
-  node -e "require(\"better-sqlite3\");console.log(\"sqlite OK\")"'
+  node -e "require(\"better-sqlite3-multiple-ciphers\");console.log(\"encrypted sqlite addon OK\")"'
 ```
 
-预期输出包含 Docker 29.x、Compose v5.x、git 2.39.x、OpenSSH_9.x、sqlite OK。
+预期输出包含 Docker 29.x、Compose v5.x、git 2.39.x、OpenSSH_9.x、encrypted sqlite addon OK。
 
 要确认 apt 源已切换:
 

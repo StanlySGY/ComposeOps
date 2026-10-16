@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - 全站界面按 iOS 风格打磨：胶囊分段控制器、毛玻璃浮层材质、按压弹簧手感、连续圆角（支持的浏览器）。
-- SQLite 存储迁移到 Node 22 内置 node:sqlite，移除 better-sqlite3 原生依赖，镜像构建不再需要编译器。
+- SQLite 默认存储适配器迁移到 Node 22 内置 node:sqlite；可选静态加密通过 better-sqlite3-multiple-ciphers 提供，Docker 仅在构建阶段编译原生依赖。
 - 仓库切换为 npm workspaces，根 lockfile 统一管理依赖。
 
 ## [1.5.0] - 2026-10-01

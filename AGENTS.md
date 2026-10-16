@@ -3,7 +3,7 @@
 单用户 Docker Compose 运维台(工作区名 `ComposeOps`,镜像/容器有时沿用旧名 `OpsDash`)。所有 UI 文案为中文,暗色工业风 + emerald 状态色系。
 
 ## 基本状态
-- Monorepo:`frontend/`(Vue 3 + Vite 5 + Pinia + Tailwind + lucide-vue-next + monaco + xterm)与 `backend/`(Fastify + better-sqlite3 + dockerode + ssh2)。
+- Monorepo:`frontend/`(Vue 3 + Vite + Pinia + Tailwind + lucide-vue-next + Monaco + xterm)与 `backend/`(Fastify + Node.js `node:sqlite` 默认明文存储/可选 `better-sqlite3-multiple-ciphers` 静态加密 + dockerode + ssh2)。
 - 前端 hash router(`/services /compose /logs /shell /ai /monitor /operations /settings`);后端 REST 前缀 `/api/v1`。
 - 向量/弹层 z-index 阶梯:`z-0` 内容 → `z-40` Tab/Sidebar → `z-45` Header → `z-50` EventCenter → `z-[51]` 抽屉面板 → `z-[55]` Modal 背板 → `z-[60]` Cmd+K → `z-[70]` Toast。
 - 弹层 Esc 统一由 `frontend/src/composables/useEscapeKey.js` 管理(modal > drawer > event > command,`lockBody` 计数锁滚动)。
@@ -28,7 +28,7 @@
 - 后端单测: `DB_PATH=/tmp/x.db npm test --workspace backend`(必须 `--test-concurrency=1`,并发会多进程抢同一 DB 偶发失败)
 - 后端语法: `node --check <file>`
 - 完整启动: `node backend/src/index.js`(`SERVE_FRONTEND=1 PORT=3001 ENABLE_SHELL=1`)
-- SQLite 走 Node 22 内置 node:sqlite(`backend/src/lib/sqlite.js` 包装 better-sqlite3 语义),better-sqlite3 依赖已移除
+- SQLite 默认使用 Node 22 内置 `node:sqlite`；配置 `DB_ENCRYPTION_KEY` 或 `DB_ENCRYPTION_KEY_FILE` 后，`backend/src/lib/sqlite.js` 使用 `better-sqlite3-multiple-ciphers` 处理静态加密。该原生依赖由 Docker 构建阶段的编译工具链构建；密钥必须保存在数据库卷和项目目录之外。新装默认仍可使用明文数据库，启用步骤见 `docs/public/DATABASE_ENCRYPTION.md`。
 - 跨域嵌入(iframe/Cloud Run 等)用 `EMBED_MODE=1` 显式开启;默认严格 CSP + SameSite=Lax
 
 ## 多节点 Docker 宿主

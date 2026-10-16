@@ -23,7 +23,7 @@ flowchart LR
 | 前端 | Vue 3.5、Vue Router 5、Pinia 4、Vite 7、Tailwind CSS 4 |
 | 编辑与终端 | Monaco、monaco-yaml、xterm |
 | 服务端 | Node.js 22+、Fastify 5、ES modules |
-| 持久化 | better-sqlite3 |
+| 持久化 | 默认 Node.js 22 `node:sqlite`；配置静态加密时使用 `better-sqlite3-multiple-ciphers` |
 | Docker | dockerode、Docker Compose CLI、ssh2 |
 
 依赖版本以两侧 package.json 和 lockfile 为准，后端直接运行 JavaScript。

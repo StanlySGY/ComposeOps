@@ -1,10 +1,10 @@
 # 📌 ComposeOps - PROJECT_CONTEXT.md
-> **上次更新时间**:2026-09-18 (Asia/Shanghai)
-> **当前版本/阶段**:v1.2.0(首个正式 tag,与 CHANGELOG [1.2.0] 对齐)
+> **上次更新时间**:2026-10-16 (Asia/Shanghai)
+> **当前版本/阶段**:仓库 package version 1.5.1；当前基线以 package.json、CHANGELOG 与 GitHub Actions 为准。
 
 ## 1. 核心概述 (Executive Summary)
 - **项目目标**:单用户 Docker Compose 运维控制台(工作区名 `ComposeOps`,镜像/容器沿用旧名 `OpsDash`)。通过 Docker Socket 自动发现带 `com.docker.compose.project` 标签的 Compose 项目,以"先发现、后显式纳管"的权限模型提供服务启停、Compose 配置编辑、环境变量文件族管理、实时日志、容器终端、数据卷备份、GitOps 同步、应用市场、定时任务、多 Docker 节点纳管、资源监控与 AI 运维 Agent 能力。
-- **技术栈**:前端 Vue 3 + Vite 5 + Pinia + Vue Router(hash)+ Tailwind + lucide-vue-next + Monaco + xterm + marked/DOMPurify;后端 Fastify 4 + @fastify/websocket + better-sqlite3 + dockerode(+docker-modem 原生 SSH)+ ssh2 + tar-stream + yaml;测试 Vitest 3(前端)/ node --test(后端,必须 `--test-concurrency=1`)。
+- **技术栈**:前端 Vue 3 + Vite + Pinia + Vue Router(hash) + Tailwind + Monaco + xterm + marked/DOMPurify;后端 Node.js 22、Fastify 5、Node 内置 `node:sqlite`（默认）及可选 `better-sqlite3-multiple-ciphers` 静态加密、dockerode、ssh2、tar-stream、yaml。依赖版本以 package.json/lockfile 为准。
 - **核心架构约定**:REST 前缀 `/api/v1`(路由按域拆分 `backend/src/routes/`);SSE 用于 Compose 操作、env 应用、Agent 执行流与指标;WebSocket(`/ws/logs`、`/ws/exec`、`/ws/jobs`、`/ws/aggregated-logs`、`/ws/events`);前端 `views / components / stores / composables / lib / api`;弹层 `useEscapeKey` 栈 + z-index 阶梯(modal > drawer > event > command);路由层 keep-alive 白名单(流式/轮询页排除)+ 空闲 chunk 预取 + page-fade 过渡。
 - **AI 架构**:单页 Agent(`/agent`,原 `/ai` 已 301)。执行通道唯一:`POST /ai/agent/execute-stream`(Tool Loop,SSE)+ `/ai/agent/approve` 确认门;`/ai/diagnose` 保留给日志页诊断弹窗;`/ai/chat`、`/ai/exec` 已删除。协议剥离只在 `ai.js` 发射层(全量有状态 + 前缀持回),前端 token 原样追加(120ms 节流);聊天逻辑共享于 `useAgentChat.js`(滚动跟随/atBottom、工具轨迹、富内容放大浮层);富渲染 `agent-markdown.js`(marked + DOMPurify 白名单,svg/table 富内容代码块启发式渲染 + 源码折叠 + 放大包裹)。
 - **字节一致副本**:`backend/src/lib/dotenv.js` ⇄ `frontend/src/lib/dotenv.js`;`backend/src/lib/agent-protocol-core.js` ⇄ `frontend/src/lib/agent-protocol-core.js`(两侧 sync 测试兜底)。
@@ -16,9 +16,9 @@
   - 数据保护:Compose 备份(20 份/diff/回滚)、**数据卷备份**(`services/volume-backup.js` helper 容器 tar,cron 类型 `volume-backup`,目录 `backup.volume_dir`,每卷 20 份)、数据库 Dump、保留策略(`pruneAiData`,setting `retention.ai_days` 默认 90 天,metrics-collector 每日触发)。
   - GitOps(轮询 + webhook `POST /gitops/webhook/:id`,token=`gitops.webhook_token`,app.js auth 豁免)、应用市场(蓝图 + 自定义模板 + AI 找应用 `POST /marketplace/templates/ai-discover`,只出草稿)、定时任务(5 段 cron 解析,JSON 持久化)、告警通知(Bark/Telegram/企微/邮件/Webhook)、操作审计、多渠道事件中心。
   - 基础设施:登录锁定(5 次/15 分钟)、Cookie SameSite=Strict、CSP(含 img-src https)、SWR 缓存、骨架屏、日志虚拟滚动、键盘导航(j/k + `?` 帮助)、Cmd+K 命令面板。
-- **测试基线**:后端 127/127(`cd backend && DB_PATH=/tmp/x.db npm test`)、前端 120/120(`cd frontend && npx vitest run`)、`npm --prefix frontend run build` 零 Warning;CI(.github/workflows/ci.yml)= 双端 lint + test + build。
+- **验证基线（2026-10-16）**:当前 HEAD `dc76dfe` 的 GitHub Actions Quality run 通过，包含 `npm ci`、双端 lint、全套测试、正式构建、预览构建、Playwright 预览检查、镜像首次安装/在线备份恢复和从 1.4.0 升级。最近本地前端测试为 62 个测试文件、378 项通过。后端总数以 CI 当前输出为准，不在此维护容易过期的固定计数。
 - **容器镜像**:`runtime` 阶段内置 docker CLI / compose / buildx(从官方 `docker:cli` COPY)+ git / openssh-client;
-  apt 默认走 `ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn`,npm 走 npmmirror,`better-sqlite3` 走预编译产物。
+  apt 默认走 `ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn`,npm 走 npmmirror。默认数据库适配器使用 `node:sqlite`；启用静态加密时依赖 `better-sqlite3-multiple-ciphers` 原生 addon，由构建阶段安装编译工具链。
   国内网络下 `docker compose up -d --build` 可直接跑通,构建期会断言四个二进制全部可用。
 
 ## 3. 已知取舍与候选改进 (Next Ideas)
@@ -28,7 +28,7 @@
 - [ ] 告警防抖改状态变化触发。
 - [ ] 远程节点 Compose/env 编辑经 SSH 通道(当前 403 guard)。
 - [ ] 成本分析疑超前:已降权至系统组,观察使用率再定去留。
-- [ ] 登录锁定为内存 Map(重启清零);数据库文件未加密(权限 0600)。
+- [x] SQLite 静态加密可选启用；新安装默认仍为明文。密钥需保存在数据卷外；同主机恢复演练已做，独立 KMS/异地灾备仍待验证。
 
 ## 4. 关键操作备忘
 - 后端单测必须串行:`DB_PATH=/tmp/x.db npm test`(package.json 已带 `--test-concurrency=1`),并发会多进程抢同一 DB 偶发失败。

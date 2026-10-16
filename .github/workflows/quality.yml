@@ -60,3 +60,25 @@ jobs:
         run: node scripts/image-smoke.mjs composeops:ci-test
       - name: Upgrade from supported baseline
         run: node scripts/image-smoke.mjs composeops:ci-test stanly1997/opsdash:1.4.0
+  image-arm64:
+    name: ARM64 image installation and restore
+    needs: code
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: composeops:ci-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: ARM64 fresh installation and online backup restore
+        run: node scripts/image-smoke.mjs composeops:ci-arm64

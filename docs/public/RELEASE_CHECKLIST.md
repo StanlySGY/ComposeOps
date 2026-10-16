@@ -21,6 +21,7 @@
 - [ ] 本机真实 HTTP Webhook 接收 JSON 并验证 503 重试通过
 - [ ] 隔离 Docker 命名卷备份/还原与 SHA-256 内容核验通过
 - [ ] amd64/arm64 镜像发布成功后创建 GitHub Release
+- [ ] 在 amd64 与 arm64 上分别完成原生 SQLite 依赖构建、镜像启动和数据库加密读写/恢复冒烟；单架构 CI 成功不能替代双架构验收
 
 以上由 Quality checks / Release 执行，以对应 Actions run 为证据。
 

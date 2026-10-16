@@ -20,11 +20,9 @@ RUN npm run build --workspace frontend
 
 
 # ---------- Stage 2: install backend deps ----------
-# SQLite 已切到 Node 22 内置的 node:sqlite(backend/src/lib/sqlite.js),
-# 不再依赖 better-sqlite3 原生模块:无需预编译下载/源码编译,也就不需要 apt
-# ---------- Stage 2: install backend deps ----------
-# better-sqlite3-multiple-ciphers has a native addon. Keep its compiler toolchain in this
-# disposable build stage only; the runtime image receives just node_modules + app files.
+# 默认数据库适配器使用 Node 22 内置 node:sqlite；可选静态加密依赖
+# better-sqlite3-multiple-ciphers 含原生 addon，因此仅在这个临时构建阶段安装编译工具链。
+# 运行时镜像只复制 node_modules 和应用文件，不包含编译工具链。
 FROM node:22-bookworm-slim AS backend-build
 
 WORKDIR /app
