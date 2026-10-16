@@ -6,11 +6,11 @@
       <select v-model="projectId" class="input min-h-8! py-1! text-xs" aria-label="选择项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
       <div class="flex gap-1.5">
         <select v-model="containerId" class="input min-h-8! py-1! text-xs" aria-label="选择容器" :disabled="!projectId" @change="onContainerChange"><option value="">选择容器</option><option v-for="container in containers" :key="container.id" :value="container.id">{{ container.name }}</option></select>
-        <button class="btn-secondary min-h-8! px-2! py-1! text-xs" :disabled="!projectId || !containerId || loading" @click="loadLogs"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />加载</button>
+        <button class="btn-secondary min-h-8! px-2! py-1! text-xs" :disabled="!projectId || !containerId || loading" aria-label="加载所选容器日志" @click="loadLogs"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />加载</button>
       </div>
       <div v-if="logLines.length" class="flex items-center justify-between text-[11px] text-zinc-500">
         <span role="status" aria-live="polite" aria-atomic="true">{{ filteredLines.length }} 行</span>
-        <button class="text-cyan-400 hover:text-cyan-300" :disabled="!errorLines.length" @click="toggleAllErrors">{{ allErrorsSelected ? '取消全选异常' : '全选异常行' }}</button>
+        <button class="text-cyan-400 hover:text-cyan-300" :disabled="!errorLines.length" :aria-label="allErrorsSelected ? '取消选择所有异常日志' : '选择所有异常日志'" @click="toggleAllErrors">{{ allErrorsSelected ? '取消全选异常' : '全选异常行' }}</button>
       </div>
       <label v-if="logLines.length" class="search-field min-h-8!"><Search class="h-3.5 w-3.5" /><input v-model="query" class="py-1! text-xs" aria-label="检索日志上下文" placeholder="检索日志..." /></label>
     </div>
@@ -27,7 +27,7 @@
     </div>
     <div v-if="lines.length" class="mt-2 flex items-center justify-between gap-2">
       <span class="mount-hint"><Check class="h-3 w-3" />将随下一条消息发送</span>
-      <button class="text-xs text-zinc-500 hover:text-rose-300" @click="clear">清除</button>
+      <button class="text-xs text-zinc-500 hover:text-rose-300" aria-label="清除已挂载日志" @click="clear">清除</button>
     </div>
   </section>
 </template>
