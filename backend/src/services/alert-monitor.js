@@ -10,7 +10,7 @@ import { runWorkspaceComposeArgs } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 
 const previousStates = new Map();
-const agentCooldowns = new Map();
+const agentRuleStates = new Map();
 let dockerStorageHigh = false;
 let timer;
 let running = false;
@@ -29,12 +29,75 @@ function agentRuleKey(rule, containerId) {
   return `${rule.id}:${containerId}`;
 }
 
-function canTriggerAgentRule(rule, containerId, cooldownMs = 10 * 60 * 1000) {
+/**
+ * Require consecutive samples to enter/leave an incident. A sustained high
+ * value alerts once; two normal samples re-arm the rule for the next incident.
+ * Invalid readings never count as either high or normal samples.
+ */
+export function observeAgentAlertState(rule, containerId, current, threshold = rule?.threshold) {
+  const value = Number(current);
+  const limit = Number(threshold);
+  if (!Number.isFinite(value) || !Number.isFinite(limit)) return false;
+
   const key = agentRuleKey(rule, containerId);
-  const last = agentCooldowns.get(key) || 0;
-  if (Date.now() - last < cooldownMs) return false;
-  agentCooldowns.set(key, Date.now());
-  return true;
+  const ruleId = String(rule.id || '');
+  const containerKey = String(containerId);
+  const ruleSignature = JSON.stringify([
+    String(rule.projectId || ''),
+    String(rule.service || ''),
+    String(rule.metric || ''),
+    limit,
+    String(rule.action || 'notify'),
+  ]);
+  const saved = agentRuleStates.get(key);
+  // Editing the rule starts a fresh incident state instead of carrying the old threshold history.
+  const previous = !saved || saved.signature !== ruleSignature ? {
+    ruleId,
+    projectId: String(rule.projectId || ''),
+    containerId: containerKey,
+    signature: ruleSignature,
+    active: false,
+    highSamples: 0,
+    normalSamples: 0,
+  } : saved;
+
+  if (value >= limit) {
+    const highSamples = Math.min(2, previous.highSamples + 1);
+    const triggered = !previous.active && highSamples >= 2;
+    agentRuleStates.set(key, {
+      ...previous,
+      ruleId,
+      projectId: String(rule.projectId || ''),
+      containerId: containerKey,
+      active: previous.active || triggered,
+      highSamples,
+      normalSamples: 0,
+    });
+    return triggered;
+  }
+
+  const normalSamples = Math.min(2, previous.normalSamples + 1);
+  agentRuleStates.set(key, {
+    ...previous,
+    ruleId,
+    projectId: String(rule.projectId || ''),
+    containerId: containerKey,
+    active: previous.active && normalSamples < 2,
+    highSamples: 0,
+    normalSamples,
+  });
+  return false;
+}
+
+function pruneAgentAlertStates(rules, projectIds, runningContainerIds) {
+  const activeRuleIds = new Set(rules
+    .filter((rule) => projectIds.has(String(rule.projectId)))
+    .map((rule) => String(rule.id || '')));
+  for (const [key, state] of agentRuleStates) {
+    if (!activeRuleIds.has(state.ruleId) || !runningContainerIds.has(state.containerId)) {
+      agentRuleStates.delete(key);
+    }
+  }
 }
 
 /** 读取服务名归一化(支持容器名前缀匹配)。 */
@@ -110,8 +173,8 @@ async function evaluateAgentRules(project, container, stats) {
     if (rule.metric === 'cpu') current = parsed.cpuPercent;
     else if (rule.metric === 'memory') current = parsed.memPercent;
     else if (rule.metric === 'restart_count') current = restartCount;
-    if (current == null || current < Number(rule.threshold)) continue;
-    if (!canTriggerAgentRule(rule, container.id)) continue;
+    if (current == null || !Number.isFinite(Number(current))) continue;
+    if (!observeAgentAlertState(rule, container.id, current, rule.threshold)) continue;
     await applyAgentAlertAction(rule, project, container, Math.round(current * 10) / 10);
   }
 }
@@ -124,6 +187,11 @@ async function poll() {
     const projects = await scanProjects();
     const managedProjects = projects.filter((item) => item.managed);
     const managedContainerIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => item.id)));
+    const managedProjectIds = new Set(managedProjects.map((project) => String(project.id)));
+    const runningContainerIds = new Set(managedProjects.flatMap((project) => project.containers
+      .filter((item) => item.state === 'running')
+      .map((item) => String(item.id))));
+    pruneAgentAlertStates(readAgentAlertRules(), managedProjectIds, runningContainerIds);
     for (const containerId of previousStates.keys()) {
       if (!managedContainerIds.has(containerId)) previousStates.delete(containerId);
     }

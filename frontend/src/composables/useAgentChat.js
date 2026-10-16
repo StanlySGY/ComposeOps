@@ -268,7 +268,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       scrollBottom();
     } else if (event.type === 'confirmation_required') {
       flushTokens();
-      assistant.confirmation = { ...event, busy: false };
+      assistant.confirmation = { ...event, busy: false, error: '' };
     } else if (event.type === 'context_data' && event.kind === 'projects') assistant.projects = event.projects;
     else if (event.type === 'context_data' && event.kind === 'search_sources') assistant.searchSources = event.sources;
     else if (event.type === 'action_completed' && event.kind === 'cron_created') window.dispatchEvent(new CustomEvent('composeops:cron-agent-created', { detail: event.result || {} }));
@@ -337,6 +337,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     const confirmation = message.confirmation;
     if (!confirmation || confirmation.busy) return;
     confirmation.busy = true;
+    confirmation.error = '';
     try {
       const payload = { executionId: confirmation.executionId, toolCallId: confirmation.toolCallId, approved: true };
       if (inputOverride && typeof inputOverride === 'object' && Object.keys(inputOverride).length) payload.input = inputOverride;
@@ -346,8 +347,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       for (const item of state.subscribers) { if (item.active !== false) item.onApproval?.(message, 'approved'); }
     } catch (error) {
       confirmation.busy = false;
-      // 追加而不是覆盖:此时回复正文可能已经流式输出了一部分,覆盖会吃掉已有内容。
-      message.content += `${message.content ? '\n\n' : ''}确认失败：${error.message}`;
+      confirmation.error = String(error?.message || '确认请求失败，请检查连接后重试');
     }
   }
 
@@ -355,13 +355,14 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     const confirmation = message.confirmation;
     if (!confirmation || confirmation.busy) return;
     confirmation.busy = true;
+    confirmation.error = '';
     try {
       await api.agentApprove({ executionId: confirmation.executionId, toolCallId: confirmation.toolCallId, approved: false });
       message.confirmation = null;
       for (const item of state.subscribers) { if (item.active !== false) item.onApproval?.(message, 'rejected'); }
     } catch (error) {
       confirmation.busy = false;
-      message.content += `${message.content ? '\n\n' : ''}拒绝失败：${error.message}`;
+      confirmation.error = String(error?.message || '拒绝请求失败，请检查连接后重试');
     }
   }
 

@@ -30,6 +30,14 @@ docker exec opsdash rm -f /tmp/composeops-before-encryption.db
 
 第一次切换前，这份备份是**未加密的敏感数据**；将它留在受保护的离线位置。加密迁移、登录和数据读取验证都完成后，再依据备份保留策略处理它。不要把备份放回 Docker 数据卷。
 
+在切换前运行只读迁移前审计。它会检查当前数据库与备份的 SQLite 完整性、schema/迁移版本、核心表计数、密钥格式与权限，以及密钥/备份是否真正分开存放；失败时不要继续切换。该检查不修改数据库，也不会输出密钥：
+
+```sh
+npm run recovery:audit -- --db="$DB_PATH" --backup="$BACKUP_PATH" --key-file="$KEY_FILE"
+```
+
+请把 `DB_PATH`、`BACKUP_PATH` 和 `KEY_FILE` 替换为本机可访问的实际路径。备份文件需为 `0600` 或更严格、所在目录需为 `0700` 或更严格；密钥与备份要位于相互分离的目录树。审计成功只表示具备受控迁移的前置条件，不等同于迁移后加密验证或恢复演练通过。
+
 导出密钥路径，并通过加密 overlay 重建服务：
 
 ```sh

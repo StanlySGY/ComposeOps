@@ -16,16 +16,17 @@
   - 数据保护:Compose 备份(20 份/diff/回滚)、**数据卷备份**(`services/volume-backup.js` helper 容器 tar,cron 类型 `volume-backup`,目录 `backup.volume_dir`,每卷 20 份)、数据库 Dump、保留策略(`pruneAiData`,setting `retention.ai_days` 默认 90 天,metrics-collector 每日触发)。
   - GitOps(轮询 + webhook `POST /gitops/webhook/:id`,token=`gitops.webhook_token`,app.js auth 豁免)、应用市场(蓝图 + 自定义模板 + AI 找应用 `POST /marketplace/templates/ai-discover`,只出草稿)、定时任务(5 段 cron 解析,JSON 持久化)、告警通知(Bark/Telegram/企微/邮件/Webhook)、操作审计、多渠道事件中心。
   - 基础设施:登录锁定(5 次/15 分钟)、Cookie SameSite=Strict、CSP(含 img-src https)、SWR 缓存、骨架屏、日志虚拟滚动、键盘导航(j/k + `?` 帮助)、Cmd+K 命令面板。
-- **验证基线（2026-10-16）**:提交 `9bd91cd` 本地全量验证：后端 431 项中 430 项通过、1 项既有预期跳过；前端 63 个测试文件、381 项通过；双端 lint、正式/预览构建通过；Playwright 预览检查 30 项通过、2 项既有预期跳过。最新提交 `0701185` 的 GitHub Actions [run 38857039469](https://github.com/StanlySGY/ComposeOps/actions/runs/38857039469) 全部成功，含常规测试、桌面/移动浏览器、amd64 安装/升级/恢复和 ARM64 安装/在线备份恢复。本轮另跑通知/SSH/TLS/多节点专项测试 18/18、真实 Docker Redis 恢复 smoke 通过；真实模型在隔离数据库和临时 Redis/PostgreSQL 项目上通过 Agent 工具循环与审批门修复演练，Redis `PONG`、PostgreSQL ready，临时资源清理通过。正式 4 小时 SSE soak 正在执行、尚未有最终结果；当前运行容器数据库状态为 plaintext，且当前环境找不到可用外置密钥/加密快照，详见 `docs/public/ROADMAP.md`。
+- **验证基线（2026-10-16）**:提交 `9bd91cd` 本地全量验证：后端 431 项中 430 项通过、1 项既有预期跳过；前端 63 个测试文件、381 项通过；双端 lint、正式/预览构建通过；Playwright 预览检查 30 项通过、2 项既有预期跳过。最新提交 `0701185` 的 GitHub Actions [run 38857039469](https://github.com/StanlySGY/ComposeOps/actions/runs/38857039469) 全部成功，含常规测试、桌面/移动浏览器、amd64 安装/升级/恢复和 ARM64 安装/在线备份恢复。本轮另跑通知/SSH/TLS/多节点专项测试 18/18、真实 Docker Redis 恢复 smoke 通过；真实模型在隔离数据库和临时 Redis/PostgreSQL 项目上通过 Agent 工具循环与审批门修复演练，Redis `PONG`、PostgreSQL ready，临时资源清理通过。正式四小时 SSE soak 因本机/WSL 关机中断，没有最终报告，按未完成/不通过验收处理且不自动重跑；后续需要时改为 5–10 分钟分段压测。当前运行容器数据库状态为 plaintext，且当前环境找不到可用外置密钥/加密快照，详见 `docs/public/ROADMAP.md`。
+- **2026-10-16 本轮改进已验证**：Agent 阈值告警连续采样防抖、工具失败摘要和确认卡错误反馈已通过专项/全量测试；只读数据库迁移前审计命令 `npm run recovery:audit` 已添加并经隔离测试验证。后端 437 项中 436 项通过、1 项既有跳过；前端 63 个测试文件、382 项通过；双端 Lint、正式/预览构建通过；Playwright 预览 30 项通过、2 项既有预期跳过。数据库当前实例未迁移，因真实外置密钥/备份仍未核实。
 - **容器镜像**:`runtime` 阶段内置 docker CLI / compose / buildx(从官方 `docker:cli` COPY)+ git / openssh-client;
   apt 默认走 `ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn`,npm 走 npmmirror。默认数据库适配器使用 `node:sqlite`；启用静态加密时依赖 `better-sqlite3-multiple-ciphers` 原生 addon，由构建阶段安装编译工具链。
   国内网络下 `docker compose up -d --build` 可直接跑通,构建期会断言四个二进制全部可用。
 
 ## 3. 已知取舍与候选改进 (Next Ideas)
 - [x] 卷备份:远程宿主已支持 helper cat 流式下载;bind mount 仍不纳入。
-- [ ] Agent 执行动态可进一步展示工具结果摘要(当前仅名称/耗时);日志挂载面板可记住上次选择。
+- [ ] 日志挂载面板可记住上次选择。Agent 工具结果摘要与确认卡内的审批/拒绝错误反馈已通过前后端专项及全量测试验证。
 - [x] 通知渠道分组:当前通知为单渠道模型(type 单选),分组的前提是多渠道并存——需先把通知升级为多渠道列表再做分组,暂缓。
-- [ ] 告警防抖改状态变化触发。
+- [x] Agent 阈值告警改为连续采样确认的事件状态机，持续超限只告警一次，恢复后重新武装。
 - [ ] 远程节点 Compose/env 编辑经 SSH 通道(当前 403 guard)。
 - [ ] 成本分析疑超前:已降权至系统组,观察使用率再定去留。
 - [x] SQLite 静态加密可选启用；新安装默认仍为明文。密钥需保存在数据卷外；同主机恢复演练已做，独立 KMS/异地灾备仍待验证。

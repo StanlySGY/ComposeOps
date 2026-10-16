@@ -73,6 +73,29 @@ describe('useAgentChat', () => {
     expect(message.confirmation).toBeNull();
   });
 
+  it('审批失败在确认卡内给出错误,保留确认卡并允许重试', async () => {
+    const chat = useAgentChat();
+    const approving = { content: '准备执行', confirmation: { executionId: 'p-approve', toolCallId: 'c-approve', busy: false, error: '' } };
+    apiMock.agentApprove.mockRejectedValueOnce(new Error('审批服务暂不可用'));
+    await chat.approve(approving);
+    expect(approving.confirmation).not.toBeNull();
+    expect(approving.confirmation.busy).toBe(false);
+    expect(approving.confirmation.error).toBe('审批服务暂不可用');
+    expect(approving.content).toBe('准备执行');
+
+    apiMock.agentApprove.mockResolvedValueOnce({ success: true });
+    await chat.approve(approving);
+    expect(approving.confirmation).toBeNull();
+
+    const rejecting = { content: '准备执行', confirmation: { executionId: 'p-reject', toolCallId: 'c-reject', busy: false, error: '' } };
+    apiMock.agentApprove.mockRejectedValueOnce(new Error('网络连接中断'));
+    await chat.reject(rejecting);
+    expect(rejecting.confirmation).not.toBeNull();
+    expect(rejecting.confirmation.busy).toBe(false);
+    expect(rejecting.confirmation.error).toBe('网络连接中断');
+    expect(rejecting.content).toBe('准备执行');
+  });
+
   it('抽屉频道与工作台频道完全隔离,互不串会话', async () => {
     const workbench = useAgentChat({ channel: WORKBENCH_CHANNEL });
     apiMock.agentExecuteStream.mockImplementation(async (payload, onEvent) => {

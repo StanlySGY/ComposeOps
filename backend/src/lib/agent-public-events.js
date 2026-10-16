@@ -61,23 +61,28 @@ export function toPublicAgentEvent(event) {
     if (event.tool === 'project.list_managed' && Array.isArray(result)) return { type: 'context_data', kind: 'projects', projects: result };
     if (event.tool === 'web.search' && Array.isArray(result?.sources)) return { type: 'context_data', kind: 'search_sources', sources: result.sources };
     if (event.tool === 'cron.create') return { type: 'action_completed', kind: 'cron_created', result: result || {} };
-    // 通用工具结果:只透出工具名/成败/耗时 + 脱敏截断的摘要,完整结果体不带给前端。
-    // 失败时 result 为空,回退到 error/durationMs 组成的摘要,避免卡片"结果"栏整片空白。
-    // 摘要放宽到 600 字符:240 字符会把列表类结果截成半截 JSON,展开后看不出所以然。
-    // 结果体本身就是空对象/空数组时(工具无返回值),给一句人话兜底,避免展开是空白。
+    // 通用工具结果:只透出成败、耗时与脱敏摘要,不把完整结果体交给前端。
+    // 失败摘要优先给可读的错误原因,绝不把 durationMs 等内部计时字段伪装成错误正文。
+    // 成功结果摘要最多 600 字符,避免列表类工具被过早截断。
     let summary = '';
+    const unsuccessful = event.result?.success === false;
     const human = [result?.message, result?.note, result?.summary].find((value) => typeof value === 'string' && value.trim());
-    if (human) {
+    if (unsuccessful) {
+      summary = cleanError(event.result?.error || result?.error || result?.message || '');
+      if (!summary && human) summary = cleanText(human);
+      if (!summary) summary = '操作失败，未返回详细原因';
+    } else if (human) {
       summary = cleanText(human).slice(0, 600);
+    } else if (result === undefined || result === null || (typeof result === 'object' && !Array.isArray(result) && Object.keys(result).length === 0) || (Array.isArray(result) && result.length === 0)) {
+      summary = '执行成功，该操作没有返回数据';
     } else {
       try {
-        const source = result === undefined ? { error: event.result?.error || '执行失败', durationMs: Number(event.result?.durationMs || 0) } : result;
-        const serialized = JSON.stringify(source);
+        const serialized = JSON.stringify(result);
         if (typeof serialized === 'string') summary = serialized.slice(0, 600);
       } catch { /* 结果不可序列化时使用下方的人话兜底。 */ }
     }
     if (!summary || summary === '{}' || summary === '[]' || summary === 'null') {
-      summary = event.result?.success === false ? '执行失败,无返回内容' : '执行成功,该操作没有返回数据';
+      summary = unsuccessful ? '操作失败，未返回详细原因' : '执行成功，该操作没有返回数据';
     }
     return {
       type: 'tool_result',
@@ -85,7 +90,7 @@ export function toPublicAgentEvent(event) {
       success: !!event.result?.success,
       durationMs: Number(event.result?.durationMs || 0),
       summary,
-      error: event.result?.success ? '' : cleanError(event.result?.error || ''),
+      error: event.result?.success ? '' : cleanError(event.result?.error || result?.error || ''),
     };
   }
   if (event.type === 'tool_requested') {

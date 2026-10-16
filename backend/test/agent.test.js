@@ -26,7 +26,7 @@ const {
   addPerformanceBaseline,
   listPerformanceBaselines,
 } = await import('../src/lib/db.js');
-const { readAgentAlertRules } = await import('../src/services/alert-monitor.js');
+const { observeAgentAlertState, readAgentAlertRules } = await import('../src/services/alert-monitor.js');
 
 test('agent: 注册 64 个工具并暴露元数据(含风险等级)', () => {
   const agent = getAgent();
@@ -112,6 +112,32 @@ test('agent: 反馈与性能基线持久化', () => {
   const baselineId = addPerformanceBaseline('基线 A', { capturedAt: new Date().toISOString(), snapshot: [] });
   assert.ok(Number.isInteger(baselineId));
   assert.equal(listPerformanceBaselines(10).some((item) => item.id === baselineId), true);
+});
+
+test('agent threshold alerts trigger on a new incident and re-arm only after recovery', () => {
+  const rule = { id: 'threshold-debounce-1', projectId: 'project-a', threshold: 80 };
+  assert.equal(observeAgentAlertState(rule, 'container-a', 95), false, 'one spike does not trigger an alert');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 91), true, 'two consecutive high samples open an incident');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 99), false, 'sustained high values do not repeat the alert');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 10), false, 'one normal sample does not clear the incident');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 99), false, 'one dip cannot re-arm the alert');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 10), false);
+  assert.equal(observeAgentAlertState(rule, 'container-a', 10), false, 'second normal sample clears the incident');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 95), false);
+  assert.equal(observeAgentAlertState(rule, 'container-a', 96), true, 'a recovered rule can trigger a new incident');
+
+  const editedRule = { ...rule, threshold: 95 };
+  assert.equal(observeAgentAlertState(editedRule, 'container-a', 98), false, 'editing the threshold resets old incident state');
+  assert.equal(observeAgentAlertState(editedRule, 'container-a', 99), true, 'the edited rule requires fresh consecutive samples');
+});
+
+test('agent threshold alerts isolate containers and ignore invalid samples', () => {
+  const rule = { id: 'threshold-debounce-2', projectId: 'project-a', threshold: 5 };
+  assert.equal(observeAgentAlertState(rule, 'container-a', 10), false);
+  assert.equal(observeAgentAlertState(rule, 'container-a', Number.NaN), false, 'invalid readings do not count');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 10), true);
+  assert.equal(observeAgentAlertState(rule, 'container-b', 10), false);
+  assert.equal(observeAgentAlertState(rule, 'container-b', 10), true, 'containers have independent incident state');
 });
 
 test('agent: 告警规则读取与工具 undo 能力', async () => {
