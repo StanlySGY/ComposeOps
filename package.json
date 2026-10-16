@@ -18,7 +18,6 @@
     "test": "npm run test --workspace=backend && npm run test --workspace=frontend",
     "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
     "test:agent-soak": "node scripts/agent-soak.mjs",
-    "recovery:audit": "node backend/scripts/database-readiness-audit.js",
     "recovery:drill": "node backend/scripts/encryption-recovery-drill.js"
   }
 }
