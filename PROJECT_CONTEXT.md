@@ -16,7 +16,7 @@
   - 数据保护:Compose 备份(20 份/diff/回滚)、**数据卷备份**(`services/volume-backup.js` helper 容器 tar,cron 类型 `volume-backup`,目录 `backup.volume_dir`,每卷 20 份)、数据库 Dump、保留策略(`pruneAiData`,setting `retention.ai_days` 默认 90 天,metrics-collector 每日触发)。
   - GitOps(轮询 + webhook `POST /gitops/webhook/:id`,token=`gitops.webhook_token`,app.js auth 豁免)、应用市场(蓝图 + 自定义模板 + AI 找应用 `POST /marketplace/templates/ai-discover`,只出草稿)、定时任务(5 段 cron 解析,JSON 持久化)、告警通知(Bark/Telegram/企微/邮件/Webhook)、操作审计、多渠道事件中心。
   - 基础设施:登录锁定(5 次/15 分钟)、Cookie SameSite=Strict、CSP(含 img-src https)、SWR 缓存、骨架屏、日志虚拟滚动、键盘导航(j/k + `?` 帮助)、Cmd+K 命令面板。
-- **验证基线（2026-10-16）**:本轮 Agent 策略/审计改造后的本地验证：后端 431 项中 430 项通过、1 项既有预期跳过；前端 63 个测试文件、381 项通过；双端 lint、正式构建、预览构建通过；Playwright 预览检查 30 项通过、2 项既有预期跳过。单次将两端串联运行时曾有一个既有异步 UI 断言偶发失败；该测试文件独立运行通过，前端完整测试集随后也通过。对应 GitHub Actions 结果须在本轮提交推送后再次确认。
+- **验证基线（2026-10-16）**:提交 `9bd91cd` 本地全量验证通过：后端 431 项中 430 项通过、1 项既有预期跳过；前端 63 个测试文件、381 项通过；双端 lint、正式构建、预览构建通过；Playwright 预览检查 30 项通过、2 项既有预期跳过。GitHub Actions [run 38856141917](https://github.com/StanlySGY/ComposeOps/actions/runs/38856141917) 已完成且 conclusion=success，包含常规测试/构建/浏览器检查、amd64 镜像安装/升级/恢复，以及 ARM64 镜像构建/首次安装/在线备份恢复。120 秒 Agent/SSE 模拟模型压测通过，详细指标及仍未替代正式 4 小时验收的说明见 `docs/public/ROADMAP.md`。
 - **容器镜像**:`runtime` 阶段内置 docker CLI / compose / buildx(从官方 `docker:cli` COPY)+ git / openssh-client;
   apt 默认走 `ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn`,npm 走 npmmirror。默认数据库适配器使用 `node:sqlite`；启用静态加密时依赖 `better-sqlite3-multiple-ciphers` 原生 addon，由构建阶段安装编译工具链。
   国内网络下 `docker compose up -d --build` 可直接跑通,构建期会断言四个二进制全部可用。
