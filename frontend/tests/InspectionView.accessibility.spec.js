@@ -90,6 +90,22 @@ describe('AI 巡检报告列表键盘可访问性', () => {
     expect(wrapper.attributes('aria-busy')).toBe('false');
   });
 
+  it('巡检明细加载期间通过 polite status 播报，加载结束后清除状态', async () => {
+    let resolveReport;
+    api.getInspectionReport.mockImplementationOnce(() => new Promise(resolve => { resolveReport = resolve; }));
+    wrapper = mountView();
+    await flushPromises();
+
+    const openReport = wrapper.get('tbody button[aria-label^="查看巡检报告："]');
+    await openReport.trigger('click');
+    expect(wrapper.get('[role="dialog"] [role="status"][aria-live="polite"]').text()).toContain('正在加载巡检报告明细');
+
+    resolveReport({ report: { ...report, report: { summary: '巡检正常', findings: [] } } });
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"] [role="status"]').exists()).toBe(false);
+    expect(wrapper.get('[role="dialog"]').text()).toContain('巡检正常');
+  });
+
   it('每行报告都有可通过键盘聚焦的命名按钮打开明细', async () => {
     wrapper = mountView();
     await flushPromises();

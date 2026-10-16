@@ -104,6 +104,21 @@ describe('跨页面表单可访问性契约', () => {
     expect(nodes.some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
   });
 
+  it('预览生成期间通过独立 polite status 播报进度', () => {
+    for (const [file, label] of [
+      ['../src/components/services/ProjectEnvModal.vue', '正在生成环境变量变更预览'],
+      ['../src/components/services/ProjectUpgradeModal.vue', '正在生成升级变更预览'],
+    ]) {
+      const nodes = templateNodes(file);
+      expect(nodes.some(node => node.tag === 'p'
+        && hasClassToken(node, 'sr-only')
+        && hasAttr(node, 'role', 'status')
+        && hasAttr(node, 'aria-live', 'polite')
+        && hasAttr(node, 'aria-atomic', 'true')
+        && (node.children || []).some(child => child.type === 2 && child.content === label)), file).toBe(true);
+    }
+  });
+
   it('标准标签页具有面板关联、单一 Tab 停靠点和键盘处理', () => {
     const files = [
       '../src/views/OperationsView.vue',

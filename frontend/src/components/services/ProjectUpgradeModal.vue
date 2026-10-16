@@ -32,6 +32,7 @@
     </template>
     <template #footer>
       <button v-if="data?.hasUpdate && !upgrading" class="btn-primary" :disabled="previewLoading" @click="startUpgrade"><Zap class="w-4 h-4" />一键平滑升级<span v-if="previewLoading" class="text-xs opacity-70">正在生成变更预览…</span></button>
+      <p v-if="previewLoading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在生成升级变更预览</p>
       <span v-if="upgrading" class="text-sm text-muted" role="status" aria-live="polite" aria-atomic="true">正在升级,请查看输出面板…</span>
       <button class="btn-secondary" @click="close">关闭</button>
     </template>

@@ -138,7 +138,7 @@
       <template #header-actions>
         <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="detailLoading" @click="askAgentForReport">交给 Agent</button>
       </template>
-      <p v-if="detailLoading" class="text-sm text-muted">加载中...</p>
+      <p v-if="detailLoading" class="text-sm text-muted" role="status" aria-live="polite" aria-atomic="true">正在加载巡检报告明细…</p>
       <template v-else-if="detail?.report">
         <p class="mb-4 rounded-lg border border-surface-800 bg-surface-950/50 px-3 py-2 text-sm text-surface-300">{{ detail.report.summary }}</p>
 
