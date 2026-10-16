@@ -546,6 +546,55 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 17,
+    name: 'Agent 持久化策略组与追加式审计事件',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS agent_policy_groups (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT NOT NULL DEFAULT '',
+          enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS agent_policy_rules (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL REFERENCES agent_policy_groups(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          effect TEXT NOT NULL CHECK(effect IN ('deny', 'allow')),
+          priority INTEGER NOT NULL DEFAULT 100,
+          enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+          tool_name TEXT NOT NULL DEFAULT '*',
+          project_id TEXT NOT NULL DEFAULT '*',
+          parameters_json TEXT NOT NULL DEFAULT '{}',
+          reason TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_policy_rules_group ON agent_policy_rules(group_id, enabled);
+        CREATE INDEX IF NOT EXISTS idx_agent_policy_rules_effect ON agent_policy_rules(effect, priority, enabled);
+        CREATE TABLE IF NOT EXISTS agent_audit_events (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          execution_id TEXT,
+          event_type TEXT NOT NULL,
+          actor TEXT NOT NULL DEFAULT 'agent',
+          tool_name TEXT NOT NULL DEFAULT '',
+          decision TEXT NOT NULL DEFAULT '',
+          rule_id TEXT,
+          rule_name TEXT NOT NULL DEFAULT '',
+          reason TEXT NOT NULL DEFAULT '',
+          parameters_hash TEXT,
+          details_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_audit_plan ON agent_audit_events(plan_id, created_at, id);
+        CREATE INDEX IF NOT EXISTS idx_agent_audit_execution ON agent_audit_events(execution_id, created_at, id);
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1048,11 +1097,22 @@ export function listAgentPlans(limit = 30) {
   return db.prepare('SELECT * FROM agent_plans ORDER BY id DESC LIMIT ?').all(safeLimit);
 }
 
+function canonicalAgentAuditValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalAgentAuditValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalAgentAuditValue(value[key])]));
+  }
+  return value;
+}
+
+function canonicalAgentAuditJson(value) {
+  return JSON.stringify(redactSecretValue(canonicalAgentAuditValue(value || {})));
+}
+
 export function recordAgentExecution(planId, toolName, params, status = 'pending') {
   const execId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   // 参数正文与指纹均基于脱敏视图，避免在审计字段或可离线猜测的哈希中保存秘密。
-  const safeParams = redactSecretValue(params || {});
-  const safeParamsJson = JSON.stringify(safeParams);
+  const safeParamsJson = canonicalAgentAuditJson(params);
   db.prepare(
     'INSERT INTO agent_executions(id, plan_id, tool_name, parameters, status) VALUES(?, ?, ?, ?, ?)'
   ).run(execId, planId, String(toolName || ''), safeParamsJson, String(status || 'pending'));
@@ -1061,7 +1121,7 @@ export function recordAgentExecution(planId, toolName, params, status = 'pending
   return execId;
 }
 
-export function updateAgentExecution(execId, { status, result, error, durationMs, confirmedBy, confirmedAt, confirmationStatus, parametersHash } = {}) {
+export function updateAgentExecution(execId, { status, result, error, durationMs, confirmedBy, confirmedAt, confirmationStatus, parameters, parametersHash } = {}) {
   const current = db.prepare('SELECT * FROM agent_executions WHERE id = ?').get(execId);
   if (!current) return null;
   const nextStatus = status !== undefined ? String(status) : current.status;
@@ -1071,13 +1131,19 @@ export function updateAgentExecution(execId, { status, result, error, durationMs
   const nextConfirmedBy = confirmedBy !== undefined ? confirmedBy : current.confirmed_by;
   const nextConfirmedAt = confirmedAt !== undefined ? confirmedAt : current.confirmed_at;
   const nextConfirmationStatus = confirmationStatus !== undefined ? String(confirmationStatus) : current.confirmation_status;
-  const nextParametersHash = parametersHash !== undefined ? String(parametersHash) : current.parameters_hash;
+  const nextParameters = parameters !== undefined ? canonicalAgentAuditJson(parameters) : current.parameters;
+  const nextParametersHash = parametersHash !== undefined
+    ? String(parametersHash)
+    : parameters !== undefined
+      ? createHash('sha256').update(nextParameters).digest('hex')
+      : current.parameters_hash;
   db.prepare(`
     UPDATE agent_executions
     SET status = ?, result = ?, error = ?, duration_ms = ?, confirmed_by = ?, confirmed_at = ?,
-        confirmation_status = ?, parameters_hash = ?
+        confirmation_status = ?, parameters = ?, parameters_hash = ?
     WHERE id = ?
-  `).run(nextStatus, nextResult, nextError, nextDuration, nextConfirmedBy, nextConfirmedAt, nextConfirmationStatus, nextParametersHash, execId);
+  `).run(nextStatus, nextResult, nextError, nextDuration, nextConfirmedBy, nextConfirmedAt,
+    nextConfirmationStatus, nextParameters, nextParametersHash, execId);
   return db.prepare('SELECT * FROM agent_executions WHERE id = ?').get(execId);
 }
 

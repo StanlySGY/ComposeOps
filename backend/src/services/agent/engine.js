@@ -19,9 +19,10 @@ import { PreconditionChecker, PostconditionValidator, expandMacro, MACRO_TOOLS }
 import { RunawayGuard } from './runaway-guard.js';
 import { drainTaskNotifications } from './background-tasks.js';
 import { compactSessionHistory } from './compaction.js';
-import { getApprovalGate } from './approval-gate.js';
+import { getApprovalGate, persistentPolicyMaySkipConfirmation } from './approval-gate.js';
 import { resolveToolContext, assertPermission, validateParams } from './planning.js';
 import { withProjectOperationLock } from '../project-operation-lock.js';
+import { evaluateAgentPolicy, recordAgentAuditEvent, fingerprintAgentParams } from './policy-store.js';
 
 import { harvestSecretValues, redactSecrets, redactSecretValue } from '../../lib/secret-redactor.js';
 
@@ -215,10 +216,48 @@ export class OperationsAgent {
       const results = [];
       for (const step of expanded) {
         const audit = this._loopAudit;
-        const stepExecId = audit ? recordAgentExecution(audit.planId, step.tool, step.params, 'executing') : null;
-        const stepResult = await this.executeTool(step.tool, step.params, _context, trace);
+        const parametersHash = fingerprintAgentParams(step.params);
+        const policy = evaluateAgentPolicy({
+          toolName: step.tool,
+          params: step.params,
+          projectId: step.params?.projectId || _context.projectId || '',
+        });
+        const stepExecId = audit ? recordAgentExecution(audit.planId, step.tool, step.params, policy.decision === 'deny' ? 'rejected' : 'executing') : null;
+        if (audit) {
+          recordAgentAuditEvent({ planId: audit.planId, executionId: stepExecId, eventType: 'tool_requested',
+            actor: 'agent-macro', toolName: step.tool, parametersHash, details: { macro: toolName } });
+          recordAgentAuditEvent({ planId: audit.planId, executionId: stepExecId, eventType: 'policy_decision',
+            actor: 'policy-engine', toolName: step.tool, decision: policy.decision, ruleId: policy.ruleId,
+            ruleName: policy.ruleName, reason: policy.reason, parametersHash, details: { macro: toolName } });
+        }
+        if (policy.decision === 'deny') {
+          const denied = `持久化策略拒绝宏步骤 ${step.tool}：${policy.reason}`;
+          if (stepExecId) {
+            updateAgentExecution(stepExecId, { status: 'rejected', confirmationStatus: 'policy_denied', error: denied });
+            recordAgentAuditEvent({ planId: audit.planId, executionId: stepExecId, eventType: 'execution_blocked',
+              actor: 'policy-engine', toolName: step.tool, decision: 'denied', ruleId: policy.ruleId,
+              ruleName: policy.ruleName, reason: denied, parametersHash, details: { macro: toolName } });
+          }
+          results.push({ success: false, error: denied, blockedByPolicy: true, tool: step.tool });
+          break;
+        }
+        if (stepExecId) recordAgentAuditEvent({ planId: audit.planId, executionId: stepExecId,
+          eventType: 'execution_started', actor: 'agent-macro', toolName: step.tool, decision: 'running',
+          parametersHash, details: { macro: toolName } });
+        let stepResult;
+        try {
+          stepResult = await this.executeTool(step.tool, step.params, _context, trace);
+        } catch (error) {
+          stepResult = { success: false, error: error.message, postconditionStatus: 'not_run' };
+        }
         if (stepExecId) {
           updateAgentExecution(stepExecId, { status: stepResult.success ? 'success' : 'failed', result: stepResult.result, error: stepResult.error, durationMs: stepResult.durationMs });
+          recordAgentAuditEvent({ planId: audit.planId, executionId: stepExecId, eventType: 'execution_completed',
+            actor: 'agent-macro', toolName: step.tool, decision: stepResult.success ? 'success' : 'failed',
+            reason: stepResult.error || '', parametersHash, details: { macro: toolName, durationMs: stepResult.durationMs || 0 } });
+          recordAgentAuditEvent({ planId: audit.planId, executionId: stepExecId, eventType: 'postcondition_completed',
+            actor: 'postcondition-validator', toolName: step.tool, decision: stepResult.postconditionStatus || 'not_reported',
+            parametersHash, reason: stepResult.postconditionReason || '' });
         }
         if (audit) {
           audit.runawayGuard.observe({
@@ -232,7 +271,12 @@ export class OperationsAgent {
         if (!stepResult.success) break; // 宏中任一步失败即停止
       }
       const allSuccess = results.every(r => r.success);
-      return { success: allSuccess, isMacro: true, steps: results, thoughts: trace, durationMs: results.reduce((sum, r) => sum + (r.durationMs || 0), 0) };
+      return {
+        success: allSuccess, isMacro: true, steps: results, thoughts: trace,
+        durationMs: results.reduce((sum, r) => sum + (r.durationMs || 0), 0),
+        postconditionStatus: allSuccess ? 'passed' : 'failed',
+        postconditionReason: results.find((r) => !r.success)?.error || '',
+      };
     }
 
     const tool = this.getTool(toolName);
@@ -270,12 +314,13 @@ export class OperationsAgent {
       const postcondition = await PostconditionValidator.validate(toolName, effectiveParams, result, { ..._context, ...resolved });
       if (!postcondition.valid) {
         this.addThought('validating', `后置条件验证失败:${postcondition.reason}`, { tool: toolName }, trace);
-        return { success: false, error: postcondition.reason, result, thoughts: trace, durationMs: Date.now() - started };
+        return { success: false, error: postcondition.reason, result, thoughts: trace,
+          durationMs: Date.now() - started, postconditionStatus: 'failed', postconditionReason: postcondition.reason };
       }
       
-      return { success: true, result, thoughts: trace, durationMs: Date.now() - started };
+      return { success: true, result, thoughts: trace, durationMs: Date.now() - started, postconditionStatus: 'passed' };
     } catch (error) {
-      return { success: false, error: error.message, thoughts: trace, durationMs: Date.now() - started };
+      return { success: false, error: error.message, thoughts: trace, durationMs: Date.now() - started, postconditionStatus: 'not_run' };
     }
   }
 
@@ -594,12 +639,72 @@ export class OperationsAgent {
             if (properties.containerId && !toolParams.containerId && context.containerId) toolParams.containerId = context.containerId;
             const resolved = await resolveToolContext(toolParams);
             const dynamicRisk = assessRisk(toolName, toolParams, { ...context, ...resolved });
+            const policyProjectId = resolved.project?.id || toolParams.projectId || context.projectId || '';
+            const policy = evaluateAgentPolicy({ toolName, params: toolParams, projectId: policyProjectId });
+            let parametersHash = fingerprintAgentParams(toolParams);
+            const executionId = recordAgentExecution(planId, toolName, toolParams, 'pending');
+            const auditActor = context.initiator || 'agent';
+            recordAgentAuditEvent({
+              planId, executionId, eventType: 'tool_requested', actor: auditActor, toolName, parametersHash,
+              details: { risk: dynamicRisk, projectId: policyProjectId || null },
+            });
+            recordAgentAuditEvent({
+              planId, executionId, eventType: 'policy_decision', actor: 'policy-engine', toolName,
+              decision: policy.decision, ruleId: policy.ruleId, ruleName: policy.ruleName,
+              reason: policy.reason, parametersHash,
+              details: { risk: dynamicRisk, projectId: policyProjectId || null },
+            });
+            if (policy.decision === 'deny') {
+              const rejectMsg = `持久化策略拒绝执行 ${toolName}：${policy.reason}`;
+              updateAgentExecution(executionId, {
+                status: 'rejected', confirmationStatus: 'policy_denied', error: rejectMsg, parametersHash,
+              });
+              recordAgentAuditEvent({
+                planId, executionId, eventType: 'execution_blocked', actor: 'policy-engine',
+                toolName, decision: 'denied', ruleId: policy.ruleId, ruleName: policy.ruleName,
+                reason: rejectMsg, parametersHash,
+              });
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
+              onEvent({ type: 'tool_rejected', tool: toolName, reason: 'persistent_policy_denied' });
+              publishTrace('tool_rejected', rejectMsg, { tool: toolName, policyRuleId: policy.ruleId });
+              continue;
+            }
             
             let effectiveParams = toolParams;
             let confirmationStatus = 'not_required';
-
-            const needsConfirm = approvalGate.needsConfirmation(approvalSessionId, toolName, toolParams, dynamicRisk, tool.confirmationRequired);
+            // 宏规则不能替代其内部 critical 步骤的逐次确认；展开失败时保守地要求确认。
+            let macroContainsCritical = false;
+            if (toolName.startsWith('macro.')) {
+              try {
+                const macroSteps = expandMacro(toolName, toolParams, { ...context, ...resolved });
+                macroContainsCritical = macroSteps.some((step) =>
+                  assessRisk(step.tool, step.params, { ...context, ...resolved }) === 'critical');
+              } catch { macroContainsCritical = true; }
+            }
+            const forceCriticalConfirmation = dynamicRisk === 'critical' || macroContainsCritical;
+            const policyAllowsSkip = persistentPolicyMaySkipConfirmation(
+              policy.decision,
+              dynamicRisk,
+              toolName.startsWith('macro.') || forceCriticalConfirmation,
+              tool.confirmationRequired,
+            );
+            const needsConfirm = forceCriticalConfirmation
+              || (!policyAllowsSkip && approvalGate.needsConfirmation(approvalSessionId, toolName, toolParams, dynamicRisk, tool.confirmationRequired));
+            if (policyAllowsSkip) {
+              confirmationStatus = 'policy_allowed';
+              recordAgentAuditEvent({
+                planId, executionId, eventType: 'policy_authorized', actor: 'policy-engine', toolName,
+                decision: 'allow_without_prompt', ruleId: policy.ruleId, ruleName: policy.ruleName,
+                reason: policy.reason, parametersHash,
+              });
+            }
             if (needsConfirm) {
+              recordAgentAuditEvent({
+                planId, executionId, eventType: 'approval_requested', actor: 'approval-gate', toolName,
+                decision: 'pending', ruleId: policy.ruleId, ruleName: policy.ruleName,
+                reason: forceCriticalConfirmation ? 'critical 操作必须逐次人工确认' : '现有审批门要求人工确认',
+                parametersHash,
+              });
               // 需要用户确认
               onEvent({ 
                 type: 'confirmation_required', 
@@ -625,12 +730,27 @@ export class OperationsAgent {
                 messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
                 onEvent({ type: 'tool_rejected', tool: toolName });
                 publishTrace('tool_rejected', rejectMsg, {});
-                const rejectedId = recordAgentExecution(planId, toolName, toolParams, 'rejected');
-                updateAgentExecution(rejectedId, { confirmationStatus: approval?.reason || 'rejected', confirmedAt: new Date().toISOString() });
+                updateAgentExecution(executionId, {
+                  status: 'rejected', confirmationStatus: approval?.reason || 'rejected',
+                  confirmedAt: null, error: rejectMsg, parametersHash,
+                });
+                recordAgentAuditEvent({
+                  planId, executionId, eventType: 'approval_decision', actor: 'admin-session',
+                  toolName, decision: 'rejected', reason: approval?.reason || 'user_or_timeout_rejected',
+                  parametersHash,
+                });
+                recordAgentAuditEvent({
+                  planId, executionId, eventType: 'execution_blocked', actor: 'approval-gate',
+                  toolName, decision: 'not_executed', reason: rejectMsg, parametersHash,
+                });
                 continue; // 让 LLM 看到拒绝消息后重新决策
               }
 
               confirmationStatus = 'approved';
+              recordAgentAuditEvent({
+                planId, executionId, eventType: 'approval_decision', actor: 'admin-session', toolName,
+                decision: 'approved', reason: '人工确认通过', parametersHash,
+              });
 
               // 支持确认弹窗中编辑参数:有输入则覆盖原参数
               effectiveParams =
@@ -645,8 +765,41 @@ export class OperationsAgent {
                 try {
                   const editedContext = await resolveToolContext(effectiveParams);
                   editedRisk = assessRisk(toolName, effectiveParams, { ...context, ...editedContext });
+                  const editedProjectId = editedContext.project?.id || effectiveParams.projectId || context.projectId || '';
+                  const editedPolicy = evaluateAgentPolicy({
+                    toolName, params: effectiveParams, projectId: editedProjectId,
+                  });
+                  if (editedPolicy.decision === 'deny') {
+                    const rejectMsg = `编辑后的参数命中持久化拒绝规则，已拒绝执行：${editedPolicy.reason}`;
+                    const editedHash = fingerprintAgentParams(effectiveParams);
+                    updateAgentExecution(executionId, {
+                      status: 'rejected', confirmationStatus: 'edited_params_policy_denied',
+                      error: rejectMsg, parameters: effectiveParams, parametersHash: editedHash,
+                    });
+                    recordAgentAuditEvent({
+                      planId, executionId, eventType: 'policy_decision', actor: 'policy-engine',
+                      toolName, decision: 'deny', ruleId: editedPolicy.ruleId, ruleName: editedPolicy.ruleName,
+                      reason: editedPolicy.reason, parametersHash: editedHash,
+                    });
+                    recordAgentAuditEvent({
+                      planId, executionId, eventType: 'execution_blocked', actor: 'policy-engine',
+                      toolName, decision: 'denied', ruleId: editedPolicy.ruleId, ruleName: editedPolicy.ruleName,
+                      reason: rejectMsg, parametersHash: editedHash,
+                    });
+                    messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
+                    onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg, reason: 'edited_params_policy_denied' });
+                    continue;
+                  }
                 } catch (error) {
                   const rejectMsg = `编辑后的参数无法重新验证风险，已拒绝执行: ${error.message}`;
+                  const editedHash = fingerprintAgentParams(effectiveParams);
+                  updateAgentExecution(executionId, {
+                    status: 'rejected', confirmationStatus: 'edited_params_invalid',
+                    error: rejectMsg, parameters: effectiveParams, parametersHash: editedHash,
+                  });
+                  recordAgentAuditEvent({ planId, executionId, eventType: 'execution_blocked',
+                    actor: 'approval-gate', toolName, decision: 'not_executed', reason: rejectMsg,
+                    parametersHash: editedHash });
                   messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
                   onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg });
                   continue;
@@ -654,6 +807,14 @@ export class OperationsAgent {
                 const riskRank = { low: 0, medium: 1, high: 2, critical: 3 };
                 if ((riskRank[editedRisk] ?? 3) > (riskRank[dynamicRisk] ?? 3)) {
                   const rejectMsg = `编辑后的参数将风险从 ${dynamicRisk} 提升为 ${editedRisk}，原确认不适用于新参数；请重新发起操作并确认。`;
+                  const editedHash = fingerprintAgentParams(effectiveParams);
+                  updateAgentExecution(executionId, {
+                    status: 'rejected', confirmationStatus: 'edited_params_risk_increased',
+                    error: rejectMsg, parameters: effectiveParams, parametersHash: editedHash,
+                  });
+                  recordAgentAuditEvent({ planId, executionId, eventType: 'execution_blocked',
+                    actor: 'approval-gate', toolName, decision: 'not_executed', reason: rejectMsg, parametersHash: editedHash,
+                    details: { originalRisk: dynamicRisk, editedRisk } });
                   messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
                   onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg, risk: editedRisk });
                   continue;
@@ -666,21 +827,44 @@ export class OperationsAgent {
               if ((approval.remember === 'tool' || approval.remember === 'call') && dynamicRisk !== 'critical') {
                 approvalGate.allowForSession(approvalSessionId, toolName, effectiveParams, approval.remember, dynamicRisk);
               }
+              parametersHash = fingerprintAgentParams(effectiveParams);
             }
 
             // 执行工具
             onEvent({ type: 'tool_executing', tool: toolName, params: effectiveParams });
             publishTrace('tool_executing', `正在执行 ${toolName}`, { params: effectiveParams });
 
+            let execId = executionId;
             try {
-              const execId = recordAgentExecution(planId, toolName, effectiveParams, 'executing');
               updateAgentExecution(execId, {
+                status: 'executing',
                 confirmationStatus,
-                confirmedBy: 'user',
+                confirmedBy: confirmationStatus === 'approved' ? 'user' : null,
                 confirmedAt: confirmationStatus === 'approved' ? new Date().toISOString() : null,
+                parameters: effectiveParams,
+                parametersHash,
+              });
+              recordAgentAuditEvent({
+                planId, executionId: execId, eventType: 'execution_started',
+                actor: confirmationStatus === 'approved' ? 'admin-approved-agent' : policyAllowsSkip ? 'persistent-policy' : 'agent',
+                toolName, decision: 'running', ruleId: policyAllowsSkip ? policy.ruleId : null,
+                ruleName: policyAllowsSkip ? policy.ruleName : '', reason: policyAllowsSkip ? policy.reason : '',
+                parametersHash, details: { confirmationStatus, projectId: policyProjectId || null },
               });
               const result = await this.executeTool(toolName, effectiveParams, context, trace);
               updateAgentExecution(execId, { status: result.success ? 'success' : 'failed', result: result.result, error: result.error, durationMs: result.durationMs });
+              recordAgentAuditEvent({
+                planId, executionId: execId, eventType: 'execution_completed',
+                actor: 'agent', toolName, decision: result.success ? 'success' : 'failed',
+                reason: result.error || '', parametersHash,
+                details: { durationMs: result.durationMs || 0, confirmationStatus },
+              });
+              recordAgentAuditEvent({
+                planId, executionId: execId, eventType: 'postcondition_completed',
+                actor: 'postcondition-validator', toolName,
+                decision: result.postconditionStatus || 'not_reported',
+                reason: result.postconditionReason || '', parametersHash,
+              });
 
               // 值级脱敏:工具结果先收割 KEY=VALUE 形态的敏感值,再在回喂文本
               // 里把已知值与静态 token 形态(sk-/ghp_/xox/AKIA)统一抹掉。
@@ -708,6 +892,21 @@ export class OperationsAgent {
 
             } catch (error) {
               const errorMsg = error.message;
+              if (execId) {
+                updateAgentExecution(execId, {
+                  status: 'failed', error: errorMsg, confirmationStatus,
+                });
+                recordAgentAuditEvent({
+                  planId, executionId: execId, eventType: 'execution_completed', actor: 'agent',
+                  toolName, decision: 'failed', reason: errorMsg, parametersHash,
+                  details: { confirmationStatus, failureStage: 'tool_execution_or_validation' },
+                });
+                recordAgentAuditEvent({
+                  planId, executionId: execId, eventType: 'postcondition_completed',
+                  actor: 'postcondition-validator', toolName, decision: 'not_run',
+                  reason: '工具在执行或前置校验阶段抛出异常，未得到后置检查结果', parametersHash,
+                });
+              }
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
               onEvent({ type: 'tool_error', tool: toolName, error: errorMsg });
               publishTrace('tool_error', `${toolName} 执行失败`, { error: errorMsg });

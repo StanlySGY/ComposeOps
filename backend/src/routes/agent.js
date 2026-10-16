@@ -27,6 +27,17 @@ import { checkRateLimit } from '../lib/rate-limit.js';
 import { redactSecretValue } from '../lib/secret-redactor.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
 import { compactSessionHistory } from '../services/agent/compaction.js';
+import {
+  createAgentPolicyGroup,
+  updateAgentPolicyGroup,
+  deleteAgentPolicyGroup,
+  listAgentPolicyGroups,
+  createAgentPolicyRule,
+  updateAgentPolicyRule,
+  deleteAgentPolicyRule,
+  listAgentPolicyRules,
+  listAgentAuditEvents,
+} from '../services/agent/policy-store.js';
 import { randomUUID } from 'node:crypto';
 import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
 
@@ -45,6 +56,89 @@ function aiRateLimit(limit, windowMs = 60000) {
     }
   };
 }
+  // 持久化 Agent 策略组（单管理员 API，由 app.js 的会话鉴权与 Origin 检查保护）。
+  fastify.get('/agent/policy-groups', async () => ({ groups: listAgentPolicyGroups() }));
+  fastify.post('/agent/policy-groups', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['name'], properties: {
+      name: { type: 'string', minLength: 1, maxLength: 160 },
+      description: { type: 'string', maxLength: 1000 }, enabled: { type: 'boolean' },
+    } } },
+  }, async (request, reply) => {
+    try { return { group: createAgentPolicyGroup(request.body) }; }
+    catch (error) { return reply.code(error.statusCode || 400).send({ error: 'policy_group_invalid', message: error.message }); }
+  });
+  fastify.patch('/agent/policy-groups/:groupId', {
+    schema: {
+      params: { type: 'object', required: ['groupId'], properties: { groupId: { type: 'string', minLength: 1, maxLength: 128 } } },
+      body: { type: 'object', additionalProperties: false, minProperties: 1, properties: {
+        name: { type: 'string', minLength: 1, maxLength: 160 }, description: { type: 'string', maxLength: 1000 }, enabled: { type: 'boolean' },
+      } },
+    },
+  }, async (request, reply) => {
+    try {
+      const group = updateAgentPolicyGroup(request.params.groupId, request.body);
+      if (!group) return reply.code(404).send({ error: 'policy_group_not_found', message: '策略组不存在' });
+      return { group };
+    } catch (error) { return reply.code(error.statusCode || 400).send({ error: 'policy_group_invalid', message: error.message }); }
+  });
+  fastify.delete('/agent/policy-groups/:groupId', {
+    schema: { params: { type: 'object', required: ['groupId'], properties: { groupId: { type: 'string', minLength: 1, maxLength: 128 } } } },
+  }, async (request, reply) => {
+    if (!deleteAgentPolicyGroup(request.params.groupId)) return reply.code(404).send({ error: 'policy_group_not_found', message: '策略组不存在' });
+    return { ok: true };
+  });
+
+  fastify.get('/agent/policy-rules', {
+    schema: { querystring: { type: 'object', properties: {
+      groupId: { type: 'string', maxLength: 128 }, limit: limitField(500),
+    } } },
+  }, async (request) => ({ rules: listAgentPolicyRules({ groupId: request.query?.groupId, limit: request.query?.limit }) }));
+  const policyRuleBody = {
+    type: 'object', additionalProperties: false,
+    properties: {
+      groupId: { type: 'string', minLength: 1, maxLength: 128 },
+      name: { type: 'string', minLength: 1, maxLength: 200 },
+      effect: { type: 'string', enum: ['deny', 'allow'] },
+      priority: { type: 'integer', minimum: -1000, maximum: 1000 },
+      enabled: { type: 'boolean' },
+      toolName: { type: 'string', minLength: 1, maxLength: 128 },
+      projectId: { type: 'string', minLength: 1, maxLength: 200 },
+      parameters: { type: 'object', maxProperties: 20 },
+      reason: { type: 'string', maxLength: 1000 },
+    },
+  };
+  fastify.post('/agent/policy-rules', {
+    schema: { body: { ...policyRuleBody, required: ['groupId', 'name', 'effect'] } },
+  }, async (request, reply) => {
+    try { return { rule: createAgentPolicyRule(request.body) }; }
+    catch (error) { return reply.code(error.statusCode || 400).send({ error: 'policy_rule_invalid', message: error.message }); }
+  });
+  fastify.patch('/agent/policy-rules/:ruleId', {
+    schema: {
+      params: { type: 'object', required: ['ruleId'], properties: { ruleId: { type: 'string', minLength: 1, maxLength: 128 } } },
+      body: { ...policyRuleBody, minProperties: 1 },
+    },
+  }, async (request, reply) => {
+    try {
+      const rule = updateAgentPolicyRule(request.params.ruleId, request.body);
+      if (!rule) return reply.code(404).send({ error: 'policy_rule_not_found', message: '策略规则不存在' });
+      return { rule };
+    } catch (error) { return reply.code(error.statusCode || 400).send({ error: 'policy_rule_invalid', message: error.message }); }
+  });
+  fastify.delete('/agent/policy-rules/:ruleId', {
+    schema: { params: { type: 'object', required: ['ruleId'], properties: { ruleId: { type: 'string', minLength: 1, maxLength: 128 } } } },
+  }, async (request, reply) => {
+    if (!deleteAgentPolicyRule(request.params.ruleId)) return reply.code(404).send({ error: 'policy_rule_not_found', message: '策略规则不存在' });
+    return { ok: true };
+  });
+
+  fastify.get('/agent/audit-events', {
+    schema: { querystring: { type: 'object', properties: {
+      planId: { type: 'string', maxLength: 128 }, executionId: { type: 'string', maxLength: 128 }, limit: limitField(500),
+    } } },
+  }, async (request) => ({ events: listAgentAuditEvents({
+    planId: request.query?.planId, executionId: request.query?.executionId, limit: request.query?.limit,
+  }) }));
   // POST /api/v1/ai/agent/sessions —— 创建聊天会话
   fastify.post('/agent/sessions', async () => ({ sessionId: createAiSession() }));
 
@@ -184,7 +278,7 @@ function aiRateLimit(limit, windowMs = 60000) {
     // 审批门会话键:无 sessionId 的直连流每次生成独立键,防止"本会话不再询问"
     // 授权经由共享 default 桶泄漏到其他匿名流。
     const gateKey = sessionId != null && sessionId !== '' ? String(sessionId) : `stream-${randomUUID()}`;
-    const context = { projectId, containerId, sessionId, gateKey, role, webSearchEnabled, attachedLogs, history, pageContext };
+    const context = { projectId, containerId, sessionId, gateKey, role, initiator: 'authenticated-user', webSearchEnabled, attachedLogs, history, pageContext };
 
     // 客户端断开时中断执行
     let completed = false;

@@ -80,6 +80,8 @@ Tool Loop 每轮调用模型，解析工具调用，检查权限/风险/审批�
 
 - 历史由后端读取。ai_sessions.compacted_before_id 标记模型活跃窗口，compact_summary 存摘要；渲染仍读取全量历史。
 - approval-gate 支持 ask、allow_writes、full；critical 始终确认，会话记忆不能绕过。
+- 持久化策略由 `agent/policy-store.js` 管理（迁移 v17）：deny-first，按完整工具名、项目 ID 和参数子集精确匹配。allow 只可免除 low/medium 独立工具确认；critical、宏及工具元数据声明的硬确认仍由原审批门控制。编辑确认参数后重新计算风险并重新应用拒绝规则。
+- 每次工具调用拥有稳定的 `agent_executions.id`，关联的 `agent_audit_events` 记录策略判定、审批、执行结果和后置检查。审计只保存脱敏详情与参数指纹，清理 plan 不会级联删除审计事件。
 - secret-redactor 收集敏感值并脱敏出站文本，日志/文件/页面上下文作为不可信证据。
 - background-tasks 支持后台任务与完成通知，runaway-guard 检测重复动作；空模型轮次最多提醒重试一次。
 - SSE token 的协议清理由后端有状态发射层完成，前端原样追加；逐 token trim 会破坏 Markdown 空白和换行。
@@ -93,7 +95,7 @@ Tool Loop 每轮调用模型，解析工具调用，检查权限/风险/审批�
 | 配置与认证 | settings、sessions |
 | 项目与备份 | project_preferences、compose_backups、volume_backups |
 | 会话与用量 | ai_sessions、ai_history、ai_memories、ai_usage |
-| 操作与执行 | operation_history、agent_plans、agent_executions、background_jobs |
+| 操作与执行 | operation_history、agent_plans、agent_executions、agent_audit_events、agent_policy_groups、agent_policy_rules、background_jobs |
 | 观测与资产 | container_metrics、inspections、alert_events、event_records、assets、asset_relations |
 | 工作流 | workflow_definitions、workflow_instances、workflow_steps |
 

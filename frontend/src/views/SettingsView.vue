@@ -49,6 +49,10 @@
       </fieldset>
     </section>
 
+    <section v-if="tab === 'agent-policy'" class="settings-section">
+      <AgentPoliciesPanel />
+    </section>
+
     <section v-if="tab === 'personal'" class="settings-section">
       <h2 class="section-title">界面偏好</h2>
       <div class="ios-group">
@@ -291,7 +295,8 @@ import StoragePruneModal from '../components/settings/StoragePruneModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import AiChannelsPanel from '../components/settings/AiChannelsPanel.vue';
-const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'personal', label: '偏好', icon: markRaw(SlidersHorizontal) }, { id: 'notifications', label: '通知', icon: markRaw(Bell) }, { id: 'maintenance', label: '维护', icon: markRaw(Wrench) }, { id: 'mounts', label: '项目纳管', icon: markRaw(FolderCog) }, { id: 'hosts', label: 'Docker 节点', icon: markRaw(Server) }, { id: 'mcp', label: 'MCP', icon: markRaw(Plug) }, { id: 'about', label: '关于', icon: markRaw(Info) }];
+import AgentPoliciesPanel from '../components/settings/AgentPoliciesPanel.vue';
+const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'agent-policy', label: 'Agent 策略', icon: markRaw(ShieldCheck) }, { id: 'personal', label: '偏好', icon: markRaw(SlidersHorizontal) }, { id: 'notifications', label: '通知', icon: markRaw(Bell) }, { id: 'maintenance', label: '维护', icon: markRaw(Wrench) }, { id: 'mounts', label: '项目纳管', icon: markRaw(FolderCog) }, { id: 'hosts', label: 'Docker 节点', icon: markRaw(Server) }, { id: 'mcp', label: 'MCP', icon: markRaw(Plug) }, { id: 'about', label: '关于', icon: markRaw(Info) }];
 const route = useRoute();
 const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';

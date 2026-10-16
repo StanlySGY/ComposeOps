@@ -14,6 +14,14 @@
 
 const MODES = new Set(['ask', 'allow_writes', 'full']);
 
+/**
+ * 持久化 allow 规则只能免除 low/medium 非宏工具的逐次确认。
+ * high/critical 风险和宏整体一律交由原审批门决定，critical 永远不得跳过。
+ */
+export function persistentPolicyMaySkipConfirmation(policyDecision, risk, isMacro = false, confirmationRequired = false) {
+  return policyDecision === 'allow' && ['low', 'medium'].includes(risk) && !isMacro && !confirmationRequired;
+}
+
 /** 参数域指纹:全部参数按键名排序序列化,嵌套对象走 JSON,保证同一调用稳定、不同调用可区分。 */
 function paramsFingerprint(params = {}) {
   if (!params || typeof params !== 'object') return '';
