@@ -63,6 +63,14 @@ test('database readiness audit blocks mismatched schemas', (t) => {
   assert.throws(() => auditDatabaseReadiness(files), /schema 不一致/);
 });
 
+test('database readiness audit blocks mismatched core table row counts', (t) => {
+  const files = fixture(t);
+  const backup = new DatabaseSync(files.backupPath);
+  backup.prepare('INSERT INTO settings(key, value) VALUES (?, ?)').run('extra', 'row');
+  backup.close();
+  assert.throws(() => auditDatabaseReadiness(files), /核心表行数不一致/);
+});
+
 test('database readiness audit blocks a key and backup in the same directory tree', (t) => {
   const files = fixture(t);
   const colocatedBackup = path.join(path.dirname(files.keyFilePath), 'snapshot.db');

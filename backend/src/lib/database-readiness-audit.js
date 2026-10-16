@@ -132,6 +132,9 @@ export function auditDatabaseReadiness({ dbPath, backupPath, keyFilePath } = {})
   if (JSON.stringify(database.schema) !== JSON.stringify(backup.schema)) {
     throw new Error('当前数据库与备份的 schema 不一致');
   }
+  if (JSON.stringify(database.coreRowCounts) !== JSON.stringify(backup.coreRowCounts)) {
+    throw new Error('当前数据库与备份的核心表行数不一致');
+  }
 
   return {
     status: 'ready_for_controlled_migration',
