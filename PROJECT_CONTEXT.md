@@ -1,6 +1,13 @@
 # 📌 ComposeOps - PROJECT_CONTEXT.md
-> **上次更新时间**:2026-10-16 (Asia/Shanghai)
+> **上次更新时间**:2026-10-19 (Asia/Shanghai)
 > **当前版本/阶段**:仓库 package version 1.5.1；当前基线以 package.json、CHANGELOG 与 GitHub Actions 为准。
+
+## 0. 2026-10-19 最新运行状态（优先于下方历史快照）
+- **生产数据库静态加密已完成**：容器 opsdash 使用 docker-compose.yml + docker-compose.encrypted.yml 启动；database-encryption.js status 实测为 status=encrypted、encryptedHeader=true、keyVerified=true。数据库卷仍为 composeops_opsdash-data，服务健康检查通过，http://127.0.0.1:28765/ 返回 HTTP 200。
+- **密钥位置**：/home/sgy/.config/composeops/db-encryption-key（文件 0600、父目录 0700，不在仓库或数据库卷中；绝不读取、打印或提交密钥内容）。仍需把该密钥纳入独立的受控/异地密钥托管；完成前不得删除本机密钥文件。
+- **迁移回滚备份**：迁移前明文一致性快照 /home/sgy/.local/share/composeops-recovery/opsdash-before-encryption-20261019.db（约 110 MB，文件 0600，目录 0700），须按敏感明文数据保护，完成密钥托管与恢复保留期前不得删除。加密快照 /home/sgy/.local/share/composeops-recovery/opsdash-encrypted-snapshot-20261019.db；恢复演练报告 /home/sgy/.local/share/composeops-recovery/reports/encryption-recovery-drill-20261019.json，演练通过：密钥验证、完整性、schema 与核心表计数匹配，在线库未被修改。
+- **启动后保留策略**：应用启动时维护日志记录 aiHistoryDeleted:1，删除的是迁移前快照中 ai_history.id=4（时间 2026-09-19 01:38:07）的一条旧记录；这是应用启动后的历史数据保留清理，不是加密迁移复制过程的遗漏。迁移前审计已通过；启动后再次对比旧快照时因这项保留清理出现预期行数差异。
+- **四小时 Agent/SSE 压测**：短时预检 30 秒通过（58 次调度、54 次正常完成、4 次主动断开、3 次慢客户端、0 请求失败，最终活跃执行/待审批均为 0）。正式四小时任务由用户级 systemd 单元 composeops-agent-soak-4h-20261019.service 托管，启动时间 2026-10-19 14:08（Asia/Shanghai），目标 14,400 秒；主日志 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261019.log、每分钟心跳 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261019-heartbeat.log，最终报告预期 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261019.json。任务使用隔离 SQLite 和模拟模型，不触达生产数据库或真实 AI 渠道；在最终 JSON 生成并核验前不得标记通过。
 
 ## 1. 核心概述 (Executive Summary)
 - **项目目标**:单用户 Docker Compose 运维控制台(工作区名 `ComposeOps`,镜像/容器沿用旧名 `OpsDash`)。通过 Docker Socket 自动发现带 `com.docker.compose.project` 标签的 Compose 项目,以"先发现、后显式纳管"的权限模型提供服务启停、Compose 配置编辑、环境变量文件族管理、实时日志、容器终端、数据卷备份、GitOps 同步、应用市场、定时任务、多 Docker 节点纳管、资源监控与 AI 运维 Agent 能力。

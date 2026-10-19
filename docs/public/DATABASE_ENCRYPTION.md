@@ -117,3 +117,13 @@ npm run recovery:drill -- --backup="$HOME/.local/share/composeops-recovery/opsda
 - 密钥通过宿主机只读挂载提供，与 SQLite 数据卷分离；拥有 Docker Socket/root 权限的宿主机管理员仍可能读取正在运行的进程及其密钥。
 - 应用在缺少密钥时拒绝打开具有非标准 SQLite 文件头的数据库，避免静默降级；仅凭文件头不能区分加密文件与损坏文件。
 - 加密文件、密钥与备份需分开保管，并定期演练恢复。不要在数据库仍被其他进程访问时运行离线加密或轮换工具。
+
+## 6. 生产迁移记录（2026-10-19）
+
+- 已对当前 opsdash 数据库完成静态加密迁移；迁移前只读审计通过，原库与回滚快照的 integrity_check、schema、迁移版本及核心表行数一致。
+- 迁移后实际检查结果：status=encrypted、encryptedHeader=true、keyVerified=true；容器为 healthy，首页 HTTP 200，/health 返回 status=ok、docker=ok。
+- 外置密钥文件位于 /home/sgy/.config/composeops/db-encryption-key（0600，父目录 0700）。**必须将密钥另行存入独立、受控的密钥托管/异地备份**；本机文件不能替代独立密钥备份。密钥内容不得写入本仓库或工单。
+- 迁移前明文回滚快照位于 /home/sgy/.local/share/composeops-recovery/opsdash-before-encryption-20261019.db（0600，受保护目录 0700）。它仍是敏感明文数据，在确认加密恢复可用、密钥完成独立托管和回滚保留期结束前不得删除。
+- 加密快照位于 /home/sgy/.local/share/composeops-recovery/opsdash-encrypted-snapshot-20261019.db；独立临时恢复演练报告位于 /home/sgy/.local/share/composeops-recovery/reports/encryption-recovery-drill-20261019.json。演练通过，验证了密钥可打开快照和临时恢复副本、SQLite 完整性、schema 与核心表计数匹配；在线数据库未被演练改写。
+- 服务启动后的自动历史保留清理删除了一条旧 ai_history 记录（id=4，created_at=2026-09-19 01:38:07）。这发生在加密迁移并启动服务之后，因此用迁移前快照再次运行行数对比审计会因预期清理而被阻止；日志记录了 aiHistoryDeleted:1。迁移前审计本身已通过，不能将启动后的这条保留清理误判为迁移复制失败。
+- 后续执行任何 Compose 管理操作时，必须同时指定 docker-compose.yml 与 docker-compose.encrypted.yml，并设置 COMPOSEOPS_DB_ENCRYPTION_KEY_FILE=/home/sgy/.config/composeops/db-encryption-key。不要仅使用基础 Compose 文件重建服务。
