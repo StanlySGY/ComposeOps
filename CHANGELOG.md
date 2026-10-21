@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Agent/SSE 长时压测增强：采用单调时钟、原子检查点与 SIGTERM/SIGINT 中断收尾，避免系统关机或进程中断被误记为通过；四小时隔离压测已通过，结果使用临时数据库与模拟模型。
 - Agent 持久化策略组与规则管理：按项目、完整工具名和参数子集匹配，拒绝规则全局优先；明确允许规则仅可免除低/中风险独立工具的逐次确认，不能绕过 critical、宏审批或工具元数据要求的硬确认。
 - Agent 追加式审计事件：关联策略判定、拒绝原因、人工审批、执行结果和后置检查；参数仅保留脱敏视图与参数指纹，并提供设置页管理和审计查询。
 
