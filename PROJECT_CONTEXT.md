@@ -9,7 +9,7 @@
 - **恢复材料与敏感明文快照**：加密快照 /home/sgy/.local/share/composeops-recovery/opsdash-encrypted-snapshot-20261019.db（约 110 MB，0600）；迁移前明文快照 /home/sgy/.local/share/composeops-recovery/opsdash-before-encryption-20261019.db 仍须按敏感明文数据保护，在独立密钥托管、恢复能力与保留期确认前不得删除。
 - **最新恢复演练通过**：报告 /home/sgy/.local/share/composeops-recovery/reports/encryption-recovery-drill-20261021.json（0600）。加密快照和临时恢复副本均可用现有密钥打开；integrityCheck=ok、schema 与核心表计数匹配、临时副本已清理，liveDatabaseModified=false。该结果验证当前机器可恢复，不代表异地灾备已完成。
 - **四小时 Agent/SSE 隔离压测通过**：报告 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261021.json（0600），status=passed、实际时长 14400 秒、interrupted=false、problems=[]。调度 28,792 次、正常完成 27,098 次、主动断开 1,694 次、慢客户端 1,179 次、模拟模型调用 28,792 次、SSE 事件 741,870 个；RSS 峰值增长 65.7 MiB（阈值 256 MiB）、文件描述符增长 7（阈值 48）、平均 CPU 2.3%、事件循环 P95 最大采样值 37.2 ms（阈值 250 ms）；收尾时活动执行和待审批均为 0。测试使用临时 SQLite 与进程内模拟模型，不触达生产数据库或真实 AI 渠道。
-- **本轮代码验证与交付**：后端 437 passed、1 skipped、0 failed；前端 382 passed、0 failed；npm run lint 与 git diff --check 均通过。scripts/agent-soak.mjs 已加入单调时钟、原子检查点和 SIGTERM/SIGINT 中断收尾；提交 d108773a67a9755c60aff1a3eb98a32c6f2c6edf 已推送至 origin/main，GitHub Actions run 39547573520 的质量、amd64 安装/升级/恢复和 ARM64 安装/恢复 jobs 均成功。
+- **本轮代码验证与交付**：2026-10-21 再次全量运行 `npm test`：后端 438 项中 437 passed、1 skipped、0 failed；前端 63 个测试文件、382 passed、0 failed。双端 `npm run lint`、正式构建通过；Playwright 桌面/移动预览 32 项中 30 passed、2 skipped。生产首页桌面/移动 HTTP 200、无 JS/console 错误及横向溢出；受保护 API 未登录均返回 401；健康检查正常。提交 d108773a67a9755c60aff1a3eb98a32c6f2c6edf 已推送，GitHub Actions run 39547573520 的质量、amd64 安装/升级/恢复和 ARM64 安装/恢复 jobs 均成功。
 - **本轮 UI 验证边界**：静态预览 Playwright 30 项通过、2 项按预期跳过；生产首页桌面/移动冒烟均 HTTP 200、无横向溢出及浏览器控制台错误，健康检查正常。但生产端深层页面因当前自动化浏览器没有已认证 Session 而被重定向至登录/欢迎页，尚未完成真实登录态下的端到端 UI 操作验收；不得将预览结果视为生产全流程通过。
 - **后续优先事项**：完成有认证态的生产 UI 操作链路复核、复核公开文档与发布清单、评估远程节点 Compose/env 编辑限制和上游模型兼容性矩阵。按用户决定，数据库加密密钥暂时只保存在本机，不配置云端或离线副本；异地灾备因此仍未验收。
 
@@ -38,7 +38,7 @@
 - [ ] 日志挂载面板可记住上次选择。Agent 工具结果摘要与确认卡内的审批/拒绝错误反馈已通过前后端专项及全量测试验证。
 - [x] 通知渠道分组:当前通知为单渠道模型(type 单选),分组的前提是多渠道并存——需先把通知升级为多渠道列表再做分组,暂缓。
 - [x] Agent 阈值告警改为连续采样确认的事件状态机，持续超限只告警一次，恢复后重新武装。
-- [ ] 远程节点 Compose/env 编辑经 SSH 通道(当前 403 guard)。
+- [ ] 远程节点 Compose/env 编辑与应用的真实 SSH/TLS 端到端矩阵（本地安全/回滚测试通过；当前运行实例未配置可用的真实远程验收节点，不能把模拟测试记作远端验收通过）。
 - [ ] 成本分析疑超前:已降权至系统组,观察使用率再定去留。
 - [x] SQLite 静态加密可选启用；新安装默认仍为明文。密钥需保存在数据卷外；同主机恢复演练已做，独立 KMS/异地灾备仍待验证。
 
