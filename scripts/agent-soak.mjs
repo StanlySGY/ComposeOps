@@ -54,7 +54,7 @@ function parseArgs(argv) {
       config.reportFile = path.resolve(reportFile);
       continue;
     }
-    const match = /^--([a-z-]+)(?:=(.+))?$/.exec(raw);
+    const match = /^--([a-z0-9-]+)(?:=(.+))?$/.exec(raw);
     if (!match || !(match[1] in keys)) throw new Error('Unknown option: ' + raw);
     const value = Number(match[2]);
     if (!Number.isFinite(value) || value < 0) throw new Error('Invalid numeric option: ' + raw);
@@ -102,15 +102,18 @@ let agent;
 let base;
 let cookie;
 let samplerStop = false;
-let testStartedAt = Date.now();
+let testStartedAt = performance.now();
 let deadline = 0;
 let nextSlotAt = 0;
 let requestSequence = 0;
+let lastCheckpointAt = 0;
+let stopReason = null;
 let resourceBaseline = null;
 let peakRssMiB = 0;
 let peakFds = null;
 let lastCpuUsage = process.cpuUsage();
 let lastCpuSampleAt = performance.now();
+let lastResourceSampleAt = performance.now();
 
 function fdCount() {
   try { return fs.readdirSync('/proc/self/fd').length; } catch { return null; }
@@ -162,17 +165,17 @@ function syntheticClientIp(sequence) {
 }
 
 async function takeRequestSlot() {
-  if (samplerStop || Date.now() >= deadline) return null;
+  if (samplerStop || performance.now() >= deadline) return null;
   const intervalMs = 60000 / config.requestsPerMinute;
-  const now = Date.now();
+  const now = performance.now();
   const scheduledAt = Math.max(now, nextSlotAt);
   nextSlotAt = scheduledAt + intervalMs;
   if (scheduledAt >= deadline) return null;
   const sequence = ++requestSequence;
   counters.scheduled++;
-  const waitMs = scheduledAt - Date.now();
+  const waitMs = scheduledAt - performance.now();
   if (waitMs > 0) await delay(waitMs);
-  if (Date.now() >= deadline) return null;
+  if (samplerStop || performance.now() >= deadline) return null;
   return sequence;
 }
 
@@ -245,10 +248,12 @@ async function consumeOne(sequence) {
 }
 
 async function sampleResources() {
-  const elapsed = (Date.now() - testStartedAt) / 1000;
+  const elapsed = (performance.now() - testStartedAt) / 1000;
   const memory = process.memoryUsage();
   const currentCpu = process.cpuUsage();
   const now = performance.now();
+  const actualSampleIntervalMs = Math.max(0, now - lastResourceSampleAt);
+  lastResourceSampleAt = now;
   const wallMs = Math.max(1, now - lastCpuSampleAt);
   const cpuMs = ((currentCpu.user - lastCpuUsage.user) + (currentCpu.system - lastCpuUsage.system)) / 1000;
   const cpuPercent = Math.max(0, (cpuMs / wallMs) * 100);
@@ -256,12 +261,14 @@ async function sampleResources() {
   lastCpuSampleAt = now;
   const sample = {
     atSeconds: Number(elapsed.toFixed(1)),
+    actualSampleIntervalMs: Number(actualSampleIntervalMs.toFixed(1)),
     rssMiB: Number((memory.rss / 1024 / 1024).toFixed(1)),
     heapUsedMiB: Number((memory.heapUsed / 1024 / 1024).toFixed(1)),
     externalMiB: Number((memory.external / 1024 / 1024).toFixed(1)),
     fileDescriptors: fdCount(),
     cpuPercent: Number(cpuPercent.toFixed(1)),
     eventLoopP95Ms: Number((eventLoop.percentile(95) / 1e6).toFixed(1)),
+    eventLoopMaxMs: Number((eventLoop.max / 1e6).toFixed(1)),
   };
   if (elapsed >= config.warmupSeconds && !resourceBaseline) {
     resourceBaseline = sample;
@@ -274,6 +281,53 @@ async function sampleResources() {
   }
   resourceSamples.push(sample);
   eventLoop.reset();
+  const checkpointNow = performance.now();
+  if (config.reportFile && checkpointNow - lastCheckpointAt >= 60000) {
+    writeCheckpoint(sample, elapsed);
+    lastCheckpointAt = checkpointNow;
+  }
+}
+
+function writeCheckpoint(finalSample, elapsedSeconds) {
+  if (!config.reportFile || !agent) return;
+  const postWarmup = resourceSamples.filter((sample) => sample.atSeconds >= config.warmupSeconds);
+  const worstEventLoopSample = postWarmup.reduce((worst, sample) =>
+    !worst || sample.eventLoopP95Ms > worst.eventLoopP95Ms ? sample : worst, null);
+  const checkpoint = {
+    status: 'running', checkpoint: true, updatedAt: new Date().toISOString(),
+    configuredDurationSeconds: config.durationSeconds,
+    elapsedSeconds: Number(elapsedSeconds.toFixed(1)),
+    configuration: config,
+    requests: {
+      scheduled: counters.scheduled, completed: counters.completed,
+      clientDisconnects: counters.clientDisconnects, slowClients: counters.slowClients,
+      modelCalls: counters.modelCalls, modelAborts: counters.modelAborts,
+      streamedEvents: counters.streamedEvents, responseBytes: counters.responseBytes,
+      failures: counters.failures,
+    },
+    resources: {
+      baselineAfterWarmup: resourceBaseline, final: finalSample, peakRssMiB,
+      rssGrowthMiB: resourceBaseline ? Number((peakRssMiB - resourceBaseline.rssMiB).toFixed(1)) : 0,
+      baselineFileDescriptors: resourceBaseline?.fileDescriptors ?? null,
+      peakFileDescriptors: peakFds,
+      fileDescriptorGrowth: resourceBaseline && resourceBaseline.fileDescriptors != null && peakFds != null
+        ? peakFds - resourceBaseline.fileDescriptors : null,
+      averageCpuPercent: cpuSamples.length
+        ? Number((cpuSamples.reduce((sum, value) => sum + value, 0) / cpuSamples.length).toFixed(1)) : 0,
+      maxSampledEventLoopP95Ms: postWarmup.length
+        ? Math.max(...postWarmup.map((sample) => sample.eventLoopP95Ms)) : 0,
+      worstEventLoopSample,
+      maxSampleIntervalMs: postWarmup.length
+        ? Math.max(...postWarmup.map((sample) => sample.actualSampleIntervalMs)) : 0,
+      sampleCount: resourceSamples.length,
+    },
+    cleanup: { activeExecutions: agent.activeExecutions.size, pendingApprovals: agent.pendingApprovals?.size ?? 0 },
+  };
+  fs.mkdirSync(path.dirname(config.reportFile), { recursive: true, mode: 0o700 });
+  const temporaryReport = config.reportFile + '.tmp';
+  fs.writeFileSync(temporaryReport, JSON.stringify(checkpoint, null, 2) + '\n', { mode: 0o600 });
+  fs.chmodSync(temporaryReport, 0o600);
+  fs.renameSync(temporaryReport, config.reportFile);
 }
 
 async function main() {
@@ -310,23 +364,25 @@ async function main() {
     return makeModelResponse('稳定性测试通过。'.repeat(8), 12, init.signal);
   };
 
-  testStartedAt = Date.now();
+  testStartedAt = performance.now();
   deadline = testStartedAt + config.durationSeconds * 1000;
   nextSlotAt = testStartedAt;
+  lastCheckpointAt = testStartedAt;
   lastCpuUsage = process.cpuUsage();
   lastCpuSampleAt = performance.now();
+  lastResourceSampleAt = lastCpuSampleAt;
   eventLoop.enable();
   console.log('Agent/SSE soak started: duration=' + config.durationSeconds + 's workers=' + config.workers + ' requestBudget=' + config.requestsPerMinute + '/min');
   console.log('Using a temporary SQLite database and an in-process mock model; no real AI channel, host, or production database is contacted.');
 
   const sampler = (async () => {
-    while (!samplerStop && Date.now() < deadline) {
-      await delay(Math.min(config.sampleIntervalMs, Math.max(1, deadline - Date.now())));
+    while (!samplerStop && performance.now() < deadline) {
+      await delay(Math.min(config.sampleIntervalMs, Math.max(1, deadline - performance.now())));
       await sampleResources();
     }
   })();
   const workers = Array.from({ length: config.workers }, async () => {
-    while (!samplerStop && Date.now() < deadline) {
+    while (!samplerStop && performance.now() < deadline) {
       const sequence = await takeRequestSlot();
       if (sequence == null) break;
       try {
@@ -341,8 +397,8 @@ async function main() {
   await Promise.all(workers);
   samplerStop = true;
   await sampler;
-  const settleUntil = Date.now() + 5000;
-  while ((agent.activeExecutions.size || (agent.pendingApprovals?.size ?? 0)) && Date.now() < settleUntil) await delay(25);
+  const settleUntil = performance.now() + 5000;
+  while ((agent.activeExecutions.size || (agent.pendingApprovals?.size ?? 0)) && performance.now() < settleUntil) await delay(25);
   await sampleResources();
   eventLoop.disable();
 
@@ -357,10 +413,18 @@ async function main() {
   const eventLoopP95Ms = postWarmup.length
     ? Math.max(...postWarmup.map((sample) => sample.eventLoopP95Ms))
     : (finalSample.eventLoopP95Ms || 0);
+  const worstEventLoopSample = postWarmup.reduce((worst, sample) =>
+    !worst || sample.eventLoopP95Ms > worst.eventLoopP95Ms ? sample : worst, null);
+  const maxSampleIntervalMs = postWarmup.length
+    ? Math.max(...postWarmup.map((sample) => sample.actualSampleIntervalMs)) : 0;
 
+  const elapsedSeconds = Number(((performance.now() - testStartedAt) / 1000).toFixed(1));
   const summary = {
     status: 'pending',
-    durationSeconds: config.durationSeconds,
+    durationSeconds: elapsedSeconds,
+    configuredDurationSeconds: config.durationSeconds,
+    interrupted: Boolean(stopReason),
+    stopReason,
     configuration: config,
     requests: {
       scheduled: counters.scheduled, completed: counters.completed,
@@ -373,11 +437,13 @@ async function main() {
       baselineAfterWarmup: resourceBaseline, final: finalSample,
       peakRssMiB, rssGrowthMiB, baselineFileDescriptors: resourceBaseline?.fileDescriptors ?? null,
       peakFileDescriptors: peakFds, fileDescriptorGrowth: fdGrowth,
-      averageCpuPercent, maxSampledEventLoopP95Ms: eventLoopP95Ms, sampleCount: resourceSamples.length,
+      averageCpuPercent, maxSampledEventLoopP95Ms: eventLoopP95Ms,
+      worstEventLoopSample, maxSampleIntervalMs, sampleCount: resourceSamples.length,
     },
     cleanup: { activeExecutions: agent.activeExecutions.size, pendingApprovals: agent.pendingApprovals?.size ?? 0 },
   };
   const problems = [];
+  if (stopReason) problems.push('Test interrupted by ' + stopReason + ' before its configured monotonic deadline');
   if (!counters.completed) problems.push('No normal SSE request completed');
   if (!counters.clientDisconnects) problems.push('No client-disconnect cleanup probe completed');
   if (!counters.slowClients) problems.push('No slow-client probe completed');
@@ -387,7 +453,7 @@ async function main() {
   if (fdGrowth != null && fdGrowth > config.maxFdGrowth) problems.push('File descriptor growth ' + fdGrowth + ' exceeds ' + config.maxFdGrowth);
   if (averageCpuPercent > config.maxAverageCpuPercent) problems.push('Average CPU ' + averageCpuPercent + '% exceeds ' + config.maxAverageCpuPercent + '%');
   if (eventLoopP95Ms > config.maxEventLoopP95Ms) problems.push('Event-loop p95 ' + eventLoopP95Ms + ' ms exceeds ' + config.maxEventLoopP95Ms + ' ms');
-  summary.status = problems.length ? 'failed' : 'passed';
+  summary.status = stopReason ? 'interrupted' : problems.length ? 'failed' : 'passed';
   summary.problems = problems;
   if (config.reportFile) {
     fs.mkdirSync(path.dirname(config.reportFile), { recursive: true, mode: 0o700 });
@@ -396,12 +462,24 @@ async function main() {
     console.log('Agent/SSE JSON report written to ' + config.reportFile);
   }
   console.log(JSON.stringify(summary, null, 2));
-  if (problems.length) {
+  if (stopReason) {
+    console.error('Agent/SSE soak INTERRUPTED. Partial results were preserved; this is not a pass.');
+    process.exitCode = 2;
+  } else if (problems.length) {
     console.error('Agent/SSE soak FAILED. A bounded run is diagnostic evidence, not a substitute for the multi-hour release soak.');
     process.exitCode = 1;
   } else {
     console.log('Agent/SSE soak PASSED for this configured duration.');
   }
+}
+
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, () => {
+    stopReason = signal;
+    samplerStop = true;
+    deadline = performance.now();
+    console.warn('Received ' + signal + '; stopping workers and preserving the current soak report.');
+  });
 }
 
 try {

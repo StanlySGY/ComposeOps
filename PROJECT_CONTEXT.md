@@ -1,13 +1,16 @@
 # 📌 ComposeOps - PROJECT_CONTEXT.md
-> **上次更新时间**:2026-10-19 (Asia/Shanghai)
+> **上次更新时间**:2026-10-21 (Asia/Shanghai)
 > **当前版本/阶段**:仓库 package version 1.5.1；当前基线以 package.json、CHANGELOG 与 GitHub Actions 为准。
 
-## 0. 2026-10-19 最新运行状态（优先于下方历史快照）
-- **生产数据库静态加密已完成**：容器 opsdash 使用 docker-compose.yml + docker-compose.encrypted.yml 启动；database-encryption.js status 实测为 status=encrypted、encryptedHeader=true、keyVerified=true。数据库卷仍为 composeops_opsdash-data，服务健康检查通过，http://127.0.0.1:28765/ 返回 HTTP 200。
-- **密钥位置**：/home/sgy/.config/composeops/db-encryption-key（文件 0600、父目录 0700，不在仓库或数据库卷中；绝不读取、打印或提交密钥内容）。仍需把该密钥纳入独立的受控/异地密钥托管；完成前不得删除本机密钥文件。
-- **迁移回滚备份**：迁移前明文一致性快照 /home/sgy/.local/share/composeops-recovery/opsdash-before-encryption-20261019.db（约 110 MB，文件 0600，目录 0700），须按敏感明文数据保护，完成密钥托管与恢复保留期前不得删除。加密快照 /home/sgy/.local/share/composeops-recovery/opsdash-encrypted-snapshot-20261019.db；恢复演练报告 /home/sgy/.local/share/composeops-recovery/reports/encryption-recovery-drill-20261019.json，演练通过：密钥验证、完整性、schema 与核心表计数匹配，在线库未被修改。
-- **启动后保留策略**：应用启动时维护日志记录 aiHistoryDeleted:1，删除的是迁移前快照中 ai_history.id=4（时间 2026-09-19 01:38:07）的一条旧记录；这是应用启动后的历史数据保留清理，不是加密迁移复制过程的遗漏。迁移前审计已通过；启动后再次对比旧快照时因这项保留清理出现预期行数差异。
-- **四小时 Agent/SSE 压测**：短时预检 30 秒通过（58 次调度、54 次正常完成、4 次主动断开、3 次慢客户端、0 请求失败，最终活跃执行/待审批均为 0）。正式四小时任务由用户级 systemd 单元 composeops-agent-soak-4h-20261019.service 托管，启动时间 2026-10-19 14:08（Asia/Shanghai），目标 14,400 秒；主日志 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261019.log、每分钟心跳 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261019-heartbeat.log，最终报告预期 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261019.json。任务使用隔离 SQLite 和模拟模型，不触达生产数据库或真实 AI 渠道；在最终 JSON 生成并核验前不得标记通过。
+## 0. 2026-10-21 最新运行状态（优先于下方历史快照）
+- **生产数据库静态加密仍有效**：容器 opsdash 当前 running/healthy；只读状态检查返回 status=encrypted、encryptedHeader=true、keyVerified=true；http://127.0.0.1:28765/health 返回 status=ok、docker=ok。本轮未重启或改写生产服务。
+- **密钥托管仍是未完成项**：密钥文件 /home/sgy/.config/composeops/db-encryption-key 权限 0600，父目录 0700。2026-10-21 已确认本机密钥可用，但尚未验证独立受控/异地密钥托管；不得删除本机密钥，也不要把密钥内容写入 Git、日志或工单。
+- **启动后保留策略历史说明**：2026-10-19 应用启动时记录 aiHistoryDeleted:1，清理了一条超过保留期限的旧 ai_history 记录（id=4，时间 2026-09-19 01:38:07）。这是启动后的历史保留清理，不是加密迁移复制遗漏；迁移前审计已通过。
+- **恢复材料与敏感明文快照**：加密快照 /home/sgy/.local/share/composeops-recovery/opsdash-encrypted-snapshot-20261019.db（约 110 MB，0600）；迁移前明文快照 /home/sgy/.local/share/composeops-recovery/opsdash-before-encryption-20261019.db 仍须按敏感明文数据保护，在独立密钥托管、恢复能力与保留期确认前不得删除。
+- **最新恢复演练通过**：报告 /home/sgy/.local/share/composeops-recovery/reports/encryption-recovery-drill-20261021.json（0600）。加密快照和临时恢复副本均可用现有密钥打开；integrityCheck=ok、schema 与核心表计数匹配、临时副本已清理，liveDatabaseModified=false。该结果验证当前机器可恢复，不代表异地灾备已完成。
+- **四小时 Agent/SSE 隔离压测通过**：报告 /home/sgy/.local/share/composeops-recovery/reports/agent-soak-4h-20261021.json（0600），status=passed、实际时长 14400 秒、interrupted=false、problems=[]。调度 28,792 次、正常完成 27,098 次、主动断开 1,694 次、慢客户端 1,179 次、模拟模型调用 28,792 次、SSE 事件 741,870 个；RSS 峰值增长 65.7 MiB（阈值 256 MiB）、文件描述符增长 7（阈值 48）、平均 CPU 2.3%、事件循环 P95 最大采样值 37.2 ms（阈值 250 ms）；收尾时活动执行和待审批均为 0。测试使用临时 SQLite 与进程内模拟模型，不触达生产数据库或真实 AI 渠道。
+- **本轮代码验证通过**：后端 437 passed、1 skipped、0 failed；前端 382 passed、0 failed；npm run lint 和 git diff --check 均通过。当前代码改动是 scripts/agent-soak.mjs，包括单调时钟、原子检查点和 SIGTERM/SIGINT 中断收尾；尚未提交。
+- **后续优先事项**：先审查并提交压测脚本及本交接文档；独立密钥托管/异地灾备仍需选择实际可用的受控目标后才能完成，不能以同一主机上的另一份文件替代。
 
 ## 1. 核心概述 (Executive Summary)
 - **项目目标**:单用户 Docker Compose 运维控制台(工作区名 `ComposeOps`,镜像/容器沿用旧名 `OpsDash`)。通过 Docker Socket 自动发现带 `com.docker.compose.project` 标签的 Compose 项目,以"先发现、后显式纳管"的权限模型提供服务启停、Compose 配置编辑、环境变量文件族管理、实时日志、容器终端、数据卷备份、GitOps 同步、应用市场、定时任务、多 Docker 节点纳管、资源监控与 AI 运维 Agent 能力。
@@ -23,7 +26,7 @@
   - 数据保护:Compose 备份(20 份/diff/回滚)、**数据卷备份**(`services/volume-backup.js` helper 容器 tar,cron 类型 `volume-backup`,目录 `backup.volume_dir`,每卷 20 份)、数据库 Dump、保留策略(`pruneAiData`,setting `retention.ai_days` 默认 90 天,metrics-collector 每日触发)。
   - GitOps(轮询 + webhook `POST /gitops/webhook/:id`,token=`gitops.webhook_token`,app.js auth 豁免)、应用市场(蓝图 + 自定义模板 + AI 找应用 `POST /marketplace/templates/ai-discover`,只出草稿)、定时任务(5 段 cron 解析,JSON 持久化)、告警通知(Bark/Telegram/企微/邮件/Webhook)、操作审计、多渠道事件中心。
   - 基础设施:登录锁定(5 次/15 分钟)、Cookie SameSite=Strict、CSP(含 img-src https)、SWR 缓存、骨架屏、日志虚拟滚动、键盘导航(j/k + `?` 帮助)、Cmd+K 命令面板。
-- **验证基线（2026-10-16）**:提交 `9bd91cd` 本地全量验证：后端 431 项中 430 项通过、1 项既有预期跳过；前端 63 个测试文件、381 项通过；双端 lint、正式/预览构建通过；Playwright 预览检查 30 项通过、2 项既有预期跳过。最新提交 `0701185` 的 GitHub Actions [run 38857039469](https://github.com/StanlySGY/ComposeOps/actions/runs/38857039469) 全部成功，含常规测试、桌面/移动浏览器、amd64 安装/升级/恢复和 ARM64 安装/在线备份恢复。本轮另跑通知/SSH/TLS/多节点专项测试 18/18、真实 Docker Redis 恢复 smoke 通过；真实模型在隔离数据库和临时 Redis/PostgreSQL 项目上通过 Agent 工具循环与审批门修复演练，Redis `PONG`、PostgreSQL ready，临时资源清理通过。正式四小时 SSE soak 因本机/WSL 关机中断，没有最终报告，按未完成/不通过验收处理且不自动重跑；后续需要时改为 5–10 分钟分段压测。当前运行容器数据库状态为 plaintext，且当前环境找不到可用外置密钥/加密快照，详见 `docs/public/ROADMAP.md`。
+- **历史验证基线（2026-10-16；仅作历史记录，当前运行状态以第 0 节为准）**:提交 `9bd91cd` 本地全量验证：后端 431 项中 430 项通过、1 项既有预期跳过；前端 63 个测试文件、381 项通过；双端 lint、正式/预览构建通过；Playwright 预览检查 30 项通过、2 项既有预期跳过。最新提交 `0701185` 的 GitHub Actions [run 38857039469](https://github.com/StanlySGY/ComposeOps/actions/runs/38857039469) 全部成功，含常规测试、桌面/移动浏览器、amd64 安装/升级/恢复和 ARM64 安装/在线备份恢复。本轮另跑通知/SSH/TLS/多节点专项测试 18/18、真实 Docker Redis 恢复 smoke 通过；真实模型在隔离数据库和临时 Redis/PostgreSQL 项目上通过 Agent 工具循环与审批门修复演练，Redis `PONG`、PostgreSQL ready，临时资源清理通过。正式四小时 SSE soak 因本机/WSL 关机中断，没有最终报告，按未完成/不通过验收处理且不自动重跑；后续需要时改为 5–10 分钟分段压测。当前运行容器数据库状态为 plaintext，且当前环境找不到可用外置密钥/加密快照，详见 `docs/public/ROADMAP.md`。
 - **2026-10-16 本轮改进已验证**：Agent 阈值告警连续采样防抖、工具失败摘要和确认卡错误反馈已通过专项/全量测试；只读数据库迁移前审计命令 `node backend/scripts/database-readiness-audit.js` 已添加并经隔离测试验证。后端 438 项中 437 项通过、1 项既有跳过；前端 63 个测试文件、382 项通过；双端 Lint、正式/预览构建通过；Playwright 预览 30 项通过、2 项既有预期跳过。数据库当前实例未迁移，因真实外置密钥/备份仍未核实。
 - **容器镜像**:`runtime` 阶段内置 docker CLI / compose / buildx(从官方 `docker:cli` COPY)+ git / openssh-client;
   apt 默认走 `ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn`,npm 走 npmmirror。默认数据库适配器使用 `node:sqlite`；启用静态加密时依赖 `better-sqlite3-multiple-ciphers` 原生 addon，由构建阶段安装编译工具链。
