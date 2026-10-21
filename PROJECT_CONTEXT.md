@@ -46,3 +46,10 @@
 - 后端单测必须串行:`DB_PATH=/tmp/x.db npm test`(package.json 已带 `--test-concurrency=1`),并发会多进程抢同一 DB 偶发失败。
 - 前后端共享代码改动须同步两份副本并跑 sync 测试;`dotenv.js` 同理(无测试,人工对齐)。
 - 真机冒烟模板:拷贝 `backend/data/opsdash.db` 副本 + scrypt 重置密码 → `ENABLE_SHELL=1 SERVE_FRONTEND=1 PORT=3101 DB_PATH=<副本> node src/index.js`。
+
+## 2026-10-21 本轮外部验收探测（新增）
+
+- 生产健康检查再次返回 status=ok、docker=ok；/api/v1/auth/status 返回 setupRequired=false、authenticated=false。通过受支持的 Browser 工具新建独立页面访问 http://127.0.0.1:28765/，页面实际呈现管理员密码登录框；因此未完成认证后的生产 UI 全流程。没有重置密码、绕过认证或读取凭据。解阻方式：用户在该受支持页面自行完成登录后通知继续，或提供可由 Browser 工具使用的受支持已认证会话。
+- 对本机两个已运行的 OpenAI 兼容网关做只读模型列表探测：zai-openai（http://127.0.0.1:30016/v1/models）和 axonhub（http://127.0.0.1:8090/v1/models）均返回 HTTP 401 Invalid API key。这仅说明本次探测没有有效认证，不能推断上游模型服务故障；未读取、复制、输出或修改任何密钥。真实模型/流式/工具调用兼容性矩阵仍需在 ComposeOps 管理界面配置并测试一个获授权的测试 channel 后完成。
+- 本轮检查 ~/.ssh/config 未发现可用的非通配 Host 别名，且当前运行实例此前已记录未配置远程 Docker 节点/SSH Agent；没有可安全指定的真实 SSH/TLS 测试目标，远程握手、指纹、证书轮换及断连恢复不记为通过。解阻方式：在 ComposeOps 中登记一个非生产测试节点，并确认有权对其执行只读健康检查。
+- 数据库加密密钥继续仅存本机；不上传、不复制到远端。已完成的本机加密快照恢复演练保持有效，但另一主机/异地恢复仍未验收；未删除任何迁移前或恢复相关备份。
