@@ -7,7 +7,8 @@ import test from 'node:test';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-ops-test-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
-const { parseImageRef, extractImageRefs } = await import('../src/services/image-updater.js');
+const { parseImageRef, extractImageRefs, extractImageServices, compareImageDigests, fetchRemoteDigest } = await import('../src/services/image-updater.js');
+const { flattenUpdateResults } = await import('../src/services/maintenance.js');
 const { parseDockerDf, parseDockerDfOutput, pruneStorage } = await import('../src/services/docker-storage.js');
 const { getActivityDocker } = await import('../src/services/docker-hosts.js');
 const { removeDockerResource } = await import('../src/services/docker-resources.js');
@@ -39,8 +40,11 @@ test('cron pull-images: 没有纳管项目时返回无工作摘要', () => {
 
 
 test('image-updater: parseImageRef 识别 registry/image/tag', () => {
-  assert.deepEqual(parseImageRef('nginx:1.25'), { registry: 'docker.io', image: 'library/nginx', tag: '1.25', original: 'nginx:1.25' });
-  assert.deepEqual(parseImageRef('ghcr.io/gethomepage/homepage:latest'), { registry: 'ghcr.io', image: 'gethomepage/homepage', tag: 'latest', original: 'ghcr.io/gethomepage/homepage:latest' });
+  assert.deepEqual(parseImageRef('nginx:1.25'), { registry: 'docker.io', image: 'library/nginx', tag: '1.25', digest: null, original: 'nginx:1.25' });
+  assert.deepEqual(parseImageRef('ghcr.io/gethomepage/homepage:latest'), { registry: 'ghcr.io', image: 'gethomepage/homepage', tag: 'latest', digest: null, original: 'ghcr.io/gethomepage/homepage:latest' });
+  assert.deepEqual(parseImageRef('nginx'), { registry: 'docker.io', image: 'library/nginx', tag: 'latest', digest: null, original: 'nginx' });
+  assert.deepEqual(parseImageRef('registry.example:5000/team/api:3.2'), { registry: 'registry.example:5000', image: 'team/api', tag: '3.2', digest: null, original: 'registry.example:5000/team/api:3.2' });
+  assert.equal(parseImageRef(`ghcr.io/org/api@sha256:${'a'.repeat(64)}`).digest, `sha256:${'a'.repeat(64)}`);
   assert.equal(parseImageRef('${IMAGE}'), null);
 });
 
@@ -48,6 +52,73 @@ test('image-updater: extractImageRefs 提取 compose 中 services.image', () => 
   const compose = `services:\n  web:\n    image: nginx:alpine\n  api:\n    image: ghcr.io/org/api:2.0\n  noimage:\n    build: ./app\n`;
   const refs = extractImageRefs(compose);
   assert.deepEqual(refs, ['nginx:alpine', 'ghcr.io/org/api:2.0']);
+});
+
+test('image-updater: 解析 YAML 服务来源、变量、pull_policy 和多文件覆盖', () => {
+  const base = `services:\n  web:\n    image: nginx\n  api:\n    build: ./api\n  worker:\n    image: ghcr.io/org/worker:latest\n    build: ./worker\n  pinned:\n    image: ghcr.io/org/pinned@sha256:${'b'.repeat(64)}\n  templated:\n    image: '\${IMAGE_REF}'\n  config-only:\n    environment:\n      image: not-a-container-image\n`;
+  const override = `services:\n  worker:\n    pull_policy: always\n  web:\n    image: nginx:1.27\n  local-only:\n    image: custom/api:dev\n    pull_policy: never\n  --unsafe:\n    image: alpine\n`;
+  const services = extractImageServices([base, override]);
+  const byName = Object.fromEntries(services.map((item) => [item.service, item]));
+  assert.equal(byName.web.image, 'nginx:1.27');
+  assert.equal(byName.web.status, 'remote');
+  assert.equal(byName.api.status, 'local_build');
+  assert.equal(byName.worker.status, 'remote');
+  assert.equal(byName.pinned.status, 'pinned');
+  assert.equal(byName.templated.status, 'unresolved');
+  assert.equal(byName['local-only'].status, 'local_only');
+  assert.equal(byName['--unsafe'].status, 'unresolved');
+  assert.equal(byName['config-only'], undefined);
+  assert.deepEqual(extractImageRefs([base, override]), ['nginx:1.27', 'ghcr.io/org/worker:latest']);
+});
+
+test('image-updater: 比较同一仓库的 RepoDigest；不把本地 Image ID 当作远端 digest', () => {
+  const parsed = parseImageRef('nginx:latest');
+  const digestA = `sha256:${'a'.repeat(64)}`;
+  const digestB = `sha256:${'b'.repeat(64)}`;
+  assert.deepEqual(compareImageDigests({ Id: digestA, RepoDigests: [`nginx@${digestA}`] }, digestA, parsed), {
+    status: 'current', localDigest: digestA, remoteDigest: digestA, hasUpdate: false,
+  });
+  assert.deepEqual(compareImageDigests({ Id: digestA, RepoDigests: [`docker.io/library/nginx@${digestA}`] }, digestB, parsed), {
+    status: 'updated', localDigest: digestA, remoteDigest: digestB, hasUpdate: true,
+  });
+  assert.equal(compareImageDigests(null, digestB, parsed).status, 'not_downloaded');
+  assert.equal(compareImageDigests({ Id: digestA, RepoDigests: [] }, digestB, parsed).status, 'unknown');
+});
+
+test('image-updater: Docker Hub official image 的匿名 token 使用 library 仓库 scope，并请求 OCI manifest', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const digest = `sha256:${'c'.repeat(64)}`;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (String(url).startsWith('https://auth.docker.io/token?')) {
+      return { ok: true, json: async () => ({ token: 'test-token' }) };
+    }
+    return { ok: true, headers: { get: (name) => (name.toLowerCase() === 'docker-content-digest' ? digest : null) } };
+  };
+  try {
+    assert.equal(await fetchRemoteDigest(parseImageRef('nginx:alpine')), digest);
+    assert.match(calls[0].url, /scope=repository%3Alibrary%2Fnginx%3Apull|scope=repository:library\/nginx:pull/);
+    assert.match(calls[1].url, /\/v2\/library\/nginx\/manifests\/alpine$/);
+    assert.match(calls[1].options.headers.Authorization, /^Bearer test-token$/);
+    assert.match(calls[1].options.headers.Accept, /application\/vnd\.oci\.image\.index\.v1\+json/);
+  } finally {
+    // eslint-disable-next-line require-atomic-updates -- this test restores its temporary global fetch stub.
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('image-updater: 旧维护结果格式保留项目/服务，并将本地构建与检查失败分开', () => {
+  const results = flattenUpdateResults([{ projectId: 'p1', projectName: 'demo', images: [
+    { service: 'web', image: 'nginx:latest', hasUpdate: true, status: 'updated', localDigest: 'sha256:a', remoteDigest: 'sha256:b' },
+    { service: 'api', image: '', hasUpdate: false, status: 'local_build', reason: 'build 配置' },
+    { service: 'db', image: 'postgres:16', hasUpdate: false, status: 'failed', error: 'registry 401' },
+  ] }]);
+  assert.deepEqual(results.map(({ service, status }) => ({ service, status })), [
+    { service: 'web', status: 'updated' }, { service: 'api', status: 'local_build' }, { service: 'db', status: 'failed' },
+  ]);
+  assert.equal(results[0].projectName, 'demo');
+  assert.equal(results[2].error, 'registry 401');
 });
 
 test('docker-storage: parseDockerDf 解析 df json 并汇总 reclaimable', () => {

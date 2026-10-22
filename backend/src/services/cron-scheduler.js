@@ -15,7 +15,7 @@ const JOB_TYPES = {
   'db-backup': { label: '数据库自动备份', description: '对所有纳管项目中运行的数据库容器执行 Dump 并留存本地' },
   'prune-safe': { label: 'Docker 安全清理', description: '清理悬空镜像、退出容器与未使用构建缓存' },
   'prune-all': { label: 'Docker 自动深度清理', description: '自动清理悬空镜像、退出容器与全部未使用构建缓存;不会删除数据卷' },
-  'images-check': { label: '镜像更新检查', description: '全局检测纳管项目镜像是否有远程更新(写入雷达缓存)' },
+  'images-check': { label: '镜像更新检查', description: '只读查询纳管项目的远端镜像更新；不会拉取或重建容器' },
   'pull-images': { label: '定时拉取镜像', description: '对所有可编辑项目执行 docker compose pull' },
   'volume-backup': { label: '数据卷备份', description: '对所有纳管项目的命名卷执行 tar 备份,保留最近份数' },
   'inspection': { label: 'AI 巡检', description: '执行一次只读巡检并留存报告(容器/磁盘/内存/备份时效)' },

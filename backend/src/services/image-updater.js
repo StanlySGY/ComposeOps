@@ -1,6 +1,7 @@
 import { readFile, writeFile, copyFile } from 'fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { parse as parseYaml } from 'yaml';
 import { setSetting, addComposeBackup, addOperation } from '../lib/db.js';
 import { readCompose } from './compose-runner.js';
 import { getActivityDocker } from './docker-hosts.js';
@@ -10,19 +11,27 @@ import { withProjectOperationLock } from './project-operation-lock.js';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h,避免 Registry Rate Limit
 const cache = new Map(); // projectId -> { ts, data }
 
-/** 解析镜像引用为 { registry, image, tag }。非镜像行(变量/$)返回 null。 */
+/** 解析 Docker 镜像引用。变量、无效引用返回 null；无标签引用按 latest 处理。 */
 export function parseImageRef(ref = '') {
-  const cleaned = String(ref).trim().split(/\s+/)[0].replace(/^["']|["']$/g, '');
-  if (!cleaned || cleaned.startsWith('$') || cleaned.startsWith('#') || cleaned.includes('\\')) return null;
-  if (!cleaned.includes('/') && !cleaned.includes(':') && !cleaned.includes('.')) return null;
-  let registry = 'docker.io';
-  let image = cleaned;
+  const cleaned = String(ref).trim().replace(/^["']|["']$/g, '');
+  if (!cleaned || cleaned.startsWith('#') || /[\s\\${}]/.test(cleaned)) return null;
+  const at = cleaned.indexOf('@');
+  if (at !== -1 && cleaned.indexOf('@', at + 1) !== -1) return null;
+  const digest = at === -1 ? null : cleaned.slice(at + 1);
+  if (digest && !/^[A-Za-z][A-Za-z0-9_+.-]*:[a-fA-F0-9]+$/.test(digest)) return null;
+  let image = at === -1 ? cleaned : cleaned.slice(0, at);
+  if (!image) return null;
   let tag = 'latest';
+  const lastSlash = image.lastIndexOf('/');
   const lastColon = image.lastIndexOf(':');
-  if (lastColon > -1 && !image.slice(lastColon + 1).includes('/') && /^[\w][\w.-]*$/.test(image.slice(lastColon + 1))) {
-    tag = image.slice(lastColon + 1);
+  if (lastColon > lastSlash) {
+    const candidate = image.slice(lastColon + 1);
+    if (!/^[\w][\w.-]*$/.test(candidate)) return null;
+    tag = candidate;
     image = image.slice(0, lastColon);
   }
+  if (!image || image.startsWith('/') || image.endsWith('/')) return null;
+  let registry = 'docker.io';
   const firstSlash = image.indexOf('/');
   if (firstSlash > -1) {
     const maybeReg = image.slice(0, firstSlash);
@@ -32,30 +41,59 @@ export function parseImageRef(ref = '') {
     }
   }
   if (registry === 'docker.io' && !image.includes('/')) image = `library/${image}`;
-  return { registry, image, tag, original: cleaned };
+  if (!image || image.split('/').some((part) => !part || part === '.' || part === '..')) return null;
+  return { registry, image, tag, digest, original: cleaned };
 }
 
-/** 从 Compose 内容提取全部镜像引用(services.*.image 与 build 之外)。 */
-export function extractImageRefs(composeContent = '') {
-  const refs = new Set();
-  const lines = String(composeContent).split('\n');
-  let inServices = false;
-  for (const raw of lines) {
-    const line = raw;
-    const trimmed = line.trim();
-    if (/^services:\s*$/.test(trimmed)) { inServices = true; continue; }
-    if (!inServices) continue;
-    // 顶层非缩进键(如 volumes:/networks:)表示 services 块已结束
-    if (!line.startsWith(' ') && !line.startsWith('\t') && trimmed.length > 0 && !trimmed.startsWith('#')) {
-      inServices = false;
-      continue;
-    }
-    if (!/^image:/.test(trimmed)) continue;
-    const value = trimmed.slice('image:'.length).trim();
-    const parsed = parseImageRef(value);
-    if (parsed) refs.add(parsed.original);
+function classifyImageService(service) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(service.service)) {
+    return { ...service, status: 'unresolved', reason: '服务名称格式不支持安全的自动升级' };
   }
-  return [...refs];
+  if (!service.image) return service.build
+    ? { ...service, status: 'local_build', reason: '服务通过 build 配置本地构建' }
+    : { ...service, status: 'unsupported', reason: '服务没有 image 配置' };
+  if (service.build && service.pullPolicy !== 'always') {
+    return service.pullPolicy
+      ? { ...service, status: 'local_build', reason: `pull_policy=${service.pullPolicy}，不按远端镜像更新处理` }
+      : { ...service, status: 'needs_policy', reason: '同时配置了 image 和 build，请明确设置 pull_policy 后再探测远端更新' };
+  }
+  if (service.pullPolicy === 'never') {
+    return service.build
+      ? { ...service, status: 'local_build', reason: 'pull_policy=never，优先使用本地构建镜像' }
+      : { ...service, status: 'local_only', reason: 'pull_policy=never，仅使用已存在的本地镜像' };
+  }
+  if (service.pullPolicy === 'build') {
+    return { ...service, status: 'local_build', reason: `pull_policy=${service.pullPolicy}，不检查远端更新` };
+  }
+  const parsed = parseImageRef(service.image);
+  if (!parsed) return { ...service, status: 'unresolved', reason: '镜像引用包含变量或格式无法识别' };
+  if (parsed.digest) return { ...service, parsed, status: 'pinned', reason: '镜像已固定到 digest；更新需修改 Compose 配置' };
+  return { ...service, parsed, status: 'remote' };
+}
+
+/** 解析并合并 Compose 文件中的服务镜像字段，避免误读注释/环境变量中的 image 文本。 */
+export function extractImageServices(composeContents = '') {
+  const contents = (Array.isArray(composeContents) ? composeContents : [composeContents]).filter((item) => typeof item === 'string');
+  const services = new Map();
+  for (const content of contents) {
+    const document = parseYaml(content);
+    for (const [name, config] of Object.entries(document?.services || {})) {
+      if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+      const current = services.get(name) || { service: name, image: null, build: false, pullPolicy: null };
+      if (Object.hasOwn(config, 'image')) current.image = typeof config.image === 'string' ? config.image.trim() : null;
+      if (Object.hasOwn(config, 'build')) current.build = config.build !== null && config.build !== false;
+      if (Object.hasOwn(config, 'pull_policy')) current.pullPolicy = String(config.pull_policy || '').toLowerCase();
+      services.set(name, current);
+    }
+  }
+  return [...services.values()].map(classifyImageService).filter((item) => item.status !== 'unsupported');
+}
+
+/** 兼容旧调用方：只返回策略明确为远端可探测的镜像引用。 */
+export function extractImageRefs(composeContent = '') {
+  return [...new Set(extractImageServices(composeContent)
+    .filter((item) => item.status === 'remote')
+    .map((item) => item.parsed.original))];
 }
 
 /** Docker Hub 匿名 token,供 manifest 拉取。 */
@@ -76,9 +114,10 @@ async function dockerHubToken(repo) {
 /** 拉取远程 manifest 的 digest(HEAD/GET + Docker-Content-Digest 头优先)。 */
 export async function fetchRemoteDigest({ registry, image, tag }) {
   const base = registry === 'docker.io' ? 'https://registry-1.docker.io' : `https://${registry}`;
-  const repo = registry === 'docker.io' ? image.replace(/^library\//, '') : image;
+  // Docker Hub official images must retain the library/ namespace in their token scope.
+  const repo = image;
   const endpoint = `${base}/v2/${image}/manifests/${tag}`;
-  const accept = 'application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/json';
+  const accept = 'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/json';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
   try {
@@ -97,13 +136,57 @@ export async function fetchRemoteDigest({ registry, image, tag }) {
   }
 }
 
-async function localImageId(docker, image) {
+async function localImageInfo(docker, image) {
   try {
-    const info = await docker.getImage(image).inspect();
-    return info.Id || '';
+    return await docker.getImage(image).inspect();
   } catch {
     return null;
   }
+}
+
+function normalizeRepository(value) {
+  let name = String(value || '').split('@')[0];
+  if (name.startsWith('index.docker.io/')) name = `docker.io/${name.slice('index.docker.io/'.length)}`;
+  if (name.startsWith('docker.io/')) {
+    const rest = name.slice('docker.io/'.length);
+    return `docker.io/${rest.includes('/') ? rest : `library/${rest}`}`;
+  }
+  const first = name.split('/')[0];
+  if (first.includes('.') || first.includes(':') || first === 'localhost') return name;
+  return `docker.io/${name.includes('/') ? name : `library/${name}`}`;
+}
+
+/** 只在同一 Registry/repository 的 RepoDigest 与远端 manifest digest 之间作比较。 */
+export function compareImageDigests(localInfo, remoteDigest, parsed) {
+  if (!localInfo) return { status: 'not_downloaded', localDigest: null, remoteDigest, hasUpdate: true };
+  const expectedRepo = normalizeRepository(`${parsed.registry}/${parsed.image}`);
+  const repoDigest = (localInfo.RepoDigests || []).find((value) => {
+    const [repo, digest] = String(value).split('@');
+    return !!digest && normalizeRepository(repo) === expectedRepo;
+  });
+  if (!repoDigest) {
+    return { status: 'unknown', localDigest: null, localImageId: localInfo.Id || null, remoteDigest, hasUpdate: false, reason: '本地镜像没有同一仓库的 RepoDigest，无法可靠比较' };
+  }
+  const localDigest = repoDigest.split('@').at(-1);
+  const same = localDigest === remoteDigest;
+  return { status: same ? 'current' : 'updated', localDigest, remoteDigest, hasUpdate: !same };
+}
+
+async function readProjectComposeContents(project) {
+  const files = Array.isArray(project.composeFiles) && project.composeFiles.length ? project.composeFiles : [project.composeFile].filter(Boolean);
+  if (!files.length) throw new Error('项目没有可读取的 Compose 文件');
+  if (project.mounted) {
+    const contents = [];
+    for (let i = 0; i < files.length; i += 1) contents.push((await readCompose(project, i)).content);
+    return contents;
+  }
+  if (project.workspaceAvailable) {
+    return withRunner(project, async (container) => Promise.all(files.map(async (file) => {
+      const { content } = await readArchiveFile(container, file);
+      return content;
+    })));
+  }
+  throw Object.assign(new Error('当前项目的 Compose 文件不可读，无法安全检查镜像来源'), { statusCode: 409 });
 }
 
 /** 单项目镜像更新检测(带 1h 缓存)。 */
@@ -111,41 +194,33 @@ export async function getProjectUpdates(project, { force = false } = {}) {
   const cached = cache.get(project.id);
   if (!force && cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data;
   const docker = getActivityDocker();
-  let composeContent = '';
-  if (project.mounted) {
-    try { composeContent = (await readCompose(project, 0)).content; } catch { /* 本地 Compose 不可读时尝试 workspace。 */ }
-  } else if (project.workspaceAvailable) {
-    try {
-      composeContent = await withRunner(project, async (container) => {
-        const { content } = await readArchiveFile(container, project.composeFiles[0]);
-        return content;
-      });
-      composeContent = composeContent || '';
-    } catch { /* workspace Compose 不可读时返回无配置结果。 */ }
-  }
-  const refs = extractImageRefs(composeContent);
+  const services = extractImageServices(await readProjectComposeContents(project));
   const images = [];
-  for (const ref of refs) {
-    try {
-      const parsed = parseImageRef(ref);
-      if (!parsed) continue;
-      const local = await localImageId(docker, ref).catch(() => null);
-      let remote = null;
-      let error = '';
-      try { remote = await fetchRemoteDigest(parsed); } catch (e) { error = e.message; }
-      images.push({
-        image: ref,
-        registry: parsed.registry,
-        tag: parsed.tag,
-        localDigest: local,
-        remoteDigest: remote,
-        hasUpdate: !!(local && remote && local !== remote),
-        reachable: !error,
-        error,
-      });
-    } catch {
-      // 跳过无法解析的镜像
+  const remoteDigests = new Map();
+  for (const service of services) {
+    const item = { service: service.service, image: service.image || '', status: service.status, hasUpdate: false, localDigest: null, remoteDigest: null, reachable: false, reason: service.reason || '' };
+    if (service.status !== 'remote') {
+      item.reachable = service.status === 'local_build' || service.status === 'pinned';
+      images.push(item);
+      continue;
     }
+    const { parsed } = service;
+    item.registry = parsed.registry;
+    item.tag = parsed.tag;
+    try {
+      const local = await localImageInfo(docker, parsed.original);
+      let remote = remoteDigests.get(parsed.original);
+      if (remote === undefined) {
+        remote = await fetchRemoteDigest(parsed);
+        remoteDigests.set(parsed.original, remote);
+      }
+      Object.assign(item, compareImageDigests(local, remote, parsed), { reachable: true });
+    } catch (error) {
+      item.status = 'failed';
+      item.error = error.message;
+      item.reachable = false;
+    }
+    images.push(item);
   }
   const data = {
     projectId: project.id,
@@ -167,7 +242,19 @@ export async function checkAllUpdates() {
   async function worker() {
     while (queue.length) {
       const project = queue.shift();
-      try { results.push(await getProjectUpdates(project, { force: true })); } catch { /* 单项目失败不影响全局 */ }
+      try {
+        results.push(await getProjectUpdates(project, { force: true }));
+      } catch (error) {
+        // 全局巡检不能把读取 Compose / YAML 解析失败的项目静默当成“无更新”。
+        results.push({
+          projectId: project.id,
+          projectName: project.projectName,
+          checkedAt: Date.now(),
+          images: [{ service: 'Compose 文件', image: '—', status: 'failed', hasUpdate: false, reachable: false, error: error.message }],
+          hasUpdate: false,
+          error: error.message,
+        });
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(3, projects.length) }, () => worker()));
@@ -209,22 +296,35 @@ export async function upgradeProject(project, options = {}) {
   if (!project?.managed || !project.editable) {
     throw Object.assign(new Error('当前节点下该项目不支持平滑升级(需要 Compose 能力)'), { statusCode: 403 });
   }
+  if (!Array.isArray(options.services) || !options.services.length || options.services.some((service) => typeof service !== 'string' || !service.trim())) {
+    throw Object.assign(new Error('请至少选择一个有更新的 Compose 服务'), { statusCode: 400 });
+  }
+  if (new Set(options.services).size !== options.services.length) {
+    throw Object.assign(new Error('升级服务列表包含重复项'), { statusCode: 400 });
+  }
   return withProjectOperationLock(project.id, () => upgradeProjectLocked(project, options));
 }
 
-async function upgradeProjectLocked(project, { onOutput = () => {}, onChild = () => {} } = {}) {
+async function upgradeProjectLocked(project, { services, onOutput = () => {}, onChild = () => {} } = {}) {
+  const latest = await getProjectUpdates(project, { force: true });
+  const updateable = new Set(latest.images.filter((item) => item.hasUpdate).map((item) => item.service));
+  const selected = [...new Set(services || [])];
+  const stale = selected.filter((service) => !updateable.has(service));
+  if (stale.length) {
+    throw Object.assign(new Error(`这些服务当前没有可确认的镜像更新，请重新检查：${stale.join(', ')}`), { statusCode: 409 });
+  }
   const backups = await writeUpgradeBackups(project);
   const { spawnComposeCommand } = await import('./compose-runner.js');
   const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
   let code;
   if (project.mounted) {
-    code = await runStep(spawnComposeCommand(project, ['pull']), onOutput, onChild);
+    code = await runStep(spawnComposeCommand(project, ['pull', ...selected]), onOutput, onChild);
     if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
-    code = await runStep(spawnComposeCommand(project, ['up', '-d']), onOutput, onChild);
+    code = await runStep(spawnComposeCommand(project, ['up', '-d', '--no-deps', ...selected]), onOutput, onChild);
   } else {
-    code = await runWorkspaceComposeArgs(project, ['pull'], onOutput);
+    code = await runWorkspaceComposeArgs(project, ['pull', ...selected], onOutput);
     if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
-    code = await runWorkspaceComposeArgs(project, ['up', '-d'], onOutput);
+    code = await runWorkspaceComposeArgs(project, ['up', '-d', '--no-deps', ...selected], onOutput);
   }
   if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
 
@@ -234,16 +334,18 @@ async function upgradeProjectLocked(project, { onOutput = () => {}, onChild = ()
   let degraded = false;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    const checks = await Promise.all(project.containers.map(async (item) => {
+    const currentContainers = await docker.listContainers({ all: true, filters: { label: [`com.docker.compose.project=${project.projectName}`] } });
+    const targets = currentContainers.filter((item) => selected.includes(item.Labels?.['com.docker.compose.service']));
+    const checks = await Promise.all(targets.map(async (item) => {
       try {
-        const inspection = await docker.getContainer(item.id).inspect();
+        const inspection = await docker.getContainer(item.Id).inspect();
         const state = inspection.State || {};
         const health = state.Health?.Status === 'healthy' || !state.Health;
-        const paused = state.Status === 'running' || state.Status === 'paused';
-        return { id: item.id, name: item.name, ok: paused && health };
-      } catch { return { id: item.id, name: item.name, ok: false }; }
+        const running = state.Status === 'running';
+        return { id: item.Id, name: (item.Names?.[0] || '').replace(/^\//, ''), ok: running && health };
+      } catch { return { id: item.Id, name: (item.Names?.[0] || '').replace(/^\//, ''), ok: false }; }
     }));
-    degraded = checks.some((item) => !item.ok);
+    degraded = checks.length === 0 || checks.some((item) => !item.ok);
     if (!degraded) break;
   }
   addOperation({
@@ -251,9 +353,10 @@ async function upgradeProjectLocked(project, { onOutput = () => {}, onChild = ()
     projectName: project.projectName,
     action: 'images.upgrade',
     status: degraded ? 'failed' : 'success',
-    detail: degraded ? '升级后容器未通过健康检查' : '已平滑升级并恢复健康',
+    detail: degraded ? `所选服务升级后未通过健康检查：${selected.join(', ')}` : `已升级并通过健康检查：${selected.join(', ')}`,
   });
-  return { code, upgraded: true, degraded, rollbackAvailable: backups.length > 0, backups };
+  cache.delete(project.id);
+  return { code, upgraded: true, degraded, services: selected, rollbackAvailable: backups.length > 0, backups };
 }
 
 function runStep(child, onOutput, onChild) {

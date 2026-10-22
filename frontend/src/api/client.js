@@ -202,7 +202,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ containerId, dbName }),
     }),
-  streamUpgrade: (projectId, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/upgrade`, {}, signal),
+  streamUpgrade: (projectId, services, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/upgrade`, { services }, signal),
   streamRollback: (projectId, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/rollback`, {}, signal),
   checkAllUpdates: () => request('/ops/updates/check-all', { method: 'POST' }),
   // docker storage

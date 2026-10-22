@@ -1,10 +1,10 @@
 import { getActivityDocker } from './docker-hosts.js';
-import { scanProjects } from './scanner.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
 import db, { pruneAgentPlans, pruneAiUsage, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { pruneEvents } from './event-center.js';
 import { pruneStateHistory } from './state-history.js';
+import { checkAllUpdates } from './image-updater.js';
 
 function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
@@ -32,35 +32,27 @@ export async function getDockerUsage() {
   };
 }
 
-async function imageId(docker, image) {
-  try { return (await docker.getImage(image).inspect()).Id; } catch { return null; }
+/** 将雷达结果转换为设置页/通知使用的兼容格式；只读查询，不执行 docker pull。 */
+export function flattenUpdateResults(projects = []) {
+  return projects.flatMap((project) => (project.images || []).map((item) => ({
+    projectId: project.projectId,
+    projectName: project.projectName,
+    service: item.service,
+    image: item.image || item.service,
+    status: item.hasUpdate ? 'updated' : item.status === 'failed' ? 'failed' : item.status,
+    localDigest: item.localDigest || null,
+    remoteDigest: item.remoteDigest || null,
+    error: item.error || item.reason || '',
+  })));
 }
 
 export async function checkImageUpdates(onProgress = () => {}) {
-  const docker = await getActivityDocker();
-  const projects = await scanProjects();
-  const images = [...new Set(projects
-    .filter((project) => project.managed)
-    .flatMap((project) => project.containers.map((item) => item.image))
-    .filter(Boolean))];
-  const results = [];
-  for (const image of images) {
-    const before = await imageId(docker, image);
-    onProgress(`拉取 ${image}`);
-    try {
-      const stream = await docker.pull(image);
-      await new Promise((resolve, reject) => {
-        docker.modem.followProgress(stream, (error) => error ? reject(error) : resolve());
-      });
-      const after = await imageId(docker, image);
-      results.push({ image, status: before && after && before !== after ? 'updated' : 'current', before, after });
-    } catch (error) {
-      results.push({ image, status: 'failed', error: error.message });
-    }
-  }
+  const { projects } = await checkAllUpdates();
+  const results = flattenUpdateResults(projects);
+  for (const item of results) onProgress(`检查 ${item.image}`);
   const updated = results.filter((item) => item.status === 'updated');
   if (updated.length) {
-    await sendNotification('ComposeOps：发现镜像更新', updated.map((item) => item.image).join('\n')).catch(() => {});
+    await sendNotification('ComposeOps：发现镜像更新（等待手动应用）', updated.map((item) => `${item.projectName}/${item.service}: ${item.image}`).join('\n')).catch(() => {});
   }
   setSetting('updates.last_results', JSON.stringify(results));
   return results;

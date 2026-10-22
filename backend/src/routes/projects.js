@@ -605,7 +605,19 @@ export default async function projectRoutes(fastify) {
     }
   });
 
-  fastify.post('/:id/upgrade', { schema: { params: idParams } }, async (request, reply) => {
+  fastify.post('/:id/upgrade', {
+    schema: {
+      params: idParams,
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          services: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 128 } },
+        },
+        required: ['services'],
+      },
+    },
+  }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
     if (!project) return;
     reply.raw.writeHead(200, {
@@ -628,6 +640,7 @@ export default async function projectRoutes(fastify) {
     };
     let child;
     upgradeProject(project, {
+      services: request.body.services,
       onOutput: (type, text) => { output += text; send(type, text); },
       onChild: (process) => { child = process; },
     }).then((result) => {

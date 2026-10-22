@@ -268,7 +268,7 @@ async function handleEnvApply({ project }) {
     if (error.name !== 'AbortError') { output.text += `\n[请求失败] ${error.message}`; output.exitCode = 1; }
   } finally { controlController = null; busy.value = false; output.running = false; }
 }
-async function handleUpgrade(project) {
+async function handleUpgrade({ project, services }) {
   if (busy.value) return;
   upgradeProject.value = null;
   output.open = true; output.text = ''; output.action = 'images.upgrade'; output.name = project.projectName; output.projectId = project.id; output.exitCode = null; output.running = true;
@@ -276,7 +276,7 @@ async function handleUpgrade(project) {
   controlController?.abort();
   controlController = new AbortController();
   try {
-    await api.streamUpgrade(project.id, (frame) => {
+    await api.streamUpgrade(project.id, services, (frame) => {
       if (frame.type === 'stdout' || frame.type === 'stderr') output.text += frame.data;
       else if (frame.type === 'error') output.text += `\n[错误] ${frame.data}`;
       else if (frame.type === 'exit') { output.exitCode = frame.data.code; output.text += `\n[退出码 ${frame.data.code}]`; }
