@@ -73,14 +73,22 @@ services:
       - HOST=0.0.0.0
       - LOG_LEVEL=info
       - ENABLE_SHELL=1
+      # Optional runtime proxy: local .env points at a WSL bridge bound only to
+      # the ComposeOps Docker gateway; NODE_USE_ENV_PROXY enables Node 22 fetch.
+      - HTTP_PROXY=${COMPOSEOPS_HTTP_PROXY:-}
+      - HTTPS_PROXY=${COMPOSEOPS_HTTPS_PROXY:-}
+      - http_proxy=${COMPOSEOPS_HTTP_PROXY:-}
+      - https_proxy=${COMPOSEOPS_HTTPS_PROXY:-}
+      - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
+      - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
+      - NODE_USE_ENV_PROXY=${COMPOSEOPS_NODE_USE_ENV_PROXY:-0}
       # 按需 Compose 工作容器复用时间与最多缓存项目数。
       # - COMPOSEOPS_WORKSPACE_IDLE_MS=90000
       # - COMPOSEOPS_WORKSPACE_CACHE_MAX=8
       # Optional unattended setup. Prefer the first-run browser setup so the
       # password does not remain in compose environment metadata.
       # - ADMIN_PASSWORD=replace-with-at-least-10-characters
-      # 运行时 AI 出站走代理(若你的 AI Base URL 需翻墙)。Node 22 内置 fetch
-      # 自动识别 HTTP_PROXY/HTTPS_PROXY/NO_PROXY。不需要时整段注释掉。
+      # 运行时 HTTP 出站可使用上方代理变量；Node 22 fetch 通过 NODE_USE_ENV_PROXY=1 启用环境代理。
       # - HTTP_PROXY=http://host.docker.internal:7897
       # - HTTPS_PROXY=http://host.docker.internal:7897
       # - NO_PROXY=localhost,127.0.0.1

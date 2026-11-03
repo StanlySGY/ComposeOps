@@ -102,6 +102,7 @@ import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.vue';
+import { buildImageUpdateSummary } from '../lib/image-update-summary.js';
 
 const hostsStore = useHostsStore();
 const toast = useToastStore();
@@ -177,9 +178,7 @@ async function runBatchUpdateCheck() {
   try {
     const result = await api.checkAllUpdates();
     const projects = result?.projects || [];
-    const withUpdate = projects.filter((project) => project.hasUpdate).length;
-    const unreachable = projects.reduce((sum, project) => sum + (project.images || []).filter((image) => image.reachable === false).length, 0);
-    toast.success(`镜像检查完成:${projects.length} 个项目,${withUpdate} 个有更新${unreachable ? `,${unreachable} 个仓库不可达` : ''}`);
+    toast.success(buildImageUpdateSummary(projects));
   } catch (e) {
     toast.error(`镜像检查失败:${e.message}`);
   } finally {

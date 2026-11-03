@@ -36,6 +36,15 @@
 - SSH 节点在远端主机上读写 Compose/env(`mountState=remote_ssh`,`composeMode=workspace`,不在远端拉起本机镜像)。仅有 Docker API 的 TCP 节点仍是容器控制模式(`mountState=remote_api_only`,`editable=false`)。`compose-runner` 通过 `DOCKER_HOST` 在子进程内切换节点。
 - 切换节点后前端广播 `composeops:host-changed`,各页面监听触发刷新。
 
+## WSL Docker HTTP 代理桥接
+- WSL 本机 HTTP 代理当前监听地址为 127.0.0.1:7897。Docker 容器不能把自己的 127.0.0.1 当成 WSL 主机。
+- 用户级 systemd 服务 composeops-proxy-bridge.service 负责 TCP 转发：仅绑定 ComposeOps Docker 网桥地址 172.18.0.1:7898，上游是 WSL 本机 127.0.0.1:7897。不要改为监听 0.0.0.0，也不要发布代理端口到 LAN 或公网。
+- 用户级服务脚本位于 /home/sgy/.local/libexec/composeops-proxy-bridge.mjs，unit 位于 /home/sgy/.config/systemd/user/composeops-proxy-bridge.service。
+- 仓库 .env 中 COMPOSEOPS_HTTP_PROXY 和 COMPOSEOPS_HTTPS_PROXY 指向网桥，COMPOSEOPS_NODE_USE_ENV_PROXY=1 启用 Node 22 内置 fetch 的环境代理支持，COMPOSEOPS_NO_PROXY 保留本机与内网直连。
+- 检查用户服务可运行 systemctl --user status composeops-proxy-bridge.service；检查监听可运行 ss -ltnp 并确认只出现 172.18.0.1:7898。
+- 若 composeops_default 网桥网关变化，需要同步修改用户级 unit 的监听地址与 .env 代理地址。验证容器能成功获取 Docker Hub token 和 manifest 后，才把远端镜像探测判为通过。
+- 任何 Compose 重建仍必须同时使用 docker-compose.yml 与 docker-compose.encrypted.yml，并设置外置数据库密钥文件路径；严禁删除或重建 composeops_opsdash-data。
+
 ## Git 操作经验
 - 沙箱内 `.git` 只读:commit 需 `sandbox_permissions=require_escalated`,`prefix_rule:["git","commit","-m"]` 已批准。
 - `git push origin main` HTTPS 在沙箱握手失败;直接提升权限走已批准 `["git","push"]` 即可成功;SSH 地址 `git@github.com:StanlySGY/ComposeOps.git` 沙箱内 DNS 解析失败,需同样提升权限。
