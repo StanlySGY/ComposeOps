@@ -33,6 +33,8 @@ COPY frontend/package.json frontend/package.json
 # Seed the CA bundle from the already pinned official Docker CLI image so HTTPS apt works in slim.
 COPY --from=docker:cli /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ARG APT_MIRROR="mirrors.tuna.tsinghua.edu.cn"
+# The official Node image already ships matching headers in /usr/local/include/node;
+# reuse them for node-gyp instead of depending on a second nodejs.org download.
 RUN if [ -n "$APT_MIRROR" ]; then \
       sed -i "s|deb.debian.org|$APT_MIRROR|g; s|http://$APT_MIRROR|https://$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
     fi \
@@ -41,7 +43,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
  && npm config set registry https://registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
- && npm ci --workspace backend --no-audit --no-fund \
+ && npm_config_nodedir=/usr/local npm ci --workspace backend --no-audit --no-fund \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------- Stage 3: runtime ----------
