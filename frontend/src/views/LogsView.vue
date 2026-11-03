@@ -1,7 +1,10 @@
 <template>
   <div class="page-shell page-shell-workspace">
     <div class="page-header">
-      <div><h1 class="page-title">实时日志</h1><p class="page-subtitle">多容器聚合、着色分流与即时过滤</p></div>
+      <div class="flex min-w-0 items-center gap-3">
+        <button v-if="returnTarget" class="btn-secondary shrink-0" @click="goBackToSource"><ArrowLeft class="h-4 w-4" />{{ returnTarget.label }}</button>
+        <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
+      </div>
       <div class="page-actions">
         <select v-model="projectId" class="input" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
         <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
@@ -96,10 +99,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { useRoute } from 'vue-router';
-import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { useRoute, useRouter } from 'vue-router';
+import { ArrowLeft, Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import LogPane from '../components/logs/LogPane.vue';
@@ -109,6 +112,8 @@ import { matchLogQuery, parseLogQuery } from '../lib/log-query.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 
 const route = useRoute();
+const router = useRouter();
+const logSourceRoute = ref(['services', 'topology'].includes(String(route.query.from || '')) ? String(route.query.from) : '');
 const projects = ref([]);
 const projectId = ref(route.query.projectId || '');
 const containerId = ref(route.query.containerId || '');
@@ -172,6 +177,10 @@ const containers = computed(() => projects.value.find((p) => p.id === projectId.
 const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
 const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
+const returnTarget = computed(() => ({
+  services: { path: '/services', label: '返回服务列表' },
+  topology: { path: '/topology', label: '返回拓扑' },
+})[logSourceRoute.value] || null);
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
@@ -220,7 +229,20 @@ onMounted(() => {
   void reloadProjects();
 });
 
-function onHostChanged() { disconnect(); closeStats(); clearLines(); projects.value = []; void reloadProjects(); }
+let activatedBefore = false;
+onActivated(() => {
+  if (!activatedBefore) { activatedBefore = true; return; }
+  disposed = false;
+  void reloadProjects();
+});
+onDeactivated(() => {
+  disposed = true;
+  loadId += 1;
+  disconnect();
+  closeStats();
+});
+
+function onHostChanged() { if (disposed) return; disconnect(); closeStats(); clearLines(); projects.value = []; void reloadProjects(); }
 async function reloadProjects() {
   const currentLoad = ++loadId;
   const [result, prefs] = await Promise.allSettled([api.getProjects(true), api.getPreferences()]);
@@ -236,6 +258,7 @@ async function reloadProjects() {
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 }
 watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nextContainer]) => {
+  if (route.name !== 'logs' || (!nextProject && !nextContainer)) return;
   disconnect();
   clearLines();
   projectId.value = nextProject || '';
@@ -246,8 +269,25 @@ watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nex
   openStats();
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 });
-function onProjectChange() { containerId.value = ''; selectedContainers.value = []; containerQuery.value = ''; disconnect(); closeStats(); clearLines(); }
-function onContainerChange() { disconnect(); clearLines(); }
+watch(() => route.query.from, (source) => {
+  if (['services', 'topology'].includes(String(source || ''))) logSourceRoute.value = String(source);
+});
+function syncRouteContext() {
+  const query = {};
+  if (projectId.value) query.projectId = projectId.value;
+  if (containerId.value) query.containerId = containerId.value;
+  if (logSourceRoute.value) query.from = logSourceRoute.value;
+  router.replace({ path: '/logs', query });
+}
+function onProjectChange() { containerId.value = ''; selectedContainers.value = []; containerQuery.value = ''; disconnect(); closeStats(); clearLines(); syncRouteContext(); }
+function onContainerChange() { disconnect(); clearLines(); syncRouteContext(); }
+function goBackToSource() {
+  if (!returnTarget.value) return;
+  const historyBack = window.history.state?.back;
+  const historyBackName = historyBack ? router.resolve(historyBack).name : null;
+  if (historyBackName === logSourceRoute.value) router.back();
+  else router.push(returnTarget.value.path);
+}
 function toggleAggregate() {
   aggregateMode.value = !aggregateMode.value;
   selectedContainers.value = [];
@@ -370,6 +410,7 @@ function isTyping(target) {
 }
 /** 与速查表一致的日志页快捷键:/ 聚焦搜索,Space 暂停/继续,End 恢复滚动,s 切换分栏。 */
 function onKeydown(event) {
+  if (disposed) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === '/') {
     if (isTyping(event.target)) return;

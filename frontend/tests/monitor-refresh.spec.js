@@ -44,6 +44,19 @@ describe('实时监控刷新与生命周期', () => {
     expect(wrapper.text()).toContain('23%');
   });
 
+  it('首次请求尚未返回时显示加载状态而不是 0 个容器', async () => {
+    const pending = deferred();
+    api.getMetrics.mockReturnValueOnce(pending.promise);
+    await start();
+
+    expect(wrapper.text()).toContain('正在加载容器…');
+    expect(wrapper.text()).not.toContain('0 个容器');
+
+    pending.resolve(metrics());
+    await flushPromises();
+    expect(wrapper.text()).toContain('0 个容器');
+  });
+
   it('加载中离开页面不会在响应返回后重新启动轮询', async () => {
     const pending = deferred();
     api.getMetrics.mockReturnValueOnce(pending.promise);

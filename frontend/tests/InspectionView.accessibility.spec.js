@@ -55,7 +55,7 @@ function mountView() {
       stubs: {
         BaseModal: {
           props: ['show', 'title', 'sizeClass', 'bodyClass'],
-          template: '<div v-if="show" role="dialog"><slot name="header-actions"/><slot/><slot name="footer"/></div>',
+          template: '<div v-if="show" role="dialog" :data-title="title"><slot name="header-actions"/><slot/><slot name="footer"/></div>',
         },
       },
     },
@@ -121,5 +121,15 @@ describe('AI 巡检报告列表键盘可访问性', () => {
 
     expect(api.getInspectionReport).toHaveBeenCalledWith('report-42');
     expect(wrapper.get('[role="dialog"]').exists()).toBe(true);
+  });
+
+  it('巡检明细标题读取报告对象中的评分和等级', async () => {
+    wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('tbody button[aria-label^="查看巡检报告："]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[role="dialog"]').attributes('data-title')).toContain('评分 92 / 健康');
+    expect(wrapper.get('[role="dialog"]').attributes('data-title')).not.toContain('undefined');
   });
 });

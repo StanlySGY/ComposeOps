@@ -88,7 +88,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search } from 'lucide-vue-next';
 import { useServicesStore } from '../stores/services.js';
@@ -415,7 +415,9 @@ watch(autoRefresh, (value) => {
   }
   startRealtime();
 });
-watch([() => route.query.focus, () => store.projects], focusProject, { deep: true });
+watch([() => route.query.focus, () => store.projects], () => {
+  if (route.name === 'services') focusProject();
+}, { deep: true });
 usePullRefresh(refresh);
 onMounted(async () => {
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
@@ -430,9 +432,12 @@ onMounted(async () => {
   if (route.query.job) void pollJob(String(route.query.job));
   void openEnvFromQuery();
 });
-watch(() => route.query.job, (job) => { if (job) void pollJob(String(job)); else { activeJobId = ''; clearTimeout(jobPollTimer); } });
+watch(() => route.query.job, (job) => {
+  if (route.name !== 'services') return;
+  if (job) void pollJob(String(job)); else { activeJobId = ''; clearTimeout(jobPollTimer); }
+});
 watch(kbFocusId, (id) => {
-  if (!id) return;
+  if (route.name !== 'services' || !id) return;
   nextTick(() => { document.getElementById(`project-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
 });
 useKeyboardNavigation({
@@ -447,7 +452,7 @@ async function handleKbAction(action) {
   const project = store.projects.find((p) => p.id === kbFocusId.value);
   if (!project) return;
   if (action === 'expand') { toggleExpanded(project.id); return; }
-  if (action === 'l') { router.push({ path: '/logs', query: { projectId: project.id } }); return; }
+  if (action === 'l') { router.push({ path: '/logs', query: { projectId: project.id, from: 'services' } }); return; }
   if (action === 'e') { envProject.value = project; return; }
   if (action === 'c') { router.push({ path: '/compose', query: { projectId: project.id } }); return; }
   if (action === 'r') {
@@ -480,5 +485,18 @@ function pausePage() {
   controlController = null;
   stopRealtime();
 }
-onUnmounted(pausePage);
+let activatedBefore = false;
+let pageActive = true;
+let pageActivationToken = 0;
+onActivated(async () => {
+  if (!activatedBefore) { activatedBefore = true; return; }
+  pageActive = true;
+  const activationToken = ++pageActivationToken;
+  await store.refresh(false);
+  if (!pageActive || activationToken !== pageActivationToken) return;
+  startRealtime();
+  if (route.query.job) void pollJob(String(route.query.job));
+});
+onDeactivated(() => { pageActive = false; pageActivationToken += 1; pausePage(); });
+onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); });
 </script>

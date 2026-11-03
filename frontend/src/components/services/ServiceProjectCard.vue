@@ -89,8 +89,8 @@
               <div v-if="container.stoppedAt || container.startedAt" class="text-muted text-[11px]">{{ containerStateHint(container) }}</div>
             </div>
             <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="`/logs?projectId=${project.id}&containerId=${container.id}`"><ScrollText class="w-4 h-4" /></router-link>
-            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="`/logs?projectId=${project.id}`"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
+            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
             <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
             <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
           </div>
@@ -122,7 +122,7 @@
             <!-- 底部触控大按钮行 -->
             <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-surface-800/50">
               <router-link
-                :to="`/logs?projectId=${project.id}&containerId=${container.id}`"
+                :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"
                 class="flex items-center justify-center gap-1 rounded-lg bg-surface-800/80 py-1.5 text-xs text-surface-200 active:bg-surface-700"
                 :class="{ 'pointer-events-none opacity-40': !project.managed }"
               >
@@ -155,7 +155,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { Bot, ChevronDown, Database, Download, FileCode2, FolderCog, GitBranch, History, KeyRound, Layers, ListTree, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
 import StatusBadge from '../common/StatusBadge.vue';
 import WebUiLauncher from './WebUiLauncher.vue';
@@ -190,6 +190,12 @@ watch(() => props.expanded, (expanded) => {
 });
 watch(() => props.project.id, () => { closeStats(); checkUpdates(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
 onMounted(() => { checkUpdates(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
+let activatedBefore = false;
+onActivated(() => {
+  if (!activatedBefore) { activatedBefore = true; return; }
+  if (props.expanded) openStats();
+});
+onDeactivated(closeStats);
 onBeforeUnmount(closeStats);
 
 async function checkUpdates() {

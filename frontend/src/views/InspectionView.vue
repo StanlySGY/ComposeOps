@@ -134,7 +134,7 @@
     </div>
 
     <!-- 报告明细抽屉 -->
-    <BaseModal :show="!!detail" :title="detail ? `${formatTime(detail.createdAt)} · ${sourceLabel(detail.source)} · 评分 ${detail.score} / ${GRADE_LABELS[detail.grade]}` : ''" size-class="max-h-[88vh] max-w-3xl flex flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4" @close="closeDetail">
+    <BaseModal :show="!!detail" :title="detail ? `${formatTime(detail.report?.createdAt || detail.createdAt)} · ${sourceLabel(detail.report?.source || detail.source)} · 评分 ${detailScore() ?? '—'} / ${detailGradeLabel()}` : ''" size-class="max-h-[88vh] max-w-3xl flex flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4" @close="closeDetail">
       <template #header-actions>
         <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="detailLoading" @click="askAgentForReport">交给 Agent</button>
       </template>
@@ -255,6 +255,17 @@ function predictionTitle(prediction) {
 }
 function gradeLabel(grade) {
   return GRADE_LABELS[grade] || grade || '健康';
+}
+
+function detailSummary() {
+  return reports.value.find((report) => String(report.id) === String(detail.value?.id)) || null;
+}
+function detailScore() {
+  return detail.value?.report?.score ?? detailSummary()?.score ?? null;
+}
+function detailGradeLabel() {
+  const grade = detail.value?.report?.grade ?? detailSummary()?.grade;
+  return grade ? gradeLabel(grade) : '待获取';
 }
 
 function formatTime(value) {

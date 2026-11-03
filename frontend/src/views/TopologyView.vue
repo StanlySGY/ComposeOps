@@ -126,7 +126,7 @@
               <!-- 快捷操作栏 -->
               <div class="mt-4 pt-3 border-t border-white/10 flex items-center gap-2">
                 <router-link
-                  :to="`/logs?projectId=${encodeURIComponent(selectedSvcData.projectId || selectedProjectId)}`"
+                  :to="`/logs?projectId=${encodeURIComponent(selectedSvcData.projectId || selectedProjectId)}&from=topology`"
                   class="btn-secondary text-xs! py-1.5! px-3!"
                 >
                   <ScrollText class="w-3.5 h-3.5" />

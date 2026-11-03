@@ -34,12 +34,51 @@ describe('日志页面生命周期与数据完整性', () => {
     document.body.style.overflow = '';
   });
   async function start(route = '/logs?projectId=p&containerId=c') {
-    router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/logs', component: LogsView }] });
+    router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/logs', name: 'logs', component: LogsView },
+      { path: '/services', name: 'services', component: { template: '<div>服务列表</div>' } },
+    ] });
     await router.push(route);
     wrapper = mount(LogsView, { global: { plugins: [router], stubs: { AIDiagnosisModal: { props: ['rawLogs'], template: '<div class="diagnosis">{{ rawLogs }}</div>' } } } });
     await flushPromises();
   }
   const send = (data, aggregate = false) => channels[aggregate ? 1 : 0].options.onMessage({ data: JSON.stringify(data) });
+
+  it('离开日志模块再通过导航返回时保留项目、容器和筛选条件', async () => {
+    await start();
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error');
+    await wrapper.get('select[aria-label="按日志级别过滤"]').setValue('error');
+
+    await router.push('/services');
+    await flushPromises();
+    await router.push('/logs');
+    await flushPromises();
+
+    expect(wrapper.get('select[aria-label="选择日志项目"]').element.value).toBe('p');
+    expect(wrapper.get('input[aria-label="搜索和过滤实时日志"]').element.value).toBe('level:error');
+    expect(wrapper.get('select[aria-label="按日志级别过滤"]').element.value).toBe('error');
+  });
+
+  it('来自服务列表的日志页提供明确返回入口', async () => {
+    await start('/logs?projectId=p&containerId=c&from=services');
+    const backButton = wrapper.findAll('button').find(button => button.text().includes('返回服务列表'));
+    expect(backButton).toBeTruthy();
+    await backButton.trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.name).toBe('services');
+  });
+
+  it('通过通用日志导航重新进入时仍保留原始来源返回入口', async () => {
+    await start('/logs?projectId=p&containerId=c&from=services');
+    await router.push('/services');
+    await flushPromises();
+    await router.push('/logs');
+    await flushPromises();
+
+    expect(wrapper.findAll('button').some(button => button.text().includes('返回服务列表'))).toBe(true);
+    expect(router.currentRoute.value.query).toEqual({});
+    expect(wrapper.get('select[aria-label="选择日志项目"]').element.value).toBe('p');
+  });
 
   it('连接状态变化通过礼貌状态区域播报', async () => {
     await start();

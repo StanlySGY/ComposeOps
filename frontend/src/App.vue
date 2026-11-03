@@ -17,7 +17,7 @@
         </div>
         <div class="content-outer mx-auto h-full min-h-full w-full">
           <router-view v-slot="{ Component }">
-            <transition name="page-fade" mode="out-in">
+            <transition name="page-fade" mode="out-in" @after-enter="restoreRouteScroll">
               <keep-alive :include="keepAliveViews">
                 <component :is="Component" />
               </keep-alive>
@@ -39,7 +39,8 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onErrorCaptured, onMounted, ref } from 'vue';
+import { onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
@@ -55,15 +56,18 @@ import { useAgentConsole } from './composables/useAgentConsole.js';
 import { preloadRouteChunks } from './router.js';
 
 // keep-alive 白名单(SFC 文件名即组件名):
-// 保住输入中状态、滚动位置与重组件(Monaco/终端/会话),切回页面零重建。
-// 实时数据页与任务页刻意不保活,切页后及时释放 WebSocket、SSE 和轮询。
+// 保住筛选、展开、输入与重组件状态；共享滚动容器的位置由下方按路由单独恢复。
+// 服务/日志页虽然有实时流，但必须在 onDeactivated 中断开、onActivated 中恢复，不能让后台页面继续占用连接。
 const keepAliveViews = [
+  'ServicesView', 'LogsView', 'TopologyView',
   'ComposeView', 'AgentExecutionHistoryView',
   'SettingsView', 'MarketplaceView', 'GitOpsView', 'CostAnalysisView',
   'ResourcesView', 'CMDBView', 'WorkflowCenterView',
 ];
 
 const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
 const servicesStore = useServicesStore();
 const toast = useToastStore();
 const { openAgent, startPageTracking, stopPageTracking } = useAgentConsole();
@@ -117,6 +121,24 @@ function applyDensity() {
 }
 const expire = () => auth.expire();
 const refreshOnHostChange = () => { void servicesStore.refreshForHost(); };
+
+// Keep the shared app scroller position per route while pages are cached.
+const routeScrollPositions = new Map();
+let pendingScrollRestoreRoute = null;
+watch(() => route.fullPath, (currentPath, previousPath) => {
+  const scroller = document.querySelector('.app-main');
+  const previousName = router.resolve(previousPath).name;
+  if (previousName && scroller) routeScrollPositions.set(previousName, scroller.scrollTop);
+  pendingScrollRestoreRoute = router.resolve(currentPath).name;
+});
+function restoreRouteScroll() {
+  const routeName = pendingScrollRestoreRoute || route.name;
+  pendingScrollRestoreRoute = null;
+  const scroller = document.querySelector('.app-main');
+  if (!scroller) return;
+  scroller.scrollTop = routeScrollPositions.get(routeName) || 0;
+  document.querySelector('.app-header')?.classList.toggle('scrolled', scroller.scrollTop > 28);
+}
 
 function onGlobalKeydown(event) {
   if (event.key !== '?' || event.metaKey || event.ctrlKey || event.altKey) return;
