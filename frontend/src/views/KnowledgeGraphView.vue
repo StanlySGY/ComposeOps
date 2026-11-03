@@ -258,7 +258,7 @@ const graphNodes = computed(() => {
     list.push({ key: `host-${host.id}`, label: truncate(host.name), fullLabel: host.name, sub: host.active ? '活跃宿主' : host.type, state: 'host' });
   });
   projects.value.forEach((p) => {
-    const label = useCmdb.value ? (p.displayName || p.name) : p.projectName;
+    const label = p.projectName || p.displayName || p.name || p.id || '未命名项目';
     const sub = `${p.containers?.length || 0} 个服务容器`;
     list.push({ key: `project-${p.id}`, label: truncate(String(label)), fullLabel: String(label), sub, state: 'project' });
   });
