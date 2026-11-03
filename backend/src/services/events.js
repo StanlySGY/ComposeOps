@@ -46,6 +46,14 @@ export function recordAlertEvent({ key, title, detail, priority = 'warning', to 
 export function recordAlertEventAndNotify({ key, title, detail, priority = 'warning', to = null, logs = '' }) {
   const event = recordAlertEvent({ key, title, detail, priority, to, logs });
   emitEvent({ type: 'alert', ...event });
+  // 告警是持久化事件源；路由失败不得影响告警和通知主链路。
+  void import('./event-router.js').then(({ routeWorkflowEvent }) => routeWorkflowEvent({
+    ...event,
+    eventId: 'alert:' + String(event.id || event.key || key),
+    source: 'alert',
+    eventType: 'alert',
+    severity: priority === 'danger' ? 'danger' : priority,
+  })).catch((error) => console.warn('[event-router] alert event dispatch failed:', error.message));
   // 守护模式:开关开启时 fire-and-forget AI 自动诊断(带冷却,绝不影响告警主链路)
   void (async () => {
     try {

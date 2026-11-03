@@ -1,6 +1,6 @@
 # ComposeOps 架构
 
-按 2026-09-30 的源码整理。ComposeOps 是单用户 Docker Compose 运维台，由 Vue 单页应用、Fastify API、SQLite 和 Docker Engine 组成。[app.js](../../backend/src/app.js) 组装应用，[index.js](../../backend/src/index.js) 监听端口并启动后台调度。
+按 2026-11-03 的源码整理。ComposeOps 是单用户 Docker Compose 运维台，由 Vue 单页应用、Fastify API、SQLite 和 Docker Engine 组成。[app.js](../../backend/src/app.js) 组装应用，[index.js](../../backend/src/index.js) 监听端口并启动后台调度。
 
 ## 组件与通信
 
@@ -83,8 +83,16 @@ Tool Loop 每轮调用模型，解析工具调用，检查权限/风险/审批�
 - 持久化策略由 `agent/policy-store.js` 管理（迁移 v17）：deny-first，按完整工具名、项目 ID 和参数子集精确匹配。allow 只可免除 low/medium 独立工具确认；critical、宏及工具元数据声明的硬确认仍由原审批门控制。编辑确认参数后重新计算风险并重新应用拒绝规则。
 - 每次工具调用拥有稳定的 `agent_executions.id`，关联的 `agent_audit_events` 记录策略判定、审批、执行结果和后置检查。审计只保存脱敏详情与参数指纹，清理 plan 不会级联删除审计事件。
 - secret-redactor 收集敏感值并脱敏出站文本，日志/文件/页面上下文作为不可信证据。
-- background-tasks 支持后台任务与完成通知，runaway-guard 检测重复动作；空模型轮次最多提醒重试一次。
+- background-tasks 使用 SQLite `agent_background_tasks` 保存任务状态、心跳和脱敏输出；完成结果进入事件中心，运维中心可跨 Agent 会话查看、读取和停止任务。`runaway-guard` 检测重复动作；空模型轮次最多提醒重试一次。
 - SSE token 的协议清理由后端有状态发射层完成，前端原样追加；逐 token trim 会破坏 Markdown 空白和换行。
+
+## 后台任务、事件触发与审批安全
+
+- Agent 后台任务 API：`GET /api/v1/ai/agent/tasks` 列表、`GET /api/v1/ai/agent/tasks/:taskId` 读取详情/输出、`POST /api/v1/ai/agent/tasks/:taskId/stop` 请求停止。任务记录保存在 SQLite，进程内仅保留当前执行句柄；输出写入前经 `redactSecrets` 脱敏并受长度上限约束。
+- 进程启动恢复时，无法恢复执行闭包的 `running` / `stopping` 任务标记为 `outcome_unknown`，不自动重放 Docker 操作。Task Watchdog 默认每 30 秒检查一次，超过 90 秒没有心跳的 Agent 任务或运行中工作流会转为 `outcome_unknown` 并写入告警事件；操作者需核对目标 Host/项目真实状态。
+- [event-router.js](../../backend/src/services/event-router.js) 采用确定性规则匹配事件触发定义，不让 LLM 决定是否启动工作流。Docker Events、告警和统一事件中心是事件来源；匹配字段包括明确的事件类型，以及可选来源、动作、严重级别和项目范围。工作流自身事件被忽略以防递归，事件 ID 与数据库幂等键防止重复创建实例。
+- Cron 工作流由同一 Event Router 定时扫描，按服务端本地分钟判断是否到期，并用工作流 ID + 分钟键做数据库幂等；重复 tick 或进程重启不会在同一分钟重复创建实例。
+- Approval 节点进入 `waiting_approval` 时冻结审批节点 ID、完整工作流定义 SHA-256 指纹和下一可达 Action 的节点/动作/项目快照。审批时再次比较当前定义与快照；定义在等待期间发生变化、快照缺失或意图不一致时返回 `WORKFLOW_APPROVAL_STALE`，必须取消并重新运行。通过后只签发一次性授权，Action 执行前校验节点、动作、项目和定义指纹，并先持久化消费凭证再触发外部副作用。
 
 ## 数据与认证
 
@@ -95,7 +103,7 @@ Tool Loop 每轮调用模型，解析工具调用，检查权限/风险/审批�
 | 配置与认证 | settings、sessions |
 | 项目与备份 | project_preferences、compose_backups、volume_backups |
 | 会话与用量 | ai_sessions、ai_history、ai_memories、ai_usage |
-| 操作与执行 | operation_history、agent_plans、agent_executions、agent_audit_events、agent_policy_groups、agent_policy_rules、background_jobs |
+| 操作与执行 | operation_history、agent_plans、agent_executions、agent_audit_events、agent_policy_groups、agent_policy_rules、agent_background_tasks、background_jobs |
 | 观测与资产 | container_metrics、inspections、alert_events、event_records、assets、asset_relations |
 | 工作流 | workflow_definitions、workflow_instances、workflow_steps |
 
@@ -111,6 +119,8 @@ DB_PATH=/tmp/composeops-test.db npm run test:backend
 npm run test:frontend
 npm run lint
 npm run build
+npm --prefix frontend run build:preview
+npm --prefix frontend run test:preview
 ```
 
 端口和部署参数以现有配置为准，此次没有修改 `0.0.0.0:28765:3001`。实测与边界见 [审查记录](../audit-2026-09-29.md)。

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   createWorkflowDefinition,
   getWorkflowDefinition,
@@ -9,6 +10,7 @@ import {
   listWorkflowInstances,
   updateWorkflowInstance,
   updateWorkflowInstanceIfStatus,
+  touchWorkflowInstance,
   addWorkflowStep,
   updateWorkflowStep,
 } from '../lib/db.js';
@@ -17,6 +19,7 @@ import { emitEvent } from './events.js';
 import { getAgent } from './agent.js';
 import { findProject } from './scanner.js';
 import { prepareProjectAction } from './project-action-runner.js';
+import { validateCron } from './cron-scheduler.js';
 
 /**
  * 轻量工作流引擎:
@@ -59,14 +62,35 @@ function validateNodes(nodes) {
   return nodes;
 }
 
+function validateTriggerConfig(triggerType, triggerConfig = {}) {
+  const type = String(triggerType || 'manual');
+  if (!['manual', 'event', 'cron'].includes(type)) throw Object.assign(new Error('不支持的工作流触发方式'), { statusCode: 400 });
+  if (!triggerConfig || typeof triggerConfig !== 'object' || Array.isArray(triggerConfig)) throw Object.assign(new Error('触发配置必须是对象'), { statusCode: 400 });
+  if (type === 'event') {
+    const eventTypes = triggerConfig.eventTypes ?? triggerConfig.eventType;
+    const hasTypes = (Array.isArray(eventTypes) && eventTypes.some((item) => String(item).trim()))
+      || (typeof eventTypes === 'string' && eventTypes.split(',').some((item) => item.trim()));
+    if (!hasTypes) throw Object.assign(new Error('事件触发必须明确指定 eventTypes，避免意外接管所有事件'), { statusCode: 400 });
+  }
+  if (type === 'cron') {
+    const expression = String(triggerConfig.cron || '').trim();
+    if (!expression) throw Object.assign(new Error('定时触发必须填写 Cron 表达式'), { statusCode: 400 });
+    validateCron(expression);
+  }
+}
+
 export function createDefinition({ name, description = '', triggerType = 'manual', triggerConfig = {}, nodes = [], enabled = 1 }) {
   if (!name || !String(name).trim()) throw Object.assign(new Error('工作流名称不能为空'), { statusCode: 400 });
+  validateTriggerConfig(triggerType, triggerConfig);
   validateNodes(nodes);
   return createWorkflowDefinition({ name: String(name).trim(), description, triggerType, triggerConfig, nodes, enabled });
 }
 
 export function updateDefinition(id, patch = {}) {
+  const current = getWorkflowDefinition(id);
+  if (!current) return null;
   if (patch.nodes !== undefined) validateNodes(patch.nodes);
+  validateTriggerConfig(patch.triggerType ?? current.triggerType, patch.triggerConfig ?? current.triggerConfig ?? {});
   return updateWorkflowDefinition(id, patch);
 }
 
@@ -83,19 +107,22 @@ export function removeDefinition(id) {
 }
 
 /** 启动一次工作流实例。event 触发时由事件中心调用。 */
-export function startWorkflow(definitionId, context = {}) {
+export function startWorkflow(definitionId, context = {}, options = {}) {
   const definition = getWorkflowDefinition(definitionId);
   if (!definition) throw Object.assign(new Error('工作流不存在'), { statusCode: 404 });
   if (!definition.enabled) throw Object.assign(new Error('工作流已停用'), { statusCode: 400 });
 
+  const startedAt = new Date().toISOString();
   const instance = createWorkflowInstance({
     definitionId,
     name: definition.name,
     status: 'running',
     context,
+    idempotencyKey: options.idempotencyKey || null,
+    triggerEventId: options.triggerEventId || null,
   });
-  const startedAt = new Date().toISOString();
-  updateWorkflowInstance(instance.id, { status: 'running', startedAt });
+  if (instance.replayed) return instance;
+  updateWorkflowInstance(instance.id, { status: 'running', startedAt, heartbeatAt: startedAt });
 
   // 异步执行,不阻塞调用方
   void runWorkflow(instance.id);
@@ -116,6 +143,8 @@ async function runWorkflow(instanceId) {
     (instance.steps || []).filter((step) => step.status === 'success').map((step) => step.nodeId)
   );
   let currentStepId = null;
+  const heartbeatTimer = setInterval(() => { touchWorkflowInstance(instanceId); }, 10000);
+  heartbeatTimer.unref?.();
 
   try {
     let nodeIndex = 0;
@@ -139,6 +168,20 @@ async function runWorkflow(instanceId) {
       const current = getWorkflowInstance(instanceId);
       if (!current || !['running', 'pending'].includes(current.status)) return;
 
+      if (node.type === 'action') {
+        const action = String(node.config?.action || '');
+        const projectId = node.config?.projectId || context.projectId || null;
+        const approval = context.workflowApprovals?.[node.id];
+        const currentDefinitionFingerprint = workflowDefinitionFingerprint(definition);
+        if (!approval || approval.consumed || approval.action !== action || approval.projectId !== projectId
+          || approval.actionNodeId !== node.id || approval.definitionFingerprint !== currentDefinitionFingerprint) {
+          throw Object.assign(new Error(`执行节点 ${node.id} 缺少匹配且未使用的人工审批，或审批后工作流定义已变化；请核对实际状态并重新发起审批。`), { statusCode: 403, code: 'WORKFLOW_APPROVAL_REQUIRED' });
+        }
+        const approvals = { ...(context.workflowApprovals || {}), [node.id]: { ...approval, consumed: true, consumedAt: new Date().toISOString() } };
+        context = { ...context, workflowApprovals: approvals };
+        // 必须先持久化一次性授权的消费状态，再触发 Docker 副作用；重启后不会重放该操作。
+        updateWorkflowInstance(instanceId, { context, heartbeatAt: new Date().toISOString() });
+      }
       const stepId = addWorkflowStep({
         instanceId,
         nodeId: node.id,
@@ -147,15 +190,31 @@ async function runWorkflow(instanceId) {
         input: { ...(node.config || {}), context },
       });
       currentStepId = stepId;
-      updateWorkflowInstance(instanceId, { currentNode: node.id });
+      updateWorkflowInstance(instanceId, { currentNode: node.id, heartbeatAt: new Date().toISOString() });
       const startedAt = new Date().toISOString();
       updateWorkflowStep(stepId, { startedAt });
 
       // approval 节点:暂停等待人工审批,不继续执行后续节点。
       if (node.type === 'approval') {
-        updateWorkflowStep(stepId, { status: 'waiting_approval' });
-        updateWorkflowInstance(instanceId, { status: 'waiting_approval' });
-        emitEvent({ type: 'workflow', eventType: 'workflow', title: `工作流等待审批:${definition.name}`, detail: node.id, severity: 'warning' });
+        const approvalIntent = buildApprovalIntent(definition, node, context);
+        context = { ...context, pendingApprovalIntent: approvalIntent };
+        updateWorkflowStep(stepId, {
+          status: 'waiting_approval',
+          output: { approvalIntent },
+        });
+        updateWorkflowInstance(instanceId, {
+          status: 'waiting_approval',
+          context,
+          heartbeatAt: new Date().toISOString(),
+        });
+        emitEvent({
+          type: 'workflow', eventType: 'workflow',
+          title: `工作流等待审批:${definition.name}`,
+          detail: approvalIntent.actionIntent
+            ? `${approvalIntent.actionIntent.action} · ${approvalIntent.actionIntent.projectId || '未指定项目'}`
+            : node.id,
+          severity: 'warning',
+        });
         return;
       }
 
@@ -217,7 +276,54 @@ async function runWorkflow(instanceId) {
       payload: { instanceId, definitionId: definition.id },
     });
     emitEvent({ type: 'workflow', eventType: 'workflow', title: `工作流失败:${definition.name}`, detail: error.message, severity: 'danger' });
+  } finally {
+    clearInterval(heartbeatTimer);
   }
+}
+
+/** 从审批节点向前解析下一个可达 action；遇到条件时使用审批时的上下文决定分支。 */function workflowDefinitionFingerprint(definition) {
+  const payload = {
+    id: definition.id,
+    name: definition.name,
+    description: definition.description || '',
+    enabled: Number(definition.enabled) === 1,
+    triggerType: definition.triggerType,
+    triggerConfig: definition.triggerConfig || {},
+    nodes: definition.nodes || [],
+  };
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function buildApprovalIntent(definition, approvalNode, context = {}) {
+  const actionNode = findFollowingActionNode(definition.nodes || [], approvalNode, context);
+  return {
+    approvalNodeId: approvalNode.id,
+    definitionFingerprint: workflowDefinitionFingerprint(definition),
+    actionIntent: actionNode ? {
+      actionNodeId: actionNode.id,
+      action: String(actionNode.config?.action || ''),
+      projectId: actionNode.config?.projectId || context.projectId || null,
+    } : null,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+
+function findFollowingActionNode(nodes, approvalNode, context = {}) {
+  const explicitGraph = nodes.some((node) => node.next || node.onTrue || node.onFalse);
+  const startIndex = nodes.findIndex((node) => node.id === approvalNode?.id);
+  if (startIndex < 0) return null;
+  let nextId = explicitGraph ? resolveNextNode(approvalNode, context) : nodes[startIndex + 1]?.id || null;
+  const visited = new Set([approvalNode.id]);
+  while (nextId && !visited.has(nextId)) {
+    visited.add(nextId);
+    const node = nodes.find((candidate) => candidate.id === nextId);
+    if (!node || node.type === 'approval') return null;
+    if (node.type === 'action') return node;
+    const index = nodes.findIndex((candidate) => candidate.id === node.id);
+    nextId = explicitGraph ? resolveNextNode(node, context) : nodes[index + 1]?.id || null;
+  }
+  return null;
 }
 
 /** 执行单个节点。 */
@@ -352,7 +458,7 @@ export function getInstance(id) {
   return getWorkflowInstance(id);
 }
 
-/** 人工审批:推进等待审批的实例。 */
+/** 人工审批:先核对暂停时冻结的 Action 意图和完整工作流指纹，再签发一次性授权。 */
 export function approveInstance(instanceId, { approved = true, note = '' } = {}) {
   const instance = getWorkflowInstance(instanceId);
   if (!instance) throw Object.assign(new Error('工作流实例不存在'), { statusCode: 404 });
@@ -363,17 +469,61 @@ export function approveInstance(instanceId, { approved = true, note = '' } = {})
       || getWorkflowInstance(instanceId);
   }
 
-  // 找到等待审批的步骤,标记为通过,然后继续执行后续节点。
   const pendingStep = instance.steps.find((step) => step.status === 'waiting_approval');
-  if (pendingStep) {
-    updateWorkflowStep(pendingStep.id, { status: 'success', output: { approved: true, note }, finishedAt: new Date().toISOString() });
+  const definition = getWorkflowDefinition(instance.definitionId);
+  const approvalNode = definition?.nodes?.find((node) => node.id === pendingStep?.nodeId);
+  const capturedIntent = instance.context?.pendingApprovalIntent;
+  if (!definition || !approvalNode || !pendingStep || !capturedIntent
+    || capturedIntent.approvalNodeId !== approvalNode.id) {
+    throw Object.assign(new Error('审批意图快照缺失或不完整；请取消该实例并基于当前工作流重新运行。'), { statusCode: 409, code: 'WORKFLOW_APPROVAL_STALE' });
   }
-  const resumed = updateWorkflowInstanceIfStatus(instanceId, ['waiting_approval'], { status: 'running' });
+
+  const currentFingerprint = workflowDefinitionFingerprint(definition);
+  if (capturedIntent.definitionFingerprint !== currentFingerprint) {
+    throw Object.assign(new Error('等待审批期间工作流定义已发生变化，原审批不能授权新动作；请取消该实例并重新运行、重新审批。'), { statusCode: 409, code: 'WORKFLOW_APPROVAL_STALE' });
+  }
+
+  const actionNode = findFollowingActionNode(definition.nodes || [], approvalNode, instance.context || {});
+  const currentActionIntent = actionNode ? {
+    actionNodeId: actionNode.id,
+    action: String(actionNode.config?.action || ''),
+    projectId: actionNode.config?.projectId || instance.context?.projectId || null,
+  } : null;
+  if (JSON.stringify(capturedIntent.actionIntent || null) !== JSON.stringify(currentActionIntent)) {
+    throw Object.assign(new Error('待执行动作或项目与审批时展示的意图不一致，原审批已失效；请重新运行工作流。'), { statusCode: 409, code: 'WORKFLOW_APPROVAL_STALE' });
+  }
+
+  const nextContext = { ...(instance.context || {}) };
+  if (pendingStep) {
+    updateWorkflowStep(pendingStep.id, {
+      status: 'success',
+      output: { approved: true, note, approvalIntent: capturedIntent },
+      finishedAt: new Date().toISOString(),
+    });
+  }
+  if (actionNode) {
+    nextContext.workflowApprovals = {
+      ...(nextContext.workflowApprovals || {}),
+      [actionNode.id]: {
+        ...currentActionIntent,
+        definitionFingerprint: currentFingerprint,
+        approvedAt: new Date().toISOString(),
+        approvalStepId: pendingStep.id,
+        note: String(note || '').slice(0, 500),
+        consumed: false,
+      },
+    };
+  }
+  delete nextContext.pendingApprovalIntent;
+  const resumed = updateWorkflowInstanceIfStatus(instanceId, ['waiting_approval'], {
+    status: 'running',
+    context: nextContext,
+    heartbeatAt: new Date().toISOString(),
+  });
   if (!resumed) return getWorkflowInstance(instanceId);
   void runWorkflow(instanceId);
   return resumed;
 }
-
 export function cancelInstance(instanceId) {
   const instance = getWorkflowInstance(instanceId);
   if (!instance) throw Object.assign(new Error('工作流实例不存在'), { statusCode: 404 });

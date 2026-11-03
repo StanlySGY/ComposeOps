@@ -52,11 +52,22 @@
               <td class="font-mono text-xs text-surface-400">{{ inst.id }}</td>
               <td class="text-sm text-surface-100">{{ inst.name }}</td>
               <td><span class="status-badge" :class="instanceTone(inst.status)">{{ instanceLabel(inst.status) }}</span></td>
-              <td class="text-xs text-surface-400">{{ inst.currentNode || '—' }}</td>
+              <td class="text-xs text-surface-400">
+                <div>{{ inst.currentNode || '—' }}</div>
+                <div v-if="inst.status === 'waiting_approval' && inst.context?.pendingApprovalIntent" class="mt-1 max-w-xs whitespace-normal rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-200">
+                  <template v-if="inst.context.pendingApprovalIntent.actionIntent">
+                    待确认：{{ actionLabel(inst.context.pendingApprovalIntent.actionIntent.action) }} · 项目 {{ inst.context.pendingApprovalIntent.actionIntent.projectId || '运行上下文' }}
+                  </template>
+                  <template v-else>此审批节点后没有可识别的执行动作</template>
+                </div>
+                <div v-else-if="inst.status === 'waiting_approval'" class="mt-1 max-w-xs whitespace-normal rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1 text-[11px] text-rose-300">
+                  缺少审批意图快照。为安全起见，请取消此旧实例并重新运行。
+                </div>
+              </td>
               <td class="text-xs text-surface-500">{{ formatTime(inst.createdAt) }}</td>
               <td>
                 <div class="flex gap-1">
-                  <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" @click="approve(inst, true)">通过</button>
+                  <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" :disabled="!inst.context?.pendingApprovalIntent" @click="approve(inst, true)">通过</button>
                   <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" @click="approve(inst, false)">拒绝</button>
                   <button v-if="['pending', 'running', 'waiting_approval'].includes(inst.status)" class="icon-btn" title="取消" :aria-label="`取消工作流 ${inst.name}`" @click="cancel(inst)"><X class="w-4 h-4" /></button>
                 </div>
@@ -81,11 +92,23 @@
           </div>
           <div>
             <label class="form-label" for="workflow-trigger-type">触发方式</label>
-            <select id="workflow-trigger-type" v-model="form.triggerType" class="input">
+            <select id="workflow-trigger-type" v-model="form.triggerType" class="input" @change="normalizeTriggerConfig">
               <option value="manual">手动</option>
               <option value="cron">定时</option>
               <option value="event">事件</option>
             </select>
+          </div>
+          <div v-if="form.triggerType === 'event'" class="grid gap-2 rounded-lg border border-surface-800 bg-surface-950/40 p-3 sm:grid-cols-2">
+            <label class="form-grid-label sm:col-span-2"><span>事件类型(必填，逗号分隔)</span><input v-model="form.triggerConfig.eventTypes" class="input" placeholder="container, alert, gitops" /></label>
+            <label class="form-grid-label"><span>来源(可选)</span><input v-model="form.triggerConfig.sources" class="input" placeholder="docker, alert" /></label>
+            <label class="form-grid-label"><span>动作(可选)</span><input v-model="form.triggerConfig.actions" class="input" placeholder="die, health_status: unhealthy" /></label>
+            <label class="form-grid-label sm:col-span-2"><span>项目 ID(可选，限制到一个纳管项目)</span><input v-model="form.triggerConfig.projectId" class="input" placeholder="不填则匹配所选事件类型的所有纳管项目" /></label>
+            <p class="sm:col-span-2 text-xs text-surface-500">事件必须显式选择类型。工作流自身事件不会再次触发工作流；Docker、告警和统一事件中心事件均经过去重。</p>
+          </div>
+          <div v-else-if="form.triggerType === 'cron'" class="grid gap-2 rounded-lg border border-surface-800 bg-surface-950/40 p-3 sm:grid-cols-2">
+            <label class="form-grid-label"><span>Cron 表达式(必填)</span><input v-model="form.triggerConfig.cron" class="input font-mono" placeholder="*/5 * * * *" /></label>
+            <label class="form-grid-label"><span>项目 ID(可选)</span><select v-model="form.triggerConfig.projectId" class="input"><option value="">使用工作流运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+            <p class="sm:col-span-2 text-xs text-surface-500">按服务端本地时区解析；同一分钟最多触发一次，重复 tick 和重启由 SQLite 幂等键去重。</p>
           </div>
           <div>
             <label class="form-label">节点编排</label>
@@ -153,7 +176,7 @@ const store = useWorkflowStore();
 const toast = useToastStore();
 const showEditor = ref(false);
 const editingId = ref('');
-const form = reactive({ name: '', description: '', triggerType: 'manual', nodes: [] });
+const form = reactive({ name: '', description: '', triggerType: 'manual', triggerConfig: {}, nodes: [] });
 const projects = ref([]);
 
 const { definitions, instances, loading, error } = storeToRefs(store);
@@ -162,13 +185,17 @@ function nodeLabel(type) {
   return { trigger: '触发', condition: '条件', agent: 'Agent', approval: '审批', action: '执行', verify: '验证' }[type] || type;
 }
 function instanceLabel(status) {
-  return { pending: '待执行', running: '执行中', waiting_approval: '待审批', success: '成功', failed: '失败', cancelled: '已取消' }[status] || status;
+  return { pending: '待执行', running: '执行中', waiting_approval: '待审批', success: '成功', failed: '失败', cancelled: '已取消', outcome_unknown: '结果待核对' }[status] || status;
+}
+function actionLabel(action) {
+  return { up: '启动', stop: '停止', restart: '重启', pull: '拉取镜像' }[action] || action || '未知动作';
 }
 function instanceTone(status) {
   if (status === 'success') return 'bg-emerald-500/10 text-emerald-400';
   if (status === 'failed') return 'bg-rose-500/10 text-rose-400';
   if (status === 'waiting_approval') return 'bg-amber-500/10 text-amber-400';
   if (status === 'running') return 'bg-sky-500/10 text-sky-400';
+  if (status === 'outcome_unknown') return 'bg-amber-500/10 text-amber-300';
   if (status === 'cancelled') return 'bg-surface-800 text-surface-400';
   return 'bg-surface-800 text-surface-400';
 }
@@ -177,12 +204,16 @@ function formatTime(ts) {
   return new Date(ts.replace(' ', 'T')).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+function normalizeTriggerConfig() {
+  if (!form.triggerConfig || typeof form.triggerConfig !== 'object' || Array.isArray(form.triggerConfig)) form.triggerConfig = {};
+  if (form.triggerType === 'event' && !String(form.triggerConfig.eventTypes || '').trim()) form.triggerConfig.eventTypes = 'container';
+  if (form.triggerType === 'cron' && !String(form.triggerConfig.cron || '').trim()) form.triggerConfig.cron = '*/5 * * * *';
+}
 function normalizeNode(node) {
   if (!node.config || typeof node.config !== 'object' || Array.isArray(node.config)) node.config = {};
   if (node.type === 'action' && !node.config.action) node.config.action = 'restart';
   return node;
 }
-
 function cloneNode(node) {
   return normalizeNode({ ...node, config: { ...(node.config || {}) } });
 }
@@ -192,6 +223,7 @@ function openCreate() {
   form.name = '';
   form.description = '';
   form.triggerType = 'manual';
+  form.triggerConfig = {};
   form.nodes = [
     { id: 'trigger', type: 'trigger', config: {} },
     { id: 'approval', type: 'approval', config: {} },
@@ -204,6 +236,7 @@ function openEdit(def) {
   form.name = def.name;
   form.description = def.description;
   form.triggerType = def.triggerType;
+  form.triggerConfig = { ...(def.triggerConfig || {}) };
   form.nodes = def.nodes.map(cloneNode);
   showEditor.value = true;
 }
@@ -221,7 +254,10 @@ async function save() {
     if (node.type === 'condition' && !node.config.expression?.trim()) { toast.error(`条件节点「${node.id}」需要表达式`); return; }
     if (node.type === 'action' && (!node.config.action || !node.config.projectId)) { toast.error(`执行节点「${node.id}」需要选择操作和项目`); return; }
   }
-  const payload = { ...form, nodes: form.nodes.map((node) => ({ ...node, config: { ...node.config } })) };
+  normalizeTriggerConfig();
+  if (form.triggerType === 'event' && !String(form.triggerConfig.eventTypes || '').trim()) { toast.error('事件触发必须选择至少一种事件类型'); return; }
+  if (form.triggerType === 'cron' && !String(form.triggerConfig.cron || '').trim()) { toast.error('请填写 Cron 表达式'); return; }
+  const payload = { ...form, triggerConfig: { ...form.triggerConfig }, nodes: form.nodes.map((node) => ({ ...node, config: { ...node.config } })) };
   try {
     if (editingId.value) await store.update(editingId.value, payload);
     else await store.create(payload);

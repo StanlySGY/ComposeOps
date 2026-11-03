@@ -72,6 +72,42 @@
       </div>
     </section>
 
+    <!-- 持久化 Agent 后台任务 -->
+    <section class="section-panel">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <div><h2 class="section-title">Agent 后台任务</h2><p class="mt-1 text-muted">任务独立于聊天连接运行；中断后结果不确定的任务需要先核对 Docker 实际状态</p></div>
+        <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="taskLoading" @click="loadAgentTasks()"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': taskLoading }" />刷新任务</button>
+      </div>
+      <p v-if="agentTaskError" class="alert-error" role="alert">{{ agentTaskError }}</p>
+      <div v-if="!agentTasks.length && !agentTaskError" class="rounded-xl border border-dashed border-surface-700 p-6 text-center text-sm text-surface-500">暂无 Agent 后台任务。通过 AI 助手将长时间的 Compose 操作转入后台后，任务会出现在这里。</div>
+      <div v-else-if="agentTasks.length" class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>任务</th><th>项目</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead>
+          <tbody>
+            <template v-for="task in agentTasks" :key="task.id">
+              <tr class="hover:bg-surface-800/25">
+                <td><div class="font-medium text-surface-100">{{ task.label }}</div><div class="mt-0.5 font-mono text-[10px] text-surface-500">{{ task.id }}</div></td>
+                <td class="max-w-48 truncate text-xs text-surface-400" :title="task.projectId || ''">{{ task.projectId || '全局任务' }}</td>
+                <td><span class="status-badge" :class="agentTaskTone(task.status)">{{ agentTaskStatusLabel(task.status) }}</span><p v-if="task.error" class="mt-1 max-w-64 text-xs text-amber-300">{{ task.error }}</p></td>
+                <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(task.startedAt || task.createdAt) }}</td>
+                <td><div class="flex gap-1">
+                  <button class="btn-secondary px-2! py-1! text-xs" @click="toggleTaskOutput(task)"><FileText class="h-3.5 w-3.5" />{{ expandedTaskId === task.id ? '收起' : '输出' }}</button>
+                  <button v-if="['queued', 'running'].includes(task.status)" class="btn-secondary px-2! py-1! text-xs" @click="stopTarget = task"><Square class="h-3.5 w-3.5" />停止</button>
+                </div></td>
+              </tr>
+              <tr v-if="expandedTaskId === task.id" :key="task.id + '-output'">
+                <td colspan="5" class="bg-surface-950/40">
+                  <p v-if="taskDetails[task.id]?.error" class="mb-2 text-xs text-amber-300">{{ taskDetails[task.id].error }}</p>
+                  <pre class="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-surface-800 bg-black/20 p-3 font-mono text-xs text-surface-300">{{ taskDetails[task.id]?.output || '暂无任务输出' }}</pre>
+                  <p v-if="taskDetails[task.id]?.status === 'outcome_unknown'" class="mt-2 text-xs text-amber-300">该任务没有可证明的最终结果。请先检查目标容器/项目状态，不要直接重放原操作。</p>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- 现有定时任务 -->
     <section class="section-panel">
       <div class="mb-4 flex items-center justify-between">
@@ -122,13 +158,15 @@
       </div>
       <div v-else-if="!loading" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无巡检报告。前往 <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link> 生成第一份报告。</div>
     </section>
+    <ConfirmDialog :show="!!stopTarget" title="停止后台任务" :message="'确认向任务「' + (stopTarget?.label || '') + '」发送停止请求？若执行方式无法确认进程已终止，任务会标记为结果待核对。'" tone="warning" confirm-text="发送停止请求" @confirm="confirmStopTask" @cancel="stopTarget = null" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { Bot, RefreshCw, Rocket, Sparkles } from 'lucide-vue-next';
+import { Bot, FileText, RefreshCw, Rocket, Sparkles, Square } from 'lucide-vue-next';
+import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 
@@ -146,11 +184,60 @@ const jobs = ref([]);
 const inspectionEnabled = ref(false);
 const inspectionInterval = ref(24);
 const latestInspection = ref(null);
+const agentTasks = ref([]);
+const taskDetails = ref({});
+const expandedTaskId = ref('');
+const taskLoading = ref(false);
+const agentTaskError = ref('');
+const stopTarget = ref(null);
+let taskPollTimer = null;
 
 const targetProject = computed(() => store.projects.find((p) => p.id === targetProjectId.value));
 
 function jobTypeLabel(type) {
   return { 'db-backup': '数据库备份', 'prune-safe': '安全清理', 'prune-all': '深度清理', 'images-check': '镜像检查', 'pull-images': '拉取镜像', 'volume-backup': '数据卷备份', inspection: 'AI 巡检' }[type] || type;
+}
+function agentTaskStatusLabel(status) {
+  return { queued: '等待执行', running: '执行中', stopping: '正在停止', completed: '已完成', failed: '失败', stopped: '已取消', outcome_unknown: '结果待核对' }[status] || status;
+}
+function agentTaskTone(status) {
+  if (status === 'completed') return 'bg-emerald-500/10 text-emerald-400';
+  if (status === 'failed' || status === 'outcome_unknown') return 'bg-amber-500/10 text-amber-300';
+  if (status === 'running' || status === 'stopping') return 'bg-sky-500/10 text-sky-300';
+  return 'bg-surface-800 text-surface-400';
+}
+async function loadAgentTasks() {
+  taskLoading.value = true;
+  try {
+    const data = await api.getAgentTasks(50);
+    agentTasks.value = data.tasks || [];
+    agentTaskError.value = '';
+  } catch (e) {
+    agentTaskError.value = '后台任务加载失败：' + (e.message || '未知错误');
+  } finally {
+    taskLoading.value = false;
+  }
+}
+async function toggleTaskOutput(task) {
+  if (expandedTaskId.value === task.id) { expandedTaskId.value = ''; return; }
+  expandedTaskId.value = task.id;
+  try {
+    const data = await api.getAgentTask(task.id, 0);
+    taskDetails.value = { ...taskDetails.value, [task.id]: data.task || {} };
+  } catch (e) {
+    taskDetails.value = { ...taskDetails.value, [task.id]: { error: e.message || '读取任务失败' } };
+  }
+}
+async function confirmStopTask() {
+  const task = stopTarget.value;
+  stopTarget.value = null;
+  if (!task) return;
+  try {
+    await api.stopAgentTask(task.id);
+    await loadAgentTasks();
+  } catch (e) {
+    agentTaskError.value = '停止请求失败：' + (e.message || '未知错误');
+  }
 }
 function formatTime(value) {
   if (!value) return '—';
@@ -225,12 +312,15 @@ async function load() {
   error.value = '';
   loadErrors.value = { jobs: '', inspection: '' };
   try {
-    const [jobData, inspectionData] = await Promise.allSettled([
+    const [jobData, inspectionData, taskData] = await Promise.allSettled([
       api.listCronJobs(),
       api.getInspectionOverview(1),
+      api.getAgentTasks(50),
     ]);
     if (jobData.status === 'fulfilled') jobs.value = jobData.value.jobs || [];
     else loadErrors.value.jobs = `定时任务加载失败：${jobData.reason?.message || '未知错误'}`;
+    if (taskData.status === 'fulfilled') { agentTasks.value = taskData.value.tasks || []; agentTaskError.value = ''; }
+    else agentTaskError.value = '后台任务加载失败：' + (taskData.reason?.message || '未知错误');
 
     if (inspectionData.status === 'fulfilled') {
       latestInspection.value = inspectionData.value.latest || null;
@@ -253,5 +343,7 @@ usePullRefresh(load);
 onMounted(async () => {
   await store.refresh(false);
   await load();
+  taskPollTimer = setInterval(() => { void loadAgentTasks(); }, 10000);
 });
+onBeforeUnmount(() => { if (taskPollTimer) clearInterval(taskPollTimer); });
 </script>

@@ -219,6 +219,15 @@ async function handleDockerEvent(event, current = () => true) {
 
   // 广播给所有订阅者
   broadcastEvent(payload);
+  // Docker Event 只路由已纳管项目；eventId 包含 Host/容器/动作/daemon 时间戳，跨重连可去重。
+  const eventId = 'docker:' + getActiveHostId() + ':' + containerId + ':' + action + ':' + String(event.timeNano || event.time || payload.timestamp);
+  void import('./event-router.js').then(({ routeWorkflowEvent }) => routeWorkflowEvent({
+    ...payload,
+    eventId,
+    source: 'docker',
+    eventType: 'container',
+    severity: payload.healthStatus === 'unhealthy' || ['die', 'kill'].includes(action) ? 'danger' : 'info',
+  })).catch((error) => console.warn('[event-router] Docker event dispatch failed:', error.message));
 }
 
 /**

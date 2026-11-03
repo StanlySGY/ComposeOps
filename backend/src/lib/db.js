@@ -595,6 +595,49 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 18,
+    name: 'Agent 后台任务持久化与工作流恢复元数据',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS agent_background_tasks (
+          id TEXT PRIMARY KEY,
+          session_id INTEGER NOT NULL DEFAULT 0,
+          project_id TEXT,
+          host_id TEXT,
+          task_type TEXT NOT NULL DEFAULT 'agent',
+          label TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'queued',
+          output TEXT NOT NULL DEFAULT '',
+          output_bytes INTEGER NOT NULL DEFAULT 0,
+          exit_code INTEGER,
+          error TEXT NOT NULL DEFAULT '',
+          result_json TEXT NOT NULL DEFAULT '{}',
+          consumed INTEGER NOT NULL DEFAULT 0,
+          attempt INTEGER NOT NULL DEFAULT 1,
+          idempotency_key TEXT UNIQUE,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          started_at TEXT,
+          heartbeat_at TEXT,
+          finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_tasks_session ON agent_background_tasks(session_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_background_tasks(status, heartbeat_at);
+      `);
+      const hasWorkflowInstances = !!database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workflow_instances'").get();
+      if (hasWorkflowInstances) {
+        addColumn(database, 'workflow_instances', 'heartbeat_at', 'TEXT');
+        addColumn(database, 'workflow_instances', 'idempotency_key', 'TEXT');
+        addColumn(database, 'workflow_instances', 'trigger_event_id', 'TEXT');
+        database.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_instances_idempotency
+            ON workflow_instances(idempotency_key) WHERE idempotency_key IS NOT NULL;
+          CREATE INDEX IF NOT EXISTS idx_workflow_instances_heartbeat
+            ON workflow_instances(status, heartbeat_at);
+        `);
+      }
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1434,6 +1477,104 @@ export function interruptRunningBackgroundJobs() {
   return jobs.map((job) => job.id);
 }
 
+export function createAgentBackgroundTask({ id, sessionId = 0, projectId = null, hostId = null, taskType = 'agent', label = '', idempotencyKey = null }) {
+  const taskId = id || `agt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const existing = idempotencyKey
+    ? db.prepare('SELECT * FROM agent_background_tasks WHERE idempotency_key = ?').get(String(idempotencyKey))
+    : null;
+  if (existing) return { ...mapAgentBackgroundTaskRow(existing), replayed: true };
+  db.prepare(`
+    INSERT INTO agent_background_tasks(id, session_id, project_id, host_id, task_type, label, status, idempotency_key)
+    VALUES(?, ?, ?, ?, ?, ?, 'queued', ?)
+  `).run(taskId, Number(sessionId) || 0, projectId || null, hostId || null, String(taskType || 'agent').slice(0, 64), String(label || '').slice(0, 200), idempotencyKey ? String(idempotencyKey) : null);
+  return getAgentBackgroundTask(taskId);
+}
+
+export function getAgentBackgroundTask(id) {
+  const row = db.prepare('SELECT * FROM agent_background_tasks WHERE id = ?').get(String(id || ''));
+  return row ? mapAgentBackgroundTaskRow(row) : null;
+}
+
+export function listAgentBackgroundTasks({ sessionId = null, status = '', limit = 100 } = {}) {
+  const conditions = [];
+  const params = [];
+  if (sessionId !== null && sessionId !== undefined && Number(sessionId) !== 0) {
+    conditions.push('session_id = ?');
+    params.push(Number(sessionId));
+  }
+  if (status) { conditions.push('status = ?'); params.push(String(status)); }
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return db.prepare(`SELECT * FROM agent_background_tasks ${where} ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+    .all(...params, safeLimit).map(mapAgentBackgroundTaskRow);
+}
+
+export function updateAgentBackgroundTask(id, patch = {}) {
+  const current = getAgentBackgroundTask(id);
+  if (!current) return null;
+  const status = patch.status !== undefined ? String(patch.status) : current.status;
+  const output = patch.output !== undefined ? String(patch.output || '').slice(-200 * 1024) : current.output;
+  const outputBytes = patch.outputBytes !== undefined ? Math.max(0, Number(patch.outputBytes) || 0) : Buffer.byteLength(output, 'utf8');
+  const exitCode = patch.exitCode !== undefined ? patch.exitCode : current.exitCode;
+  const error = patch.error !== undefined ? String(patch.error || '').slice(0, 2000) : current.error;
+  const result = patch.result !== undefined ? JSON.stringify(patch.result || {}) : JSON.stringify(current.result || {});
+  const consumed = patch.consumed !== undefined ? Number(!!patch.consumed) : Number(current.consumed);
+  const attempt = patch.attempt !== undefined ? Math.max(1, Number(patch.attempt) || 1) : Number(current.attempt) || 1;
+  const timestamps = {
+    startedAt: patch.startedAt !== undefined ? patch.startedAt : current.startedAt,
+    heartbeatAt: patch.heartbeatAt !== undefined ? patch.heartbeatAt : current.heartbeatAt,
+    finishedAt: patch.finishedAt !== undefined ? patch.finishedAt : current.finishedAt,
+  };
+  if (status === 'running' && !timestamps.startedAt) timestamps.startedAt = new Date().toISOString();
+  if (['completed', 'failed', 'stopped', 'outcome_unknown'].includes(status) && !timestamps.finishedAt) timestamps.finishedAt = new Date().toISOString();
+  db.prepare(`
+    UPDATE agent_background_tasks SET status = ?, output = ?, output_bytes = ?, exit_code = ?, error = ?, result_json = ?,
+      consumed = ?, attempt = ?, started_at = ?, heartbeat_at = ?, finished_at = ? WHERE id = ?
+  `).run(status, output, outputBytes, exitCode, error, result, consumed, attempt,
+    timestamps.startedAt, timestamps.heartbeatAt, timestamps.finishedAt, String(id));
+  return getAgentBackgroundTask(id);
+}
+
+export function markAgentBackgroundTasksUnknown() {
+  const rows = db.prepare("SELECT id FROM agent_background_tasks WHERE status IN ('queued', 'running', 'stopping')").all();
+  db.prepare("UPDATE agent_background_tasks SET status = 'outcome_unknown', error = CASE WHEN error = '' THEN '服务进程在任务结束前退出；请核对 Docker 实际状态后再决定是否重新执行。' ELSE error END, finished_at = datetime('now'), heartbeat_at = datetime('now') WHERE status IN ('running', 'stopping')").run();
+  return rows.map((row) => row.id);
+}
+
+export function pruneAgentBackgroundTasks(retentionDays = 7) {
+  const days = Math.max(1, Math.min(Number(retentionDays) || 7, 90));
+  return db.prepare("DELETE FROM agent_background_tasks WHERE status IN ('completed', 'failed', 'stopped') AND consumed = 1 AND julianday('now') - julianday(finished_at) > ?")
+    .run(days).changes;
+}
+
+export function clearAgentBackgroundTasks() {
+  db.prepare('DELETE FROM agent_background_tasks').run();
+}
+
+function mapAgentBackgroundTaskRow(row) {
+  return {
+    id: row.id,
+    sessionId: Number(row.session_id) || 0,
+    projectId: row.project_id || null,
+    hostId: row.host_id || null,
+    taskType: row.task_type,
+    label: row.label,
+    status: row.status,
+    output: row.output || '',
+    outputBytes: Number(row.output_bytes) || 0,
+    exitCode: row.exit_code == null ? null : Number(row.exit_code),
+    error: row.error || '',
+    result: safeParse(row.result_json, {}),
+    consumed: !!Number(row.consumed),
+    attempt: Number(row.attempt) || 1,
+    idempotencyKey: row.idempotency_key || null,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    heartbeatAt: row.heartbeat_at,
+    finishedAt: row.finished_at,
+  };
+}
+
 export function exportUserData() {
   // docker.hosts 必须整键排除(而非脱敏后导出):SSH 密码/私钥/TLS 证书是明文落库的,
   // 脱敏导出再导入会把无凭据条目回灌覆盖真实凭据;导入侧 allowlist 本就不含该键。
@@ -2008,12 +2149,22 @@ export function deleteWorkflowDefinition(id) {
   return db.prepare('DELETE FROM workflow_definitions WHERE id = ?').run(id).changes > 0;
 }
 
-export function createWorkflowInstance({ id, definitionId, name = '', status = 'pending', context = {} }) {
+export function createWorkflowInstance({ id, definitionId, name = '', status = 'pending', context = {}, idempotencyKey = null, triggerEventId = null }) {
   const instanceId = id || `wfi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  db.prepare(`
-    INSERT INTO workflow_instances(id, definition_id, name, status, context)
-    VALUES(?, ?, ?, ?, ?)
-  `).run(instanceId, definitionId, String(name || ''), String(status || 'pending'), JSON.stringify(context || {}));
+  const insert = idempotencyKey
+    ? db.prepare(`
+        INSERT OR IGNORE INTO workflow_instances(id, definition_id, name, status, context, idempotency_key, trigger_event_id)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+      `)
+    : db.prepare(`
+        INSERT INTO workflow_instances(id, definition_id, name, status, context, idempotency_key, trigger_event_id)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+      `);
+  const inserted = insert.run(instanceId, definitionId, String(name || ''), String(status || 'pending'), JSON.stringify(context || {}), idempotencyKey || null, triggerEventId || null);
+  if (idempotencyKey) {
+    const row = db.prepare('SELECT id FROM workflow_instances WHERE idempotency_key = ?').get(String(idempotencyKey));
+    if (row) return { ...getWorkflowInstance(row.id), replayed: Number(inserted.changes) === 0 };
+  }
   return getWorkflowInstance(instanceId);
 }
 
@@ -2025,6 +2176,25 @@ export function getWorkflowInstance(id) {
   return instance;
 }
 
+export function markRunningWorkflowInstancesUnknown() {
+  const rows = db.prepare("SELECT id FROM workflow_instances WHERE status = 'running'").all();
+  if (!rows.length) return [];
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const mark = db.transaction(() => {
+    db.prepare(`UPDATE workflow_steps SET status = 'outcome_unknown', error = '服务进程在步骤结束前退出；请核对实际环境后再决定如何处理。', finished_at = datetime('now') WHERE instance_id IN (${placeholders}) AND status = 'running'`).run(...ids);
+    db.prepare(`UPDATE workflow_instances SET status = 'outcome_unknown', result = ?, finished_at = datetime('now'), heartbeat_at = datetime('now') WHERE id IN (${placeholders}) AND status = 'running'`)
+      .run(JSON.stringify({ outcomeUnknown: true, reason: 'process_restart' }), ...ids);
+  });
+  mark();
+  return ids;
+}
+
+export function touchWorkflowInstance(id, heartbeatAt = new Date().toISOString()) {
+  return db.prepare("UPDATE workflow_instances SET heartbeat_at = ? WHERE id = ? AND status = 'running'")
+    .run(heartbeatAt, String(id)).changes > 0;
+}
+
 export function listWorkflowInstances({ status = '', limit = 50 } = {}) {
   const conditions = [];
   const params = [];
@@ -2034,7 +2204,6 @@ export function listWorkflowInstances({ status = '', limit = 50 } = {}) {
   const rows = db.prepare(`SELECT * FROM workflow_instances ${where} ORDER BY created_at DESC LIMIT ?`).all(...params, safeLimit);
   return rows.map(mapWorkflowInstanceRow);
 }
-
 export function updateWorkflowInstance(id, patch = {}) {
   const current = db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(id);
   if (!current) return null;
@@ -2044,10 +2213,11 @@ export function updateWorkflowInstance(id, patch = {}) {
   const result = patch.result !== undefined ? JSON.stringify(patch.result) : current.result;
   const startedAt = patch.startedAt !== undefined ? patch.startedAt : current.started_at;
   const finishedAt = patch.finishedAt !== undefined ? patch.finishedAt : current.finished_at;
+  const heartbeatAt = patch.heartbeatAt !== undefined ? patch.heartbeatAt : current.heartbeat_at;
   db.prepare(`
-    UPDATE workflow_instances SET status = ?, current_node = ?, context = ?, result = ?, started_at = ?, finished_at = ?
+    UPDATE workflow_instances SET status = ?, current_node = ?, context = ?, result = ?, started_at = ?, finished_at = ?, heartbeat_at = ?
     WHERE id = ?
-  `).run(status, currentNode, context, result, startedAt, finishedAt, id);
+  `).run(status, currentNode, context, result, startedAt, finishedAt, heartbeatAt, id);
   return getWorkflowInstance(id);
 }
 
@@ -2063,11 +2233,12 @@ export function updateWorkflowInstanceIfStatus(id, expectedStatuses, patch = {})
   const result = patch.result !== undefined ? JSON.stringify(patch.result) : current.result;
   const startedAt = patch.startedAt !== undefined ? patch.startedAt : current.started_at;
   const finishedAt = patch.finishedAt !== undefined ? patch.finishedAt : current.finished_at;
+  const heartbeatAt = patch.heartbeatAt !== undefined ? patch.heartbeatAt : current.heartbeat_at;
   const placeholders = expected.map(() => '?').join(',');
   const changed = db.prepare(`
-    UPDATE workflow_instances SET status = ?, current_node = ?, context = ?, result = ?, started_at = ?, finished_at = ?
+    UPDATE workflow_instances SET status = ?, current_node = ?, context = ?, result = ?, started_at = ?, finished_at = ?, heartbeat_at = ?
     WHERE id = ? AND status IN (${placeholders})
-  `).run(status, currentNode, context, result, startedAt, finishedAt, id, ...expected).changes;
+  `).run(status, currentNode, context, result, startedAt, finishedAt, heartbeatAt, id, ...expected).changes;
   return changed ? getWorkflowInstance(id) : null;
 }
 
@@ -2120,6 +2291,9 @@ function mapWorkflowInstanceRow(row) {
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    heartbeatAt: row.heartbeat_at || null,
+    idempotencyKey: row.idempotency_key || null,
+    triggerEventId: row.trigger_event_id || null,
   };
 }
 

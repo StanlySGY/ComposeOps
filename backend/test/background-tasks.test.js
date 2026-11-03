@@ -1,3 +1,4 @@
+import './helpers/isolated-db.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -78,7 +79,7 @@ test('background-tasks: stop 终止运行中的子进程(SIGNAL 路径)', async 
   const id = createBackgroundTask({
     sessionId: 5,
     run: (onOutput, onChild) => new Promise((resolve) => {
-      child = spawn('sleep', ['60'], { stdio: 'ignore' });
+      child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
       onChild(child);
       child.on('close', () => resolve({ exitCode: 143 }));
     }),
@@ -90,7 +91,8 @@ test('background-tasks: stop 终止运行中的子进程(SIGNAL 路径)', async 
   const second = stopBackgroundTask(id);
   assert.equal(second.stopped, false, '已终止的任务再次 stop 返回 stopped:false');
   const task = getBackgroundTask(id);
-  assert.equal(task.status, 'stopped');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(task.status, 'outcome_unknown');
   await new Promise((r) => setTimeout(r, 200));
   assert.ok(child.killed || child.exitCode !== null, '子进程应收到终止信号');
 });
@@ -106,7 +108,9 @@ test('background-tasks: 无句柄任务(containers 模式)可标记终止但 kil
   assert.equal(result.stopped, true);
   assert.equal(result.killed, false, '无句柄时不能谎称已杀进程');
   assert.ok(result.note, '应说明该执行方式的终止语义');
-  assert.equal(getBackgroundTask(id).status, 'stopped');
+  assert.equal(getBackgroundTask(id).status, 'stopping');
+  await new Promise((resolve) => setTimeout(resolve, 3100));
+  assert.equal(getBackgroundTask(id).status, 'outcome_unknown');
 });
 
 test('background-tasks: stop 之后 run 结算不得把状态改回 completed', async () => {
@@ -120,7 +124,7 @@ test('background-tasks: stop 之后 run 结算不得把状态改回 completed', 
   stopBackgroundTask(id);
   release({ exitCode: 0, output: 'late' });
   await new Promise((r) => setTimeout(r, 30));
-  assert.equal(getBackgroundTask(id).status, 'stopped');
+  assert.equal(getBackgroundTask(id).status, 'outcome_unknown');
   assert.equal(getBackgroundTask(id).exitCode, 0);
 });
 

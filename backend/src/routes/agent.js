@@ -40,6 +40,7 @@ import {
 } from '../services/agent/policy-store.js';
 import { randomUUID } from 'node:crypto';
 import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
+import { listBackgroundTasks, waitForTaskOutput, stopBackgroundTask } from '../services/agent/background-tasks.js';
 
 export default async function agentRoutes(fastify) {
 
@@ -195,6 +196,34 @@ function aiRateLimit(limit, windowMs = 60000) {
       },
     },
   }, async (request) => getAiUsageSummary(request.query?.days));
+
+  // 持久化 Agent 后台任务中心：不依赖原聊天 SSE 连接，读取详情不会消费会话通知。
+  fastify.get('/agent/tasks', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+      status: { type: 'string', maxLength: 32 }, sessionId: numericId, limit: limitField(100),
+    } } },
+  }, async (request) => {
+    const query = request.query || {};
+    const tasks = listBackgroundTasks(query.sessionId ? Number(query.sessionId) : null)
+      .filter((task) => !query.status || task.status === query.status)
+      .slice(0, Math.max(1, Math.min(Number(query.limit) || 100, 100)));
+    return { tasks };
+  });
+  fastify.get('/agent/tasks/:taskId', {
+    schema: {
+      params: { type: 'object', required: ['taskId'], properties: { taskId: { type: 'string', minLength: 1, maxLength: 128 } } },
+      querystring: { type: 'object', additionalProperties: false, properties: { waitMs: { type: 'integer', minimum: 0, maximum: 10000 } } },
+    },
+  }, async (request, reply) => {
+    try { return { task: await waitForTaskOutput(request.params.taskId, request.query?.waitMs || 0, { consume: false }) }; }
+    catch (error) { return reply.code(error.statusCode || 404).send({ error: 'agent_task_not_found', message: error.message }); }
+  });
+  fastify.post('/agent/tasks/:taskId/stop', {
+    schema: { params: { type: 'object', required: ['taskId'], properties: { taskId: { type: 'string', minLength: 1, maxLength: 128 } } } },
+  }, async (request, reply) => {
+    try { return stopBackgroundTask(request.params.taskId); }
+    catch (error) { return reply.code(error.statusCode || 404).send({ error: 'agent_task_stop_failed', message: error.message }); }
+  });
 
   // GET /api/v1/ai/agent/feedback —— exportable low-score samples for offline review/evals
   fastify.get('/agent/feedback', {

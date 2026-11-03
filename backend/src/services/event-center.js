@@ -16,6 +16,14 @@ import { emitEvent, listAlertEvents, updateAlertEvent, pruneAlertEvents } from '
 export function recordEvent({ eventType = 'alert', source = 'system', title, detail = '', severity = 'info', status = 'open', assetId = null, assetName = '', payload = {} }) {
   const record = addEventRecord({ eventType, source, title, detail, severity, status, assetId, assetName, payload });
   emitEvent({ type: 'event', eventType, ...record });
+  // 统一事件中心同时作为工作流事件源；workflow 自身事件由 Router 明确忽略，防止递归触发。
+  void import('./event-router.js').then(({ routeWorkflowEvent }) => routeWorkflowEvent({
+    ...record,
+    eventId: 'event:' + String(record.id || record.createdAt || Date.now()),
+    eventType,
+    source,
+    severity,
+  })).catch((error) => console.warn('[event-router] event dispatch failed:', error.message));
   return record;
 }
 

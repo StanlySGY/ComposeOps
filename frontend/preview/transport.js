@@ -90,6 +90,8 @@ export async function previewFetch(input, options = {}) {
     '/ai/agent/memories': { memories: [] },
     '/ai/agent/executions': { plans: [], executions: [] },
     '/ai/agent/usage': { totalTokens: 0, models: [], daily: [] },
+    // The offline preview never starts real Agent background work; expose a truthful empty task center.
+    '/ai/agent/tasks': { tasks: [] },
     '/ai/agent/feedback': { feedback: [] },
     '/jobs': { jobs: [...jobs.values()] },
     '/cron': { jobs: [] }, '/cron/history': { history: [] },

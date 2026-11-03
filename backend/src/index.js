@@ -6,6 +6,10 @@ import { startHealthAlerter } from './services/health-alerter.js';
 import { startCronScheduler } from './services/cron-scheduler.js';
 import { startInspectionScheduler } from './services/inspection.js';
 import { initializeBackgroundJobs } from './services/background-jobs.js';
+import { initializeBackgroundTasks } from './services/agent/background-tasks.js';
+import { markRunningWorkflowInstancesUnknown } from './lib/db.js';
+import { startWorkflowCronTriggers, stopWorkflowCronTriggers } from './services/event-router.js';
+import { startTaskWatchdog, stopTaskWatchdog } from './services/task-watchdog.js';
 import { initGitOps } from './services/gitops.js';
 import { startMetricsCollection } from './services/metrics-collector.js';
 import { startDataMaintenance } from './services/maintenance.js';
@@ -48,10 +52,16 @@ const start = async () => {
   try {
     const interruptedJobs = initializeBackgroundJobs();
     if (interruptedJobs.length) fastify.log.warn({ jobs: interruptedJobs }, 'marked unfinished background jobs as interrupted');
+    const uncertainTasks = initializeBackgroundTasks();
+    if (uncertainTasks.length) fastify.log.warn({ tasks: uncertainTasks }, 'marked unfinished Agent tasks outcome_unknown; Docker state reconciliation is required');
+    const uncertainWorkflows = markRunningWorkflowInstancesUnknown();
+    if (uncertainWorkflows.length) fastify.log.warn({ workflows: uncertainWorkflows }, 'marked interrupted workflows outcome_unknown; side effects will not be replayed automatically');
     await fastify.listen({ port: PORT, host: HOST });
     startAlertMonitor();
     startHealthAlerter();
     startCronScheduler();
+    startWorkflowCronTriggers();
+    startTaskWatchdog();
     startInspectionScheduler(); // 自动巡检(默认关闭,按 setting 的间隔触发,见 inspection.js)
     initGitOps();
     const metricsIntervalSeconds = Number(process.env.METRICS_INTERVAL_SECONDS || 30);
@@ -79,6 +89,8 @@ async function shutdown(signal) {
   try { stopMetricsTimers?.(); } catch { /* 未启动时无需清理 */ }
   try { stopStateRecorder(); } catch { /* 未启动时无需清理 */ }
   try { stopCostWarmup?.(); } catch { /* 未启动时无需清理 */ }
+  try { stopWorkflowCronTriggers(); } catch { /* 工作流 Cron 触发器未启动时无需清理 */ }
+  try { stopTaskWatchdog(); } catch { /* Task Watchdog 未启动时无需清理 */ }
   try {
     const { stopInspectionScheduler } = await import('./services/inspection.js');
     stopInspectionScheduler();

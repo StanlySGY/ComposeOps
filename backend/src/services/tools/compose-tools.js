@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { readContainerLogs } from '../../lib/docker-exec.js';
 import { spawnComposeCommand } from '../compose-runner.js';
 import { runWorkspaceComposeArgs } from '../compose-workspace.js';
-import { getActivityDocker } from '../docker-hosts.js';
+import { getActivityDocker, getActiveHostId } from '../docker-hosts.js';
 import { createBackgroundTask } from '../agent/background-tasks.js';
 import { prepareProjectAction } from '../project-action-runner.js';
 import { findProjectContainer, scanProjects } from '../scanner.js';
@@ -105,6 +105,8 @@ export function registerComposeTools(agent) {
       const taskId = createBackgroundTask({
         sessionId: context.sessionId,
         projectId: project.id,
+        hostId: getActiveHostId(),
+        taskType: `compose.${action}`,
         label: `compose.${action} ${project.name || project.id}`,
         run: (onOutput, onChild) => prepared.run(onOutput, onChild, { timeoutMs: BACKGROUND_TIMEOUT_MS }),
       });

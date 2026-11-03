@@ -4,11 +4,13 @@ import { flushPromises, mount } from '@vue/test-utils';
 const listCronJobs = vi.hoisted(() => vi.fn());
 const getInspectionOverview = vi.hoisted(() => vi.fn());
 const createCronJob = vi.hoisted(() => vi.fn());
+const getAgentTasks = vi.hoisted(() => vi.fn());
+const getAgentTask = vi.hoisted(() => vi.fn());
 const store = vi.hoisted(() => ({
   projects: [{ id: 'p1', projectName: '测试项目' }],
   refresh: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../src/api/client.js', () => ({ api: { listCronJobs, getInspectionOverview, createCronJob } }));
+vi.mock('../src/api/client.js', () => ({ api: { listCronJobs, getInspectionOverview, createCronJob, getAgentTasks, getAgentTask } }));
 vi.mock('../src/stores/services.js', () => ({ useServicesStore: () => store }));
 vi.mock('../src/composables/usePullRefresh.js', () => ({ usePullRefresh: vi.fn() }));
 
@@ -19,10 +21,14 @@ beforeEach(() => {
   listCronJobs.mockReset();
   getInspectionOverview.mockReset();
   createCronJob.mockReset();
+  getAgentTasks.mockReset();
+  getAgentTask.mockReset();
   store.refresh.mockClear().mockResolvedValue(undefined);
   listCronJobs.mockResolvedValue({ jobs: [] });
   getInspectionOverview.mockResolvedValue({ latest: null, schedule: { enabled: false, intervalHours: 24 }, reports: [] });
   createCronJob.mockResolvedValue({ id: 'created-job' });
+  getAgentTasks.mockResolvedValue({ tasks: [] });
+  getAgentTask.mockResolvedValue({ task: { output: '' } });
 });
 afterEach(() => { wrapper?.unmount(); wrapper = null; });
 function mountView() {
@@ -75,6 +81,21 @@ describe('运维任务中心的加载失败与部分创建反馈', () => {
     expect(wrapper.text()).toContain('暂无定时任务');
     expect(wrapper.text()).toContain('暂无巡检报告');
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(0);
+  });
+
+  it('展示持久化 Agent 后台任务并支持展开查看输出', async () => {
+    getAgentTasks.mockResolvedValueOnce({ tasks: [{
+      id: 'agt-1', label: 'compose.up demo', projectId: 'p1',
+      status: 'completed', startedAt: '2026-11-02T10:00:00.000Z',
+    }] });
+    getAgentTask.mockResolvedValueOnce({ task: { id: 'agt-1', status: 'completed', output: 'compose operation completed' } });
+    wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('compose.up demo');
+    expect(wrapper.text()).toContain('已完成');
+    await wrapper.findAll('button').find(button => button.text().includes('输出')).trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('compose operation completed');
   });
 
   it('计划只创建出部分定时任务时刷新列表、明确告知勿整组重试', async () => {

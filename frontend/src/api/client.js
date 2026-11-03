@@ -260,6 +260,9 @@ export const api = {
   truncateAiHistory: (sessionId, fromMessageId) => request('/ai/history/truncate', { method: 'POST', body: JSON.stringify({ sessionId, fromMessageId }) }),
   // ai agent:执行已收敛为 Tool Loop 流式通道;会话/记忆/审计见上方与下方的端点
   agentExecuteStream: (payload, onEvent, signal) => streamSse('/ai/agent/execute-stream', payload, onEvent, signal),
+  getAgentTasks: (limit = 50, filters = {}) => request('/ai/agent/tasks?' + new URLSearchParams({ limit: String(limit), ...(filters.status ? { status: filters.status } : {}), ...(filters.sessionId ? { sessionId: String(filters.sessionId) } : {}) })),
+  getAgentTask: (id, waitMs = 0) => request('/ai/agent/tasks/' + encodeURIComponent(id) + '?waitMs=' + encodeURIComponent(waitMs)),
+  stopAgentTask: (id) => request('/ai/agent/tasks/' + encodeURIComponent(id) + '/stop', { method: 'POST' }),
   agentApprove: (payload) => request('/ai/agent/approve', { method: 'POST', body: JSON.stringify(payload) }),
   agentFeedback: (payload) => request('/ai/agent/feedback', { method: 'POST', body: JSON.stringify(payload) }),
   setAgentApprovalMode: (payload) => request('/ai/agent/approval-mode', { method: 'POST', body: JSON.stringify(payload) }),

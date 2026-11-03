@@ -8,7 +8,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-workflow-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const {
-  createDefinition, listDefinitions, getDefinition, removeDefinition,
+  createDefinition, updateDefinition, listDefinitions, getDefinition, removeDefinition,
   startWorkflow, getInstance, approveInstance, cancelInstance, evaluateCondition,
 } = await import('../src/services/workflow-engine.js');
 
@@ -77,6 +77,45 @@ test('workflow: 审批通过后继续执行到完成', async () => {
   const done = getInstance(instance.id);
   assert.equal(done.status, 'success');
   assert.ok(done.steps.some((step) => step.nodeType === 'verify' && step.status === 'success'));
+});
+
+test('workflow: 等待审批期间工作流定义变化时拒绝旧意图授权', async () => {
+  const definition = createDefinition({
+    name: '审批意图冻结',
+    nodes: [
+      { id: 'trigger', type: 'trigger', config: {} },
+      { id: 'approval', type: 'approval', config: {} },
+      { id: 'action', type: 'action', config: { action: 'restart', projectId: 'project-a' } },
+    ],
+  });
+  const instance = startWorkflow(definition.id, {});
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  const pending = getInstance(instance.id);
+  assert.equal(pending.status, 'waiting_approval');
+  assert.deepEqual(pending.context.pendingApprovalIntent.actionIntent, {
+    actionNodeId: 'action', action: 'restart', projectId: 'project-a',
+  });
+  const approvalStep = pending.steps.find((step) => step.nodeId === 'approval');
+  assert.deepEqual(approvalStep.output.approvalIntent, pending.context.pendingApprovalIntent);
+
+  updateDefinition(definition.id, {
+    nodes: [
+      { id: 'trigger', type: 'trigger', config: {} },
+      { id: 'approval', type: 'approval', config: {} },
+      { id: 'action', type: 'action', config: { action: 'stop', projectId: 'project-b' } },
+    ],
+  });
+
+  assert.throws(
+    () => approveInstance(instance.id, { approved: true, note: '旧动作审批' }),
+    (error) => error.statusCode === 409 && error.code === 'WORKFLOW_APPROVAL_STALE',
+  );
+  const stillPending = getInstance(instance.id);
+  assert.equal(stillPending.status, 'waiting_approval');
+  assert.equal(stillPending.context.workflowApprovals, undefined);
+  assert.equal(stillPending.steps.some((step) => step.nodeType === 'action'), false);
+  cancelInstance(instance.id);
 });
 
 test('workflow: 拒绝审批则取消', async () => {
@@ -195,4 +234,52 @@ test('workflow: agent 节点接入 Agent 引擎(未配置 API Key 时优雅失�
   const agentStep = done.steps.find((step) => step.nodeType === 'agent');
   assert.ok(agentStep);
   assert.equal(agentStep.status, 'failed');
+});
+
+test('workflow: Action 节点没有后端一次性审批凭证时必须失败关闭', async () => {
+  const definition = createDefinition({
+    name: '缺少审批的 Action',
+    nodes: [
+      { id: 'trigger', type: 'trigger', config: {} },
+      { id: 'action', type: 'action', config: { action: 'restart', projectId: 'missing-managed-project' } },
+    ],
+  });
+  const instance = startWorkflow(definition.id, {});
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const done = getInstance(instance.id);
+  assert.equal(done.status, 'failed');
+  assert.match(done.result.error, /缺少匹配且未使用的人工审批/);
+  assert.equal(done.steps.some((step) => step.nodeId === 'action'), false);
+});
+
+test('workflow: 重复幂等键只创建一个工作流实例', async () => {
+  const definition = createDefinition({
+    name: '幂等启动',
+    nodes: [
+      { id: 'trigger', type: 'trigger', config: {} },
+      { id: 'verify', type: 'verify', config: {} },
+    ],
+  });
+  const idempotencyKey = 'workflow-test:stable-key';
+  const first = startWorkflow(definition.id, {}, { idempotencyKey });
+  const replay = startWorkflow(definition.id, {}, { idempotencyKey });
+  assert.equal(replay.id, first.id);
+  assert.equal(replay.replayed, true);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(getInstance(first.id).status, 'success');
+});
+
+test('workflow: event trigger 必须明确指定事件类型，cron trigger 必须填写合法表达式', () => {
+  assert.throws(
+    () => createDefinition({ name: 'Catch all forbidden', triggerType: 'event', triggerConfig: {}, nodes: [] }),
+    /明确指定 eventTypes/,
+  );
+  assert.throws(
+    () => createDefinition({ name: 'Cron missing', triggerType: 'cron', triggerConfig: {}, nodes: [] }),
+    /填写 Cron 表达式/,
+  );
+  assert.throws(
+    () => createDefinition({ name: 'Cron invalid', triggerType: 'cron', triggerConfig: { cron: 'not cron' }, nodes: [] }),
+    /cron|字段|Cron/,
+  );
 });
