@@ -48,6 +48,16 @@ docker compose -f docker-compose.yml -f docker-compose.encrypted.yml up -d --for
 
 启动时，应用会把原有数据库架构、表数据、索引、视图、触发器、BLOB、迁移版本和自增序列复制到同目录的加密临时文件；通过完整性校验后才原子替换原数据库。失败时不会用不完整文件替换原库。迁移会占用额外磁盘并延长启动时间；大数据库需安排维护窗口并确认剩余空间。即使自动迁移保留原文件直到切换成功，也仍应先创建独立备份。
 
+如果不希望每次打开新 shell 都重新 `export`，可在项目根目录创建本机专用的 `.env`，只保存密钥文件路径（`.env` 已被 Git 忽略）：
+
+```sh
+umask 077
+printf 'COMPOSEOPS_DB_ENCRYPTION_KEY_FILE=%s\n' "$HOME/.config/composeops/db-encryption-key" > .env
+chmod 600 .env
+```
+
+`.env` 中不得保存密钥内容；密钥仍只放在项目目录和数据卷之外的受限文件中。
+
 检查服务健康、能登录并读取 AI 配置/历史记录，再查看加密状态：
 
 ```sh
@@ -55,7 +65,7 @@ docker compose -f docker-compose.yml -f docker-compose.encrypted.yml ps
 docker exec opsdash node scripts/database-encryption.js status --db /app/backend/data/opsdash.db
 ```
 
-启用后**始终同时使用两个 Compose 文件**；每个需要执行 Compose 命令的 shell 都要设置 `COMPOSEOPS_DB_ENCRYPTION_KEY_FILE`。如果省略 overlay，容器将缺少密钥挂载；对已加密数据库，应用会拒绝启动，不会降级为明文。
+启用后**始终同时使用两个 Compose 文件**；可以通过每个 shell 的 `export COMPOSEOPS_DB_ENCRYPTION_KEY_FILE=...` 或项目根目录的本机 `.env` 提供外部密钥文件路径。如果省略 overlay，容器将缺少密钥挂载；对已加密数据库，应用会拒绝启动，不会降级为明文。
 
 ## 3. 离线密钥轮换
 
