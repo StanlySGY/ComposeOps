@@ -257,6 +257,7 @@ function statusLabel(status) {
     pending: '待执行',
     pending_confirmation: '待确认',
     executing: '执行中',
+    outcome_unknown: '结果待核对',
     completed: '已完成',
     failed: '失败',
   };
@@ -267,6 +268,7 @@ function statusClass(status) {
   if (status === 'completed') return 'bg-emerald-500/10 text-emerald-400';
   if (status === 'failed') return 'bg-rose-500/10 text-rose-400';
   if (status === 'executing') return 'bg-blue-500/10 text-blue-400';
+  if (status === 'outcome_unknown') return 'bg-amber-500/10 text-amber-300';
   return 'bg-zinc-700/50 text-zinc-400';
 }
 

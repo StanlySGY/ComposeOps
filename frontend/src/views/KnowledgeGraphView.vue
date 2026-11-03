@@ -185,7 +185,7 @@
 </template>
 
 <script setup>
-defineProps({ embedded: { type: Boolean, default: false } });
+const props = defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { AlertTriangle, Bot, Boxes, ChevronRight, Database, GitMerge, HardDrive, RefreshCw, Server, Waypoints } from 'lucide-vue-next';
@@ -203,11 +203,39 @@ const error = ref('');
 const hosts = ref([]);
 const alerts = ref([]);
 const inspectionCount = ref(0);
-const useCmdb = ref(false);
+const useCmdb = ref(props.embedded);
 const viewMode = ref('graph'); // 'graph' | 'tree'
 
-const projects = computed(() => useCmdb.value ? cmdb.projects : store.projects);
-const containerCount = computed(() => useCmdb.value ? cmdb.containers.length : projects.value.reduce((n, p) => n + (p.containers?.length || 0), 0));
+// 嵌入 CMDB 资产中心时必须使用同一份 CMDB 快照，而不是切到另一套实时发现数据。
+const cmdbProjects = computed(() => {
+  const containersById = new Map(cmdb.containers.map((asset) => [asset.id, asset]));
+  const volumesById = new Map(cmdb.assets.filter((asset) => asset.kind === 'volume').map((asset) => [asset.id, asset]));
+  return cmdb.projects.map((asset) => {
+    const assetId = `project:${asset.name}`;
+    const childContainers = cmdb.relations
+      .filter((relation) => relation.relation === 'runs_on' && relation.targetId === assetId && relation.sourceId.startsWith('container:'))
+      .map((relation) => containersById.get(relation.sourceId))
+      .filter(Boolean)
+      .map((container) => ({
+        id: container.name,
+        name: container.displayName || container.name,
+        state: container.status,
+        volumes: cmdb.relations
+          .filter((relation) => relation.relation === 'mounts' && relation.sourceId === container.id)
+          .map((relation) => volumesById.get(relation.targetId)?.name)
+          .filter(Boolean),
+      }));
+    return {
+      id: asset.name,
+      projectName: asset.displayName || asset.name,
+      workingDir: asset.properties?.composeFile || '',
+      status: asset.status,
+      containers: childContainers,
+    };
+  });
+});
+const projects = computed(() => useCmdb.value ? cmdbProjects.value : store.projects);
+const containerCount = computed(() => projects.value.reduce((n, p) => n + (p.containers?.length || 0), 0));
 const volumeCount = computed(() => useCmdb.value ? cmdb.assets.filter((a) => a.kind === 'volume').length : projects.value.reduce((n, p) => n + (p.containers || []).reduce((m, c) => m + (c.volumes?.length || 0), 0), 0));
 const alertCount = computed(() => alerts.value.length);
 const activeHostName = computed(() => hosts.value.find((h) => h.active)?.name || 'Local Daemon');

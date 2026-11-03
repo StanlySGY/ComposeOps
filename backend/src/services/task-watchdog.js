@@ -5,12 +5,34 @@ import {
   updateAgentBackgroundTask,
   updateWorkflowInstanceIfStatus,
   updateWorkflowStep,
+  listAgentPlans,
+  updateAgentPlan,
 } from '../lib/db.js';
 
 const DEFAULT_STALE_MS = 90000;
 const DEFAULT_INTERVAL_MS = 30000;
 let timer = null;
 let running = false;
+
+/**
+ * 在服务启动、开始接收新请求前收敛上次进程遗留的 Agent executing 计划。
+ * 只标记状态，不重放工具调用；执行是否已落到 Docker 侧需人工核对。
+ */
+export function markInterruptedAgentPlansUnknown() {
+  const nowIso = new Date().toISOString();
+  const marked = [];
+  for (const plan of listAgentPlans(100)) {
+    if (plan.status !== 'executing') continue;
+    const updated = updateAgentPlan(plan.id, {
+      status: 'outcome_unknown',
+      executedAt: plan.executed_at || nowIso,
+      progressStage: '服务重启中断，执行结果待核对',
+      updatedAt: nowIso,
+    });
+    if (updated) marked.push(plan.id);
+  }
+  return marked;
+}
 
 function toMillis(value, fallback = 0) {
   const parsed = typeof value === 'number' ? value : Date.parse(value || '');

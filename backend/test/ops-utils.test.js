@@ -11,7 +11,7 @@ const { parseImageRef, extractImageRefs, extractImageServices, compareImageDiges
 const { flattenUpdateResults } = await import('../src/services/maintenance.js');
 const { parseDockerDf, parseDockerDfOutput, pruneStorage } = await import('../src/services/docker-storage.js');
 const { getActivityDocker } = await import('../src/services/docker-hosts.js');
-const { removeDockerResource } = await import('../src/services/docker-resources.js');
+const { removeDockerResource, listDockerResources, countVolumeReferences } = await import('../src/services/docker-resources.js');
 const { renderBlueprintCompose, renderBlueprintEnv, getBlueprint, listBlueprints } = await import('../src/services/app-blueprints.js');
 const { evaluateContainer, buildTitle, buildBody, stripDockerMultiplex } = await import('../src/services/health-alerter.js');
 const { summarizePullImagesResult } = await import('../src/services/cron-scheduler.js');
@@ -170,9 +170,11 @@ test('docker-resources: 即使调用方传 force=true,镜像与数据卷也不�
   const docker = getActivityDocker();
   const originalGetImage = docker.getImage;
   const originalGetVolume = docker.getVolume;
+  const originalListContainers = docker.listContainers;
   const calls = [];
   docker.getImage = (id) => ({ remove: async (options) => calls.push(['image', id, options]) });
   docker.getVolume = (id) => ({ remove: async (options) => calls.push(['volume', id, options]) });
+  docker.listContainers = async () => [];
   try {
     await removeDockerResource('image', 'image-id', true);
     await removeDockerResource('volume', 'volume-id', true);
@@ -183,6 +185,71 @@ test('docker-resources: 即使调用方传 force=true,镜像与数据卷也不�
   } finally {
     if (originalGetImage === undefined) delete docker.getImage;
     else docker.getImage = originalGetImage;
+    if (originalGetVolume === undefined) delete docker.getVolume;
+    else docker.getVolume = originalGetVolume;
+    if (originalListContainers === undefined) delete docker.listContainers;
+    else docker.listContainers = originalListContainers;
+  }
+});
+
+test('docker-resources: 以所有容器 Mounts 为准，包含已停止容器并区分 bind mount', async () => {
+  const docker = getActivityDocker();
+  const originals = {
+    listImages: docker.listImages,
+    listVolumes: docker.listVolumes,
+    listNetworks: docker.listNetworks,
+    listContainers: docker.listContainers,
+  };
+  docker.listImages = async () => [];
+  docker.listVolumes = async () => ({ Volumes: [
+    { Name: 'running-volume', Driver: 'local', UsageData: { Size: 120 } },
+    { Name: 'stopped-volume', Driver: 'local', UsageData: { Size: 80 } },
+    { Name: 'unused-volume', Driver: 'local', UsageData: { Size: 40 } },
+  ] });
+  docker.listNetworks = async () => [];
+  docker.listContainers = async ({ all }) => {
+    assert.equal(all, true);
+    return [
+      { Id: 'running-container', State: 'running', Mounts: [{ Type: 'volume', Name: 'running-volume' }] },
+      { Id: 'stopped-container', State: 'exited', Mounts: [{ Type: 'volume', Name: 'stopped-volume' }, { Type: 'bind', Source: '/tmp' }] },
+    ];
+  };
+  try {
+    const refs = countVolumeReferences([
+      { Id: 'a', Mounts: [{ Type: 'volume', Name: 'shared' }, { Type: 'volume', Name: 'shared' }] },
+      { Id: 'b', Mounts: [{ Type: 'volume', Name: 'shared' }] },
+    ]);
+    assert.equal(refs.get('shared'), 2);
+
+    const result = await listDockerResources();
+    const volumes = Object.fromEntries(result.volumes.map((volume) => [volume.name, volume]));
+    assert.equal(volumes['running-volume'].orphan, false);
+    assert.equal(volumes['running-volume'].refCount, 1);
+    assert.equal(volumes['stopped-volume'].orphan, false);
+    assert.equal(volumes['stopped-volume'].refCount, 1);
+    assert.equal(volumes['unused-volume'].orphan, true);
+    assert.equal(result.counts.orphanVolumes, 1);
+  } finally {
+    for (const [name, method] of Object.entries(originals)) {
+      if (method === undefined) delete docker[name];
+      else docker[name] = method;
+    }
+  }
+});
+
+test('docker-resources: 删除前再次检查停止容器引用并返回 409', async () => {
+  const docker = getActivityDocker();
+  const originalListContainers = docker.listContainers;
+  const originalGetVolume = docker.getVolume;
+  let removed = false;
+  docker.listContainers = async () => [{ Id: 'stopped-container', State: 'exited', Mounts: [{ Type: 'volume', Name: 'protected-volume' }] }];
+  docker.getVolume = () => ({ remove: async () => { removed = true; } });
+  try {
+    await assert.rejects(removeDockerResource('volume', 'protected-volume'), (error) => error.statusCode === 409 && /仍被 1 个容器引用/.test(error.message));
+    assert.equal(removed, false);
+  } finally {
+    if (originalListContainers === undefined) delete docker.listContainers;
+    else docker.listContainers = originalListContainers;
     if (originalGetVolume === undefined) delete docker.getVolume;
     else docker.getVolume = originalGetVolume;
   }

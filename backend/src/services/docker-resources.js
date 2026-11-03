@@ -24,22 +24,32 @@ function normalizeImage(image = {}) {
   };
 }
 
-/** dockerode listVolumes -> 规范化卷条目(UsageData 缺失时逐个 inspect 兜底)。 */
-async function normalizeVolumes(docker, listResult = {}) {
-  const volumes = Array.isArray(listResult.Volumes) ? listResult.Volumes : [];
-  return Promise.all(volumes.map(async (volume) => {
-    const name = String(volume.Name || '');
-    let usage = volume.UsageData;
-    if (!usage || typeof usage.RefCount !== 'number') {
-      try {
-        const inspected = await docker.getVolume(name).inspect();
-        usage = inspected?.UsageData || null;
-      } catch {
-        usage = null;
-      }
+/**
+ * 从 Docker 全量容器列表统计卷引用。必须包含 stopped/exited 容器：
+ * 只要容器仍存在并持有 Mounts，就不能把它的数据卷标为孤儿。
+ */
+export function countVolumeReferences(containers = []) {
+  const references = new Map();
+  for (const container of Array.isArray(containers) ? containers : []) {
+    const containerId = String(container?.Id || container?.ID || container?.Names?.[0] || 'unknown-container');
+    for (const mount of Array.isArray(container?.Mounts) ? container.Mounts : []) {
+      if (mount?.Type !== 'volume' || !mount?.Name) continue;
+      const name = String(mount.Name);
+      if (!references.has(name)) references.set(name, new Set());
+      references.get(name).add(containerId);
     }
-    const refCount = Number(usage?.RefCount) || 0;
-    const size = Number(usage?.Size) || 0;
+  }
+  return new Map([...references].map(([name, ids]) => [name, ids.size]));
+}
+
+/** dockerode listVolumes -> 规范化卷条目；引用状态以 Docker 容器 Mounts 为准。 */
+function normalizeVolumes(listResult = {}, containers = []) {
+  const volumes = Array.isArray(listResult.Volumes) ? listResult.Volumes : [];
+  const referenceCounts = countVolumeReferences(containers);
+  return volumes.map((volume) => {
+    const name = String(volume.Name || '');
+    const refCount = referenceCounts.get(name) || 0;
+    const size = Number(volume.UsageData?.Size) || 0;
     const createdAt = volume.CreatedAt ? new Date(volume.CreatedAt).getTime() : null;
     return {
       name,
@@ -48,10 +58,10 @@ async function normalizeVolumes(docker, listResult = {}) {
       scope: String(volume.Scope || 'local'),
       size,
       refCount,
-      orphan: refCount <= 0,
+      orphan: refCount === 0,
       createdAt,
     };
-  }));
+  });
 }
 
 /** dockerode listNetworks -> 规范化网络条目。 */
@@ -77,13 +87,15 @@ function normalizeNetwork(network = {}) {
 /** GET /ops/storage/resources:一次性返回镜像 / 卷 / 网络清单及逐项状态。 */
 export async function listDockerResources() {
   const docker = getActivityDocker();
-  const [imagesRaw, volumesRaw, networksRaw] = await Promise.all([
+  const [imagesRaw, volumesRaw, networksRaw, containersRaw] = await Promise.all([
     docker.listImages({ all: true }).catch((error) => { throw wrap(error); }),
     docker.listVolumes().catch((error) => { throw wrap(error); }),
     docker.listNetworks().catch((error) => { throw wrap(error); }),
+    // 引用关系不完整时整个清单失败关闭，绝不能把未知卷降级标记为可删除。
+    docker.listContainers({ all: true }).catch((error) => { throw wrap(error); }),
   ]);
   const images = imagesRaw.map(normalizeImage);
-  const volumes = await normalizeVolumes(docker, volumesRaw);
+  const volumes = normalizeVolumes(volumesRaw, containersRaw);
   const networks = networksRaw.map(normalizeNetwork);
   const warnings = Array.isArray(volumesRaw?.Warnings) ? volumesRaw.Warnings : [];
   return {
@@ -115,8 +127,13 @@ export async function removeDockerResource(kind, id, _force = false) {
     return { kind, id, removed: true };
   }
   if (kind === 'volume') {
-    // 不能为了避免“被引用卷删除失败”而强制删除:调用方列表可能已过期。
-    // Docker 会在卷被容器引用时拒绝删除,这是数据安全的最后一道保护。
+    // 删除前再次查询所有容器（包括已停止容器），阻止过期列表或并发挂载导致误删。
+    const containers = await docker.listContainers({ all: true }).catch((error) => { throw wrap(error); });
+    const refCount = countVolumeReferences(containers).get(id) || 0;
+    if (refCount > 0) {
+      throw Object.assign(new Error(`数据卷仍被 ${refCount} 个容器引用，拒绝删除`), { statusCode: 409 });
+    }
+    // 不强制删除；Docker daemon 仍是最后一道并发竞态保护。
     await docker.getVolume(id).remove({ force: false });
     return { kind, id, removed: true };
   }

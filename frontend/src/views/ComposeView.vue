@@ -735,10 +735,8 @@ function shortName(file) { return file.split('/').pop(); }
 function formatTime(value) { return new Date(`${value}Z`).toLocaleString(); }
 
 function toggleEditorMode() {
+  // 内容与视图模式分别异步更新；切到可视化后若 YAML 尚未加载，content watcher 会补齐解析。
   editorMode.value = editorMode.value === 'code' ? 'visual' : 'code';
-  if (editorMode.value === 'visual') {
-    parseYamlToServices();
-  }
 }
 
 function parseYamlToServices() {
@@ -808,8 +806,11 @@ function saveServiceFromEditor({ name, service }) {
 }
 
 watch(editorMode, (newMode) => {
-  if (newMode === 'visual') {
-    parseYamlToServices();
-  }
+  if (newMode === 'visual') parseYamlToServices();
+});
+// 路由 keep-alive 可能保留 visual 模式，而项目/配置文件内容在返回页面后才异步载入。
+// 每次内容变更都同步可视化模型，避免首次进入或切换项目时短暂显示“暂无服务”。
+watch(content, () => {
+  if (editorMode.value === 'visual') parseYamlToServices();
 });
 </script>

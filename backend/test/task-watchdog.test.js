@@ -4,7 +4,20 @@ import test from 'node:test';
 
 const db = await import('../src/lib/db.js');
 const { createDefinition, getInstance } = await import('../src/services/workflow-engine.js');
-const { runTaskWatchdogOnce } = await import('../src/services/task-watchdog.js');
+const { runTaskWatchdogOnce, markInterruptedAgentPlansUnknown } = await import('../src/services/task-watchdog.js');
+
+test('startup recovery marks interrupted Agent execution plans outcome_unknown without replay', () => {
+  const planId = db.createAgentPlan(77, 'stale plan', { steps: [{ tool: 'compose.restart' }] });
+  db.updateAgentPlan(planId, { status: 'executing', progressStage: 'Tool Loop 执行中' });
+  const pendingId = db.createAgentPlan(77, 'awaiting approval', { steps: [] });
+  db.updateAgentPlan(pendingId, { status: 'pending_confirmation' });
+
+  const marked = markInterruptedAgentPlansUnknown();
+  assert.ok(marked.includes(planId));
+  assert.equal(db.getAgentPlan(planId).status, 'outcome_unknown');
+  assert.match(db.getAgentPlan(planId).progress_stage, /结果待核对/);
+  assert.equal(db.getAgentPlan(pendingId).status, 'pending_confirmation');
+});
 
 test('task watchdog marks a stale Agent background task outcome_unknown without replay', () => {
   const task = db.createAgentBackgroundTask({

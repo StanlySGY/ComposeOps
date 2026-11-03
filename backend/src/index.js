@@ -9,7 +9,7 @@ import { initializeBackgroundJobs } from './services/background-jobs.js';
 import { initializeBackgroundTasks } from './services/agent/background-tasks.js';
 import { markRunningWorkflowInstancesUnknown } from './lib/db.js';
 import { startWorkflowCronTriggers, stopWorkflowCronTriggers } from './services/event-router.js';
-import { startTaskWatchdog, stopTaskWatchdog } from './services/task-watchdog.js';
+import { startTaskWatchdog, stopTaskWatchdog, markInterruptedAgentPlansUnknown } from './services/task-watchdog.js';
 import { initGitOps } from './services/gitops.js';
 import { startMetricsCollection } from './services/metrics-collector.js';
 import { startDataMaintenance } from './services/maintenance.js';
@@ -54,6 +54,8 @@ const start = async () => {
     if (interruptedJobs.length) fastify.log.warn({ jobs: interruptedJobs }, 'marked unfinished background jobs as interrupted');
     const uncertainTasks = initializeBackgroundTasks();
     if (uncertainTasks.length) fastify.log.warn({ tasks: uncertainTasks }, 'marked unfinished Agent tasks outcome_unknown; Docker state reconciliation is required');
+    const interruptedAgentPlans = markInterruptedAgentPlansUnknown();
+    if (interruptedAgentPlans.length) fastify.log.warn({ plans: interruptedAgentPlans }, 'marked Agent plans interrupted by previous process outcome_unknown; Docker state reconciliation is required');
     const uncertainWorkflows = markRunningWorkflowInstancesUnknown();
     if (uncertainWorkflows.length) fastify.log.warn({ workflows: uncertainWorkflows }, 'marked interrupted workflows outcome_unknown; side effects will not be replayed automatically');
     await fastify.listen({ port: PORT, host: HOST });

@@ -43,6 +43,7 @@ export async function syncAssets() {
   }
 
   // 2. Project 资产 + 关系(project runs_on host)
+  const pendingVolumeRelations = [];
   for (const project of projects) {
     const projectId = project.id || project.projectName || project.name;
     if (!projectId) continue;
@@ -73,6 +74,9 @@ export async function syncAssets() {
         source: 'scanner',
       });
       addAssetRelation(`container:${containerId}`, `project:${projectId}`, 'runs_on');
+      for (const volumeName of container.volumes || []) {
+        if (volumeName) pendingVolumeRelations.push({ containerId, volumeName: String(volumeName) });
+      }
     }
   }
 
@@ -89,6 +93,11 @@ export async function syncAssets() {
       source: 'docker',
     });
     addAssetRelation(`volume:${activeHostId}:${volume.Name}`, `host:${activeHostId}`, 'runs_on');
+  }
+  // 容器与卷的挂载血缘：先创建卷资产，再写关系，避免关系指向不存在的资产。
+  for (const { containerId, volumeName } of pendingVolumeRelations) {
+    const volumeAssetId = `volume:${activeHostId}:${volumeName}`;
+    if (getAsset(volumeAssetId)) addAssetRelation(`container:${containerId}`, volumeAssetId, 'mounts');
   }
   for (const network of networkResult || []) {
     if (!network?.Id && !network?.Name) continue;
