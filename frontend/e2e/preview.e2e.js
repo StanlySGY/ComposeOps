@@ -421,3 +421,55 @@ test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
+
+test('服务页进入日志再返回，筛选、展开、滚动与日志上下文保持一致', async ({ page }) => {
+  await page.goto('./#/services');
+  await expect(page.getByRole('heading', { name: '服务总览', exact: true })).toBeVisible();
+  const search = page.getByPlaceholder('搜索项目、容器、镜像或路径');
+  await search.fill('wiki-api');
+  const card = page.locator('#project-knowledge-base');
+  await expect(card).toBeVisible();
+  await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
+  await card.locator('.service-project-card__toggle').click();
+  await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
+  const logLink = card.locator('a[href*="/logs"][href*="containerId=demo-wiki-api"]:visible');
+  await expect(logLink).toBeVisible();
+  // 移动端的卡片日志入口位于展开内容下方;先让真实入口进入视口,再记录离开时的位置。
+  await logLink.scrollIntoViewIfNeeded();
+  const scrollTop = await page.locator('.app-main').evaluate(el => el.scrollTop);
+  await logLink.click();
+  await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
+  await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
+  await page.getByRole('textbox', { name: '搜索和过滤实时日志' }).fill('ENOTFOUND');
+  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await expect(page.getByRole('heading', { name: '服务总览', exact: true })).toBeVisible();
+  await expect(search).toHaveValue('wiki-api');
+  await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.app-main')).toHaveJSProperty('scrollTop', scrollTop);
+
+  // 通过侧栏普通“日志”入口不带 query 重进,应保留项目上下文和原始来源。
+  await page.getByRole('link', { name: '日志', exact: true }).first().click();
+  await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: '选择日志项目' })).toHaveValue('knowledge-base');
+  await expect(page.getByRole('textbox', { name: '搜索和过滤实时日志' })).toHaveValue('ENOTFOUND');
+  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await expect(search).toHaveValue('wiki-api');
+  await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('手机窄屏日志搜索框保持完整宽度并可实际过滤', async ({ page, isMobile }) => {
+  test.skip(!isMobile, '仅在移动设备项目验证窄屏工具栏');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('./#/logs?projectId=knowledge-base&containerId=demo-wiki-api&from=services');
+  await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
+  const search = page.getByRole('textbox', { name: '搜索和过滤实时日志' });
+  await expect(search).toBeVisible();
+  const width = await search.evaluate(element => element.getBoundingClientRect().width);
+  expect(width).toBeGreaterThanOrEqual(250);
+  await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
+  await search.fill('ENOTFOUND');
+  await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+});

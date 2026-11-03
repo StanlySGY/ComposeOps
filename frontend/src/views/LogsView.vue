@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell page-shell-workspace">
+  <div class="page-shell page-shell-workspace logs-view">
     <div class="page-header">
       <div class="flex min-w-0 items-center gap-3">
         <button v-if="returnTarget" class="btn-secondary shrink-0" @click="goBackToSource"><ArrowLeft class="h-4 w-4" />{{ returnTarget.label }}</button>

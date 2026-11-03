@@ -2819,6 +2819,8 @@ body {
   .data-table th, .data-table td { padding: 9px 10px; }
   .page-actions { width: 100%; flex-wrap: wrap; }
   .page-actions > .input, .page-actions > select { min-width: 0; max-width: 100%; flex: 1 1 160px; }
+  /* 日志操作栏按钮较多;搜索框必须独占一行,不能被 flex-1 压到只剩图标。 */
+  .logs-view .page-actions > .search-field { flex: 1 1 100%; width: 100%; }
   .section-panel { min-width: 0; }
   .metric-grid { gap: 10px; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
