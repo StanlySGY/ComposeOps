@@ -15,7 +15,7 @@ function observe(page) {
 const routes = {
   dashboard: '运维总览', services: '服务总览', compose: 'Compose 配置', logs: '实时日志', agent: 'AI 智能运维 Agent',
   shell: '容器终端', monitor: '实时监控', resources: '存储清理', settings: '设置', topology: '服务拓扑中心', events: '事件中心',
-  inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': '运维任务中心', workflows: '工作流中心',
+  inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': 'Autonomous Ops', workflows: '工作流中心',
   cron: '定时任务', gitops: 'GitOps 集成', review: '变更与回滚', cmdb: '资产中心 (CMDB)', 'node-groups': '节点组管理',
   marketplace: '应用市场', cost: '成本分析',
 };
