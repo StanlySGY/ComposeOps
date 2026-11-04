@@ -84,6 +84,8 @@ services:
       - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
       - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
       - NODE_USE_ENV_PROXY=${COMPOSEOPS_NODE_USE_ENV_PROXY:-0}
+      # Durable Effect worker is constrained to read-only Docker inspect actions; set 0 to pause dispatch.
+      - OPS_EFFECT_WORKER_ENABLED=${COMPOSEOPS_EFFECT_WORKER_ENABLED:-1}
       # 按需 Compose 工作容器复用时间与最多缓存项目数。
       # - COMPOSEOPS_WORKSPACE_IDLE_MS=90000
       # - COMPOSEOPS_WORKSPACE_CACHE_MAX=8

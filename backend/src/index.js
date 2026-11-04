@@ -9,6 +9,7 @@ import { initializeBackgroundJobs } from './services/background-jobs.js';
 import { initializeBackgroundTasks } from './services/agent/background-tasks.js';
 import { markRunningWorkflowInstancesUnknown } from './lib/db.js';
 import { recoverExpiredOpsEffects } from './services/ops-tickets.js';
+import { startOpsEffectWorker, stopOpsEffectWorker } from './services/ops-effect-worker.js';
 import { startWorkflowCronTriggers, stopWorkflowCronTriggers } from './services/event-router.js';
 import { startTaskWatchdog, stopTaskWatchdog, markInterruptedAgentPlansUnknown } from './services/task-watchdog.js';
 import { initGitOps } from './services/gitops.js';
@@ -62,6 +63,10 @@ const start = async () => {
     const uncertainWorkflows = markRunningWorkflowInstancesUnknown();
     if (uncertainWorkflows.length) fastify.log.warn({ workflows: uncertainWorkflows }, 'marked interrupted workflows outcome_unknown; side effects will not be replayed automatically');
     await fastify.listen({ port: PORT, host: HOST });
+    if (process.env.OPS_EFFECT_WORKER_ENABLED === '1') {
+      startOpsEffectWorker({ logger: fastify.log });
+      fastify.log.info('Controlled Effect Worker enabled (read-only Docker inspection actions only)');
+    }
     startAlertMonitor();
     startHealthAlerter();
     startCronScheduler();
@@ -94,6 +99,10 @@ async function shutdown(signal) {
   try { stopMetricsTimers?.(); } catch { /* 未启动时无需清理 */ }
   try { stopStateRecorder(); } catch { /* 未启动时无需清理 */ }
   try { stopCostWarmup?.(); } catch { /* 未启动时无需清理 */ }
+  try {
+    const workerShutdown = stopOpsEffectWorker();
+    if (workerShutdown) await Promise.race([workerShutdown, new Promise((resolve) => setTimeout(resolve, 5000))]);
+  } catch { /* Effect Worker 未启动时无需清理 */ }
   try { stopWorkflowCronTriggers(); } catch { /* 工作流 Cron 触发器未启动时无需清理 */ }
   try { stopTaskWatchdog(); } catch { /* Task Watchdog 未启动时无需清理 */ }
   try {

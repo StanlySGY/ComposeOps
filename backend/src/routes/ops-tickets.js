@@ -4,6 +4,7 @@ import {
   reconcileOpsAssignment, submitOpsReport, decideOpsReport, proposeOpsEffect,
   approveOpsEffect, cancelOpsEffect, reconcileOpsEffect,
 } from '../services/ops-tickets.js';
+import { getOpsEffectWorkerStatus } from '../services/ops-effect-worker.js';
 
 const ticketParams = { type:'object', required:['ticketId'], additionalProperties:false, properties:{ ticketId:{type:'string',minLength:1,maxLength:160} } };
 const nestedParams = { type:'object', required:['ticketId','mandateId'], additionalProperties:false, properties:{
@@ -24,6 +25,8 @@ const failure = (reply,error,defaultCode='ops_ticket_failed') => reply.code(erro
 });
 
 export default async function opsTicketRoutes(fastify) {
+  fastify.get('/worker/status', async () => getOpsEffectWorkerStatus());
+
   fastify.get('/', {
     schema:{querystring:{type:'object',additionalProperties:false,properties:{
       status:{type:'string',maxLength:32},query:{type:'string',maxLength:120},limit:{type:'integer',minimum:1,maximum:200},
@@ -65,6 +68,7 @@ export default async function opsTicketRoutes(fastify) {
         projectIds:{type:'array',maxItems:100,items:{type:'string',maxLength:160}},
         hostIds:{type:'array',maxItems:100,items:{type:'string',maxLength:160}},
         resourceIds:{type:'array',maxItems:100,items:{type:'string',maxLength:160}},
+        composeProjectNames:{type:'array',maxItems:100,items:{type:'string',maxLength:128}},
       }},
       allowedActions:{type:'array',minItems:1,maxItems:50,items:{type:'string',maxLength:120}},
       deniedActions:{type:'array',maxItems:50,items:{type:'string',maxLength:120}},

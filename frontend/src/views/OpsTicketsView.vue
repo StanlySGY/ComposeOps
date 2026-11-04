@@ -137,7 +137,7 @@
             </div>
             <div class="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-xs text-sky-100/80">
               <div class="flex items-center gap-2 font-semibold text-sky-200"><Info class="h-4 w-4" />Observe → Suggest → Approval → Execute</div>
-              <p class="mt-1.5">事件和巡检可以成为建议来源；Ticket 负责持续跟踪。当前 Effect 审批只将意图写入持久队列，尚未绑定自动 Docker 执行器。执行仍须由受控 Worker 或既有运维入口完成。</p>
+              <p class="mt-1.5">事件和巡检可以成为建议来源；Ticket 负责持续跟踪。Execute 意图经人工审批后由受控 Worker 派发，但生产白名单目前只有两种低风险只读 Docker 检查，不具备任何资源变更能力。</p>
             </div>
           </section>
 
@@ -146,6 +146,7 @@
               <div class="mb-3 flex items-center justify-between gap-2"><div><h3 class="text-sm font-semibold text-surface-200">授权快照（Mandate）</h3><p class="mt-0.5 text-xs text-surface-500">范围、允许/禁止动作与策略版本签名；新版本会撤销旧版本</p></div><button class="btn-primary min-h-9! px-3! text-xs!" @click="showMandateForm = !showMandateForm"><Plus class="h-3.5 w-3.5" />签发授权</button></div>
               <form v-if="showMandateForm" class="mb-4 grid gap-3 rounded-lg border border-surface-800 bg-surface-950/35 p-3 md:grid-cols-2" @submit.prevent="issueMandate">
                 <label class="form-grid-label"><span>项目范围（每行一个）</span><textarea v-model="mandateForm.projectIds" class="input min-h-16" :placeholder="selectedTicket.projectId || 'project-id'" /></label>
+                <label class="form-grid-label"><span>Compose 项目名范围（每行一个，必须精确匹配）</span><textarea v-model="mandateForm.composeProjectNames" class="input min-h-16 font-mono text-xs" placeholder="composeops" /></label>
                 <label class="form-grid-label"><span>Host 范围（每行一个）</span><textarea v-model="mandateForm.hostIds" class="input min-h-16" placeholder="host-id" /></label>
                 <label class="form-grid-label"><span>资源范围（每行一个）</span><textarea v-model="mandateForm.resourceIds" class="input min-h-16" placeholder="container-id / volume-id" /></label>
                 <label class="form-grid-label"><span>有效期（天）</span><input v-model.number="mandateForm.days" type="number" min="1" max="90" class="input" /></label>
@@ -225,15 +226,24 @@
 
           <section v-else-if="activeTab === 'effects'" class="space-y-3">
             <div class="card p-4">
-              <div class="mb-3 flex items-center justify-between gap-2"><div><h3 class="text-sm font-semibold text-surface-200">持久化副作用意图（Effect）</h3><p class="mt-0.5 text-xs text-surface-500">观察、建议和待执行意图分开记录；审批只入队，不会直接操作资源</p></div><button class="btn-primary min-h-9! px-3! text-xs!" @click="showEffectForm = !showEffectForm"><Plus class="h-3.5 w-3.5" />新增意图</button></div>
-              <div class="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100/80"><strong class="text-amber-200">执行安全边界：</strong>此队列只持久化派发意图、审批、租约和结果，不会自行调用 Docker、Compose 或 SSH。即使审批通过，也必须由受控执行器领取并重新校验 Mandate。</div>
+              <div class="mb-3 flex items-center justify-between gap-2"><div><h3 class="text-sm font-semibold text-surface-200">持久化副作用意图（Effect）</h3><p class="mt-0.5 text-xs text-surface-500">审批、授权复核、受控只读派发与结果留痕</p></div><button class="btn-primary min-h-9! px-3! text-xs!" @click="showEffectForm = !showEffectForm"><Plus class="h-3.5 w-3.5" />新增意图</button></div>
+              <div class="mb-3 rounded-lg border border-surface-800 bg-surface-950/40 p-3 text-xs">
+                <div class="flex flex-wrap items-center justify-between gap-2"><strong class="text-surface-200">受控 Effect Worker</strong><span class="status-badge" :class="workerStatus?.enabled ? 'bg-emerald-500/10 text-emerald-300' : 'bg-surface-800 text-surface-400'">{{ workerStatus?.enabled ? '运行中' : '已停止' }}</span></div>
+                <div class="mt-2 grid grid-cols-2 gap-2 text-surface-400 sm:grid-cols-4"><span>待派发：{{ workerStatus?.queueDepth ?? '—' }}</span><span>执行中：{{ workerStatus?.executing ?? '—' }}</span><span>租约中：{{ workerStatus?.leased ?? '—' }}</span><span>待核对：{{ workerStatus?.outcomeUnknown ?? '—' }}</span></div>
+                <p class="mt-2 text-emerald-200/80">只读白名单：service.inspect、container.inspect。执行前重新验证审批、Mandate 版本、范围和风险。</p>
+                <p class="mt-1 text-amber-200/80">明确禁止：image.pull、Compose up/down、容器重启/删除、卷删除、SSH 与任意 Shell。未列入白名单的动作会在开始前拒绝并写入审计。</p>
+                <p v-if="workerStatus?.lastError" class="mt-2 break-words text-rose-300">最近错误：{{ workerStatus.lastError }}</p>
+              </div>
+              <div class="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100/80"><strong class="text-amber-200">安全边界：</strong>Worker 只执行上方两种只读 Docker 查询，不具备 Docker/Compose 写操作能力；远程 Host 不派发。执行中进程中断会转为 outcome_unknown，不自动重放。</div>
               <form v-if="showEffectForm" class="mb-4 grid gap-3 rounded-lg border border-surface-800 bg-surface-950/35 p-3 md:grid-cols-2" @submit.prevent="createEffect">
-                <label class="form-grid-label"><span>动作类型</span><input v-model="effectForm.effectType" class="input font-mono text-xs" required maxlength="120" placeholder="service.inspect / image.pull" /></label>
+                <label class="form-grid-label"><span>动作类型</span><select v-model="effectForm.effectType" class="input font-mono text-xs"><option value="service.inspect">service.inspect · 项目容器列表</option><option value="container.inspect">container.inspect · 单容器详情</option></select></label>
                 <label class="form-grid-label"><span>模式</span><select v-model="effectForm.mode" class="input"><option value="observe">Observe · 只记录观察</option><option value="suggest">Suggest · 提出建议</option><option value="execute">Execute · 请求执行授权</option></select></label>
                 <label class="form-grid-label"><span>风险等级</span><select v-model="effectForm.risk" class="input"><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option><option value="critical">关键操作</option></select></label>
                 <label v-if="effectForm.mode === 'execute'" class="form-grid-label"><span>Mandate 授权</span><select v-model="effectForm.mandateId" class="input" required><option value="">选择当前有效授权</option><option v-for="mandate in activeMandates" :key="mandate.id" :value="mandate.id">Mandate v{{ mandate.version }}</option></select></label>
-                <label class="form-grid-label"><span>项目 ID</span><input v-model="effectForm.projectId" class="input" maxlength="160" :placeholder="selectedTicket.projectId || 'project-id'" /></label>
-                <label class="form-grid-label"><span>Host ID</span><input v-model="effectForm.hostId" class="input" maxlength="160" :placeholder="selectedTicket.hostId || 'host-id'" /></label>
+                <label class="form-grid-label"><span>项目 ID（用于 Mandate 范围匹配）</span><input v-model="effectForm.projectId" class="input" maxlength="160" :placeholder="selectedTicket.projectId || 'project-id'" /></label>
+                <label class="form-grid-label"><span>Compose 项目名（精确匹配 Docker Label）</span><input v-model="effectForm.composeProject" class="input font-mono" maxlength="128" required placeholder="compose-project-name" /></label>
+                <label v-if="effectForm.effectType === 'container.inspect'" class="form-grid-label md:col-span-2"><span>容器 ID（12–64 位十六进制）</span><input v-model="effectForm.resourceId" class="input font-mono" maxlength="64" required placeholder="Docker container ID" /></label>
+                <label class="form-grid-label"><span>Host ID（当前本机 Worker 不支持远程 Host）</span><input v-model="effectForm.hostId" class="input" maxlength="160" :placeholder="selectedTicket.hostId || '留空：本机 Docker'" /></label>
                 <label class="form-grid-label md:col-span-2"><span>动作参数（JSON 对象）</span><textarea v-model="effectForm.payload" class="input min-h-20 font-mono text-xs" /></label>
                 <div class="md:col-span-2 flex justify-end gap-2"><button type="button" class="btn-secondary" @click="showEffectForm = false">取消</button><button type="submit" class="btn-primary" :disabled="saving">持久化意图</button></div>
               </form>
@@ -276,6 +286,7 @@ const notice = ref('');
 const tickets = ref([]);
 const stats = ref({});
 const detail = ref({ ticket: null, mandates: [], assignments: [], reports: [], effects: [], activity: [] });
+const workerStatus = ref(null);
 const selectedTicketId = ref('');
 const query = ref('');
 const statusFilter = ref('');
@@ -292,7 +303,7 @@ const ticketStatusDraft = ref('planning');
 
 const ticketForm = reactive({ title: '', description: '', priority: 'normal', sourceType: 'manual', sourceId: '', projectId: '', hostId: '', acceptanceCriteria: '' });
 const mandateForm = reactive({
-  projectIds: '', hostIds: '', resourceIds: '', allowedActions: 'service.inspect', deniedActions: 'volume.delete\ndatabase.drop', days: 7,
+  projectIds: '', composeProjectNames: '', hostIds: '', resourceIds: '', allowedActions: 'service.inspect', deniedActions: 'volume.delete\ndatabase.drop', days: 7,
 });
 const assignmentForm = reactive({
   workerRole: 'executor', sourceType: 'manual', sourceId: '', sessionId: '', mandateId: '', replacesAssignmentId: '', handoffSummary: '',
@@ -302,8 +313,8 @@ const reportForm = reactive({
   findingDetail: '', evidenceKind: 'note', evidenceSourceId: '', evidenceSummary: '',
 });
 const effectForm = reactive({
-  effectType: 'service.inspect', mode: 'suggest', risk: 'medium', mandateId: '',
-  projectId: '', hostId: '', payload: '{}',
+  effectType: 'service.inspect', mode: 'suggest', risk: 'low', mandateId: '',
+  projectId: '', composeProject: '', resourceId: '', hostId: '', payload: '{}',
 });
 
 const tabs = computed(() => [
@@ -326,7 +337,7 @@ function ticketTone(status) { return ({ planning: 'bg-surface-800 text-surface-3
 function priorityLabel(value) { return ({ low: '低优先级', normal: '普通优先级', high: '高优先级', urgent: '紧急' })[value] || value; }
 function sourceLabel(value) { return ({ manual: '手动', event: '事件', inspection: '巡检', agent: 'Agent', workflow: '工作流' })[value] || value; }
 function mandateStatus(m) { return m.status === 'active' && !isExpired(m) ? '有效' : m.status === 'active' ? '已过期' : m.status === 'revoked' ? '已撤销' : m.status; }
-function scopeLabel(scope = {}) { return [['项目', scope.projectIds], ['Host', scope.hostIds], ['资源', scope.resourceIds]].filter(([, values]) => values?.length).map(([label, values]) => label + ' ' + values.join(', ')).join('；') || '未限定'; }
+function scopeLabel(scope = {}) { return [['项目', scope.projectIds], ['Compose 项目', scope.composeProjectNames], ['Host', scope.hostIds], ['资源', scope.resourceIds]].filter(([, values]) => values?.length).map(([label, values]) => label + ' ' + values.join(', ')).join('；') || '未限定'; }
 function roleLabel(role) { return ({ planner: '规划者', executor: '执行者', validator: '只读验证者', incident_responder: '应急响应者', manual: '人工' })[role] || role; }
 function assignmentLabel(status) { return ({ assigned: '已派工', running: '执行中', waiting: '等待中', blocked: '阻塞', handed_off: '已交接', succeeded: '成功', failed: '失败', outcome_unknown: '结果待核对', cancelled: '已取消' })[status] || status; }
 function assignmentTone(status) { return ({ assigned: 'bg-sky-500/10 text-sky-300', running: 'bg-blue-500/10 text-blue-300', waiting: 'bg-violet-500/10 text-violet-300', blocked: 'bg-amber-500/10 text-amber-300', outcome_unknown: 'bg-amber-500/10 text-amber-300', succeeded: 'bg-emerald-500/10 text-emerald-300', failed: 'bg-rose-500/10 text-rose-300' })[status] || 'bg-surface-800 text-surface-500'; }
@@ -334,7 +345,7 @@ function reportTypeLabel(type) { return ({ execution: '执行报告', verificati
 function reportStatus(status) { return ({ submitted: '待验收', accepted: '已通过', rejected: '已退回' })[status] || status; }
 function effectLabel(status) { return ({ proposed: '建议待处理', awaiting_approval: '等待审批', queued: '等待派发', leased: '已被领取', executing: '执行中', succeeded: '成功', failed: '失败', outcome_unknown: '结果待核对', cancelled: '已取消', rejected: '已拒绝' })[status] || status; }
 function effectTone(status) { return ({ proposed: 'bg-surface-800 text-surface-300', awaiting_approval: 'bg-amber-500/10 text-amber-300', queued: 'bg-sky-500/10 text-sky-300', leased: 'bg-blue-500/10 text-blue-300', executing: 'bg-blue-500/10 text-blue-300', succeeded: 'bg-emerald-500/10 text-emerald-300', failed: 'bg-rose-500/10 text-rose-300', outcome_unknown: 'bg-amber-500/10 text-amber-300' })[status] || 'bg-surface-800 text-surface-500'; }
-function eventLabel(type) { return ({ ticket_created: '任务创建', ticket_updated: '任务更新', mandate_issued: '签发授权', mandate_revoked: '撤销授权', assignment_created: '创建派工', assignment_handoff: '执行交接', assignment_updated: '派工状态更新', assignment_reconciled: '派工结果核对', report_submitted: '提交报告', report_accepted: '验收通过', report_rejected: '报告退回', effect_proposed: '提出副作用意图', effect_approved_queued: '批准并入队', effect_claimed: '执行器领取', effect_execution_started: '进入执行阶段', effect_completed: '执行完成', effect_outcome_unknown: '执行结果不确定', effect_reconciled: '人工核对副作用', effect_cancelled: '取消意图', effect_lease_requeued_before_execution: '未开始的租约已安全回队列' })[type] || type; }
+function eventLabel(type) { return ({ ticket_created: '任务创建', ticket_updated: '任务更新', mandate_issued: '签发授权', mandate_revoked: '撤销授权', assignment_created: '创建派工', assignment_handoff: '执行交接', assignment_updated: '派工状态更新', assignment_reconciled: '派工结果核对', report_submitted: '提交报告', report_accepted: '验收通过', report_rejected: '报告退回', effect_proposed: '提出副作用意图', effect_approved_queued: '批准并入队', effect_claimed: '执行器领取', effect_execution_started: '进入执行阶段', effect_completed: '执行完成', effect_outcome_unknown: '执行结果不确定', effect_reconciled: '人工核对副作用', effect_cancelled: '取消意图', effect_rejected_before_dispatch: '白名单校验拒绝', effect_lease_requeued_before_execution: '未开始的租约已安全回队列' })[type] || type; }
 function activitySummary(item) { const d = item.details || {}; return d.note || d.reason || d.title || d.summary || d.effectType || d.workerRole || d.to || d.from || d.mandateId || d.reportId || '记录已写入审计时间线'; }
 
 async function refreshDetail(id = selectedTicketId.value) {
@@ -343,12 +354,17 @@ async function refreshDetail(id = selectedTicketId.value) {
   detail.value = result;
   if (detail.value.ticket) ticketStatusDraft.value = detail.value.ticket.status;
 }
+async function loadWorkerStatus() {
+  try { workerStatus.value = await api.getOpsEffectWorkerStatus(); }
+  catch { workerStatus.value = null; }
+}
 async function load({ preserve = true } = {}) {
   if (loading.value) return;
   loading.value = true; error.value = '';
   try {
     const result = await api.getOpsTickets({ ...(statusFilter.value ? { status: statusFilter.value } : {}), ...(query.value.trim() ? { query: query.value.trim() } : {}), limit: 200 });
     tickets.value = result.tickets || []; stats.value = result.stats || {};
+    await loadWorkerStatus();
     if (!preserve || !tickets.value.some((item) => item.id === selectedTicketId.value)) selectedTicketId.value = tickets.value[0]?.id || '';
     await refreshDetail();
   } catch (e) { error.value = e.message || '读取长期任务失败'; }
@@ -386,10 +402,16 @@ async function updateTicketStatus() {
 }
 async function issueMandate() {
   const projectIds = splitLines(mandateForm.projectIds || selectedTicket.value.projectId || '');
+  const composeProjectNames = splitLines(mandateForm.composeProjectNames);
+  const allowedActions = splitLines(mandateForm.allowedActions);
+  if (allowedActions.some((action) => ['service.inspect', 'container.inspect'].includes(action)) && !composeProjectNames.length) {
+    error.value = 'service.inspect / container.inspect 必须在 Mandate 中明确填写 Compose 项目名范围。';
+    return;
+  }
   await mutate(async () => {
     await api.issueOpsMandate(selectedTicketId.value, {
-      scope: { projectIds, hostIds: splitLines(mandateForm.hostIds), resourceIds: splitLines(mandateForm.resourceIds) },
-      allowedActions: splitLines(mandateForm.allowedActions), deniedActions: splitLines(mandateForm.deniedActions),
+      scope: { projectIds, composeProjectNames, hostIds: splitLines(mandateForm.hostIds), resourceIds: splitLines(mandateForm.resourceIds) },
+      allowedActions, deniedActions: splitLines(mandateForm.deniedActions),
       expiresAt: new Date(Date.now() + Math.max(1, Math.min(90, Number(mandateForm.days) || 7)) * 86400000).toISOString(),
     });
     showMandateForm.value = false;
@@ -459,20 +481,22 @@ async function createEffect() {
   let payload;
   try { payload = JSON.parse(effectForm.payload || '{}'); } catch { error.value = '动作参数必须是有效 JSON 对象'; return; }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) { error.value = '动作参数必须是 JSON 对象'; return; }
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(effectForm.composeProject.trim())) { error.value = '请填写有效的 Compose 项目名'; return; }
+  if (effectForm.effectType === 'container.inspect' && !/^[a-f0-9]{12,64}$/i.test(effectForm.resourceId.trim())) { error.value = '请输入 12–64 位十六进制容器 ID'; return; }
   await mutate(async () => {
     await api.createOpsEffect(selectedTicketId.value, {
       effectType: effectForm.effectType.trim(), mode: effectForm.mode, risk: effectForm.risk,
       mandateId: effectForm.mode === 'execute' ? effectForm.mandateId : undefined,
-      target: { projectId: effectForm.projectId.trim() || selectedTicket.value.projectId || '', hostId: effectForm.hostId.trim() || selectedTicket.value.hostId || '' },
+      target: { projectId: effectForm.projectId.trim() || selectedTicket.value.projectId || '', composeProject: effectForm.composeProject.trim(), resourceId: effectForm.effectType === 'container.inspect' ? effectForm.resourceId.trim() : '', hostId: effectForm.hostId.trim() },
       payload,
     });
-    Object.assign(effectForm, { effectType: 'service.inspect', mode: 'suggest', risk: 'medium', mandateId: '', projectId: '', hostId: '', payload: '{}' });
+    Object.assign(effectForm, { effectType: 'service.inspect', mode: 'suggest', risk: 'low', mandateId: '', projectId: '', composeProject: '', resourceId: '', hostId: '', payload: '{}' });
     showEffectForm.value = false;
     activeTab.value = 'effects';
-  }, '副作用意图已持久化；当前不会自动执行 Docker/Compose。');
+  }, '副作用意图已持久化；Execute 需要人工审批，Worker 仅支持低风险只读检查。');
 }
 async function approveEffect(effect) {
-  if (!window.confirm('批准仅会把这条意图加入持久化派发队列，不会自动执行 Docker/Compose。继续吗？')) return;
+  if (!window.confirm('批准后由受控 Worker 按只读白名单派发；只读检查不会修改资源，其他动作将被拒绝。继续吗？')) return;
   await mutate(() => api.approveOpsEffect(selectedTicketId.value, effect.id), '审批已记录，意图已进入等待派发队列。');
 }
 async function cancelEffect(effect) {

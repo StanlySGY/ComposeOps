@@ -120,11 +120,12 @@ ComposeOps 采用渐进式 Worker Profile，而不是复制一套平行 Agent �
 长期任务以 Ticket 为稳定身份，独立于任意 Agent Session。一个 Ticket 可以经历多个 Assignment；Assignment 只引用既有 Agent Session、Plan、后台任务、工作流或批量任务，不复制或替换现有 Worker Runtime。交接会保留旧 Assignment 并创建新序号记录，必须携带交接摘要。实现位于 [ops-tickets.js](../../backend/src/services/ops-tickets.js) 与 [ops-tickets routes](../../backend/src/routes/ops-tickets.js)，页面为 [OpsTicketsView.vue](../../frontend/src/views/OpsTicketsView.vue)。
 
 - Ticket 保存目标、背景、优先级、来源、项目/Host 范围和验收标准；状态转换由后端限制。Ticket 只有存在人工接受的结构化报告后才能标记为 succeeded。
-- Mandate 是不可变授权快照：限定 project / host / resource、允许动作、拒绝动作、策略版本、到期时间和 SHA-256 指纹。签发新版本会撤销旧版本；撤销/替换会拒绝尚未执行的待审批、排队和已领取 Effect。审批、领取和执行开始前都会重新核对授权版本与目标范围。
+- Mandate 是不可变授权快照：限定内部 project / host / resource，以及独立的精确 Compose 项目名范围、允许动作、拒绝动作、策略版本、到期时间和 SHA-256 指纹。Compose 项目名绑定到快照指纹；旧授权不会因此自动获得新的 Docker 检查能力。签发新版本会撤销旧版本；撤销/替换会拒绝尚未执行的待审批、排队和已领取 Effect。审批、领取和执行开始前都会重新核对授权版本与目标范围。
 - Assignment 记录角色、执行人、已有来源 ID / Session ID、尝试、状态与交接信息。Ticket 身份不随 Session 结束、替换 Worker 或交接而改变。
 - Report 采用结构化摘要、发现项、证据和提交时的验收标准快照。提交报告只进入 review；人工接受/退回有独立审计事件。完成 Ticket 必须有 accepted Report。
-- Effect 记录 Observe / Suggest / Execute 意图、风险、目标、参数、Mandate 指纹、审批人、租约、尝试次数与结果。幂等键以 Ticket 为边界。批准只把意图写入 queued，不调用 Docker、Compose 或 SSH。
-- Effect Worker 生命周期 API 目前只提供受控的持久化 claim / start / heartbeat / complete 台账服务；尚未绑定自动 Docker/Compose 执行适配器。执行器必须在 start 前自行确认自己将执行的动作与持久化 Effect 一致，并且不得把工具输出、日志或事件正文当成授权。
+- Effect 记录 Observe / Suggest / Execute 意图、风险、目标、参数、Mandate 指纹、审批人、租约、尝试次数与结果。幂等键以 Ticket 为边界；同一幂等键只能重放语义相同的请求，不同参数返回冲突。
+- Controlled Effect Worker 已连接持久化队列，但生产白名单严格只有 service.inspect 与 container.inspect 两种低风险只读 Docker 查询。两个动作都要求 Mandate 同时明确授权 ComposeOps projectId 和 Docker Compose 项目名；container.inspect 可进一步限定资源 ID。未知动作、无效风险值、非 Execute 模式、非低风险、额外参数和远程 Host 在执行前拒绝；没有 Compose 写入、镜像拉取、容器/卷变更、SSH 或 Shell Handler。详情见 [OPS_EFFECT_WORKER.md](./OPS_EFFECT_WORKER.md)。
+- Worker 领取后会在执行开始前重新验证人工审批、Mandate 指纹/期限/动作/目标范围，并在只读请求期间续租；Docker 返回结果经过字段白名单与值级脱敏后持久化。Worker 状态通过 `/api/v1/ops-tickets/worker/status` 提供。
 - 恢复策略区分阶段：过期 leased（尚未记录开始）可安全回队列；过期 executing 无法证明副作用是否完成，转为 outcome_unknown，禁止自动重放，必须基于真实 Host/项目状态人工核对。
 - Observe → Suggest → Approval → Execute 是治理流，不是自动授权。事件规则继续由确定性 Event Router 触发；此领域层不会把所有事件自动升级成 Ticket，也不会自行派发高风险动作。
 

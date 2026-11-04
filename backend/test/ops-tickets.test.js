@@ -38,6 +38,10 @@ test('ops tickets: require an authenticated same-origin admin session', async ()
   assert.equal(setup.statusCode, 200, setup.body);
   const cookie = String(setup.headers['set-cookie']).split(';', 1)[0];
   headers = { ...plainHeaders, cookie };
+  const workerStatus = await app.inject({ method: 'GET', url: '/api/v1/ops-tickets/worker/status', headers });
+  assert.equal(workerStatus.statusCode, 200, workerStatus.body);
+  assert.equal(workerStatus.json().readOnlyOnly, true);
+  assert.deepEqual(workerStatus.json().supportedActions.map((item) => item.effectType), ['service.inspect', 'container.inspect']);
 });
 
 test('ops tickets: Ticket is independent from Agent Session and idempotent', async () => {
@@ -125,7 +129,7 @@ test('ops tickets: immutable scoped Mandate is deny-first and versioned', async 
 
   const replacement = await app.inject({
     method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/mandates', headers,
-    payload: { scope: { projectIds: ['project-staging'] }, allowedActions: ['service.inspect'] },
+    payload: { scope: { projectIds: ['project-staging'], composeProjectNames: ['compose-staging'] }, allowedActions: ['service.inspect'] },
   });
   assert.equal(replacement.statusCode, 201, replacement.body);
   assert.equal(replacement.json().mandate.version, 2);
@@ -232,7 +236,7 @@ test('ops tickets: approval queues an intent but does not execute a side effect'
     method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/effects', headers,
     payload: {
       mode: 'execute', risk: 'low', effectType: 'service.inspect', mandateId,
-      target: { projectId: 'project-staging' }, payload: { inspection: 'read-only' }, idempotencyKey: 'effect-inspect-1',
+      target: { projectId: 'project-staging', composeProject: 'compose-staging' }, payload: { inspection: 'read-only' }, idempotencyKey: 'effect-inspect-1',
     },
   });
   assert.equal(created.statusCode, 201, created.body);
@@ -259,11 +263,11 @@ test('ops tickets: approval queues an intent but does not execute a side effect'
 
 test('ops tickets: a Mandate revoked after claim blocks execution start', async () => {
   const issued = await app.inject({ method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/mandates', headers,
-    payload: { scope: { projectIds: ['project-staging'] }, allowedActions: ['service.inspect'] } });
+    payload: { scope: { projectIds: ['project-staging'], composeProjectNames: ['compose-staging'] }, allowedActions: ['service.inspect'] } });
   assert.equal(issued.statusCode, 201, issued.body);
   const currentMandateId = issued.json().mandate.id;
   const intent = await app.inject({ method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/effects', headers,
-    payload: { mode: 'execute', effectType: 'service.inspect', mandateId: currentMandateId, target: { projectId: 'project-staging' } } });
+    payload: { mode: 'execute', effectType: 'service.inspect', mandateId: currentMandateId, target: { projectId: 'project-staging', composeProject: 'compose-staging' } } });
   assert.equal(intent.statusCode, 201, intent.body);
   const effectId = intent.json().effect.id;
   const approved = await app.inject({ method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/effects/' + effectId + '/approve', headers });
@@ -276,7 +280,7 @@ test('ops tickets: a Mandate revoked after claim blocks execution start', async 
   assert.equal(db.prepare('SELECT status FROM ops_effects WHERE id=?').get(effectId).status, 'rejected');
   assert.throws(() => startOpsEffect(effectId, 'revocation-test-worker'), { code: 'effect_lease_invalid' });
   const renewed = await app.inject({ method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/mandates', headers,
-    payload: { scope: { projectIds: ['project-staging'] }, allowedActions: ['service.inspect'] } });
+    payload: { scope: { projectIds: ['project-staging'], composeProjectNames: ['compose-staging'] }, allowedActions: ['service.inspect'] } });
   assert.equal(renewed.statusCode, 201, renewed.body);
   mandateId = renewed.json().mandate.id;
 });
@@ -286,7 +290,7 @@ test('ops tickets: expired unstarted lease requeues; expired executing lease bec
     method: 'POST', url: '/api/v1/ops-tickets/' + ticketId + '/effects', headers,
     payload: {
       mode: 'execute', risk: 'low', effectType: 'service.inspect', mandateId,
-      target: { projectId: 'project-staging' }, payload: { inspection: 'recovery-test' },
+      target: { projectId: 'project-staging', composeProject: 'compose-staging' }, payload: { inspection: 'recovery-test' },
     },
   });
   assert.equal(create.statusCode, 201, create.body);
@@ -308,6 +312,9 @@ test('ops tickets: expired unstarted lease requeues; expired executing lease bec
   db.prepare('UPDATE ops_effects SET lease_expires_at=? WHERE id=?').run(new Date(Date.now() - 10000).toISOString(), effectId);
   assert.deepEqual(recoverExpiredOpsEffects(), { requeued: 0, outcomeUnknown: 1 });
   assert.equal(db.prepare('SELECT status FROM ops_effects WHERE id=?').get(effectId).status, 'outcome_unknown');
+  const staleLease = db.prepare('SELECT lease_owner,lease_expires_at FROM ops_effects WHERE id=?').get(effectId);
+  assert.equal(staleLease.lease_owner, null);
+  assert.equal(staleLease.lease_expires_at, null);
   assert.equal(claimNextOpsEffect('must-not-replay', 30), null);
 
   const reconciled = await app.inject({

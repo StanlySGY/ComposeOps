@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   createOpsReport: vi.fn(),
   decideOpsReport: vi.fn(),
   createOpsEffect: vi.fn(),
+  getOpsEffectWorkerStatus: vi.fn(),
   approveOpsEffect: vi.fn(),
   cancelOpsEffect: vi.fn(),
   reconcileOpsEffect: vi.fn(),
@@ -68,6 +69,7 @@ beforeEach(async () => {
   api.createOpsReport.mockResolvedValue({ report: { id: 'orp-new', status: 'submitted' } });
   api.decideOpsReport.mockResolvedValue({ report: { id: 'orp-new', status: 'accepted' } });
   api.createOpsEffect.mockResolvedValue({ effect: { ...effect, status: 'proposed' } });
+  api.getOpsEffectWorkerStatus.mockResolvedValue({ state: 'running', enabled: true, readOnlyOnly: true, queueDepth: 0, executing: 0, leased: 0, outcomeUnknown: 0, supportedActions: [{ effectType: 'service.inspect' }, { effectType: 'container.inspect' }] });
   api.approveOpsEffect.mockResolvedValue({ effect: { ...effect, status: 'queued' } });
   api.cancelOpsEffect.mockResolvedValue({ effect: { ...effect, status: 'cancelled' } });
   api.reconcileOpsEffect.mockResolvedValue({ effect: { ...effect, status: 'failed' } });
@@ -141,24 +143,52 @@ describe('OpsTicketsView long-lived operations workspace', () => {
     await issue.trigger('click');
     await flushPromises();
     await wrapper.get('textarea[placeholder="project-staging"]').setValue('project-staging');
+    await wrapper.get('textarea[placeholder="composeops"]').setValue('compose-worker-test');
     await wrapper.findAll('form').at(-1).trigger('submit');
     await flushPromises();
     expect(api.issueOpsMandate, wrapper.text()).toHaveBeenCalledWith('opt-1', expect.objectContaining({
-      scope: expect.objectContaining({ projectIds: ['project-staging'] }),
+      scope: expect.objectContaining({ projectIds: ['project-staging'], composeProjectNames: ['compose-worker-test'] }),
       allowedActions: ['service.inspect'],
     }));
     expect(wrapper.text()).toContain('已签发新的 Mandate 快照');
   });
 
-  it('requires explicit confirmation and only queues an approved Effect', async () => {
+  it('blocks a read-only Mandate without an explicit Compose project scope', async () => {
+    await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('授权')).trigger('click');
+    await wrapper.findAll('button').find((button) => button.text().includes('签发授权')).trigger('click');
+    await flushPromises();
+    await wrapper.findAll('form').at(-1).trigger('submit');
+    await flushPromises();
+    expect(api.issueOpsMandate).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('必须在 Mandate 中明确填写 Compose 项目名范围');
+  });
+
+  it('requires explicit confirmation and explains the read-only worker allowlist', async () => {
     await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('Effect 队列')).trigger('click');
     const approve = wrapper.findAll('button').find((button) => button.text().includes('批准并入队'));
     await approve.trigger('click');
     await flushPromises();
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('不会自动执行 Docker'));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('只读白名单'));
     expect(api.approveOpsEffect).toHaveBeenCalledWith('opt-1', 'oef-1');
     expect(wrapper.text()).toContain('等待派发队列');
-    expect(wrapper.text()).toContain('不会自行调用 Docker、Compose 或 SSH');
+    expect(wrapper.text()).toContain('受控 Effect Worker');
+    expect(wrapper.text()).toContain('service.inspect');
+    expect(wrapper.text()).toContain('明确禁止');
+    expect(wrapper.text()).toContain('运行中');
+    expect(api.getOpsEffectWorkerStatus).toHaveBeenCalled();
+  });
+
+  it('offers only the supported read-only actions and asks for an exact Compose project', async () => {
+    await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('Effect 队列')).trigger('click');
+    await wrapper.findAll('button').find((button) => button.text().includes('新增意图')).trigger('click');
+    const form = wrapper.findAll('form').find((item) => item.text().includes('Compose 项目名'));
+    expect(form.text()).toContain('service.inspect');
+    expect(form.text()).toContain('container.inspect');
+    expect(form.text()).not.toContain('image.pull');
+    expect(form.find('input[placeholder="compose-project-name"]').exists()).toBe(true);
+    await form.get('select').setValue('container.inspect');
+    await flushPromises();
+    expect(form.find('input[placeholder="Docker container ID"]').exists()).toBe(true);
   });
 
   it('submits structured reports through the report workflow', async () => {

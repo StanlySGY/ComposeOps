@@ -38,7 +38,8 @@ const stable = (v) => Array.isArray(v) ? v.map(stable) : v && typeof v==='object
 const fingerprint = (v) => createHash('sha256').update(JSON.stringify(stable(v))).digest('hex');
 
 function ticketRow(r){return {id:r.id,title:r.title,description:r.description,status:r.status,priority:r.priority,sourceType:r.source_type,sourceId:r.source_id||null,projectId:r.project_id||null,hostId:r.host_id||null,acceptanceCriteria:decoded(r.acceptance_json,[]),idempotencyKey:r.idempotency_key||null,createdBy:r.created_by,createdAt:r.created_at,updatedAt:r.updated_at};}
-function mandateRow(r){return {id:r.id,ticketId:r.ticket_id,version:Number(r.version),status:r.status,scope:decoded(r.scope_json,{}),allowedActions:decoded(r.allowed_actions_json,[]),deniedActions:decoded(r.denied_actions_json,[]),approvalRules:decoded(r.approval_rules_json,{}),policyVersion:r.policy_version,fingerprint:r.fingerprint,issuedBy:r.issued_by,issuedAt:r.issued_at,expiresAt:r.expires_at,revokedAt:r.revoked_at,revokeReason:r.revoke_reason||''};}
+function mandateScope(value={}){return {projectIds:Array.isArray(value.projectIds)?value.projectIds:[],hostIds:Array.isArray(value.hostIds)?value.hostIds:[],resourceIds:Array.isArray(value.resourceIds)?value.resourceIds:[],composeProjectNames:Array.isArray(value.composeProjectNames)?value.composeProjectNames:[]};}
+function mandateRow(r){return {id:r.id,ticketId:r.ticket_id,version:Number(r.version),status:r.status,scope:mandateScope(decoded(r.scope_json,{})),allowedActions:decoded(r.allowed_actions_json,[]),deniedActions:decoded(r.denied_actions_json,[]),approvalRules:decoded(r.approval_rules_json,{}),policyVersion:r.policy_version,fingerprint:r.fingerprint,issuedBy:r.issued_by,issuedAt:r.issued_at,expiresAt:r.expires_at,revokedAt:r.revoked_at,revokeReason:r.revoke_reason||''};}
 function assignmentRow(r){return {id:r.id,ticketId:r.ticket_id,mandateId:r.mandate_id||null,sequence:Number(r.sequence),workerRole:r.worker_role,assignee:r.assignee||null,sourceType:r.source_type,sourceId:r.source_id||null,sessionId:r.session_id==null?null:Number(r.session_id),status:r.status,attempt:Number(r.attempt)||1,handoffSummary:r.handoff_summary||'',idempotencyKey:r.idempotency_key||null,createdAt:r.created_at,updatedAt:r.updated_at,startedAt:r.started_at,heartbeatAt:r.heartbeat_at,finishedAt:r.finished_at};}
 function reportRow(r){return {id:r.id,ticketId:r.ticket_id,assignmentId:r.assignment_id||null,reportType:r.report_type,status:r.status,summary:r.summary,findings:decoded(r.findings_json,[]),evidence:decoded(r.evidence_json,[]),acceptanceCriteria:decoded(r.acceptance_json,[]),submittedBy:r.submitted_by,createdAt:r.created_at,decidedAt:r.decided_at,decisionNote:r.decision_note||''};}
 function effectRow(r){return {id:r.id,ticketId:r.ticket_id,assignmentId:r.assignment_id||null,mandateId:r.mandate_id||null,mandateFingerprint:r.mandate_fingerprint||null,idempotencyKey:r.idempotency_key||null,effectType:r.effect_type,mode:r.mode,risk:r.risk,target:decoded(r.target_json,{}),payload:decoded(r.payload_json,{}),status:r.status,attempt:Number(r.attempt)||0,leaseOwner:r.lease_owner||null,leaseExpiresAt:r.lease_expires_at,approvedBy:r.approved_by||null,approvedAt:r.approved_at,startedAt:r.started_at,finishedAt:r.finished_at,result:decoded(r.result_json,{}),error:r.error||'',createdAt:r.created_at,updatedAt:r.updated_at};}
@@ -79,14 +80,15 @@ export function updateOpsTicket(ticketId,patch={},actor='admin'){
  return requireTicket(ticketId);
 }
 
-function normalizeScope(v={}){const s={projectIds:arr(v.projectIds,'项目范围',100,160),hostIds:arr(v.hostIds,'宿主范围',100,160),resourceIds:arr(v.resourceIds,'资源范围',100,160)};if(!s.projectIds.length&&!s.hostIds.length&&!s.resourceIds.length)fail('Mandate 必须限定项目、宿主或资源范围');return s;}
+function normalizeScope(v={}){const s={projectIds:arr(v.projectIds,'项目范围',100,160),hostIds:arr(v.hostIds,'宿主范围',100,160),resourceIds:arr(v.resourceIds,'资源范围',100,160),composeProjectNames:arr(v.composeProjectNames,'Compose 项目范围',100,128)};if(!s.projectIds.length&&!s.hostIds.length&&!s.resourceIds.length&&!s.composeProjectNames.length)fail('Mandate 必须限定项目、宿主、资源或 Compose 项目范围');if(s.composeProjectNames.some(name=>!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name)))fail('Compose 项目范围格式无效');return s;}
 function normalizeActions(v,label,required=false){const a=arr(v,label,50,120);if(a.some(x=>!/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(x)))fail(label+'包含无效动作名称');if(required&&!a.length)fail(label+'至少需要一项');return a;}
 function mandateCovers(m,effectType,target){
  if(m.status!=='active'||Date.parse(m.expiresAt)<=Date.now())fail('授权已失效或过期','mandate_inactive',403);
  if(m.deniedActions.includes('*')||m.deniedActions.includes(effectType))fail('动作被 Mandate 禁止','mandate_action_denied',403);
  if(!m.allowedActions.includes(effectType))fail('Mandate 未授权该动作','mandate_action_not_allowed',403);
- const dims=[['projectIds','projectId'],['hostIds','hostId'],['resourceIds','resourceId']].filter(([k])=>m.scope[k].length);
+ const dims=[['projectIds','projectId'],['hostIds','hostId'],['resourceIds','resourceId'],['composeProjectNames','composeProject']].filter(([k])=>m.scope[k]?.length);
  if(!dims.length||dims.some(([k,t])=>!target[t]||!m.scope[k].includes(String(target[t]))))fail('目标资源不在 Mandate 范围内','mandate_scope_mismatch',403);
+ if(['service.inspect','container.inspect'].includes(effectType)&&!m.scope.composeProjectNames.includes(String(target.composeProject||'')))fail('Compose 项目不在 Mandate 授权范围内','mandate_compose_project_mismatch',403);
 }
 function assertEffectMandate(effect){
  if(effect.mode!=='execute'||!effect.mandate_id)fail('执行意图缺少 Mandate','mandate_not_found',403);
@@ -186,7 +188,9 @@ export function proposeOpsEffect(ticketId,input={},actor='admin'){
  const mode=String(input.mode||'suggest');if(!['observe','suggest','execute'].includes(mode))fail('执行模式无效');
  const risk=['low','medium','high','critical'].includes(input.risk)?input.risk:'medium',target=obj(input.target,'目标资源',8000),payload=obj(input.payload,'动作参数',32000);
  const assignmentId=safe(input.assignmentId,160,'Assignment ID');if(assignmentId&&!db.prepare('SELECT 1 FROM ops_assignments WHERE id=? AND ticket_id=?').get(assignmentId,ticketId))fail('Effect 关联的 Assignment 不属于该任务','assignment_not_found',404);
- const key=safe(input.idempotencyKey,160,'幂等键');if(key){const old=db.prepare('SELECT * FROM ops_effects WHERE ticket_id=? AND idempotency_key=?').get(ticketId,key);if(old)return {effect:effectRow(old),replayed:true};}
+ const key=safe(input.idempotencyKey,160,'幂等键');
+ const requestFingerprint=fingerprint({effectType,mode,risk,target,payload,assignmentId:assignmentId||null,mandateId:input.mandateId||null});
+ if(key){const old=db.prepare('SELECT * FROM ops_effects WHERE ticket_id=? AND idempotency_key=?').get(ticketId,key);if(old){const previousFingerprint=fingerprint({effectType:old.effect_type,mode:old.mode,risk:old.risk,target:decoded(old.target_json,{}),payload:decoded(old.payload_json,{}),assignmentId:old.assignment_id||null,mandateId:old.mandate_id||null});if(previousFingerprint!==requestFingerprint)fail('幂等键已被不同的 Effect 请求占用','idempotency_conflict',409);return {effect:effectRow(old),replayed:true};}}
  let mandate=null;if(mode==='execute'){const mid=safe(input.mandateId,160,'Mandate ID',true),r=db.prepare('SELECT * FROM ops_mandates WHERE id=? AND ticket_id=?').get(mid,ticketId);if(!r)fail('执行类 Effect 必须引用本任务的 Mandate','mandate_not_found',403);mandate=mandateRow(r);mandateCovers(mandate,effectType,target);}
  const eid=id('oef'),status=mode==='execute'?'awaiting_approval':'proposed';
  db.transaction(()=>{db.prepare('INSERT INTO ops_effects(id,ticket_id,assignment_id,mandate_id,mandate_fingerprint,idempotency_key,effect_type,mode,risk,target_json,payload_json,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(eid,ticketId,assignmentId||null,mandate?.id||null,mandate?.fingerprint||null,key||null,effectType,mode,risk,encoded(target),encoded(payload),status);activity(ticketId,'effect_proposed',{effectId:eid,effectType,mode,risk,status,mandateId:mandate?.id||null},actor);})();
@@ -196,7 +200,7 @@ export function approveOpsEffect(ticketId,effectId,actor='admin'){
  requireTicket(ticketId);const r=db.prepare('SELECT * FROM ops_effects WHERE id=? AND ticket_id=?').get(effectId,ticketId);if(!r)fail('Effect 不存在','effect_not_found',404);
  if(r.mode!=='execute'||r.status!=='awaiting_approval')fail('只有等待审批的执行意图可以批准','effect_not_approvable',409);
  const m=assertEffectMandate(r);
- db.transaction(()=>{db.prepare("UPDATE ops_effects SET status='queued',approved_by=?,approved_at=?,updated_at=? WHERE id=? AND status='awaiting_approval'").run(safe(actor,80,'审批人')||'admin',now(),now(),effectId);activity(ticketId,'effect_approved_queued',{effectId,mandateId:m.id,note:'审批只将意图加入持久化队列，不会执行外部副作用'},actor);})();
+ db.transaction(()=>{db.prepare("UPDATE ops_effects SET status='queued',approved_by=?,approved_at=?,updated_at=? WHERE id=? AND status='awaiting_approval'").run(safe(actor,80,'审批人')||'admin',now(),now(),effectId);activity(ticketId,'effect_approved_queued',{effectId,mandateId:m.id,note:'审批仅授权入队；受控 Worker 只执行已登记的只读动作，审批本身不触发外部操作'},actor);})();
  return effectRow(db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId));
 }
 export function cancelOpsEffect(ticketId,effectId,reason='',actor='admin'){
@@ -211,7 +215,7 @@ function recoverInTransaction(stamp){
  const leases=db.prepare("SELECT id,ticket_id FROM ops_effects WHERE status='leased' AND lease_expires_at<=?").all(stamp);
  const running=db.prepare("SELECT id,ticket_id FROM ops_effects WHERE status='executing' AND lease_expires_at<=?").all(stamp);
  db.prepare("UPDATE ops_effects SET status='queued',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE status='leased' AND lease_expires_at<=?").run(stamp,stamp);
- db.prepare("UPDATE ops_effects SET status='outcome_unknown',error='执行租约到期，无法确认外部副作用是否完成；必须核对真实环境。',finished_at=?,updated_at=? WHERE status='executing' AND lease_expires_at<=?").run(stamp,stamp,stamp);
+ db.prepare("UPDATE ops_effects SET status='outcome_unknown',error='执行租约到期，无法确认外部副作用是否完成；必须核对真实环境。',finished_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE status='executing' AND lease_expires_at<=?").run(stamp,stamp,stamp);
  for(const r of leases)activity(r.ticket_id,'effect_lease_requeued_before_execution',{effectId:r.id});
  for(const r of running)activity(r.ticket_id,'effect_outcome_unknown',{effectId:r.id,reason:'executing lease expired'});
  return {requeued:leases.length,outcomeUnknown:running.length};
@@ -241,8 +245,16 @@ export function claimNextOpsEffect(workerId,leaseSeconds=60){
 export function startOpsEffect(effectId,workerId){
  const owner=safe(workerId,120,'Worker ID',true),r=db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId);if(!r)fail('Effect 不存在','effect_not_found',404);
  if(r.status!=='leased'||r.lease_owner!==owner||Date.parse(r.lease_expires_at||'')<=Date.now())fail('Effect 租约无效或过期','effect_lease_invalid',409);
+ if(!r.approved_by||!r.approved_at)fail('Effect 尚未经过人工审批','effect_not_approved',403);
  try{assertEffectMandate(r);}catch(error){db.transaction(()=>{db.prepare("UPDATE ops_effects SET status='rejected',error=?,finished_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND status='leased'").run(safe(error.message,2000,'校验错误'),now(),now(),effectId);activity(r.ticket_id,'effect_rejected_before_execution',{effectId,reason:error.code||'mandate_invalid'});})();throw error;}
  db.transaction(()=>{const changed=db.prepare("UPDATE ops_effects SET status='executing',started_at=?,updated_at=? WHERE id=? AND status='leased' AND lease_owner=?").run(now(),now(),effectId,owner);if(!changed.changes)fail('Effect 租约已失效','effect_lease_invalid',409);activity(r.ticket_id,'effect_execution_started',{effectId,workerId:owner});})();
+ return effectRow(db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId));
+}
+export function rejectOpsEffect(effectId,workerId,reason){
+ const owner=safe(workerId,120,'Worker ID',true),note=safe(reason,1000,'拒绝原因',true),r=db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId);
+ if(!r)fail('Effect 不存在','effect_not_found',404);
+ if(r.status!=='leased'||r.lease_owner!==owner||Date.parse(r.lease_expires_at||'')<=Date.now())fail('Effect 不属于该 Worker 的有效租约','effect_lease_invalid',409);
+ db.transaction(()=>{const changed=db.prepare("UPDATE ops_effects SET status='rejected',error=?,finished_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND status='leased' AND lease_owner=?").run(note,now(),now(),effectId,owner);if(!changed.changes)fail('Effect 租约已失效','effect_lease_invalid',409);activity(r.ticket_id,'effect_rejected_before_dispatch',{effectId,effectType:r.effect_type,workerId:owner,reason:note});})();
  return effectRow(db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId));
 }
 export function heartbeatOpsEffect(effectId,workerId,leaseSeconds=60){

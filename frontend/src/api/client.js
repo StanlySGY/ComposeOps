@@ -352,6 +352,7 @@ export const api = {
   createOpsReport: (id, payload) => request('/ops-tickets/' + encodeURIComponent(id) + '/reports', { method: 'POST', body: JSON.stringify(payload) }),
   decideOpsReport: (id, reportId, payload) => request('/ops-tickets/' + encodeURIComponent(id) + '/reports/' + encodeURIComponent(reportId) + '/decision', { method: 'POST', body: JSON.stringify(payload) }),
   createOpsEffect: (id, payload) => request('/ops-tickets/' + encodeURIComponent(id) + '/effects', { method: 'POST', body: JSON.stringify(payload) }),
+  getOpsEffectWorkerStatus: () => request('/ops-tickets/worker/status'),
   approveOpsEffect: (id, effectId) => request('/ops-tickets/' + encodeURIComponent(id) + '/effects/' + encodeURIComponent(effectId) + '/approve', { method: 'POST' }),
   cancelOpsEffect: (id, effectId, reason = '') => request('/ops-tickets/' + encodeURIComponent(id) + '/effects/' + encodeURIComponent(effectId) + '/cancel', { method: 'POST', body: JSON.stringify({ reason }) }),
   reconcileOpsEffect: (id, effectId, payload) => request('/ops-tickets/' + encodeURIComponent(id) + '/effects/' + encodeURIComponent(effectId) + '/reconcile', { method: 'POST', body: JSON.stringify(payload) }),
