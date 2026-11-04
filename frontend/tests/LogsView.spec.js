@@ -44,6 +44,16 @@ describe('日志页面生命周期与数据完整性', () => {
   }
   const send = (data, aggregate = false) => channels[aggregate ? 1 : 0].options.onMessage({ data: JSON.stringify(data) });
 
+  it('日志工具栏将来源过滤与流控制拆分成具名分组', async () => {
+    await start();
+    const sourceGroup = wrapper.get('[role="group"][aria-label="日志来源与过滤"]');
+    const streamGroup = wrapper.get('[role="group"][aria-label="日志流操作"]');
+    expect(sourceGroup.get('select[aria-label="选择日志项目"]').exists()).toBe(true);
+    expect(sourceGroup.get('input[aria-label="搜索和过滤实时日志"]').exists()).toBe(true);
+    expect(streamGroup.get('button[aria-label="暂停显示"]').exists()).toBe(true);
+    expect(streamGroup.get('button[aria-label="下载日志"]').exists()).toBe(true);
+  });
+
   it('离开日志模块再通过导航返回时保留项目、容器和筛选条件', async () => {
     await start();
     await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error');

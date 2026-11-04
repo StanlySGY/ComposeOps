@@ -45,13 +45,15 @@
       </div>
     </div>
 
-    <div class="ops-tabs" role="tablist" aria-label="统一运维视图">
-      <button v-for="item in tabs" :key="item.id" role="tab" :aria-selected="tab === item.id" :tabindex="tab === item.id ? 0 : -1" :class="{ active: tab === item.id }" @click="setTab(item.id)">
+    <div class="ops-tabs" role="tablist" aria-label="统一运维视图" @keydown="handleTabKeydown">
+      <button v-for="item in tabs" :key="item.id" :id="'ops-tab-' + item.id" :data-tab="item.id" role="tab"
+        :aria-controls="'ops-panel-' + item.id" :aria-selected="tab === item.id"
+        :tabindex="tab === item.id ? 0 : -1" :class="{ active: tab === item.id }" @click="setTab(item.id)">
         <component :is="item.icon" class="h-4 w-4" />{{ item.label }}<span>{{ item.count }}</span>
       </button>
     </div>
 
-    <section v-if="tab === 'tasks' || tab === 'approvals' || tab === 'review'" class="ops-workspace">
+    <section v-if="tab === 'tasks' || tab === 'approvals' || tab === 'review'" :id="'ops-panel-' + tab" role="tabpanel" :aria-labelledby="'ops-tab-' + tab" tabindex="0" class="ops-workspace">
       <div class="ops-list-pane">
         <div class="ops-list-toolbar">
           <label class="search-field min-w-0 flex-1">
@@ -183,7 +185,7 @@
       </aside>
     </section>
 
-    <section v-else-if="tab === 'events'" class="ops-events-layout">
+    <section v-else-if="tab === 'events'" id="ops-panel-events" role="tabpanel" aria-labelledby="ops-tab-events" tabindex="0" class="ops-events-layout">
       <div class="ops-list-pane">
         <div class="ops-list-toolbar">
           <label class="search-field min-w-0 flex-1"><Search class="h-4 w-4" /><input v-model="query" aria-label="搜索事件" placeholder="搜索事件、来源或资产..." /></label>
@@ -224,7 +226,7 @@
       <aside v-else class="ops-detail-pane ops-detail-placeholder"><div class="ops-detail-placeholder-icon"><Eye class="h-6 w-6" /></div><h2>选择一个事件</h2><p>查看来源、严重程度、原始关联 ID 和处理状态。</p></aside>
     </section>
 
-    <section v-else class="ops-global-timeline">
+    <section v-else id="ops-panel-timeline" role="tabpanel" aria-labelledby="ops-tab-timeline" tabindex="0" class="ops-global-timeline">
       <div class="ops-list-toolbar">
         <label class="search-field min-w-0 flex-1"><Search class="h-4 w-4" /><input v-model="query" aria-label="搜索全局时间线" placeholder="搜索事件、操作、Agent 或工作流..." /></label>
         <span class="ops-result-count">{{ globalTimeline.length }} 条</span>
@@ -266,6 +268,7 @@ import {
   auditEventLabel, buildTaskTimeline, buildUnifiedTasks,
   pendingAgentApprovals, taskMatchesFilter, taskStatusLabel, taskStatusTone, timestampValue,
 } from '../lib/ops-command-center.js';
+import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -285,6 +288,11 @@ const sourceErrors = ref([]);
 const pendingAction = ref(null);
 const lastLoadedAt = ref(0);
 let loadSequence = 0;
+let detailLoadSequence = 0;
+
+function handleTabKeydown(event) {
+  handleTablistKeydown(event, (nextTab) => setTab(nextTab));
+}
 
 const tabs = computed(() => [
   { id: 'tasks', label: '全部任务', icon: ListChecks, count: tasks.value.length },
@@ -423,35 +431,41 @@ async function load({ preserveSelection = true } = {}) {
   if (selectedTaskId.value) await loadTaskDetail(selectedTask.value);
 }
 async function loadTaskDetail(task) {
-  if (!task) { detail.value = null; return; }
+  const requestId = ++detailLoadSequence;
+  if (!task) {
+    detail.value = null;
+    detailLoading.value = false;
+    return;
+  }
   const key = task.id;
   detailLoading.value = true;
   detail.value = null;
+  sourceErrors.value = sourceErrors.value.filter((issue) => issue.source !== '任务详情');
   try {
     if (task.source === 'workflow') {
       const result = await api.getWorkflowInstance(task.sourceId);
-      if (selectedTaskId.value === key) detail.value = { workflow: result.instance || result };
+      if (requestId === detailLoadSequence && selectedTaskId.value === key) detail.value = { workflow: result.instance || result };
     } else if (task.source === 'agent-task') {
       const result = await api.getAgentTask(task.sourceId);
-      if (selectedTaskId.value === key) detail.value = { task: result.task || result };
+      if (requestId === detailLoadSequence && selectedTaskId.value === key) detail.value = { task: result.task || result };
     } else if (task.source === 'batch-job') {
       const result = await api.getJob(task.sourceId);
-      if (selectedTaskId.value === key) detail.value = { job: result.job || result };
+      if (requestId === detailLoadSequence && selectedTaskId.value === key) detail.value = { job: result.job || result };
     } else if (task.source === 'agent-plan') {
       const [planResult, auditResult] = await Promise.allSettled([
         api.getAgentExecutions(task.sourceId, 250),
         api.getAgentAuditEvents(200, { planId: task.sourceId }),
       ]);
-      if (selectedTaskId.value === key) detail.value = {
+      if (requestId === detailLoadSequence && selectedTaskId.value === key) detail.value = {
         plan: planResult.status === 'fulfilled' ? planResult.value?.plan : null,
         executions: planResult.status === 'fulfilled' ? (planResult.value?.executions || []) : [],
         audits: auditResult.status === 'fulfilled' ? (auditResult.value?.events || []) : [],
       };
     }
   } catch (error) {
-    if (selectedTaskId.value === key) sourceErrors.value = [...sourceErrors.value.filter((issue) => issue.source !== '任务详情'), { source: '任务详情', message: error.message || '读取失败' }];
+    if (requestId === detailLoadSequence && selectedTaskId.value === key) sourceErrors.value = [...sourceErrors.value, { source: '任务详情', message: error.message || '读取失败' }];
   } finally {
-    if (selectedTaskId.value === key) detailLoading.value = false;
+    if (requestId === detailLoadSequence) detailLoading.value = false;
   }
 }
 watch(currentList, (list) => {
@@ -459,7 +473,7 @@ watch(currentList, (list) => {
   const next = list[0] || null;
   selectedTaskId.value = next?.id || '';
   if (next) void loadTaskDetail(next);
-  else detail.value = null;
+  else void loadTaskDetail(null);
 }, { flush: 'post' });
 async function selectTask(task) {
   selectedTaskId.value = task.id;
@@ -468,8 +482,10 @@ async function selectTask(task) {
 }
 function openTimelineEntry(entry) {
   if (entry.taskId) {
+    const task = tasks.value.find((item) => item.id === entry.taskId);
+    if (!task) return;
     setTab('tasks');
-    void selectTask(tasks.value.find((task) => task.id === entry.taskId));
+    void selectTask(task);
   } else if (entry.source === 'event') {
     setTab('events');
     selectedEventId.value = entry.id.replace(/^event:/, '');
@@ -570,7 +586,7 @@ onMounted(async () => {
   }
 });
 onActivated(() => { if (lastLoadedAt.value && Date.now() - lastLoadedAt.value > 15000) void load(); });
-onBeforeUnmount(() => { loadSequence++; });
+onBeforeUnmount(() => { loadSequence++; detailLoadSequence++; });
 </script>
 
 <style scoped>
@@ -593,6 +609,7 @@ onBeforeUnmount(() => { loadSequence++; });
 .ops-tabs::-webkit-scrollbar { display:none; }
 .ops-tabs button { display:inline-flex; align-items:center; gap:.45rem; flex:0 0 auto; min-height:2.5rem; padding:.55rem .8rem; border-radius:.75rem; color:#a1a1aa; font-size:.78rem; transition:background .16s,color .16s; }
 .ops-tabs button.active { background:rgba(52,211,153,.12); color:#6ee7b7; }
+.ops-tabs button:focus-visible,.ops-workspace:focus-visible,.ops-events-layout:focus-visible,.ops-global-timeline:focus-visible { outline:2px solid var(--color-accent); outline-offset:2px; }
 .ops-tabs button span { min-width:1.2rem; padding:0 .28rem; border-radius:999px; background:rgba(113,113,122,.17); color:inherit; font-size:.65rem; text-align:center; font-variant-numeric:tabular-nums; }
 .ops-workspace,.ops-events-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(21rem,.85fr); gap:.9rem; min-width:0; align-items:start; }
 .ops-list-pane,.ops-detail-pane { min-width:0; overflow:hidden; border:1px solid rgba(82,82,91,.32); border-radius:1rem; background:rgba(16,20,27,.72); }

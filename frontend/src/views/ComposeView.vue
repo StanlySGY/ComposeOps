@@ -2,11 +2,14 @@
   <div class="page-shell page-shell-workspace">
     <div class="page-header">
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
-      <div class="page-actions">
+      <div class="page-actions compose-toolbar-actions">
+        <div class="compose-toolbar-group" role="group" aria-label="项目与配置文件">
         <button class="btn-secondary" title="返回服务总览" @click="router.push('/services')"><ArrowLeft class="w-4 h-4" />返回</button>
         <select v-model="projectId" class="input min-w-52" aria-label="选择 Compose 项目" @change="selectProject"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
         <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" @click="projectId = ''; selectProject()"><X class="w-4 h-4" /></button>
         <select v-if="project?.composeFiles.length > 1" v-model.number="fileIndex" class="input" aria-label="选择 Compose 配置文件" @change="load"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
+        </div>
+        <div class="compose-toolbar-group compose-toolbar-tools" role="group" aria-label="编辑与辅助工具">
         <button class="btn-secondary" :disabled="!content" @click="toggleEditorMode"><Layout class="w-4 h-4" />{{ editorMode === 'code' ? '可视化' : '代码' }}</button>
         <button class="btn-secondary" :disabled="!content" @click="validateSemantics"><ShieldCheck class="w-4 h-4" />语义校验</button>
         <select v-model="templateId" class="input w-40" title="常用服务模板" aria-label="插入常用服务模板" @change="insertTemplate">
@@ -18,7 +21,10 @@
         <button class="btn-secondary" :disabled="!content" @click="formatYaml"><AlignLeft class="w-4 h-4" />格式化</button>
         <button class="btn-secondary" title="把 docker run 命令转换为 Compose 片段" @click="showConverter = true"><ArrowRightLeft class="w-4 h-4" />转换</button>
         <button class="btn-secondary" :disabled="!projectId" @click="loadBackups"><History class="w-4 h-4" />备份</button>
+        </div>
+        <div class="compose-toolbar-group compose-toolbar-primary" role="group" aria-label="保存配置">
         <button class="btn-primary" :disabled="saving || previewLoading || !dirty" @click="save"><Save class="w-4 h-4" />{{ saving || previewLoading ? '校验中...' : '保存' }}</button>
+        </div>
       </div>
     </div>
     <div v-if="filePath" class="text-muted font-mono truncate">{{ filePath }}<span v-if="dirty" class="text-amber-400 ml-2">● 未保存</span></div>
@@ -814,3 +820,48 @@ watch(content, () => {
   if (editorMode.value === 'visual') parseYamlToServices();
 });
 </script>
+
+<style scoped>
+.compose-toolbar-actions {
+  align-items: stretch;
+}
+
+.compose-toolbar-group {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+
+.compose-toolbar-tools {
+  border-inline: 1px solid var(--color-surface-800);
+  padding-inline: .75rem;
+}
+
+.compose-toolbar-primary {
+  margin-left: auto;
+}
+
+@media (max-width: 1023px) {
+  .compose-toolbar-tools {
+    border-inline: 0;
+    padding-inline: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .compose-toolbar-group {
+    width: 100%;
+  }
+
+  .compose-toolbar-group .input {
+    min-width: 0;
+    flex: 1 1 10rem;
+  }
+
+  .compose-toolbar-primary {
+    justify-content: flex-end;
+  }
+}
+</style>

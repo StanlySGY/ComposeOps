@@ -5,12 +5,15 @@
         <button v-if="returnTarget" class="btn-secondary shrink-0" @click="goBackToSource"><ArrowLeft class="h-4 w-4" />{{ returnTarget.label }}</button>
         <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
       </div>
-      <div class="page-actions">
+      <div class="page-actions logs-toolbar-actions">
+        <div class="logs-toolbar-group" role="group" aria-label="日志来源与过滤">
         <select v-model="projectId" class="input" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
         <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
         <select v-model="levelFilter" class="input w-28" title="级别过滤" aria-label="按日志级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
         <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" aria-label="搜索和过滤实时日志" placeholder="level:error | container:api" /></label>
         <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
+        </div>
+        <div class="logs-toolbar-group logs-stream-actions" role="group" aria-label="日志流操作">
         <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
         <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
         <button v-else class="btn-danger" @click="disconnect"><Square class="w-4 h-4" />断开</button>
@@ -18,6 +21,7 @@
         <button class="icon-btn" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
         <button class="icon-btn" title="清屏" aria-label="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
         <button v-if="hasErrors" class="btn-primary" @click="diagnosis = true"><Sparkles class="w-4 h-4" />AI 诊断</button>
+        </div>
       </div>
     </div>
 
@@ -473,3 +477,49 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
 });
 </script>
+
+<style scoped>
+.logs-toolbar-actions {
+  align-items: stretch;
+}
+
+.logs-toolbar-group {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+
+.logs-toolbar-group .search-field {
+  min-width: min(100%, 12rem);
+}
+
+.logs-stream-actions {
+  border-inline-start: 1px solid var(--color-surface-800);
+  padding-inline-start: .75rem;
+}
+
+@media (max-width: 1023px) {
+  .logs-stream-actions {
+    border-inline-start: 0;
+    padding-inline-start: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .logs-toolbar-group {
+    width: 100%;
+  }
+
+  .logs-toolbar-group .input,
+  .logs-toolbar-group .search-field {
+    min-width: 0;
+    flex: 1 1 8rem;
+  }
+
+  .logs-stream-actions {
+    padding-top: .25rem;
+  }
+}
+</style>

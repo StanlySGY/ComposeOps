@@ -221,7 +221,8 @@ test('快速跳转支持键盘搜索、执行与 Escape 关闭', async ({ page }
   await expect(dialog.getByRole('option')).toHaveCount(2);
   await expect(dialog.getByRole('option').first()).toContainText('系统设置');
   await search.press('Enter');
-  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  await page.waitForURL((url) => url.hash === '#/settings', { timeout: 15000 });
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible({ timeout: 15000 });
   await trigger.click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');

@@ -161,13 +161,13 @@
 
     <!-- Zoom controls -->
     <div class="zoom-controls">
-      <button @click="zoomIn" class="zoom-btn" title="放大">
+      <button @click="zoomIn" class="zoom-btn" title="放大" aria-label="放大图表">
         <ZoomIn class="w-4 h-4" />
       </button>
-      <button @click="zoomOut" class="zoom-btn" title="缩小">
+      <button @click="zoomOut" class="zoom-btn" title="缩小" aria-label="缩小图表">
         <ZoomOut class="w-4 h-4" />
       </button>
-      <button @click="resetZoom" class="zoom-btn" title="重置">
+      <button @click="resetZoom" class="zoom-btn" title="重置" aria-label="重置图表缩放">
         <Maximize2 class="w-4 h-4" />
       </button>
     </div>
@@ -654,7 +654,7 @@ watch(() => props.data.length, () => {
 .interactive-chart-wrapper {
   position: relative;
   width: 100%;
-  background: #0F131C;
+  background: var(--color-surface-950, #1a1e25);
   border-radius: 0.5rem;
   border: 1px solid #27272a;
   padding: 1rem;
@@ -696,7 +696,7 @@ watch(() => props.data.length, () => {
 }
 
 .crosshair-line {
-  stroke: #52525b;
+  stroke: var(--color-surface-500, #6f7a8a);
   stroke-width: 1;
   stroke-dasharray: 4 2;
 }
@@ -721,15 +721,20 @@ watch(() => props.data.length, () => {
   background: #18181b;
   border: 1px solid #27272a;
   border-radius: 0.375rem;
-  color: #a1a1aa;
+  color: var(--color-surface-300, #b6bdc9);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .zoom-btn:hover {
-  background: #27272a;
-  color: #e4e4e7;
+  background: var(--color-surface-800, #363c48);
+  color: var(--color-surface-100, #eceef2);
   border-color: #38BDF8;
+}
+
+.zoom-btn:focus-visible {
+  outline: 2px solid var(--color-accent, #2563eb);
+  outline-offset: 2px;
 }
 
 .keyboard-focus-ring {

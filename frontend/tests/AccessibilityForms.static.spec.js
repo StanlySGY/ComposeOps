@@ -51,6 +51,13 @@ describe('跨页面表单可访问性契约', () => {
     }
   });
 
+  it('Compose 工具栏把项目上下文、辅助工具和保存动作组织为具名分组', () => {
+    const nodes = templateNodes('../src/views/ComposeView.vue');
+    for (const label of ['项目与配置文件', '编辑与辅助工具', '保存配置']) {
+      expect(nodes.some(node => node.tag === 'div' && hasAttr(node, 'role', 'group') && hasAttr(node, 'aria-label', label))).toBe(true);
+    }
+  });
+
   it('容器终端的项目、容器和 Shell 选择器有明确名称', () => {
     const file = '../src/views/ShellView.vue';
     for (const label of ['选择终端项目', '选择终端容器', '选择终端 Shell']) expect(findNamedControls(file, label)).toHaveLength(1);

@@ -1,28 +1,27 @@
 <template>
   <div :class="embedded ? 'resource-monitor-view' : 'page-shell resource-monitor-view'">
     <!-- Header -->
-    <div v-if="!embedded" class="mb-4 flex items-center justify-between">
+    <div v-if="!embedded" class="page-header">
       <div>
-        <h1 class="text-2xl font-bold text-zinc-100">历史指标</h1>
-        <p class="mt-1 text-sm text-zinc-400">实时容器资源使用情况与告警配置</p>
+        <h1 class="page-title">历史指标</h1>
+        <p class="page-subtitle">查看容器资源趋势、异常点与告警规则</p>
       </div>
-      <button ref="alertModalTrigger" @click="showAlertModal = true" class="btn-primary">
-        <Bell class="h-4 w-4" />
-        配置告警
-      </button>
+      <div class="page-actions">
+        <button ref="alertModalTrigger" class="btn-primary" @click="showAlertModal = true"><Bell class="h-4 w-4" />配置告警</button>
+      </div>
     </div>
 
     <!-- Container Selector -->
-    <div class="mb-4 grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div>
-        <label for="resource-monitor-project" class="mb-1 block text-sm font-medium text-zinc-300">项目</label>
+        <label for="resource-monitor-project" class="mb-1.5 block text-xs font-medium text-surface-300">项目</label>
         <select id="resource-monitor-project" v-model="projectId" aria-label="选择监控项目" @change="onProjectChange" class="input">
           <option value="">选择项目</option>
           <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
       </div>
       <div>
-        <label for="resource-monitor-container" class="mb-1 block text-sm font-medium text-zinc-300">容器</label>
+        <label for="resource-monitor-container" class="mb-1.5 block text-xs font-medium text-surface-300">容器</label>
         <div class="flex gap-2">
           <select id="resource-monitor-container" v-model="containerId" aria-label="选择监控容器" @change="loadMetrics" :disabled="!projectId" class="input flex-1">
             <option value="">选择容器</option>
@@ -33,126 +32,114 @@
       </div>
     </div>
 
-    <div v-if="error" class="mb-4 flex items-start gap-2 rounded-md border border-rose-900/50 bg-rose-950/20 p-3 text-sm text-rose-300" role="alert">
+    <div v-if="error" class="alert-error" role="alert">
       <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
       <span>{{ error }}</span>
     </div>
-    <div v-if="loading" class="mb-4 text-sm text-zinc-500" role="status" aria-live="polite">正在加载指标...</div>
+    <div v-if="loading" class="text-xs text-surface-400" role="status" aria-live="polite">正在加载指标…</div>
 
     <!-- Metrics Dashboard -->
-    <div v-if="containerId && metricsData" class="space-y-4">
+    <div v-if="containerId && metricsData" class="min-w-0 space-y-4">
       <!-- Metric Cards -->
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div
-             v-for="m in metricTypes"
-             :key="m.key"
-             role="button"
-             tabindex="0"
-             :aria-label="`选择${m.label}指标`"
-             :aria-pressed="selectedMetric === m.key"
-             @click="selectedMetric = m.key"
-             @keydown="handleMetricCardKeydown($event, m.key)"
-             @keyup="handleMetricCardKeyup($event, m.key)"
-             :class="['metric-card', selectedMetric === m.key && 'metric-card-active']">
-          <component :is="m.icon" :class="['h-5 w-5', m.color]" />
-          <div class="mt-2">
-            <div class="text-xs text-zinc-400">{{ m.label }}</div>
-            <div class="mt-1 text-lg font-semibold text-zinc-100">
-              {{ formatMetricValue(metricsData[m.key]) }}
-            </div>
-            <div class="mt-1 flex items-center gap-1 text-xs">
+      <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <button v-for="m in metricTypes" :key="m.key" type="button"
+          :aria-label="`选择${m.label}指标`" :aria-pressed="selectedMetric === m.key"
+          @click="selectedMetric = m.key"
+          :class="['metric-card', selectedMetric === m.key && 'metric-card-active']">
+          <component :is="m.icon" :class="['h-5 w-5 shrink-0', m.color]" />
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-medium text-surface-400">{{ m.label }}</span>
+            <strong class="mt-1 block truncate text-lg font-semibold tabular-nums text-surface-100">{{ formatMetricValue(metricsData[m.key]) }}</strong>
+            <span class="mt-1 flex items-center gap-1 text-xs">
               <TrendingUp v-if="metricsData[m.key]?.trend === 'increasing'" class="h-3 w-3 text-rose-400" />
               <TrendingDown v-else-if="metricsData[m.key]?.trend === 'decreasing'" class="h-3 w-3 text-emerald-400" />
-              <Minus v-else class="h-3 w-3 text-zinc-500" />
-              <span :class="trendColor(metricsData[m.key]?.trend)">
-                {{ metricsData[m.key]?.trend === 'stable' ? '稳定' : metricsData[m.key]?.trend === 'increasing' ? '上升' : '下降' }}
-              </span>
-            </div>
-          </div>
-        </div>
+              <Minus v-else class="h-3 w-3 text-surface-500" />
+              <span :class="trendColor(metricsData[m.key]?.trend)">{{ metricsData[m.key]?.trend === 'stable' ? '稳定' : metricsData[m.key]?.trend === 'increasing' ? '上升' : '下降' }}</span>
+            </span>
+          </span>
+        </button>
       </div>
 
       <!-- Chart -->
-      <div class="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950/80 p-4">
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 class="font-semibold text-zinc-100 whitespace-nowrap">{{ metricTypes.find(m => m.key === selectedMetric)?.label }}趋势</h2>
-          <div class="flex flex-nowrap gap-2 overflow-x-auto">
+      <section class="history-chart-panel section-panel min-w-0">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="section-title">{{ metricTypes.find(m => m.key === selectedMetric)?.label }}趋势</h2>
+            <p class="mt-1 text-muted">{{ currentContainer?.name || '当前容器' }} · {{ periods.find(p => p.key === period)?.label }} · 异常点以阴影标记</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="历史指标时间范围">
             <button v-for="p in periods" :key="p.key"
+                    type="button"
+                    :aria-pressed="period === p.key"
                     @click="period = p.key; loadMetrics()"
-                    :class="['px-3 py-1 text-xs rounded-md transition-colors', 
-                             period === p.key ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700']">
+                    :class="period === p.key ? 'btn-primary min-h-8! px-2.5! py-1! text-xs!' : 'btn-secondary min-h-8! px-2.5! py-1! text-xs!'">
               {{ p.label }}
             </button>
           </div>
         </div>
-          <div class="min-w-[560px]">
-            <InteractiveChart
-              :data="chartData"
-              :color="metricTypes.find(m => m.key === selectedMetric)?.chartColor || '#38BDF8'"
-              :unit="metricTypes.find(m => m.key === selectedMetric)?.unit || ''"
-              :anomalies="chartAnomalies"
-              :width="800"
-              :height="300"
-            />
-          </div>
-      </div>
+        <p v-if="!loading && !chartData.length" class="rounded-xl border border-dashed border-surface-700 px-4 py-8 text-center text-sm text-surface-400" role="status">当前时间范围暂无历史数据。缩短时间范围或等待下一轮指标采集后再查看趋势。</p>
+        <div v-else class="history-chart-frame min-w-0 w-full">
+          <InteractiveChart :data="chartData"
+            :color="metricTypes.find(m => m.key === selectedMetric)?.chartColor || '#38BDF8'"
+            :unit="metricTypes.find(m => m.key === selectedMetric)?.unit || ''"
+            :anomalies="chartAnomalies" :width="800" :height="300" />
+        </div>
+      </section>
 
       <!-- Alerts -->
-      <div class="rounded-lg border border-zinc-800 bg-zinc-950/80 p-4">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="font-semibold text-zinc-100">告警规则</h2>
-          <button @click="loadAlerts" class="text-xs text-zinc-400 hover:text-zinc-300" aria-label="刷新告警规则">
-            <RefreshCw class="h-3 w-3" />
+      <section class="section-panel">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div><h2 class="section-title">告警规则</h2><p class="mt-1 text-muted">只展示当前选中容器的规则</p></div>
+          <button class="icon-btn" :disabled="loading" @click="loadAlerts" aria-label="刷新告警规则">
+            <RefreshCw class="h-4 w-4" />
           </button>
         </div>
-        <div v-if="containerAlerts.length === 0" class="py-6 text-center text-sm text-zinc-500">
-          暂无告警规则
-        </div>
+        <p v-if="alertsError" class="alert-error" role="alert">{{ alertsError }}</p>
+        <EmptyState v-else-if="containerAlerts.length === 0" compact icon="Bell" title="暂无告警规则" description="为当前容器配置 CPU、内存或重启次数告警。" />
         <div v-else class="space-y-2">
-          <div v-for="alert in containerAlerts" :key="alert.id" 
-               class="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-900/50 p-3">
-            <div class="flex items-center gap-3">
+          <div v-for="alert in containerAlerts" :key="alert.id"
+               class="panel-card flex flex-wrap items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-3">
               <AlertTriangle :class="['h-4 w-4', getAlertColor(alert.metric)]" />
-              <div>
-                <div class="text-sm font-medium text-zinc-200">{{ alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric }}</div>
-                <div class="mt-0.5 text-xs text-zinc-400">阈值: {{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : ' 次' }}</div>
+              <div class="min-w-0">
+                <div class="truncate text-sm font-medium text-surface-200">{{ alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric }}</div>
+                <div class="mt-0.5 text-xs text-surface-400">阈值：{{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : ' 次' }}</div>
               </div>
             </div>
-            <button @click="deleteAlertRule(alert.id)" class="text-xs text-rose-400 hover:text-rose-300">
-              删除
-            </button>
+            <button @click="deleteAlertRule(alert.id)" class="btn-ghost min-h-8! px-2.5! py-1! text-xs! text-rose-300 hover:text-rose-200">删除</button>
           </div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div v-else-if="!containerId" class="py-12 text-center text-zinc-500">
-      <Activity class="mx-auto h-12 w-12 opacity-50" />
-      <p class="mt-3">请选择项目和容器查看监控数据</p>
+    <div v-else-if="!containerId" class="section-panel py-8">
+      <EmptyState icon="Activity"
+        :title="!projects.length ? '暂无已纳管项目' : projectId && !containers.length ? '当前项目没有可监控容器' : '选择一个容器查看历史指标'"
+        :description="!projects.length ? '先在服务总览纳管一个 Compose 项目，再回来查看容器趋势。' : projectId && !containers.length ? '当前项目暂时没有可用容器，请选择其他项目或启动服务。' : '选择项目和容器后，这里会展示资源趋势、异常点与告警规则。'" />
     </div>
 
     <!-- Alert Config Modal -->
     <div v-if="showAlertModal" class="modal-overlay" @click.self="closeAlertModal" @keydown="trapAlertModalTab">
       <div ref="alertModalElement" class="modal-content" role="dialog" aria-modal="true" aria-labelledby="resource-alert-modal-title" tabindex="-1">
         <div class="mb-4 flex items-center justify-between">
-          <h3 id="resource-alert-modal-title" class="text-lg font-semibold text-zinc-100">配置告警规则</h3>
-          <button @click="closeAlertModal" class="text-zinc-400 hover:text-zinc-300" aria-label="关闭告警规则配置">
+          <h3 id="resource-alert-modal-title" class="text-lg font-semibold text-surface-100">配置告警规则</h3>
+          <button @click="closeAlertModal" class="icon-btn" aria-label="关闭告警规则配置">
             <X class="h-5 w-5" />
           </button>
         </div>
         <div class="space-y-3">
           <div>
-            <label for="resource-alert-metric" class="mb-1 block text-sm text-zinc-300">指标类型</label>
+            <label for="resource-alert-metric" class="mb-1 block text-sm text-surface-300">指标类型</label>
             <select id="resource-alert-metric" v-model="alertForm.metric" class="input">
               <option v-for="m in alertMetricTypes" :key="m.key" :value="m.key">{{ m.label }}</option>
             </select>
           </div>
           <div>
-            <label for="resource-alert-threshold" class="mb-1 block text-sm text-zinc-300">阈值</label>
+            <label for="resource-alert-threshold" class="mb-1 block text-sm text-surface-300">阈值</label>
             <input id="resource-alert-threshold" v-model.number="alertForm.threshold" type="number" class="input" placeholder="例如: 80" />
           </div>
           <div>
-            <label for="resource-alert-action" class="mb-1 block text-sm text-zinc-300">动作</label>
+            <label for="resource-alert-action" class="mb-1 block text-sm text-surface-300">动作</label>
             <select id="resource-alert-action" v-model="alertForm.action" class="input">
               <option v-for="a in alertActionOptions" :key="a.key" :value="a.key">{{ a.label }}</option>
             </select>
@@ -176,10 +163,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 // embedded 模式供 MonitorView 的「历史指标」tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
-import { Activity, AlertTriangle, Bell, Cpu, Database, HardDrive, Minus, Network, RefreshCw, TrendingDown, TrendingUp, X } from 'lucide-vue-next';
+import { AlertTriangle, Bell, Cpu, Database, HardDrive, Minus, Network, RefreshCw, TrendingDown, TrendingUp, X } from 'lucide-vue-next';
 import { api, metricsApi } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
 import StatusBadge from '../components/common/StatusBadge.vue';
+import EmptyState from '../components/common/EmptyState.vue';
 import InteractiveChart from '../components/charts/InteractiveChart.vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 
@@ -196,9 +184,13 @@ const alertModalElement = ref(null);
 let previousAlertModalFocus = null;
 const loading = ref(false);
 const error = ref('');
+const alertsError = ref('');
 const historySeries = ref([]);
 const anomalies = ref([]);
 let metricsRequestId = 0;
+let projectsRequestId = 0;
+let alertsRequestId = 0;
+let disposed = false;
 
 const alertForm = ref({
   metric: 'cpu',
@@ -281,21 +273,6 @@ const periods = [
 const containers = computed(() => projects.value.find(p => p.id === projectId.value)?.containers || []);
 const currentContainer = computed(() => containers.value.find(c => c.id === containerId.value));
 
-function handleMetricCardKeydown(event, metric) {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    selectedMetric.value = metric;
-  } else if (event.key === ' ') {
-    // 与原生按钮一致：Space 按下时阻止页面滚动，松开时才激活。
-    event.preventDefault();
-  }
-}
-
-function handleMetricCardKeyup(event, metric) {
-  if (event.key !== ' ') return;
-  event.preventDefault();
-  selectedMetric.value = metric;
-}
 const containerAlerts = computed(() => alerts.value.filter(a => a.containerId === containerId.value));
 
 const chartData = computed(() => {
@@ -343,7 +320,7 @@ function periodMs(value) {
 function trendColor(trend) {
   if (trend === 'increasing') return 'text-rose-400';
   if (trend === 'decreasing') return 'text-emerald-400';
-  return 'text-zinc-500';
+  return 'text-surface-500';
 }
 
 function getAlertColor(metric) {
@@ -352,44 +329,64 @@ function getAlertColor(metric) {
     memory: 'text-emerald-400',
     restart_count: 'text-amber-400'
   };
-  return colors[metric] || 'text-zinc-400';
+  return colors[metric] || 'text-surface-400';
+}
+
+function invalidateMetrics() {
+  metricsRequestId += 1;
+  loading.value = false;
+  metricsData.value = null;
+  historySeries.value = [];
+  anomalies.value = [];
 }
 
 function onProjectChange() {
   containerId.value = '';
-  metricsData.value = null;
-  historySeries.value = [];
-  anomalies.value = [];
+  invalidateMetrics();
   error.value = '';
 }
 
 async function loadProjects() {
+  const requestId = ++projectsRequestId;
   try {
-    projects.value = ((await api.getProjects()).projects || []).filter(p => p.managed);
-    if (projects.value.length === 1 && !projectId.value) {
-      projectId.value = projects.value[0].id;
+    const response = await api.getProjects();
+    if (disposed || requestId !== projectsRequestId) return;
+    const nextProjects = (response.projects || []).filter(p => p.managed);
+    projects.value = nextProjects;
+    if (projectId.value && !nextProjects.some((project) => project.id === projectId.value)) {
+      projectId.value = '';
+      containerId.value = '';
+      invalidateMetrics();
+    }
+    if (nextProjects.length === 1 && !projectId.value) {
+      projectId.value = nextProjects[0].id;
     }
   } catch (err) {
-    error.value = `加载项目失败: ${err.message}`;
+    if (!disposed && requestId === projectsRequestId) error.value = `加载项目失败：${err.message}`;
   }
 }
 
 async function loadMetrics() {
-  if (!containerId.value) return;
+  if (!containerId.value) {
+    invalidateMetrics();
+    return;
+  }
   const requestId = ++metricsRequestId;
+  const context = { containerId: containerId.value, metric: selectedMetric.value, period: period.value };
   loading.value = true;
   error.value = '';
   try {
     const endTime = Date.now();
-    const startTime = endTime - periodMs(period.value);
+    const startTime = endTime - periodMs(context.period);
     const results = await Promise.all(
-      metricTypes.map(m => metricsApi.getContainerMetrics(containerId.value, m.key, period.value))
+      metricTypes.map(m => metricsApi.getContainerMetrics(context.containerId, m.key, context.period))
     );
+    if (disposed || requestId !== metricsRequestId || containerId.value !== context.containerId || selectedMetric.value !== context.metric || period.value !== context.period) return;
     const [seriesResult, anomalyResult] = await Promise.all([
-      metricsApi.getHistoricalMetrics({ containerId: containerId.value, metricType: backendMetric(selectedMetric.value), startTime, endTime, aggregation: 'auto' }),
-      metricsApi.detectAnomalies({ containerId: containerId.value, metricType: backendMetric(selectedMetric.value), startTime, endTime }),
+      metricsApi.getHistoricalMetrics({ containerId: context.containerId, metricType: backendMetric(context.metric), startTime, endTime, aggregation: 'auto' }),
+      metricsApi.detectAnomalies({ containerId: context.containerId, metricType: backendMetric(context.metric), startTime, endTime }),
     ]);
-    if (requestId !== metricsRequestId) return;
+    if (disposed || requestId !== metricsRequestId || containerId.value !== context.containerId || selectedMetric.value !== context.metric || period.value !== context.period) return;
     metricsData.value = {};
     metricTypes.forEach((m, i) => {
       metricsData.value[m.key] = results[i].data;
@@ -397,22 +394,25 @@ async function loadMetrics() {
     historySeries.value = (seriesResult.metrics || []).map((item) => ({ timestamp: Number(item.timestamp), value: Number(item.value) })).filter((item) => Number.isFinite(item.timestamp) && Number.isFinite(item.value));
     anomalies.value = anomalyResult.anomalies || [];
   } catch (err) {
-    if (requestId === metricsRequestId) {
+    if (!disposed && requestId === metricsRequestId) {
       historySeries.value = [];
       anomalies.value = [];
       error.value = `加载指标失败: ${err.message}`;
     }
   } finally {
-    if (requestId === metricsRequestId) loading.value = false;
+    if (!disposed && requestId === metricsRequestId) loading.value = false;
   }
 }
 
 async function loadAlerts() {
+  const requestId = ++alertsRequestId;
   try {
     const res = await metricsApi.getAlerts();
+    if (disposed || requestId !== alertsRequestId) return;
     alerts.value = res.alerts || [];
+    alertsError.value = '';
   } catch (err) {
-    error.value = `加载告警失败: ${err.message}`;
+    if (!disposed && requestId === alertsRequestId) alertsError.value = `加载告警失败：${err.message}`;
   }
 }
 
@@ -448,60 +448,76 @@ usePullRefresh(async () => {
   await loadMetrics();
 });
 onMounted(async () => {
+  disposed = false;
   await loadProjects();
   await loadAlerts();
   window.addEventListener('composeops:host-changed', onHostChanged);
 });
 
 function onHostChanged() {
+  projectsRequestId += 1;
+  alertsRequestId += 1;
+  invalidateMetrics();
   projectId.value = '';
   containerId.value = '';
-  metricsData.value = null;
-  historySeries.value = [];
-  anomalies.value = [];
+  projects.value = [];
   alerts.value = [];
+  alertsError.value = '';
+  error.value = '';
   void loadProjects();
   void loadAlerts();
 }
 
-onBeforeUnmount(() => window.removeEventListener('composeops:host-changed', onHostChanged));
+onBeforeUnmount(() => {
+  disposed = true;
+  projectsRequestId += 1;
+  alertsRequestId += 1;
+  invalidateMetrics();
+  window.removeEventListener('composeops:host-changed', onHostChanged);
+});
 
 watch(selectedMetric, () => { if (containerId.value) void loadMetrics(); });
 </script>
 
 <style scoped>
- .resource-monitor-view { min-height: 0; }
+ .resource-monitor-view { min-width: 0; min-height: 0; }
 
 .metric-card {
-  padding: 1rem;
-  background: #09090b;
-  border: 1px solid #27272a;
-  border-radius: 0.75rem;
-  cursor: pointer;
-  transition: all 0.2s;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .85rem;
+  border: 1px solid var(--color-surface-800);
+  border-radius: .85rem;
+  background: color-mix(in srgb, var(--color-surface-950) 88%, transparent);
+  color: var(--color-surface-100);
+  text-align: left;
+  transition: border-color .18s, background .18s, transform .18s;
 }
 
 .metric-card:hover {
-  border-color: #3f3f46;
-  background: #18181b;
+  border-color: var(--color-surface-600);
+  background: var(--color-surface-900);
 }
 
 .metric-card-active {
-  border-color: #10b981;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(6, 182, 212, 0.05));
+  border-color: rgb(52 211 153 / 55%);
+  background: linear-gradient(135deg, rgb(16 185 129 / 10%), rgb(6 182 212 / 5%));
+  box-shadow: inset 0 0 0 1px rgb(52 211 153 / 12%);
 }
 
-.chart-container {
-  height: 300px;
-  background: #09090b;
-  border-radius: 0.5rem;
-  padding: 1rem;
+.metric-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.8);
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -512,10 +528,18 @@ watch(selectedMetric, () => { if (containerId.value) void loadMetrics(); });
 .modal-content {
   width: 100%;
   max-width: 28rem;
-  background: #18181b;
-  border: 1px solid #27272a;
+  max-height: min(85vh, 42rem);
+  overflow-y: auto;
+  background: var(--color-surface-950);
+  border: 1px solid var(--color-surface-800);
   border-radius: 0.75rem;
   padding: 1.5rem;
+  color: var(--color-surface-100);
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 639px) {
+  .metric-card { gap: .55rem; padding: .7rem; }
+  .modal-content { padding: 1rem; }
 }
 </style>

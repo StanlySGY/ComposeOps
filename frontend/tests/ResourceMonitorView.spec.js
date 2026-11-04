@@ -155,23 +155,16 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
     const memory = document.querySelector('[aria-label="选择内存指标"]');
     expect(cpu).not.toBeNull();
     expect(memory).not.toBeNull();
-    expect(cpu.getAttribute('role')).toBe('button');
-    expect(cpu.getAttribute('tabindex')).toBe('0');
+    expect(cpu.tagName).toBe('BUTTON');
     expect(cpu.getAttribute('aria-pressed')).toBe('true');
     expect(memory.getAttribute('aria-pressed')).toBe('false');
 
-    memory.focus();
-    memory.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    memory.click();
     await flushPromises();
     expect(memory.getAttribute('aria-pressed')).toBe('true');
     expect(cpu.getAttribute('aria-pressed')).toBe('false');
 
-    cpu.focus();
-    const spaceDown = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
-    cpu.dispatchEvent(spaceDown);
-    expect(spaceDown.defaultPrevented).toBe(true);
-    expect(cpu.getAttribute('aria-pressed')).toBe('false');
-    cpu.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    cpu.click();
     await flushPromises();
     expect(cpu.getAttribute('aria-pressed')).toBe('true');
     expect(memory.getAttribute('aria-pressed')).toBe('false');
@@ -195,5 +188,46 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
     await flushPromises();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('历史图表使用可收缩的全宽容器，不再强制窄屏横向滚动', async () => {
+    metricsApi.getHistoricalMetrics.mockResolvedValue({ metrics: [{ timestamp: 1_000, value: 35 }] });
+    api.getProjects.mockResolvedValue({
+      projects: [{ id: 'p1', projectName: 'web-stack', managed: true, containers: [{ id: 'c1', name: 'api', state: 'running', health: 'healthy' }] }],
+    });
+    await mountView();
+    const selects = [...document.querySelectorAll('select')];
+    selects[1].value = 'c1';
+    selects[1].dispatchEvent(new Event('change', { bubbles: true }));
+    await flushPromises();
+
+    const panel = wrapper.find('.history-chart-panel');
+    expect(panel.exists()).toBe(true);
+    expect(panel.classes()).toContain('min-w-0');
+    expect(wrapper.find('.history-chart-frame').classes()).toEqual(expect.arrayContaining(['min-w-0', 'w-full']));
+    expect(wrapper.html()).not.toContain('min-w-[560px]');
+  });
+
+  it('节点切换后，旧容器指标请求的迟到结果不会回填到新节点', async () => {
+    let resolveOldMetrics;
+    api.getProjects
+      .mockResolvedValueOnce({ projects: [{ id: 'old-project', projectName: 'old-stack', managed: true, containers: [{ id: 'old-container', name: 'old-api', state: 'running', health: 'healthy' }] }] })
+      .mockResolvedValueOnce({ projects: [{ id: 'new-project', projectName: 'new-stack', managed: true, containers: [{ id: 'new-container', name: 'new-api', state: 'running', health: 'healthy' }] }] });
+    metricsApi.getContainerMetrics.mockImplementation(() => new Promise((resolve) => { resolveOldMetrics = resolve; }));
+    await mountView();
+    const selects = [...document.querySelectorAll('select')];
+    selects[1].value = 'old-container';
+    selects[1].dispatchEvent(new Event('change', { bubbles: true }));
+    await flushPromises();
+
+    window.dispatchEvent(new Event('composeops:host-changed'));
+    await flushPromises();
+    resolveOldMetrics?.({ data: { current: 99, unit: '%' } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('new-stack');
+    expect(wrapper.text()).not.toContain('99.0%');
+    expect(wrapper.find('.history-chart-panel').exists()).toBe(false);
+    expect(metricsApi.getHistoricalMetrics).not.toHaveBeenCalled();
   });
 });

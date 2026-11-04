@@ -107,6 +107,54 @@ describe('AutonomousOpsView command center', () => {
     expect(wrapper.text()).toContain('没有待核对或失败任务');
   });
 
+  it('运维视图标签支持方向键、Home 和 End，并同步选中状态与面板关系', async () => {
+    await mountView();
+    document.body.appendChild(wrapper.element);
+    const taskTab = wrapper.get('button[data-tab="tasks"]');
+    const tabs = wrapper.findAll('button[role="tab"]');
+    expect(taskTab.attributes('aria-selected')).toBe('true');
+    expect(taskTab.attributes('aria-controls')).toBe('ops-panel-tasks');
+
+    taskTab.element.focus();
+    await taskTab.trigger('keydown', { key: 'ArrowRight' });
+    await flushPromises();
+    const approvalTab = wrapper.get('button[data-tab="approvals"]');
+    expect(document.activeElement).toBe(approvalTab.element);
+    expect(approvalTab.attributes('aria-selected')).toBe('true');
+    expect(approvalTab.attributes('tabindex')).toBe('0');
+    expect(wrapper.get('#ops-panel-approvals').attributes('aria-labelledby')).toBe('ops-tab-approvals');
+
+    await approvalTab.trigger('keydown', { key: 'End' });
+    await flushPromises();
+    const timelineTab = wrapper.get('button[data-tab="timeline"]');
+    expect(document.activeElement).toBe(timelineTab.element);
+    expect(timelineTab.attributes('aria-selected')).toBe('true');
+
+    await timelineTab.trigger('keydown', { key: 'Home' });
+    await flushPromises();
+    expect(document.activeElement).toBe(taskTab.element);
+    expect(taskTab.attributes('aria-selected')).toBe('true');
+    expect(tabs).toHaveLength(5);
+  });
+
+  it('快速切换任务详情时，较早返回的请求不能覆盖当前选中项', async () => {
+    const workflowResolvers = [];
+    api.getWorkflowInstance.mockImplementation(() => new Promise((resolve) => workflowResolvers.push(resolve)));
+    await mountView();
+    const workflowRow = wrapper.findAll('.ops-record').find((button) => button.text().includes('生产发布审批'));
+    const agentRow = wrapper.findAll('.ops-record').find((button) => button.text().includes('日志收集'));
+    await workflowRow.trigger('click');
+    await agentRow.trigger('click');
+    await flushPromises();
+    expect(api.getAgentTask).toHaveBeenCalledWith('task-1');
+    expect(wrapper.text()).toContain('collecting logs');
+
+    workflowResolvers.forEach((resolve) => resolve({ instance: { ...workflow, name: '过期工作流详情' } }));
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('过期工作流详情');
+    expect(wrapper.text()).toContain('collecting logs');
+  });
+
   it('在待审批列表中保留 Agent 审批来源并可定位回原会话', async () => {
     await mountView();
     const approvalTab = wrapper.findAll('button[role="tab"]').find((button) => button.text().includes('待你审批'));
