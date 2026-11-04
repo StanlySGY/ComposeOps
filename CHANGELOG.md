@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Autonomous Ops Command Center：统一汇聚 Agent 计划/后台任务、工作流实例、批量任务、事件和操作审计；支持按关键词、状态和来源筛选，并查看各来源原始详情与可证实的执行时间线。
+- 长期运维任务（Ticket）独立于 Agent Session，支持可交接 Assignment、不可变版本化 Mandate、结构化报告与人工验收；新建任务只定义目标，不自动启动 Agent。
+- 持久化 Effect 意图台账支持 Observe / Suggest / Execute、幂等键、租约领取、心跳、结果留痕和崩溃恢复；审批只入队，不直接执行 Docker/Compose/SSH。未开始的过期租约可安全回队列，执行中租约过期转为 outcome_unknown，必须人工核对。
 - 任务中心增加待审批、结果待核对、活动任务和事件观察视图；工作流审批使用原有冻结意图校验与二次确认，Agent 工具审批可回到原会话处理；结果不确定的副作用任务禁止自动重试。
 - Agent Worker Profiles：增加自动分配、规划、执行、只读验证和应急响应职责；自动路由采用确定性规则，角色指令与工具白名单分离，所有写操作继续受现有风险策略和审批门约束。
 - Agent 运行历史增加任务关键词、状态与 Worker 筛选；工作台可显式选择本轮 Worker，流式轨迹记录实际分配结果。

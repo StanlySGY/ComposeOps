@@ -22,6 +22,7 @@ import costAnalysisRoutes from './routes/cost-analysis.js';
 import cmdbRoutes from './routes/cmdb.js';
 import workflowRoutes from './routes/workflow.js';
 import eventCenterRoutes from './routes/event-center.js';
+import opsTicketRoutes from './routes/ops-tickets.js';
 import stateHistoryRoutes from './routes/state-history.js';
 import mcpRoutes from './routes/mcp.js';
 import docker from './services/docker.js';
@@ -153,6 +154,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       await api.register(cmdbRoutes, { prefix: '/cmdb' });
       await api.register(workflowRoutes, { prefix: '/workflows' });
       await api.register(eventCenterRoutes, { prefix: '/events' });
+      await api.register(opsTicketRoutes, { prefix: '/ops-tickets' });
       await api.register(stateHistoryRoutes, { prefix: '/state' });
     },
     { prefix: '/api/v1' }

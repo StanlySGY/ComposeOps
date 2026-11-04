@@ -638,6 +638,134 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 19,
+    name: '长期运维任务、授权快照、派工报告与持久化 Effect 台账',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS ops_tickets (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'planning' CHECK(status IN ('planning','ready','active','blocked','review','succeeded','failed','cancelled')),
+          priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
+          source_type TEXT NOT NULL DEFAULT 'manual',
+          source_id TEXT,
+          project_id TEXT,
+          host_id TEXT,
+          acceptance_json TEXT NOT NULL DEFAULT '[]',
+          idempotency_key TEXT UNIQUE,
+          created_by TEXT NOT NULL DEFAULT 'admin',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ops_tickets_status_priority ON ops_tickets(status, priority, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_ops_tickets_project ON ops_tickets(project_id, updated_at);
+
+        CREATE TABLE IF NOT EXISTS ops_mandates (
+          id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          version INTEGER NOT NULL CHECK(version > 0),
+          status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','revoked','expired')),
+          scope_json TEXT NOT NULL,
+          allowed_actions_json TEXT NOT NULL,
+          denied_actions_json TEXT NOT NULL DEFAULT '[]',
+          approval_rules_json TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          issued_by TEXT NOT NULL,
+          issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT NOT NULL,
+          revoked_at TEXT,
+          revoke_reason TEXT,
+          UNIQUE(ticket_id, version)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_ops_mandates_active ON ops_mandates(ticket_id) WHERE status = 'active';
+        CREATE INDEX IF NOT EXISTS idx_ops_mandates_expiry ON ops_mandates(status, expires_at);
+
+        CREATE TABLE IF NOT EXISTS ops_assignments (
+          id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          mandate_id TEXT REFERENCES ops_mandates(id) ON DELETE RESTRICT,
+          sequence INTEGER NOT NULL CHECK(sequence > 0),
+          worker_role TEXT NOT NULL DEFAULT 'manual',
+          assignee TEXT,
+          source_type TEXT NOT NULL DEFAULT 'manual',
+          source_id TEXT,
+          session_id INTEGER,
+          status TEXT NOT NULL DEFAULT 'assigned' CHECK(status IN ('assigned','running','waiting','blocked','handed_off','succeeded','failed','outcome_unknown','cancelled')),
+          attempt INTEGER NOT NULL DEFAULT 1 CHECK(attempt > 0),
+          handoff_summary TEXT NOT NULL DEFAULT '',
+          idempotency_key TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          started_at TEXT,
+          heartbeat_at TEXT,
+          finished_at TEXT,
+          UNIQUE(ticket_id, sequence)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_ops_assignments_idempotency ON ops_assignments(ticket_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_ops_assignments_ticket_status ON ops_assignments(ticket_id, status, sequence);
+
+        CREATE TABLE IF NOT EXISTS ops_reports (
+          id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          assignment_id TEXT REFERENCES ops_assignments(id) ON DELETE RESTRICT,
+          report_type TEXT NOT NULL DEFAULT 'execution',
+          status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','accepted','rejected')),
+          summary TEXT NOT NULL,
+          findings_json TEXT NOT NULL DEFAULT '[]',
+          evidence_json TEXT NOT NULL DEFAULT '[]',
+          acceptance_json TEXT NOT NULL DEFAULT '[]',
+          submitted_by TEXT NOT NULL DEFAULT 'admin',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          decided_at TEXT,
+          decision_note TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_ops_reports_ticket_status ON ops_reports(ticket_id, status, created_at);
+
+        CREATE TABLE IF NOT EXISTS ops_effects (
+          id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          assignment_id TEXT REFERENCES ops_assignments(id) ON DELETE RESTRICT,
+          mandate_id TEXT REFERENCES ops_mandates(id) ON DELETE RESTRICT,
+          mandate_fingerprint TEXT,
+          idempotency_key TEXT,
+          effect_type TEXT NOT NULL,
+          mode TEXT NOT NULL CHECK(mode IN ('observe','suggest','execute')),
+          risk TEXT NOT NULL DEFAULT 'medium' CHECK(risk IN ('low','medium','high','critical')),
+          target_json TEXT NOT NULL DEFAULT '{}',
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL CHECK(status IN ('proposed','awaiting_approval','queued','leased','executing','succeeded','failed','outcome_unknown','cancelled','rejected')),
+          attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt >= 0),
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          approved_by TEXT,
+          approved_at TEXT,
+          started_at TEXT,
+          finished_at TEXT,
+          result_json TEXT NOT NULL DEFAULT '{}',
+          error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_ops_effects_idempotency ON ops_effects(ticket_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_ops_effects_dispatch ON ops_effects(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_ops_effects_ticket ON ops_effects(ticket_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_ops_effects_lease ON ops_effects(status, lease_expires_at);
+
+        CREATE TABLE IF NOT EXISTS ops_ticket_events (
+          id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          event_type TEXT NOT NULL,
+          actor TEXT NOT NULL DEFAULT 'admin',
+          details_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ops_ticket_events_ticket ON ops_ticket_events(ticket_id, created_at, id);
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

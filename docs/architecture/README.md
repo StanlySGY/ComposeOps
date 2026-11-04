@@ -115,6 +115,21 @@ ComposeOps 采用渐进式 Worker Profile，而不是复制一套平行 Agent �
 - Cron 工作流由同一 Event Router 定时扫描，按服务端本地分钟判断是否到期，并用工作流 ID + 分钟键做数据库幂等；重复 tick 或进程重启不会在同一分钟重复创建实例。
 - Approval 节点进入 `waiting_approval` 时冻结审批节点 ID、完整工作流定义 SHA-256 指纹和下一可达 Action 的节点/动作/项目快照。审批时再次比较当前定义与快照；定义在等待期间发生变化、快照缺失或意图不一致时返回 `WORKFLOW_APPROVAL_STALE`，必须取消并重新运行。通过后只签发一次性授权，Action 执行前校验节点、动作、项目和定义指纹，并先持久化消费凭证再触发外部副作用。
 
+## 长期运维任务：Ticket / Mandate / Assignment / Report / Effect
+
+长期任务以 Ticket 为稳定身份，独立于任意 Agent Session。一个 Ticket 可以经历多个 Assignment；Assignment 只引用既有 Agent Session、Plan、后台任务、工作流或批量任务，不复制或替换现有 Worker Runtime。交接会保留旧 Assignment 并创建新序号记录，必须携带交接摘要。实现位于 [ops-tickets.js](../../backend/src/services/ops-tickets.js) 与 [ops-tickets routes](../../backend/src/routes/ops-tickets.js)，页面为 [OpsTicketsView.vue](../../frontend/src/views/OpsTicketsView.vue)。
+
+- Ticket 保存目标、背景、优先级、来源、项目/Host 范围和验收标准；状态转换由后端限制。Ticket 只有存在人工接受的结构化报告后才能标记为 succeeded。
+- Mandate 是不可变授权快照：限定 project / host / resource、允许动作、拒绝动作、策略版本、到期时间和 SHA-256 指纹。签发新版本会撤销旧版本；撤销/替换会拒绝尚未执行的待审批、排队和已领取 Effect。审批、领取和执行开始前都会重新核对授权版本与目标范围。
+- Assignment 记录角色、执行人、已有来源 ID / Session ID、尝试、状态与交接信息。Ticket 身份不随 Session 结束、替换 Worker 或交接而改变。
+- Report 采用结构化摘要、发现项、证据和提交时的验收标准快照。提交报告只进入 review；人工接受/退回有独立审计事件。完成 Ticket 必须有 accepted Report。
+- Effect 记录 Observe / Suggest / Execute 意图、风险、目标、参数、Mandate 指纹、审批人、租约、尝试次数与结果。幂等键以 Ticket 为边界。批准只把意图写入 queued，不调用 Docker、Compose 或 SSH。
+- Effect Worker 生命周期 API 目前只提供受控的持久化 claim / start / heartbeat / complete 台账服务；尚未绑定自动 Docker/Compose 执行适配器。执行器必须在 start 前自行确认自己将执行的动作与持久化 Effect 一致，并且不得把工具输出、日志或事件正文当成授权。
+- 恢复策略区分阶段：过期 leased（尚未记录开始）可安全回队列；过期 executing 无法证明副作用是否完成，转为 outcome_unknown，禁止自动重放，必须基于真实 Host/项目状态人工核对。
+- Observe → Suggest → Approval → Execute 是治理流，不是自动授权。事件规则继续由确定性 Event Router 触发；此领域层不会把所有事件自动升级成 Ticket，也不会自行派发高风险动作。
+
+迁移版本 v19 创建 ops_tickets、ops_mandates、ops_assignments、ops_reports、ops_effects 和 ops_ticket_events。接口前缀为 /api/v1/ops-tickets；现有 /ops-center 继续展示运行态势，长期任务入口为 /tickets。
+
 ## 数据与认证
 
 结构和迁移的唯一来源是 [lib/db.js](../../backend/src/lib/db.js)，不要另写一份建表脚本。
@@ -125,6 +140,7 @@ ComposeOps 采用渐进式 Worker Profile，而不是复制一套平行 Agent �
 | 项目与备份 | project_preferences、compose_backups、volume_backups |
 | 会话与用量 | ai_sessions、ai_history、ai_memories、ai_usage |
 | 操作与执行 | operation_history、agent_plans、agent_executions、agent_audit_events、agent_policy_groups、agent_policy_rules、agent_background_tasks、background_jobs |
+| 长期运维任务 | ops_tickets、ops_mandates、ops_assignments、ops_reports、ops_effects、ops_ticket_events |
 | 观测与资产 | container_metrics、inspections、alert_events、event_records、assets、asset_relations |
 | 工作流 | workflow_definitions、workflow_instances、workflow_steps |
 

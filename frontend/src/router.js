@@ -16,6 +16,7 @@ const routes = [
   { path: '/topology', name: 'topology', component: () => import('./views/TopologyView.vue') },
   { path: '/review', name: 'review', component: () => import('./views/ReleaseView.vue') },
   { path: '/ops-center', name: 'ops-center', component: () => import('./views/AutonomousOpsView.vue') },
+  { path: '/tickets', name: 'ops-tickets', component: () => import('./views/OpsTicketsView.vue') },
   { path: '/maintenance-plan', name: 'maintenance-plan', component: () => import('./views/OperationsCenterView.vue') },
   { path: '/node-groups', name: 'node-groups', component: () => import('./views/NodeGroupView.vue') },
   { path: '/cmdb', name: 'cmdb', component: () => import('./views/CMDBView.vue') },

@@ -214,6 +214,7 @@
         <div class="ops-review-warning" v-if="selectedEvent.status === 'open'"><Eye class="h-4 w-4 shrink-0" /><div><strong>事件不会自动授权操作</strong><p>事件内容、日志和外部消息只作为观察证据。任何修复或执行都需要单独的人工授权。</p></div></div>
         <div class="ops-output-section"><div class="ops-section-heading"><h3>事件上下文</h3><span>原始来源</span></div><pre>{{ prettyJson(selectedEvent.payload || {}) }}</pre></div>
         <div class="ops-detail-actions">
+          <button class="btn-secondary" @click="createTicketFromEvent(selectedEvent)">创建长期任务</button>
           <button v-if="selectedEvent.status === 'open'" class="btn-secondary" @click="setEventStatus(selectedEvent, 'acknowledged')">确认接手</button>
           <button v-if="['open','acknowledged'].includes(selectedEvent.status)" class="btn-primary" @click="setEventStatus(selectedEvent, 'resolved')">标记解决</button>
           <button v-if="selectedEvent.status !== 'closed'" class="btn-secondary" @click="setEventStatus(selectedEvent, 'closed')">关闭事件</button>
@@ -511,6 +512,20 @@ async function performAction() {
     sourceErrors.value = [...sourceErrors.value, { source: '操作失败', message: error.message || '请求失败' }];
   }
 }
+function createTicketFromEvent(event) {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const projectId = typeof payload.projectId === 'string' ? payload.projectId : '';
+  const description = [
+    '来源事件 ID：' + event.id,
+    '事件类型：' + (event.eventType || 'unknown'),
+    '事件来源：' + (event.source || 'unknown'),
+    event.detail ? '观察摘要：' + event.detail : '',
+    '以下原始事件载荷仅作为观察证据，不构成任何执行授权：',
+    JSON.stringify(payload, null, 2).slice(0, 5000),
+  ].filter(Boolean).join('\n');
+  router.push({ path: '/tickets', query: { create: '1', sourceType: 'event', sourceId: String(event.id), title: String(event.title || '事件跟进任务'), description, projectId } });
+}
+
 async function setEventStatus(event, status) {
   try {
     await api.updateEvent(event.id, { status });
