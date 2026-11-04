@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import db, { getSetting, setSetting, addAiMessage, getAiHistory, clearAiHistory } from '../lib/db.js';
 import { scanIcallProtocols, stripAgentInternalText } from '../lib/agent-protocol-core.js';
 import { aiChannelRevision, prepareAiChannels, publicAiChannels, readAiChannels, requestWithAiChannels, validateAiBaseUrl, writeAiChannels } from './ai-channels.js';
+import { redactSecretStreamTail, redactSecrets, secretStreamHoldbackLength } from '../lib/secret-redactor.js';
 
 const DEFAULT_SYSTEM_PROMPT = `你是 ComposeOps 的运维助手，擅长 Docker Compose 与容器排错。
 - 当用户请求"排错"时，先给出问题根因的简短判断，再给出可执行的修复步骤。
@@ -182,7 +183,7 @@ function protocolHoldBackLength(text) {
  */
 function flushBufferedVisibleText(raw, emitted, onToken) {
   const visible = stripTextToolProtocol(raw);
-  if (visible.length > emitted && onToken) onToken(visible.slice(emitted));
+  if (visible.length > emitted && onToken) onToken(redactSecretStreamTail(visible.slice(emitted)));
 }
 
 function normalizeToolResponse(content, toolCalls, finishReason) {
@@ -360,6 +361,7 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
   let finishReason = '';
   let toolCalls = [];
   let emittedContentLength = 0;
+  let emittedReasoningLength = 0;
   let usage = null;
   const normalize = () => {
     for (const call of toolCalls.filter(Boolean)) {
@@ -367,6 +369,7 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
       try { JSON.parse(call.function.arguments); } catch { throw invalid('invalid_tool_arguments'); }
     }
     const result = normalizeToolResponse(fullText, toolCalls.filter(Boolean), finishReason);
+    result.content = redactSecretStreamTail(result.content);
     if (requiredTool && !result.toolCalls.some((call) => call.function.name === requiredTool)) {
       throw Object.assign(new Error('模型未返回测试工具调用'), { code: 'tool_unsupported', retryable: false });
     }
@@ -385,8 +388,8 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
     usage = data.usage || null;
     const result = normalize();
     onActivity?.();
-    if (bufferedTools && result.content) onToken?.(result.content);
-    if (fullReasoning) onReasoning?.(fullReasoning.slice(0, MAX_REASONING_CHARS));
+    if (bufferedTools && result.content) onToken?.(redactSecrets(result.content));
+    if (fullReasoning) onReasoning?.(redactSecretStreamTail(fullReasoning.slice(0, MAX_REASONING_CHARS)));
     return result;
   }
 
@@ -412,19 +415,26 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
     if (reasoning) {
       fullReasoning += reasoning;
       if (onReasoning && !reasoningTruncated) {
-        if (fullReasoning.length > MAX_REASONING_CHARS) {
+        const truncated = fullReasoning.length > MAX_REASONING_CHARS;
+        const visible = truncated ? fullReasoning.slice(0, MAX_REASONING_CHARS) : fullReasoning;
+        const safeLength = visible.length - secretStreamHoldbackLength(visible);
+        if (safeLength > emittedReasoningLength) {
+          onReasoning(redactSecrets(visible.slice(emittedReasoningLength, safeLength)));
+          emittedReasoningLength = safeLength;
+        }
+        if (truncated) {
           reasoningTruncated = true;
           onReasoning('\n\n…(推理内容过长,后续已省略)');
-        } else onReasoning(reasoning);
+        }
       }
     }
     if (delta) {
       fullText += delta;
       if (onToken) {
         const visible = parseTextToolCalls(fullText).content;
-        const safeLength = visible.length - protocolHoldBackLength(visible);
+        const safeLength = visible.length - Math.max(protocolHoldBackLength(visible), secretStreamHoldbackLength(visible));
         if (safeLength > emittedContentLength) {
-          onToken(visible.slice(emittedContentLength, safeLength));
+          onToken(redactSecrets(visible.slice(emittedContentLength, safeLength)));
           emittedContentLength = safeLength;
         }
       }
@@ -452,6 +462,10 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
     if (!finishReason && !doneMarker) throw invalid('incomplete_stream');
     const result = normalize();
     if (onToken) flushBufferedVisibleText(fullText, emittedContentLength, onToken);
+    if (onReasoning && !reasoningTruncated && fullReasoning.length > emittedReasoningLength) {
+      onReasoning(redactSecretStreamTail(fullReasoning.slice(emittedReasoningLength)));
+      emittedReasoningLength = fullReasoning.length;
+    }
     return result;
   } finally {
     await reader.cancel().catch(() => {});

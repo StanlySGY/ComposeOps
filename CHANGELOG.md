@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 拒绝 Git 仓库 URL 中的查询串和片段，防止访问令牌通过仓库列表 API/UI 暴露。
 - Agent 审批参数编辑后重新执行持久化拒绝策略检查；工具异常时审计明确记录后置检查未运行的原因，并在审计原因中脱敏 token 形态凭据。
 - 公共 Agent SSE 事件对工具结果/错误与普通文本统一应用值级秘密脱敏，MCP 文本和结构化结果继续验证 token 形态凭据不泄露。
+- 模型 content/reasoning 的流式 chunk 使用有状态秘密前缀暂存，跨 chunk token/Bearer/已收割值及正常 EOF 截断均脱敏后再发射；完整返回内容与流式增量保持一致。
 
 ## [1.5.1] - 2026-10-06
 

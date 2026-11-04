@@ -10,6 +10,7 @@ process.env.DB_PATH = path.join(directory, 'test.db');
 const { default: db, setSetting, getSetting, exportUserData, importUserData } = await import('../src/lib/db.js');
 const { callOpenAI, getAiConfig, getPublicAiConfig, setAiConfig, fetchAiModels } = await import('../src/services/ai.js');
 const { publicAiChannels, requestWithAiChannels } = await import('../src/services/ai-channels.js');
+const { harvestSecretValues, resetSecretRedactor } = await import('../src/lib/secret-redactor.js');
 const { buildApp } = await import('../src/app.js');
 const app = await buildApp({ logger: false });
 const setup = await app.inject({ method: 'POST', url: '/api/v1/auth/setup', payload: { password: 'channels-test-password' } });
@@ -19,7 +20,7 @@ const channel = (name, extra = {}) => ({ id: `ch-${++sequence}`, name, baseUrl: 
 const jsonReply = (content = '成功') => Response.json({ choices: [{ message: { content }, finish_reason: 'stop' }] });
 const frame = (delta, finish_reason) => `data: ${JSON.stringify({ choices: [{ delta, finish_reason }] })}\n\n`;
 const streamReply = (text = '备用回复') => new Response(frame({ content: text }, 'stop') + 'data: [DONE]\n\n');
-test.beforeEach(() => { db.prepare("DELETE FROM settings WHERE key LIKE 'ai.%'").run(); });
+test.beforeEach(() => { db.prepare("DELETE FROM settings WHERE key LIKE 'ai.%'").run(); resetSecretRedactor(); });
 test.after(async () => { await app.close(); db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
 
 test('旧配置自动显示为默认渠道，保存列表后密钥保留且不回传明文', () => {
@@ -173,6 +174,91 @@ test('流式 EOF/非法工具参数在无外发内容时可切换，工具调用
     assert.equal(result.channelId, channels[1].id); assert.equal(result.toolCalls.length, 0); assert.equal(tokens.join(''), '备用回复');
     mock.mock.restore();
   }
+});
+
+test('流式 content 与 reasoning 的秘密跨 SSE chunk 拆分时不会泄露且保留普通文本', async t => {
+  const harvested = 'HarvestedSecretValue-2026';
+  harvestSecretValues('API_KEY=' + harvested);
+  const staticToken = 'sk-abcdefgh12345678';
+  const bearerValue = 'secret-value-part';
+  const tokenChunks = [];
+  const reasoningChunks = [];
+  const tokenSnapshots = [];
+  const reasoningSnapshots = [];
+  const deltas = [
+    { content: '中文回复：\nAPI_KEY=sk-abc' },
+    { content: 'defgh123' },
+    { content: '45678\nAuthorization: Bea' },
+    { content: 'rer ' + bearerValue.slice(0, 7) },
+    { content: bearerValue.slice(7) + ' and ' + harvested.slice(0, 12) },
+    { content: harvested.slice(12) + '\n普通文本 保留空格🙂\n' },
+    { reasoning_content: '推理前缀 ' },
+    { reasoning_content: 'sk-abc' },
+    { reasoning_content: 'defgh123' },
+    { reasoning_content: '45678 / ' + harvested.slice(0, 10) },
+    { reasoning_content: harvested.slice(10) + ' reasoning done' },
+  ];
+  const response = deltas.map((delta, index) => frame(delta, index === deltas.length - 1 ? 'stop' : undefined)).join('') + 'data: [DONE]\n\n';
+  const eofPartial = frame({ content: 'final answer sk-abc' }, 'stop')
+    + frame({ reasoning_content: 'final reasoning ' + harvested.slice(0, 12) })
+    + 'data: [DONE]\n\n';
+  let fetchCall = 0;
+  t.mock.method(globalThis, 'fetch', async () => new Response(fetchCall++ === 0 ? response : eofPartial));
+
+  const result = await callOpenAI({
+    channels: [channel('stream-redaction')],
+    messages: [{ role: 'user', content: 'test' }],
+    stream: true,
+    onToken: chunk => {
+      tokenChunks.push(chunk);
+      tokenSnapshots.push(tokenChunks.join(''));
+    },
+    onReasoning: chunk => {
+      reasoningChunks.push(chunk);
+      reasoningSnapshots.push(reasoningChunks.join(''));
+    },
+  });
+
+  const visible = tokenChunks.join('');
+  const reasoning = reasoningChunks.join('');
+  for (const snapshot of tokenSnapshots) {
+    assert.equal(snapshot.includes(staticToken), false);
+    assert.equal(snapshot.includes(bearerValue), false);
+    assert.equal(snapshot.includes(harvested), false);
+    assert.equal(snapshot.includes('sk-abc'), false);
+  }
+  for (const snapshot of reasoningSnapshots) {
+    assert.equal(snapshot.includes(staticToken), false);
+    assert.equal(snapshot.includes(harvested), false);
+    assert.equal(snapshot.includes('sk-abc'), false);
+  }
+  assert.equal(visible.includes(staticToken), false);
+  assert.equal(visible.includes(bearerValue), false);
+  assert.equal(visible.includes(harvested), false);
+  assert.ok(visible.includes('中文回复：\n'));
+  assert.ok(visible.includes('普通文本 保留空格🙂'));
+  assert.ok(visible.includes('[REDACTED]'));
+  assert.equal(result.content, visible, '最终返回/历史正文与流式可见正文必须一致且已脱敏');
+  assert.equal(reasoning.includes(staticToken), false);
+  assert.equal(reasoning.includes(harvested), false);
+  assert.ok(reasoning.includes('推理前缀'));
+  assert.ok(reasoning.includes('reasoning done'));
+  assert.ok(reasoning.includes('[REDACTED]'));
+
+  const eofTokens = [];
+  const eofReasoning = [];
+  const eofResult = await callOpenAI({
+    channels: [channel('stream-redaction-eof')],
+    messages: [{ role: 'user', content: 'test eof' }],
+    stream: true,
+    onToken: chunk => eofTokens.push(chunk),
+    onReasoning: chunk => eofReasoning.push(chunk),
+  });
+  assert.ok(!eofResult.content.includes('sk-abc'));
+  assert.ok(!eofTokens.join('').includes('sk-abc'));
+  assert.ok(eofTokens.join('').includes('[REDACTED]'));
+  assert.ok(!eofReasoning.join('').includes(harvested.slice(0, 12)));
+  assert.ok(eofReasoning.join('').includes('[REDACTED]'));
 });
 
 test('输出文字或推理后流中断不自动切换，不拼接不同渠道内容', async t => {

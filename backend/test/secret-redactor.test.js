@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { harvestSecretValues, redactSecrets, redactSecretValue, resetSecretRedactor } from '../src/lib/secret-redactor.js';
+import { harvestSecretValues, redactSecrets, redactSecretValue, resetSecretRedactor, redactSecretStreamTail, secretStreamHoldbackLength } from '../src/lib/secret-redactor.js';
+
+test('secret-redactor: 流式输出暂存跨 chunk 的静态 token、已收割值和敏感字段前缀', () => {
+  resetSecretRedactor();
+  const harvested = 'HarvestedSecretValue-2026';
+  harvestSecretValues('API_KEY=' + harvested);
+  assert.equal(secretStreamHoldbackLength('safe text ' + harvested.slice(0, 12)), 12);
+  assert.ok(secretStreamHoldbackLength('safe text sk-abc') >= 'sk-abc'.length);
+  assert.ok(secretStreamHoldbackLength('Authorization: Bea') >= 'Authorization: Bea'.length);
+  assert.ok(secretStreamHoldbackLength('Authorization:') >= 'Authorization:'.length);
+  assert.ok(secretStreamHoldbackLength('API_KEY=partial-value') > 0);
+  assert.ok(secretStreamHoldbackLength('{"apiKey":"partial-value') > 0);
+  assert.equal(secretStreamHoldbackLength('ordinary diagnostic text.'), 0);
+  assert.equal(redactSecretStreamTail('ordinary sentence ends with pass'), 'ordinary sentence ends with pass');
+  assert.equal(redactSecretStreamTail('ordinary PORT=123s'), 'ordinary PORT=123s');
+  assert.equal(redactSecretStreamTail('adjacent' + harvested.slice(0, 12)), 'adjacent[REDACTED]');
+});
 
 test('secret-redactor: 键名敏感的 KEY=VALUE 被收割并能在任意文本中抹除', () => {
   resetSecretRedactor();
@@ -9,6 +25,8 @@ test('secret-redactor: 键名敏感的 KEY=VALUE 被收割并能在任意文本�
   const out = redactSecrets('连接失败,请检查 MYSQL_ROOT_PASSWORD=Sup3rS3cret! 是否正确');
   assert.ok(!out.includes('Sup3rS3cret!'), '明文密钥不应出现在脱敏结果中');
   assert.ok(out.includes('[REDACTED]'), '应替换为 [REDACTED]');
+  assert.equal(redactSecrets('SIGNING_KEY=signing-private-value-99').includes('signing-private-value-99'), false);
+  assert.equal(redactSecrets('Bearer standalone-credential-value').includes('standalone-credential-value'), false);
   // 非敏感键不收割
   assert.ok(!redactSecrets('PORT=3306').includes('[REDACTED]PORT'), '普通键值不受影响');
 });

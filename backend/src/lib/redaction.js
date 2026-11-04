@@ -7,9 +7,9 @@ export function isSensitiveKey(key = '') {
 
 export function redactText(value) {
   return String(value ?? '')
-    .replace(/(authorization\s*:\s*bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH[_-]?KEY)\s*[=:]\s*)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:"|')?(?:SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH[_-]?KEY)(?:"|')?\s*:\s*")([^"]*)(")/gi, '$1[REDACTED]$3')
+    .replace(/((?:authorization\s*:\s*)?bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:SECRET|TOKEN|PASSWORD|PASSWD|PASS|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH[_-]?KEY|SIGNING[_-]?KEY)\s*[=:]\s*)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:"|')?(?:SECRET|TOKEN|PASSWORD|PASSWD|PASS|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH[_-]?KEY|SIGNING[_-]?KEY)(?:"|')?\s*:\s*")([^"]*)(")/gi, '$1[REDACTED]$3')
     .slice(0, MAX_STRING_LENGTH);
 }
 
