@@ -73,6 +73,8 @@ services:
       - HOST=0.0.0.0
       - LOG_LEVEL=info
       - ENABLE_SHELL=1
+      # 默认不信任转发头；仅在已隔离的反向代理入口下配置 TRUST_PROXY=1，或填写可信代理 IP/CIDR。
+      - TRUST_PROXY=${TRUST_PROXY:-0}
       # Optional runtime proxy: local .env points at a WSL bridge bound only to
       # the ComposeOps Docker gateway; NODE_USE_ENV_PROXY enables Node 22 fetch.
       - HTTP_PROXY=${COMPOSEOPS_HTTP_PROXY:-}

@@ -24,7 +24,8 @@ const DEFAULT_POLL_INTERVAL = 300; // 5 分钟
 // 替代会冻结整个事件循环(含 health check)的 execFileSync。
 const GIT_TIMEOUT_MS = 120_000;
 
-const activeWatchers = new Map(); // repoId -> { interval, syncing }
+const activeWatchers = new Map(); // repoId -> { interval }
+const activeOperations = new Map(); // repoId -> operation name
 
 const SAFE_BRANCH = /^(?![./])(?!.*(?:\.\.|\/\/|@\{))[A-Za-z0-9][A-Za-z0-9._/-]{0,99}(?<![./])$/;
 const SAFE_COMMIT = /^[0-9a-f]{7,40}$/i;
@@ -36,6 +37,10 @@ function validateRepoUrl(value) {
   const url = String(value || '').trim();
   if (!SAFE_REPO_URL.test(url)) {
     throw Object.assign(new Error('仓库 URL 仅支持 http(s)://、ssh:// 或 git@ 形式'), { statusCode: 400 });
+  }
+  // 查询串和片段常被用于拼接访问令牌；仓库 URL 会展示在 API/UI 中，不允许在这些位置携带凭据。
+  if (/[?#]/.test(url)) {
+    throw Object.assign(new Error('仓库 URL 不允许包含查询参数或片段，请使用 SSH 私钥等安全凭据配置'), { statusCode: 400 });
   }
   // URL 中的 userinfo 会被持久化并经仓库配置 API 返回，禁止把密码/令牌嵌入 URL。
   if (/^(https?:\/\/|ssh:\/\/)/i.test(url)) {
@@ -100,16 +105,43 @@ async function assertRepoSafeForDestructiveOperation(localPath, configuredUrl, e
   }
 }
 
-/** 防止同一仓库的自动同步在上一轮未结束时被下一轮并发触发(git 操作竞态)。 */
-function withSyncGuard(repoId, fn) {
-  const watcher = activeWatchers.get(repoId);
-  if (watcher?.syncing) return null;
-  if (watcher) watcher.syncing = true;
+/** 同一仓库的同步、Webhook、回滚互斥；避免 fetch/reset/checkout 相互竞态。 */
+function withRepoOperation(repoId, operation, fn) {
+  const active = activeOperations.get(repoId);
+  if (active) {
+    return Promise.reject(Object.assign(
+      new Error(`该 GitOps 仓库正在执行${active}，请稍后重试`),
+      { statusCode: 409, code: 'GITOPS_OPERATION_IN_PROGRESS' },
+    ));
+  }
+  activeOperations.set(repoId, operation);
   return Promise.resolve()
     .then(fn)
     .finally(() => {
-      if (watcher) watcher.syncing = false;
+      if (activeOperations.get(repoId) === operation) activeOperations.delete(repoId);
     });
+}
+
+function assertRepoIdle(repoId) {
+  const active = activeOperations.get(repoId);
+  if (active) {
+    throw Object.assign(
+      new Error(`该 GitOps 仓库正在执行${active}，暂不能修改或删除配置`),
+      { statusCode: 409, code: 'GITOPS_OPERATION_IN_PROGRESS' },
+    );
+  }
+}
+
+/** 网络操作完成后重新读取配置再局部更新，避免并行添加其他仓库时写回旧快照。 */
+function patchRepoState(repoId, patch) {
+  const repos = listGitOpsRepos();
+  const current = repos.find((item) => item.id === repoId);
+  if (!current) {
+    throw Object.assign(new Error('GitOps 仓库不存在'), { statusCode: 404 });
+  }
+  Object.assign(current, patch);
+  saveGitOpsRepos(repos);
+  return current;
 }
 
 /**
@@ -184,6 +216,7 @@ export function addGitOpsRepo(config) {
  * 更新 Git 仓库配置
  */
 export function updateGitOpsRepo(id, updates) {
+  assertRepoIdle(id);
   const repos = listGitOpsRepos();
   const index = repos.findIndex((r) => r.id === id);
   
@@ -221,6 +254,7 @@ export function updateGitOpsRepo(id, updates) {
  * 删除 Git 仓库
  */
 export function deleteGitOpsRepo(id) {
+  assertRepoIdle(id);
   const repos = listGitOpsRepos();
   const index = repos.findIndex((r) => r.id === id);
   
@@ -239,6 +273,10 @@ export function deleteGitOpsRepo(id) {
  * 克隆或拉取仓库
  */
 export async function syncGitOpsRepo(id) {
+  return withRepoOperation(id, '同步', () => syncGitOpsRepoUnlocked(id));
+}
+
+async function syncGitOpsRepoUnlocked(id) {
   const repos = listGitOpsRepos();
   const repo = repos.find((r) => r.id === id);
   
@@ -254,6 +292,7 @@ export async function syncGitOpsRepo(id) {
   const env = gitEnv(sshKey);
 
   try {
+    let previousCommit = repo.lastCommit || null;
     // 如果本地仓库不存在，执行 clone
     if (!existsSync(gitDir)) {
       mkdirSync(localPath, { recursive: true });
@@ -262,6 +301,9 @@ export async function syncGitOpsRepo(id) {
       // 已存在的目录必须确实是配置的仓库，且不能覆盖工作区内的未提交改动。
       // reset --hard 会永久丢弃已跟踪文件的本地修改；路径配置错误时还可能误操作其他仓库。
       await assertRepoSafeForDestructiveOperation(localPath, url, env);
+      if (!previousCommit) {
+        previousCommit = (await runGit(['-C', localPath, 'rev-parse', 'HEAD'], { encoding: 'utf-8', env })).trim();
+      }
       await runGit(['-C', localPath, 'fetch', 'origin', branch], { env });
       await runGit(['-C', localPath, 'reset', '--hard', 'origin/' + branch], { env });
     }
@@ -270,17 +312,19 @@ export async function syncGitOpsRepo(id) {
     const commit = (await runGit(['-C', localPath, 'rev-parse', 'HEAD'], { encoding: 'utf-8', env })).trim();
     const commitMsg = (await runGit(['-C', localPath, 'log', '-1', '--pretty=%B'], { encoding: 'utf-8', env })).trim();
 
-    // 更新配置
-    repo.lastSync = new Date().toISOString();
-    repo.lastCommit = commit;
-    repo.status = 'synced';
-    saveGitOpsRepos(repos);
+    // 从最新配置快照局部更新，保留同步期间新增的其他仓库配置。
+    const syncedAt = new Date().toISOString();
+    patchRepoState(id, { lastSync: syncedAt, lastCommit: commit, status: 'synced', lastError: null });
 
-    return { ok: true, commit, message: commitMsg, syncedAt: repo.lastSync };
+    return {
+      ok: true,
+      commit,
+      message: commitMsg,
+      syncedAt,
+      hasChanges: Boolean(previousCommit && previousCommit !== commit),
+    };
   } catch (error) {
-    repo.status = 'error';
-    repo.lastError = error.message;
-    saveGitOpsRepos(repos);
+    try { patchRepoState(id, { status: 'error', lastError: error.message }); } catch { /* 配置可能已被外部移除 */ }
     throw Object.assign(new Error(`Git 同步失败: ${error.message}`), { statusCode: 502 });
   }
 }
@@ -325,6 +369,10 @@ export async function getGitOpsHistory(id, limit = 20) {
  * 回滚到指定 commit
  */
 export async function rollbackGitOpsRepo(id, commitHash) {
+  return withRepoOperation(id, '回滚', () => rollbackGitOpsRepoUnlocked(id, commitHash));
+}
+
+async function rollbackGitOpsRepoUnlocked(id, commitHash) {
   const repos = listGitOpsRepos();
   const repo = repos.find((r) => r.id === id);
   
@@ -347,10 +395,7 @@ export async function rollbackGitOpsRepo(id, commitHash) {
 
     const commitMsg = (await runGit(['-C', localPath, 'log', '-1', '--pretty=%B'], { encoding: 'utf-8', env })).trim();
 
-    repo.lastSync = new Date().toISOString();
-    repo.lastCommit = commit;
-    repo.status = 'synced';
-    saveGitOpsRepos(repos);
+    patchRepoState(id, { lastSync: new Date().toISOString(), lastCommit: commit, status: 'synced', lastError: null });
 
     await sendNotification(
       'GitOps 版本回滚',
@@ -374,7 +419,8 @@ function startRepoWatcher(repo) {
   const pollInterval = Number(getSetting(POLL_INTERVAL_KEY, String(DEFAULT_POLL_INTERVAL))) * 1000;
 
   const interval = setInterval(() => {
-    withSyncGuard(repo.id, async () => {
+    if (activeOperations.has(repo.id)) return;
+    Promise.resolve().then(async () => {
       try {
         // 每轮重新读取配置:闭包里的 repo 是启动时的旧对象,lastCommit 永远停在
         // 启动时刻,而 syncGitOpsRepo 更新落库的是每次重新解析的新对象——
@@ -384,15 +430,15 @@ function startRepoWatcher(repo) {
           stopRepoWatcher(repo.id); // 仓库已被删除,watcher 自行退出
           return;
         }
-        const previousCommit = current.lastCommit ?? null;
         const result = await syncGitOpsRepo(repo.id);
-        if (result.ok && result.commit !== previousCommit) {
+        if (result.ok && result.hasChanges) {
           await sendNotification(
             'GitOps 自动同步',
             `仓库 ${current.name} 检测到新提交 ${result.commit.slice(0, 7)}: ${result.message}`
           );
         }
       } catch (error) {
+        if (error.statusCode === 409) return;
         console.error(`[GitOps] 自动同步失败 (${repo.name}):`, error.message);
       }
     });

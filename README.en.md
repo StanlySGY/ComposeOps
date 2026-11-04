@@ -265,7 +265,7 @@ tailscale serve --bg http://127.0.0.1:28765
 
 **Option 2: Reverse Proxy** (Caddy/Nginx with HTTPS + authentication)
 ```yaml
-# docker-compose.yml - add to environment:
+# Only after restricting the app ingress to the trusted proxy; prefer a proxy IP/CIDR allowlist.
 TRUST_PROXY=1
 ```
 

@@ -35,6 +35,15 @@ import { stopStateRecorder } from './services/container-events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** 默认不信任任意来源的 X-Forwarded-*；需要代理时可填写 1 或逗号分隔的可信代理 IP/CIDR。 */
+function resolveTrustProxy(value = process.env.TRUST_PROXY) {
+  const raw = String(value ?? '').trim();
+  if (!raw || /^(0|false|off|no)$/i.test(raw)) return false;
+  if (/^(1|true|yes|all)$/i.test(raw)) return true;
+  const proxies = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  return proxies.length ? proxies : false;
+}
+
 /** 无需登录即可访问的认证端点(状态查询/首次设置/登录)。 */
 const PUBLIC_AUTH_PATHS = ['/api/v1/auth/status', '/api/v1/auth/setup', '/api/v1/auth/login'];
 
@@ -47,7 +56,7 @@ const PUBLIC_AUTH_PATHS = ['/api/v1/auth/status', '/api/v1/auth/setup', '/api/v1
  */
 export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'info' } } = {}) {
   const fastify = Fastify({
-    trustProxy: true,
+    trustProxy: resolveTrustProxy(),
     logger,
   });
 

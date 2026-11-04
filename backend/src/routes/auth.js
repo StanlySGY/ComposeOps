@@ -48,7 +48,8 @@ function saveLockouts() {
   setSetting(LOCKOUT_KEY, JSON.stringify(Object.fromEntries(map)));
 }
 
-const isSecure = (req) => req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https';
+// 只信任 Fastify 根据 TRUST_PROXY 解析后的协议，不能直接采信客户端可伪造的原始头。
+const isSecure = (req) => req.protocol === 'https';
 
 export default async function authRoutes(fastify) {
   const attempts = {

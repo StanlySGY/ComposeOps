@@ -15,11 +15,14 @@ for (const url of [
   'http://token@example.com/team/repo.git',
   'https://alice%40example.com:secret@example.com/team/repo.git',
   'ssh://git:secret@example.com/team/repo.git',
+  'https://example.com/team/repo.git?token=secret-token',
+  'https://example.com/team/repo.git#secret-token',
+  'git@github.com:team/repo.git?token=secret-token',
 ]) {
-  test('gitops URL security rejects embedded HTTP credentials: ' + url.split('@').at(-1), () => {
+  test('gitops URL security rejects embedded credentials and URL suffixes: ' + url.split('@').at(-1), () => {
     assert.throws(
       () => addGitOpsRepo({ name: 'credential-test', url, localPath: join(tempDir, 'repo'), projectId: 'p' }),
-      (error) => error.statusCode === 400 && /不允许包含用户名或密码/.test(error.message),
+      (error) => error.statusCode === 400 && /(不允许包含用户名或密码|不允许包含查询参数或片段)/.test(error.message),
     );
   });
 }

@@ -279,7 +279,7 @@ docker compose up -d --build
 tailscale serve --bg http://127.0.0.1:28765
 
 # 方式 2: 反向代理（Caddy/Nginx + HTTPS）
-# 设置环境变量: TRUST_PROXY=1
+# 仅当应用入口已限制为可信代理时设置 TRUST_PROXY=1；更推荐填写代理 IP/CIDR 白名单
 ```
 
 ⚠️ **安全提示**：不要把端口直接暴露到公网；远程访问务必走 VPN 或 TLS 反代。
@@ -291,7 +291,7 @@ tailscale serve --bg http://127.0.0.1:28765
 ### 认证与授权
 
 - ✅ Scrypt 密码哈希（Node.js 原生）+ 登录失败锁定（5 次锁 15 分钟）
-- ✅ 30 天 Session（HttpOnly + SameSite=Strict）
+- ✅ 30 天 Session（HttpOnly + SameSite=Lax；HTTPS 请求额外设置 Secure）
 - ✅ REST + WebSocket 统一认证，Origin 校验（防 CSRF）
 - ✅ GitOps Webhook 独立 Token（未配置即关闭）
 

@@ -103,8 +103,8 @@ Use Tailscale or reverse proxy for remote access:
 # Tailscale (recommended)
 tailscale serve --bg http://127.0.0.1:28765
 
-# Or reverse proxy with HTTPS + auth
-# Set TRUST_PROXY=1 in environment
+# Or reverse proxy with HTTPS + auth. Only trust forwarded headers from a restricted proxy ingress.
+# Prefer a comma-separated proxy IP/CIDR allowlist; TRUST_PROXY=1 trusts all proxy sources.
 ```
 
 ### 2. HTTPS/TLS
@@ -187,7 +187,7 @@ Before deploying to production:
 - [ ] Changed default admin password (if auto-setup was used)
 - [ ] Bound to `127.0.0.1` or using VPN/reverse proxy
 - [ ] HTTPS enabled for remote access
-- [ ] `TRUST_PROXY=1` set if behind reverse proxy
+- [ ] `TRUST_PROXY` is disabled by default; if behind a reverse proxy, configured only for the trusted proxy IP/CIDR (avoid `1` unless every path to the app is restricted to that proxy)
 - [ ] Docker and dependencies up to date
 - [ ] Reviewed and approved all managed projects
 - [ ] API keys rotated from defaults

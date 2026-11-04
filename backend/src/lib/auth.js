@@ -60,14 +60,15 @@ export function issueSession(reply, secure = false) {
   const token = randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
   createSession(tokenHash(token), expires.toISOString());
-  // SameSite=None 必须 paired Secure,否则浏览器直接拒收;HTTP 部署退回 Lax 保证登录可用。
+  // HTTPS 下始终设置 Secure；只有启用跨站嵌入且请求确为 HTTPS 时才使用 SameSite=None。
   const sameSite = embedMode() && secure
-    ? 'SameSite=None; Secure; Partitioned'
+    ? 'SameSite=None; Partitioned'
     : 'SameSite=Lax';
   reply.header('Set-Cookie', [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
+    ...(secure ? ['Secure'] : []),
     sameSite,
     `Max-Age=${SESSION_DAYS * 86400}`,
   ].join('; '));
@@ -76,7 +77,7 @@ export function issueSession(reply, secure = false) {
 export function clearSession(request, reply) {
   const token = parseCookies(request.headers.cookie)[COOKIE_NAME];
   if (token) deleteSession(tokenHash(token));
-  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; Max-Age=0`);
+  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly;${request.protocol === 'https' ? ' Secure;' : ''} SameSite=Lax; Max-Age=0`);
 }
 
 export function isAuthenticated(request) {
@@ -89,7 +90,8 @@ export function validateOrigin(request) {
   if (!origin) return true;
   try {
     const originHost = new URL(origin).host;
-    const reqHost = request.headers['x-forwarded-host'] || request.headers.host;
+    // Fastify 的 request.host 只有在 TRUST_PROXY 明确配置后才会采用 X-Forwarded-Host。
+    const reqHost = request.host || request.headers.host;
     if (originHost === reqHost) return true;
     // 反向代理背后 host 可能被改写,x-forwarded-host 一致即放行(不受嵌入模式影响)。
     if (embedMode()) {
