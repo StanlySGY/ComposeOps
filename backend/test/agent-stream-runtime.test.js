@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { setImmediate as settle } from 'node:timers/promises';
 import test from 'node:test';
+import { resetRateLimits } from '../src/lib/rate-limit.js';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-agent-stream-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
@@ -12,6 +13,7 @@ const { getAgent } = await import('../src/services/agent.js');
 const { setSetting, addAiMessage, getAiHistory, getAiActiveHistory } = await import('../src/lib/db.js');
 const { setAiConfig } = await import('../src/services/ai.js');
 const { createBackgroundTask, resetBackgroundTasks } = await import('../src/services/agent/background-tasks.js');
+const { createAgentPolicyGroup, createAgentPolicyRule, fingerprintAgentParams, listAgentAuditEvents } = await import('../src/services/agent/policy-store.js');
 const app = await buildApp({ logger: false });
 const base = await app.listen({ host: '127.0.0.1', port: 0 });
 const setup = await app.inject({ method: 'POST', url: '/api/v1/auth/setup', payload: { password: 'isolated-stream-test' } });
@@ -27,7 +29,11 @@ let executions = [];
 agent.registerTool('test.approval', {
   description: '只写入测试内存', requiredPermission: 'readonly', requiresProject: false, confirmationRequired: true,
   parameters: { type: 'object', properties: { value: { type: 'string' } } },
-  execute: async params => { executions.push(params); return { saved: params.value }; },
+  execute: async params => {
+    executions.push(params);
+    if (params.value === 'throw') throw new Error('controlled tool failure using sk-abcdefgh12345678');
+    return { saved: params.value };
+  },
 });
 
 const stream = deltas => [
@@ -35,7 +41,7 @@ const stream = deltas => [
   `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
   'data: [DONE]\n\n',
 ].join('');
-const toolReply = () => stream([{ tool_calls: [{ index: 0, id: 'test-call', type: 'function', function: { name: 'test.approval', arguments: '{"value":"original"}' } }] }]);
+const toolReply = (value = 'original') => stream([{ tool_calls: [{ index: 0, id: 'test-call', type: 'function', function: { name: 'test.approval', arguments: JSON.stringify({ value }) } }] }]);
 function mockModel(t) {
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     if (!String(url).startsWith('http://audit-model.test/')) return realFetch(url, options);
@@ -77,7 +83,7 @@ async function run(sessionId, onEvent = () => {}, extra = {}, signal = AbortSign
   assert.equal(events.at(-1).type, 'done');
   return events;
 }
-test.beforeEach(() => { captured.length = 0; executions = []; replies = []; });
+test.beforeEach(() => { resetRateLimits(); captured.length = 0; executions = []; replies = []; });
 test.after(async () => { resetBackgroundTasks(); await app.close(); fs.rmSync(tempDir, { recursive: true, force: true }); });
 
 test('真实 SSE: 工具完成后主渠道故障，只重试模型请求且公开切换状态', async t => {
@@ -127,6 +133,80 @@ test('真实 SSE: 审批前不执行,修改参数后执行,中文 Markdown 和�
   assert.ok(!JSON.stringify(captured).includes('temporary-private-value'));
   assert.ok(!JSON.stringify(captured).includes('another-private-value'));
   assert.equal(getAiHistory(10, sessionId).at(-1).content, answer);
+});
+
+test('真实 SSE: 审批编辑后的参数重新匹配拒绝规则,阻断执行并记录最终参数指纹', async t => {
+  mockModel(t);
+  const group = createAgentPolicyGroup({ name: 'Edited parameter deny integration' });
+  const rule = createAgentPolicyRule({
+    groupId: group.id,
+    name: 'deny edited value',
+    effect: 'deny',
+    toolName: 'test.approval',
+    projectId: '*',
+    parameters: { value: 'edited' },
+    reason: 'edited parameters are denied',
+  });
+  const { sessionId } = await request('/agent/sessions', {});
+  replies = [toolReply(), stream([{ content: '已按拒绝策略拦截编辑后的参数' }])];
+  let planId = null;
+  const events = await run(sessionId, async event => {
+    if (event.type !== 'confirmation_required') return;
+    planId = event.executionId;
+    await request('/agent/approve', {
+      executionId: event.executionId,
+      toolCallId: event.toolCallId,
+      approved: true,
+      input: { value: 'edited' },
+    });
+  });
+
+  assert.equal(executions.length, 0, 'approval of original args must not authorize edited args denied by policy');
+  assert.ok(events.some(event => event.type === 'tool_rejected'), 'edited-parameter policy denial must be exposed to the SSE client');
+  const audits = listAgentAuditEvents({ planId, limit: 20 });
+  const editedHash = fingerprintAgentParams({ value: 'edited' });
+  assert.ok(audits.some(event => event.eventType === 'policy_decision'
+    && event.decision === 'deny' && event.ruleId === rule.id && event.parametersHash === editedHash));
+  assert.ok(audits.some(event => event.eventType === 'execution_blocked'
+    && event.ruleId === rule.id && event.parametersHash === editedHash));
+});
+
+test('真实 SSE: 成功与失败执行都写入完成和后置检查审计事件', async t => {
+  mockModel(t);
+  const { sessionId: successSession } = await request('/agent/sessions', {});
+  replies = [toolReply('success'), stream([{ content: 'success path complete' }])];
+  let successPlanId = null;
+  await run(successSession, async event => {
+    if (event.type !== 'confirmation_required') return;
+    successPlanId = event.executionId;
+    await request('/agent/approve', { executionId: event.executionId, toolCallId: event.toolCallId, approved: true });
+  });
+  const successAudit = listAgentAuditEvents({ planId: successPlanId, limit: 20 });
+  for (const eventType of ['approval_requested', 'approval_decision', 'execution_started', 'execution_completed', 'postcondition_completed']) {
+    assert.ok(successAudit.some(event => event.eventType === eventType), 'success audit must include ' + eventType);
+  }
+  const successExecution = successAudit.find(event => event.eventType === 'execution_completed');
+  const successPostcondition = successAudit.find(event => event.eventType === 'postcondition_completed');
+  assert.equal(successExecution.decision, 'success');
+  assert.equal(successPostcondition.decision, 'passed');
+  assert.equal(successExecution.parametersHash, successPostcondition.parametersHash);
+
+  const { sessionId: failedSession } = await request('/agent/sessions', {});
+  replies = [toolReply('throw'), stream([{ content: 'failure path recorded' }])];
+  let failedPlanId = null;
+  await run(failedSession, async event => {
+    if (event.type !== 'confirmation_required') return;
+    failedPlanId = event.executionId;
+    await request('/agent/approve', { executionId: event.executionId, toolCallId: event.toolCallId, approved: true });
+  });
+  const failedAudit = listAgentAuditEvents({ planId: failedPlanId, limit: 20 });
+  const failedExecution = failedAudit.find(event => event.eventType === 'execution_completed');
+  const failedPostcondition = failedAudit.find(event => event.eventType === 'postcondition_completed');
+  assert.equal(failedExecution.decision, 'failed');
+  assert.equal(failedPostcondition.decision, 'not_run');
+  assert.equal(failedExecution.parametersHash, failedPostcondition.parametersHash);
+  assert.match(failedPostcondition.reason, /未得到后置检查结果/);
+  assert.equal(failedPostcondition.reason.includes('sk-abcdefgh12345678'), false, 'audit reason must redact token-shaped secrets');
 });
 
 test('真实 SSE: 拒绝审批不执行工具,流正常结束且清理审批等待', async t => {

@@ -320,7 +320,14 @@ export class OperationsAgent {
       
       return { success: true, result, thoughts: trace, durationMs: Date.now() - started, postconditionStatus: 'passed' };
     } catch (error) {
-      return { success: false, error: error.message, thoughts: trace, durationMs: Date.now() - started, postconditionStatus: 'not_run' };
+      return {
+        success: false,
+        error: error.message,
+        thoughts: trace,
+        durationMs: Date.now() - started,
+        postconditionStatus: 'not_run',
+        postconditionReason: '工具执行或前置校验阶段抛出异常，未得到后置检查结果: ' + redactSecrets(error.message || 'unknown error'),
+      };
     }
   }
 

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitOps 同步响应补充 `hasChanges`，并以仓库级互斥保护同步、Webhook、回滚和配置变更；状态更新重读最新配置，避免覆盖并行新增的其他仓库。
 - HTTPS 会话 Cookie 统一加上 `Secure`；未信任的 `X-Forwarded-Proto` 不再影响 Cookie 安全属性，清除 Cookie 时保持匹配的安全属性。
 - 拒绝 Git 仓库 URL 中的查询串和片段，防止访问令牌通过仓库列表 API/UI 暴露。
+- Agent 审批参数编辑后重新执行持久化拒绝策略检查；工具异常时审计明确记录后置检查未运行的原因，并在审计原因中脱敏 token 形态凭据。
 
 ## [1.5.1] - 2026-10-06
 
