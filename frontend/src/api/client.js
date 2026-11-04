@@ -267,7 +267,7 @@ export const api = {
   agentApprove: (payload) => request('/ai/agent/approve', { method: 'POST', body: JSON.stringify(payload) }),
   agentFeedback: (payload) => request('/ai/agent/feedback', { method: 'POST', body: JSON.stringify(payload) }),
   setAgentApprovalMode: (payload) => request('/ai/agent/approval-mode', { method: 'POST', body: JSON.stringify(payload) }),
-  getAgentExecutions: (planId = '') => request(`/ai/agent/executions${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
+  getAgentExecutions: (planId = '', limit = 100) => request(`/ai/agent/executions?${new URLSearchParams({ ...(planId ? { planId: String(planId) } : {}), limit: String(limit) })}`),
   getAgentPolicyGroups: () => request('/ai/agent/policy-groups'),
   createAgentPolicyGroup: (payload) => request('/ai/agent/policy-groups', { method: 'POST', body: JSON.stringify(payload) }),
   updateAgentPolicyGroup: (id, payload) => request(`/ai/agent/policy-groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),

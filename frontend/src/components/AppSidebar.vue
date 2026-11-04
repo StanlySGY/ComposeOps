@@ -88,7 +88,8 @@ const navGroups = [
   {
     label: '自动化',
     items: [
-      { to: '/ops-center', icon: ClipboardList, label: '运维任务' },
+      { to: '/ops-center', icon: ClipboardList, label: '任务中心' },
+      { to: '/maintenance-plan', icon: Clock3, label: '运维计划' },
       { to: '/workflows', icon: Workflow, label: '工作流' },
       { to: '/cron', icon: Clock3, label: '定时任务' },
       { to: '/gitops', icon: GitBranch, label: 'GitOps' },

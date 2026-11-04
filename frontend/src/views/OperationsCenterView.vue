@@ -2,7 +2,7 @@
   <div class="page-shell" :aria-busy="loading">
     <div class="page-header">
       <div>
-        <h1 class="page-title">运维任务中心</h1>
+        <h1 class="page-title">定时运维计划</h1>
         <p class="page-subtitle">把备份、镜像更新与 AI 巡检组合成可复用的定时运维计划</p>
       </div>
       <div class="page-actions">

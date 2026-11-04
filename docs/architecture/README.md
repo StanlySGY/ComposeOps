@@ -98,7 +98,14 @@ ComposeOps 采用渐进式 Worker Profile，而不是复制一套平行 Agent �
 
 交互参考采用“借鉴模式，不复制页面”：[Coolify](https://github.com/coollabsio/coolify) 的项目/资源层级、[Portainer](https://github.com/portainer/portainer) 的环境上下文与资源概览、[Komodo](https://github.com/moghtech/komodo) 的多主机视角、[Temporal UI](https://github.com/temporalio/ui) 的运行检索/筛选/事件历史，以及 [LangGraph](https://github.com/langchain-ai/langgraph) Studio 的逐步执行追踪。ComposeOps 应优先把会话、后台任务、工作流、事件和审批呈现为同一条可追溯的运维任务脉络，而不是让用户在多个聊天窗口间切换。
 
-下一阶段先复用现有 event_records、agent_background_tasks、workflow_instances 与审计记录，建立跨域关联和统一任务详情；只有在真实查询与生命周期需求明确后才考虑新增持久化表。事件入口先 Observe，再 Suggest / Approval / Execute；禁止把日志或外部事件当成权限指令，也禁止对 outcome_unknown 的副作用任务盲目重放。
+### Unified Command Center
+
+- /ops-center 使用 frontend/src/views/AutonomousOpsView.vue，从现有 API 汇聚 Agent 计划、Agent 后台任务、工作流实例、批量任务、统一事件、操作历史和 Agent 审计；不新增并行任务表、不改变原始记录生命周期。
+- 任务列表支持关键词、来源和标准化状态过滤，并突出待审批、执行中、失败及 outcome_unknown。详情按来源回读原始任务/工作流/Job/Agent 计划，时间线仅按明确的实例 ID、计划 ID、会话 ID 或项目 ID 关联；不会只凭时间相近把不同任务拼接。
+- 工作流审批只对 waiting_approval 且带有效 pendingApprovalIntent 的实例显示通过操作；操作必须经过 UI 二次确认，再调用原有后端冻结意图/定义指纹校验。Agent 工具审批继续在原 Agent 会话中完成，任务中心只提供返回会话的深链。
+- 事件观察页只允许更新事件状态，不会根据事件内容、日志或外部消息触发 Docker/Compose 操作。事件路由仍由确定性规则管理；Observe → Suggest → Approval → Execute 不等于自动授权。
+- outcome_unknown 只显示真实核对提示，不提供自动重试。停止后台任务也仅向原任务 API 发出明确请求，不能把“请求停止”谎报为“已停止”。
+- 原 /events、/workflows、/agent/history 专业页面继续保留；原定时运维计划编辑器从 /ops-center 迁移到 /maintenance-plan，避免丢失计划编排功能。
 
 ## 后台任务、事件触发与审批安全
 

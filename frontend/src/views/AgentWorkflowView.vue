@@ -729,7 +729,10 @@ async function applyRouteContext() {
 onMounted(async () => {
   await Promise.all([loadProjects(), loadSessions(), loadMemories(), loadWorkerRoles()]);
   await applyRouteContext();
-  if (!sessionId.value && sessions.value.length) await openSession(sessions.value[0].sessionId);
+  const requestedSessionId = String(route.query.sessionId || '');
+  const requestedSession = requestedSessionId ? sessions.value.find((session) => String(session.sessionId) === requestedSessionId) : null;
+  if (!sessionId.value && requestedSession) await openSession(requestedSession.sessionId);
+  else if (!sessionId.value && sessions.value.length) await openSession(sessions.value[0].sessionId);
   else if (!messages.value.length) focusInput();
 
   // Ctrl/Cmd+K 归全局命令面板(AppHeader 注册),这里不再抢同一个键,
