@@ -372,9 +372,12 @@ test('mcp: 结果截断保留首尾并标注', () => {
   assert.ok(text.endsWith('B'));
 
   // 嵌套字段里的敏感键名被抹掉
-  const wrapped = mcp.wrapToolResult({ tool: 'x', success: true, result: { DB_PASSWORD: 'hunter2', nested: { apiToken: 'abc' } } }, false);
+  const token = 'sk-abcdefgh12345678';
+  const wrapped = mcp.wrapToolResult({ tool: 'x', success: true, result: { DB_PASSWORD: 'hunter2', nested: { apiToken: 'abc', message: 'upstream echoed ' + token } } }, false);
   assert.ok(!wrapped.content[0].text.includes('hunter2'));
+  assert.ok(!wrapped.content[0].text.includes(token));
   assert.equal(wrapped.content[0].text.includes('[REDACTED]'), true);
+  assert.equal(JSON.stringify(wrapped.structuredContent).includes(token), false);
 });
 
 test('mcp: SSE 传输会话化请求-响应仍可用(经典客户端)', async () => {

@@ -1,14 +1,15 @@
-import { redactValue } from './redaction.js';
+import { redactSecretValue, redactSecrets } from './secret-redactor.js';
 import { stripAgentInternalText } from './agent-protocol-core.js';
 import { stripTextToolProtocol } from '../services/ai.js';
 
 const INTERNAL_TOKEN_PATTERN = /\btool_(?:call|calls|ca)\b|<\/?tool(?:[_ ]?[a-z]*)?/gi;
 
 function cleanText(value) {
-  return stripAgentInternalText(stripTextToolProtocol(String(value || '')))
+  const cleaned = stripAgentInternalText(stripTextToolProtocol(String(value || '')))
     .replace(INTERNAL_TOKEN_PATTERN, '')
     .replace(/[ \t]+\n/g, '\n')
     .trim();
+  return redactSecrets(cleaned);
 }
 
 function cleanError(value) {
@@ -50,14 +51,14 @@ export function toPublicAgentEvent(event) {
       executionId: String(event.executionId || ''),
       toolCallId: String(event.toolCallId || ''),
       tool: String(event.tool || ''),
-      params: redactValue(event.params || {}),
+      params: redactSecretValue(event.params || {}),
       // risk 透出给前端:critical 操作"本会话不再询问"不生效,弹窗要据此隐藏记忆按钮。
       risk: String(event.risk || ''),
       description: cleanText(event.description) || '该操作会修改系统状态,请确认是否继续。',
     };
   }
   if (event.type === 'tool_result') {
-    const result = redactValue(event.result?.result);
+    const result = redactSecretValue(event.result?.result);
     if (event.tool === 'project.list_managed' && Array.isArray(result)) return { type: 'context_data', kind: 'projects', projects: result };
     if (event.tool === 'web.search' && Array.isArray(result?.sources)) return { type: 'context_data', kind: 'search_sources', sources: result.sources };
     if (event.tool === 'cron.create') return { type: 'action_completed', kind: 'cron_created', result: result || {} };
@@ -95,7 +96,7 @@ export function toPublicAgentEvent(event) {
   }
   if (event.type === 'tool_requested') {
     let paramsText = '';
-    try { paramsText = JSON.stringify(redactValue(event.params || {})).slice(0, 600); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
+    try { paramsText = JSON.stringify(redactSecretValue(event.params || {})).slice(0, 600); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
     return { type: 'tool_requested', tool: String(event.tool || ''), paramsText };
   }
   // 思考/执行进度轨迹:元数据已脱敏,只透出阶段与一句话内容,供"执行动态"面板实时展示
@@ -123,7 +124,7 @@ export function toPublicAgentEvent(event) {
   if (event.type === 'tool_executing') {
     // 执行参数必须透出:此前只带工具名,点开"参数与结果"是空的,用户看不到 Agent 到底要做什么。
     let paramsText = '';
-    try { paramsText = JSON.stringify(redactValue(event.params || {})).slice(0, 800); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
+    try { paramsText = JSON.stringify(redactSecretValue(event.params || {})).slice(0, 800); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
     return { type: 'tool_executing', tool: String(event.tool || ''), paramsText };
   }
   if (event.type === 'tool_rejected') return { type: 'tool_rejected', tool: String(event.tool || '') };

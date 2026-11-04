@@ -10,7 +10,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-agent-stream-'
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 const { buildApp } = await import('../src/app.js');
 const { getAgent } = await import('../src/services/agent.js');
-const { setSetting, addAiMessage, getAiHistory, getAiActiveHistory } = await import('../src/lib/db.js');
+const { setSetting, addAiMessage, getAiHistory, getAiActiveHistory, listAgentExecutions } = await import('../src/lib/db.js');
 const { setAiConfig } = await import('../src/services/ai.js');
 const { createBackgroundTask, resetBackgroundTasks } = await import('../src/services/agent/background-tasks.js');
 const { createAgentPolicyGroup, createAgentPolicyRule, fingerprintAgentParams, listAgentAuditEvents } = await import('../src/services/agent/policy-store.js');
@@ -207,6 +207,10 @@ test('真实 SSE: 成功与失败执行都写入完成和后置检查审计事�
   assert.equal(failedExecution.parametersHash, failedPostcondition.parametersHash);
   assert.match(failedPostcondition.reason, /未得到后置检查结果/);
   assert.equal(failedPostcondition.reason.includes('sk-abcdefgh12345678'), false, 'audit reason must redact token-shaped secrets');
+  const failedHistory = listAgentExecutions(failedPlanId);
+  assert.equal(failedHistory.length, 1);
+  assert.equal(String(failedHistory[0].error).includes('sk-abcdefgh12345678'), false, 'execution history must redact token-shaped secrets');
+  assert.equal(String(failedHistory[0].parameters).includes('sk-abcdefgh12345678'), false);
 });
 
 test('真实 SSE: 拒绝审批不执行工具,流正常结束且清理审批等待', async t => {

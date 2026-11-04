@@ -84,3 +84,18 @@ test('公开 Agent 事件保留用户需要的上下文和完成通知', () => {
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_rejected', tool: 'compose.restart' }), { type: 'tool_rejected', tool: 'compose.restart' });
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_error', tool: 'compose.logs', error: '容器不存在' }), { type: 'tool_error', tool: 'compose.logs', error: '容器不存在' });
 });
+
+test('公开 Agent 事件对嵌套工具结果、错误和完成文本执行值级秘密脱敏', () => {
+  const token = 'sk-abcdefgh12345678';
+  const result = toPublicAgentEvent({
+    type: 'tool_result',
+    tool: 'compose.ps',
+    result: { success: false, error: 'upstream failed with ' + token, result: { message: 'echo ' + token, nested: { apiKey: 'private-nested-value' } } },
+  });
+  const toolError = toPublicAgentEvent({ type: 'tool_error', tool: 'compose.ps', error: 'upstream failed with ' + token });
+  const done = toPublicAgentEvent({ type: 'done', content: 'finished with ' + token, planId: 17 });
+  const serialized = JSON.stringify({ result, toolError, done });
+  assert.equal(serialized.includes(token), false);
+  assert.equal(serialized.includes('private-nested-value'), false);
+  assert.ok(serialized.includes('[REDACTED]'));
+});
