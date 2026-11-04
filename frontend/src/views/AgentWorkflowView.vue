@@ -4,6 +4,7 @@
     <div class="page-header">
       <div><h1 class="page-title">AI 智能运维 Agent</h1><p class="page-subtitle hidden sm:block">在独立会话中查看纳管项目、分析资料并执行运维操作</p></div>
       <div class="page-actions flex-wrap">
+        <select v-model="workerRole" class="input w-full sm:w-auto min-h-9! max-w-40 py-1! text-xs" :title="selectedWorkerDescription" aria-label="选择本轮 Agent Worker"><option v-for="worker in workerRoles" :key="worker.id" :value="worker.id">{{ worker.label }}</option></select>
         <select v-model="projectId" class="input w-full sm:w-auto min-h-9! max-w-52 py-1! text-xs" title="可选的当前项目上下文" aria-label="选择 Agent 当前项目上下文"><option value="">自动识别项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
         <button class="btn-secondary min-h-9! px-3! text-xs!" :disabled="loading" title="刷新纳管项目" @click="loadProjects"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />刷新</button>
         <select class="input w-full sm:w-auto min-h-9! py-1! text-xs" :value="approvalMode" title="高危操作确认策略(本会话生效)" aria-label="选择本会话操作审批策略" @change="changeApprovalMode($event.target.value)">
@@ -129,6 +130,21 @@ const router = useRouter();
 function renderMarkdown(content) { return renderAgentMarkdown(content); }
 
 const projects = ref([]); const sessions = ref([]); const memories = ref([]); const activity = ref([]); const loading = ref(false); const loadingHistory = ref(false); const loadingOlderHistory = ref(false); const historyHasMore = ref(false); const webSearchEnabled = ref(false); const projectId = ref(''); const inputEl = ref(null); const editingSessionId = ref(null); const editingTitle = ref('');
+const workerRole = ref('auto');
+const workerRoles = ref([
+  { id: 'auto', label: '自动分配', description: '按明确意图进行确定性路由；不确定时交给规划师' },
+  { id: 'planner', label: '运维规划师', description: '理解需求、梳理影响范围并制定可验证的执行计划' },
+  { id: 'executor', label: '执行者', description: '严格按用户目标逐步执行，并验证每一步结果' },
+  { id: 'validator', label: '只读验证者', description: '只读取证、检查状态、验证配置，不修改系统' },
+  { id: 'incident_responder', label: '应急响应者', description: '围绕故障快速收集证据、控制影响并验证恢复' },
+]);
+const selectedWorkerDescription = computed(() => workerRoles.value.find((worker) => worker.id === workerRole.value)?.description || '选择本轮负责的 Agent Worker');
+async function loadWorkerRoles() {
+  try {
+    const data = await api.getAgentRoles();
+    if (Array.isArray(data.roles) && data.roles.length) workerRoles.value = data.roles;
+  } catch { /* 离线或旧后端时保留兼容的内置选项。 */ }
+}
 const compacting = ref(false);
 const attachedLogs = ref('');
 const attachedCount = ref(0);
@@ -201,6 +217,7 @@ const chat = useAgentChat({
       if (toolPhases.includes(event.phase)) return;
       const phaseLabels = {
         loop_started: '开始', loop_iteration: event.round ? `第 ${event.round} 轮` : '循环',
+        worker_selected: '分配 Worker',
         interrupted: '已中断', loop_completed: '完成',
         channel_selected: '选择渠道', channel_failed: '渠道故障', channel_skipped: '跳过渠道',
       };
@@ -546,7 +563,7 @@ function toggleVoiceInput() {
 }
 async function regenerateSafely() {
   try {
-    await regenerate();
+    await regenerate({ role: workerRole.value });
   } catch (error) {
     toast.error(error.message);
   }
@@ -674,9 +691,9 @@ async function submit() {
   if (editingMessageId.value) {
     const targetId = editingMessageId.value;
     editingMessageId.value = null;
-    try { await editAndResend(targetId, text); } catch (error) { toast.error(error.message); return; }
+    try { await editAndResend(targetId, text, { role: workerRole.value }); } catch (error) { toast.error(error.message); return; }
   } else {
-    await sendMessage(text, { projectId: projectId.value || undefined, containerId: containerId.value || undefined, webSearchEnabled: webSearchEnabled.value, attachedLogs: attachedLogs.value || undefined });
+    await sendMessage(text, { role: workerRole.value, projectId: projectId.value || undefined, containerId: containerId.value || undefined, webSearchEnabled: webSearchEnabled.value, attachedLogs: attachedLogs.value || undefined });
   }
   await Promise.all([loadSessions(), loadMemories()]);
 }
@@ -710,7 +727,7 @@ async function applyRouteContext() {
   }
 }
 onMounted(async () => {
-  await Promise.all([loadProjects(), loadSessions(), loadMemories()]);
+  await Promise.all([loadProjects(), loadSessions(), loadMemories(), loadWorkerRoles()]);
   await applyRouteContext();
   if (!sessionId.value && sessions.value.length) await openSession(sessions.value[0].sessionId);
   else if (!messages.value.length) focusInput();
@@ -720,7 +737,7 @@ onMounted(async () => {
   const handleKeydown = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (input.value.trim()) sendMessage(input.value.trim());
+      if (input.value.trim()) sendMessage(input.value.trim(), { role: workerRole.value, projectId: projectId.value || undefined, containerId: containerId.value || undefined, webSearchEnabled: webSearchEnabled.value, attachedLogs: attachedLogs.value || undefined });
     } else if (e.key === 'Escape' && running.value) {
       e.preventDefault();
       interrupt();

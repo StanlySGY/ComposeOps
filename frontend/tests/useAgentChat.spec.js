@@ -43,6 +43,20 @@ describe('useAgentChat', () => {
     expect(chat.messages.value[1].content).toBe('结论 \n\n| a | b |');
     expect(chat.running.value).toBe(false);
     expect(chat.messages.value[1].streaming).toBe(false);
+    expect(apiMock.agentExecuteStream.mock.calls[0][0].role).toBe('auto');
+  });
+
+  it('本轮 Worker Profile 随请求发送,不改变会话通道或审批状态', async () => {
+    const chat = useAgentChat();
+    apiMock.agentExecuteStream.mockImplementation(async (payload, onEvent) => {
+      expect(payload.role).toBe('validator');
+      onEvent({ type: 'trace', phase: 'worker_selected', content: '本轮由只读验证者负责' });
+      onEvent({ type: 'done', content: '只读检查完成' });
+    });
+    await chat.sendMessage('检查服务状态', { role: 'validator', projectId: 'project-7' });
+    expect(apiMock.agentExecuteStream.mock.calls[0][0]).toMatchObject({ role: 'validator', projectId: 'project-7' });
+    expect(chat.messages.value[1].content).toBe('只读检查完成');
+    expect(chat.running.value).toBe(false);
   });
 
   it('done 事件用后端最终全文覆盖,自愈流式期间任何错位', async () => {

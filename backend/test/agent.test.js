@@ -13,6 +13,8 @@ const {
   assertPermission,
   RISK_LEVELS,
   AGENT_ROLES,
+  resolveAgentRole,
+  listAgentRoles,
 } = await import('../src/services/agent.js');
 const {
   createAgentPlan,
@@ -153,4 +155,19 @@ test('agent: 告警规则读取与工具 undo 能力', async () => {
   assert.equal(typeof agent.getTool('volume.mount').undo, 'function');
   assert.equal(typeof agent.getTool('alert.create').undo, 'function');
   assert.equal(agent.getTool('compose.ps').undo, undefined);
+});
+
+test('agent worker profiles: automatic routing is deterministic and keeps mutation intent out of the read-only worker', () => {
+  assert.equal(resolveAgentRole('auto', '只读检查 Redis 容器状态'), 'validator');
+  assert.equal(resolveAgentRole('auto', '查看 CPU 和内存使用情况'), 'validator');
+  assert.equal(resolveAgentRole('auto', 'Redis 故障了，帮我恢复服务'), 'incident_responder');
+  assert.equal(resolveAgentRole('auto', '检查服务后重启容器'), 'planner');
+  assert.equal(resolveAgentRole('auto', '帮我制定一次升级计划'), 'planner');
+  assert.equal(resolveAgentRole('executor', '只读检查并删除旧容器'), 'executor');
+  assert.equal(resolveAgentRole('unknown-worker', '查看服务状态'), 'planner');
+
+  const roles = listAgentRoles();
+  assert.equal(roles[0].id, 'auto');
+  assert.ok(roles.some((role) => role.id === 'validator' && role.safety === '只读工具集'));
+  assert.ok(AGENT_ROLES.incident_responder.systemPrompt.includes('人工审批'));
 });

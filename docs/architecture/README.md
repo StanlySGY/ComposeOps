@@ -86,6 +86,20 @@ Tool Loop 每轮调用模型，解析工具调用，检查权限/风险/审批�
 - background-tasks 使用 SQLite `agent_background_tasks` 保存任务状态、心跳和脱敏输出；完成结果进入事件中心，运维中心可跨 Agent 会话查看、读取和停止任务。`runaway-guard` 检测重复动作；空模型轮次最多提醒重试一次。
 - SSE token 的协议清理由后端有状态发射层完成，前端原样追加；逐 token trim 会破坏 Markdown 空白和换行。
 
+## Autonomous Ops：Worker Runtime 与运行可观测性
+
+ComposeOps 采用渐进式 Worker Profile，而不是复制一套平行 Agent 引擎：
+
+- planner 负责澄清目标、范围和验收标准；executor 负责按明确目标执行；validator 是只读角色；incident_responder 面向故障现场。
+- auto 路由由 resolveAgentRole() 使用确定性规则完成。意图不明确时回退到 planner；模型不负责选择角色或扩大权限。
+- 每个角色的 systemPrompt 约束工作方法，allowedTools 限制可见工具；两者都不能替代 Tool Registry、deny-first 策略、风险计算和 approval-gate。应急角色同样不能绕过人工确认。
+- Worker 选择结果通过脱敏 SSE trace worker_selected 展示，执行计划仍落在原有 agent_plans / agent_executions / agent_audit_events 体系，不新增平行任务数据库。
+- Agent 工作台可选择本轮 Worker；执行历史可按关键词、状态和 Worker 筛选。useAgentChat 的编辑重发、重新生成和中断续接允许携带同一轮上下文参数。
+
+交互参考采用“借鉴模式，不复制页面”：[Coolify](https://github.com/coollabsio/coolify) 的项目/资源层级、[Portainer](https://github.com/portainer/portainer) 的环境上下文与资源概览、[Komodo](https://github.com/moghtech/komodo) 的多主机视角、[Temporal UI](https://github.com/temporalio/ui) 的运行检索/筛选/事件历史，以及 [LangGraph](https://github.com/langchain-ai/langgraph) Studio 的逐步执行追踪。ComposeOps 应优先把会话、后台任务、工作流、事件和审批呈现为同一条可追溯的运维任务脉络，而不是让用户在多个聊天窗口间切换。
+
+下一阶段先复用现有 event_records、agent_background_tasks、workflow_instances 与审计记录，建立跨域关联和统一任务详情；只有在真实查询与生命周期需求明确后才考虑新增持久化表。事件入口先 Observe，再 Suggest / Approval / Execute；禁止把日志或外部事件当成权限指令，也禁止对 outcome_unknown 的副作用任务盲目重放。
+
 ## 后台任务、事件触发与审批安全
 
 - Agent 后台任务 API：`GET /api/v1/ai/agent/tasks` 列表、`GET /api/v1/ai/agent/tasks/:taskId` 读取详情/输出、`POST /api/v1/ai/agent/tasks/:taskId/stop` 请求停止。任务记录保存在 SQLite，进程内仅保留当前执行句柄；输出写入前经 `redactSecrets` 脱敏并受长度上限约束。

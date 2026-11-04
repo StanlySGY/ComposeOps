@@ -156,7 +156,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     atBottom.value = true; // 发送即回到底部
     scrollBottom(true);
     try {
-      await api.agentExecuteStream({ message: text, sessionId: sessionId.value, role: 'planner', ...extraPayload }, (event) => handleEvent(event, assistant), state.controller.signal);
+      await api.agentExecuteStream({ message: text, sessionId: sessionId.value, role: 'auto', ...extraPayload }, (event) => handleEvent(event, assistant), state.controller.signal);
     } catch (error) {
       if (error.name !== 'AbortError') assistant.content = `执行失败：${error.message}`;
     } finally {
@@ -189,14 +189,14 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     }
   }
 
-  async function continueAfterInterrupt() {
+  async function continueAfterInterrupt(extraPayload = {}) {
     if (running.value) return;
     const last = [...messages.value].reverse().find((m) => m.role === 'assistant' && m.interrupted);
     if (last) last.interrupted = false;
-    await sendMessage('请继续刚才被中断的任务,从中断处接着完成;已经执行过的步骤不要重复执行。');
+    await sendMessage('请继续刚才被中断的任务,从中断处接着完成;已经执行过的步骤不要重复执行。', extraPayload);
   }
 
-  async function regenerate() {
+  async function regenerate(extraPayload = {}) {
     const lastUser = [...messages.value].reverse().find((m) => m.role === 'user');
     if (!lastUser || running.value) return;
     const lastUserIndex = messages.value.lastIndexOf(lastUser);
@@ -209,10 +209,10 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       }
     }
     messages.value.splice(lastUserIndex);
-    await sendMessage(lastUser.content);
+    await sendMessage(lastUser.content, extraPayload);
   }
 
-  async function editAndResend(messageId, newContent) {
+  async function editAndResend(messageId, newContent, extraPayload = {}) {
     if (running.value) return;
     const index = messages.value.findIndex((m) => m.id === messageId);
     if (index === -1) return;
@@ -227,7 +227,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       }
     }
     messages.value.splice(index);
-    await sendMessage(newContent);
+    await sendMessage(newContent, extraPayload);
   }
 
   /** 工具执行轨迹:requested → executing → done/failed/rejected,供消息区展示。 */

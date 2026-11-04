@@ -52,12 +52,47 @@
       </div>
     </section>
 
+    <section v-if="executions.length" class="card p-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <label class="search-field min-h-9! min-w-48 flex-1">
+          <Search class="h-3.5 w-3.5" />
+          <input v-model="searchQuery" class="py-1! text-xs" placeholder="搜索任务内容或计划 ID" aria-label="搜索 Agent 执行历史" />
+        </label>
+        <select v-model="statusFilter" class="input min-h-9! w-full sm:w-36 py-1! text-xs" aria-label="按执行状态筛选">
+          <option value="all">全部状态</option>
+          <option value="executing">执行中</option>
+          <option value="pending_confirmation">待确认</option>
+          <option value="completed">已完成</option>
+          <option value="failed">失败</option>
+          <option value="outcome_unknown">结果待核对</option>
+          <option value="pending">待执行</option>
+        </select>
+        <select v-model="roleFilter" class="input min-h-9! w-full sm:w-40 py-1! text-xs" aria-label="按 Worker 筛选">
+          <option value="all">全部 Worker</option>
+          <option value="planner">运维规划师</option>
+          <option value="executor">执行者</option>
+          <option value="validator">只读验证者</option>
+          <option value="incident_responder">应急响应者</option>
+        </select>
+        <button v-if="searchQuery || statusFilter !== 'all' || roleFilter !== 'all'" class="btn-secondary min-h-9! px-3! text-xs!" @click="resetFilters">清除筛选</button>
+      </div>
+      <div class="mt-2 flex items-center justify-between text-xs text-zinc-500">
+        <span>显示 {{ filteredExecutions.length }} / {{ executions.length }} 次执行</span>
+        <span>按计划记录聚合 · 展开查看步骤、结果与轨迹</span>
+      </div>
+    </section>
+
     <div v-if="!loading && !executions.length" class="card p-8">
       <EmptyState icon="history" title="暂无执行记录" description="Agent 工作流执行后会在此显示" />
     </div>
 
-    <div v-else class="space-y-3">
-      <div v-for="exec in executions" :key="exec.planId" class="card p-4">
+    <div v-else-if="executions.length && !filteredExecutions.length" class="card p-8 text-center">
+      <EmptyState icon="search" title="没有符合条件的执行记录" description="尝试缩短关键词，或清除状态和 Worker 筛选。" />
+      <button class="btn-secondary mx-auto mt-3" @click="resetFilters">清除筛选</button>
+    </div>
+
+    <div v-else-if="filteredExecutions.length" class="space-y-3">
+      <div v-for="exec in filteredExecutions" :key="exec.planId" class="card p-4">
         <div class="mb-3 flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
             <div class="mb-1 flex items-center gap-2">
@@ -138,10 +173,10 @@
 </template>
 
 <script setup>
-import { onActivated, onMounted, ref } from 'vue';
+import { computed, onActivated, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { api } from '../api/client.js';
-import { RefreshCw, ChevronDown, CircleCheck, CircleX, Clock, AlertCircle } from 'lucide-vue-next';
+import { RefreshCw, ChevronDown, CircleCheck, CircleX, Clock, AlertCircle, Search } from 'lucide-vue-next';
 import EmptyState from '../components/common/EmptyState.vue';
 
 const loading = ref(false);
@@ -149,6 +184,23 @@ const error = ref('');
 const executions = ref([]);
 const usage = ref(null);
 const expandedPlan = ref(null);
+const searchQuery = ref('');
+const statusFilter = ref('all');
+const roleFilter = ref('all');
+const filteredExecutions = computed(() => {
+  const query = searchQuery.value.trim().toLocaleLowerCase();
+  return executions.value.filter((exec) => {
+    if (statusFilter.value !== 'all' && exec.status !== statusFilter.value) return false;
+    if (roleFilter.value !== 'all' && exec.role !== roleFilter.value) return false;
+    if (!query) return true;
+    return [exec.message, exec.planId, roleLabel(exec.role)].some((value) => String(value || '').toLocaleLowerCase().includes(query));
+  });
+});
+function resetFilters() {
+  searchQuery.value = '';
+  statusFilter.value = 'all';
+  roleFilter.value = 'all';
+}
 
 async function load() {
   loading.value = true;

@@ -8,6 +8,8 @@
  */
 export {
   AGENT_ROLES,
+  listAgentRoles,
+  resolveAgentRole,
   OperationsAgent,
   getAgent,
   RISK_LEVELS,

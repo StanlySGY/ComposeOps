@@ -70,11 +70,55 @@ SVG 视觉契约(必须遵守,界面是深色主题):
 
 /** 多角色 Agent:不同角色限定不同 system prompt 与可调用工具。 */
 export const AGENT_ROLES = {
-  planner: { label: '运维规划师', description: '理解需求并制定执行计划', allowedTools: null },
-  executor: { label: '执行者', description: '严格按计划逐步执行工具', allowedTools: null },
-  validator: { label: '验证者', description: '只读验证执行结果', allowedTools: ['compose.ps', 'compose.logs', 'metrics.query', 'network.inspect', 'config.validate', 'config.preview'] },
-  incident_responder: { label: '应急响应者', description: '快速响应并应急修复', allowedTools: ['compose.restart', 'compose.up', 'compose.stop', 'alert.create', 'diagnostic.probe', 'diagnostic.analyze', 'compose.logs'] },
+  planner: {
+    label: '运维规划师',
+    description: '理解需求、梳理影响范围并制定可验证的执行计划',
+    systemPrompt: '你当前承担运维规划职责。先识别目标对象、约束和验收标准；信息不足时只询问最关键的缺失项。用户只要求分析或方案时，不要擅自扩大为实际变更。计划应尽量短，并明确风险、回滚和验证方式。',
+    allowedTools: null,
+  },
+  executor: {
+    label: '执行者',
+    description: '严格按用户目标逐步执行，并验证每一步结果',
+    systemPrompt: '你当前承担执行职责。严格围绕用户明确提出的目标和已批准的范围执行，不自行扩展任务、不替用户决定破坏性操作。每次状态变更前遵循现有审批要求；执行后检查真实状态并报告结果。遇到结果不确定时先核查，禁止盲目重放副作用。',
+    allowedTools: null,
+  },
+  validator: {
+    label: '只读验证者',
+    description: '只读取证、检查状态、验证配置，不修改系统',
+    systemPrompt: '你当前承担只读验证职责。只收集证据、读取状态、检查配置和解释结果；不得尝试任何会改变系统状态的操作。结论区分已验证事实、推测和未知项，并给出具体证据。需要修复时只提出建议，交由用户另行授权。',
+    allowedTools: ['compose.ps', 'compose.logs', 'metrics.query', 'network.inspect', 'config.validate', 'config.preview'],
+  },
+  incident_responder: {
+    label: '应急响应者',
+    description: '围绕故障快速收集证据、控制影响并验证恢复',
+    systemPrompt: '你当前承担应急响应职责。优先确定影响范围和当前真实状态，先读取证据，再提出最小风险的恢复路径。任何会改变系统状态的步骤仍必须通过现有风险评估、策略和人工审批；不得因为处于应急角色而绕过确认。操作结果不确定时先核查，不得盲目重试。',
+    allowedTools: ['compose.restart', 'compose.up', 'compose.stop', 'alert.create', 'diagnostic.probe', 'diagnostic.analyze', 'compose.logs'],
+  },
 };
+
+/** 自动路由仅采用确定性规则，不调用模型决定角色或权限。 */
+export function resolveAgentRole(requestedRole, userMessage = '') {
+  if (Object.hasOwn(AGENT_ROLES, requestedRole)) return requestedRole;
+  if (requestedRole !== 'auto' && requestedRole != null && requestedRole !== '') return 'planner';
+  const text = String(userMessage || '').trim();
+  const incident = /(故障|宕机|崩溃|不可用|挂了|异常退出|服务中断|报错|告警|异常)/i.test(text);
+  const recovery = /(恢复服务|修复故障|处理故障|应急处理|重启服务|重启容器|恢复容器|回滚部署)/i.test(text);
+  if (incident && recovery) return 'incident_responder';
+  const mutationIntent = /(重启|停止|启动|部署|发布|更新|升级|修改|编辑|删除|移除|清理|恢复|回滚|扩容|缩容|执行|挂载|创建|写入|替换|安装|卸载)/i.test(text);
+  const readOnlyIntent = /(只读|只查看|仅检查|检查|查看|分析|诊断|排查|核对|验证|巡检|审计|盘点)/i.test(text);
+  if (!mutationIntent && readOnlyIntent) return 'validator';
+  return 'planner';
+}
+
+export function listAgentRoles() {
+  return [
+    { id: 'auto', label: '自动分配', description: '按明确意图进行确定性路由；不确定时交给规划师' },
+    ...Object.entries(AGENT_ROLES).map(([id, role]) => ({
+      id, label: role.label, description: role.description,
+      safety: id === 'validator' ? '只读工具集' : '沿用全局风险策略与审批门',
+    })),
+  ];
+}
 
 function roleAllowed(role, toolName) {
   const meta = role && AGENT_ROLES[role];
@@ -342,7 +386,8 @@ export class OperationsAgent {
    */
   async executeWithLoop(userMessage, context = {}, onEvent, signal = null) {
     const trace = [];
-    const role = context.role && AGENT_ROLES[context.role] ? context.role : 'planner';
+    const requestedRole = context.role || 'auto';
+    const role = resolveAgentRole(requestedRole, userMessage);
     const roleMeta = AGENT_ROLES[role];
     const planId = context.planId || createAgentPlan(context.sessionId, userMessage, {
       role,
@@ -365,6 +410,10 @@ export class OperationsAgent {
         onEvent({ type: 'trace', trace: thought });
         return thought;
       };
+      publishTrace('worker_selected', `本轮由「${roleMeta.label}」负责：${roleMeta.description}`, {
+        workerId: role,
+        routing: requestedRole === 'auto' ? 'automatic' : 'manual',
+      });
       // 会话超阈值自动压缩:活跃区消息数超过设定值(agent.auto_compact_messages,0 关闭)
       // 时,先压缩再加载历史,避免长会话无节制膨胀顶爆上下文;手动压缩入口保留在会话菜单。
       // 必须在读取 storedMessages / compactSummary 之前完成,本轮即可享受压缩后的视图。
@@ -432,7 +481,7 @@ export class OperationsAgent {
         ? `${userMessage}\n\n${fenceUntrusted('CONTAINER_LOGS', redactSecrets(attachedLogs))}`
         : userMessage;
       const messages = [
-        { role: 'system', content: `${LOOP_SYSTEM_PROMPT}${contextHint}${snapshotHint}${searchHint}${pageHint}${attachedLogs ? `\n\n${UNTRUSTED_GUARD}` : ''}` },
+        { role: 'system', content: `${LOOP_SYSTEM_PROMPT}\n\n当前工作角色：${roleMeta.label}\n${roleMeta.systemPrompt}${contextHint}${snapshotHint}${searchHint}${pageHint}${attachedLogs ? `\n\n${UNTRUSTED_GUARD}` : ''}` },
         ...(storedMessages.length ? storedMessages : priorMessages),
         { role: 'user', content: guardedUserMessage },
       ];
