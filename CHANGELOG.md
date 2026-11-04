@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- 全站主内容区采用 fluid-first 响应式宽度策略:数据、监控与运维页面铺满可用工作区;设置页保留 1440px 阅读宽度;宽屏边距随视口渐进伸缩,移除通用页面的 1360px 宽度上限。
+
 ### Added
 - Autonomous Ops Command Center：统一汇聚 Agent 计划/后台任务、工作流实例、批量任务、事件和操作审计；支持按关键词、状态和来源筛选，并查看各来源原始详情与可证实的执行时间线。
 - 长期运维任务（Ticket）独立于 Agent Session，支持可交接 Assignment、不可变版本化 Mandate、结构化报告与人工验收；新建任务只定义目标，不自动启动 Agent。

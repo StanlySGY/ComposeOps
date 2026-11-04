@@ -46,6 +46,60 @@ test('真实应用导航和全部页面可访问，没有后端流量或渲染�
   expect(observed.network).toEqual([]);
 });
 
+test('宽屏内容区铺满工作区，设置页保留可读宽度，手机端无横向溢出', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('./#/dashboard');
+  await expect(page.getByRole('heading', { name: '运维总览', exact: true })).toBeVisible();
+
+  const wideLayout = await page.evaluate(() => {
+    const main = document.querySelector('.app-main');
+    const outer = document.querySelector('.content-outer');
+    return {
+      viewport: window.innerWidth,
+      mainWidth: main?.clientWidth ?? 0,
+      contentWidth: outer?.getBoundingClientRect().width ?? 0,
+      documentWidth: document.documentElement.scrollWidth,
+    };
+  });
+  expect(wideLayout.contentWidth).toBeGreaterThan(wideLayout.mainWidth * 0.9);
+  expect(wideLayout.documentWidth).toBeLessThanOrEqual(wideLayout.viewport);
+
+  await page.evaluate(() => { window.location.hash = '/settings'; });
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  const readableWidth = await page.locator('.page-shell-readable').evaluate(element => element.getBoundingClientRect().width);
+  expect(readableWidth).toBeLessThanOrEqual(1440);
+  expect(readableWidth).toBeGreaterThan(1300);
+
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  const tabletLayout = await page.evaluate(() => {
+    const main = document.querySelector('.app-main');
+    const outer = document.querySelector('.content-outer');
+    return {
+      viewport: window.innerWidth,
+      mainWidth: main?.clientWidth ?? 0,
+      contentWidth: outer?.getBoundingClientRect().width ?? 0,
+      readableWidth: document.querySelector('.page-shell-readable')?.getBoundingClientRect().width ?? 0,
+      documentWidth: document.documentElement.scrollWidth,
+    };
+  });
+  expect(tabletLayout.contentWidth).toBeGreaterThan(tabletLayout.mainWidth * 0.9);
+  expect(tabletLayout.readableWidth).toBeLessThanOrEqual(tabletLayout.contentWidth);
+  expect(tabletLayout.documentWidth).toBeLessThanOrEqual(tabletLayout.viewport);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  const mobileLayout = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    contentWidth: document.querySelector('.content-outer')?.getBoundingClientRect().width ?? 0,
+    readableWidth: document.querySelector('.page-shell-readable')?.getBoundingClientRect().width ?? 0,
+  }));
+  expect(mobileLayout.documentWidth).toBeLessThanOrEqual(mobileLayout.viewport);
+  expect(mobileLayout.contentWidth).toBeLessThanOrEqual(mobileLayout.viewport);
+  expect(mobileLayout.readableWidth).toBeLessThanOrEqual(mobileLayout.contentWidth);
+});
+
 test('真实 Agent 审批门可拒绝、确认，刷新后重置示例', async ({ page }) => {
   const observed = observe(page);
   await page.goto('./#/agent');
