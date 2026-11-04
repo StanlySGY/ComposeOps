@@ -202,7 +202,7 @@ export class OperationsAgent {
   }
 
   /** 执行单个工具:确认批准后、宏展开与 Tool Loop 共用此入口。 */
-  async executeTool(toolName, params = {}, _context = {}, trace = []) {
+  async executeTool(toolName, params = {}, _context = {}, trace = [], executionContext = null) {
     // 宏工具展开
     if (toolName.startsWith('macro.')) {
       const macro = MACRO_TOOLS[toolName];
@@ -215,7 +215,7 @@ export class OperationsAgent {
       // 必须逐步进行,否则宏内一次失败的清理在事后无法追溯。
       const results = [];
       for (const step of expanded) {
-        const audit = this._loopAudit;
+        const audit = executionContext;
         const parametersHash = fingerprintAgentParams(step.params);
         const policy = evaluateAgentPolicy({
           toolName: step.tool,
@@ -246,7 +246,7 @@ export class OperationsAgent {
           parametersHash, details: { macro: toolName } });
         let stepResult;
         try {
-          stepResult = await this.executeTool(step.tool, step.params, _context, trace);
+          stepResult = await this.executeTool(step.tool, step.params, _context, trace, executionContext);
         } catch (error) {
           stepResult = { success: false, error: error.message, postconditionStatus: 'not_run' };
         }
@@ -480,8 +480,8 @@ export class OperationsAgent {
       // 审批门会话键:优先用路由层生成的 gateKey(无 sessionId 的直连流彼此隔离),
       // 避免落进共享 'default' 桶导致"不再询问"授权跨流泄漏。
       const approvalSessionId = context.gateKey || context.sessionId;
-      // 宏展开的逐步审计与死循环检测需要 planId/runawayGuard,挂到实例上供 executeTool 读取。
-      this._loopAudit = { planId, runawayGuard };
+      // 宏展开的逐步审计与死循环检测属于本次执行,显式传递以隔离并发会话。
+      const executionContext = { planId, runawayGuard };
       onEvent({ type: 'approval_mode', mode: approvalGate.getMode(approvalSessionId) });
       let silentRetryUsed = false;
       let silentNudge = '';
@@ -858,7 +858,7 @@ export class OperationsAgent {
                 ruleName: policyAllowsSkip ? policy.ruleName : '', reason: policyAllowsSkip ? policy.reason : '',
                 parametersHash, details: { confirmationStatus, projectId: policyProjectId || null },
               });
-              const result = await this.executeTool(toolName, effectiveParams, context, trace);
+              const result = await this.executeTool(toolName, effectiveParams, context, trace, executionContext);
               updateAgentExecution(execId, { status: result.success ? 'success' : 'failed', result: result.result, error: result.error, durationMs: result.durationMs });
               recordAgentAuditEvent({
                 planId, executionId: execId, eventType: 'execution_completed',
@@ -944,9 +944,8 @@ export class OperationsAgent {
       return { success: false, messages, finalContent: `达到最大循环次数 ${maxLoops}`, maxLoopsReached: true };
 
     } finally {
-      // 清理 AbortController 与宏审计挂钩,避免跨执行残留引用
+      // 清理本次执行的 AbortController;执行审计上下文是局部变量,无需写回单例。
       this.activeExecutions.delete(planId);
-      this._loopAudit = null;
     }
   }
 

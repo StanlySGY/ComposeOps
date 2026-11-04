@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 默认关闭 Fastify 代理头信任；需要反向代理时显式配置可信代理，Origin 校验使用 Fastify 解析后的 Host，避免直接采信未受信任的 X-Forwarded-Host/Proto。
 
 ### Fixed
+- Agent 并发宏执行改为显式传递单次执行上下文，避免共享 Agent 单例上的审计/死循环检测状态被其他会话覆盖或提前清理；新增双宏交错执行回归测试。
 - 配置页随条件渲染的编辑器容器创建/销毁 Monaco，修复带项目参数直达页面与代码/可视化来回切换后的空白编辑器。
 - GitOps 同步响应补充 `hasChanges`，并以仓库级互斥保护同步、Webhook、回滚和配置变更；状态更新重读最新配置，避免覆盖并行新增的其他仓库。
 - HTTPS 会话 Cookie 统一加上 `Secure`；未信任的 `X-Forwarded-Proto` 不再影响 Cookie 安全属性，清除 Cookie 时保持匹配的安全属性。
