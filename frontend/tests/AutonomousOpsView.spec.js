@@ -95,6 +95,11 @@ describe('AutonomousOpsView command center', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('检查 content-factory 服务');
     expect(wrapper.text()).not.toContain('日志收集');
+    const clear = wrapper.findAll('button').find((button) => button.text().includes('清除筛选'));
+    expect(clear).toBeTruthy();
+    await clear.trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('.ops-record')).toHaveLength(4);
 
     await wrapper.get('button[role="tab"]').trigger('click');
     const reviewTab = wrapper.findAll('button[role="tab"]').find((button) => button.text().includes('结果待核对'));

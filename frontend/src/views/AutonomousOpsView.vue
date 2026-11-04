@@ -75,6 +75,7 @@
             <option value="workflow">工作流</option>
             <option value="batch-job">批量任务</option>
           </select>
+          <button v-if="query || statusFilter !== 'all' || sourceFilter !== 'all'" class="btn-secondary min-h-9! px-3! text-xs!" @click="resetFilters">清除筛选</button>
           <span class="ops-result-count">{{ currentList.length }} 条</span>
         </div>
 
