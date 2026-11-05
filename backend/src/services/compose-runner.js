@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
 import { composeEnv, getActiveHost } from './docker-hosts.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 
 const COMPOSE_BIN = process.env.COMPOSE_BIN || 'docker';
 
@@ -158,7 +159,7 @@ export async function saveCompose(project, fileIndex, content, reason = 'save', 
   }
   validateYaml(content);
   const filePath = await resolveProjectFile(project, fileIndex);
-  return withComposeFileLock(filePath, async () => {
+  return withProjectOperationLock(project.id, () => withComposeFileLock(filePath, async () => {
     const previous = await readFile(filePath, 'utf8');
     assertComposeVersion(previous, expectedContent);
     const currentStat = await stat(filePath);
@@ -192,7 +193,7 @@ export async function saveCompose(project, fileIndex, content, reason = 'save', 
       throw error;
     }
     return { ok: true, path: filePath };
-  });
+  }));
 }
 
 export { ACTIONS };

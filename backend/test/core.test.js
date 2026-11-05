@@ -16,6 +16,7 @@ const { buildMountPlan, compactMountPaths, safeProjectMountPath, isWithinProject
 const { validateWorkspaceProjectPaths } = await import('../src/services/compose-workspace.js');
 const { runContainerAction, supportsContainerAction } = await import('../src/services/project-control.js');
 const { assertProjectActionAllowed } = await import('../src/services/project-action-runner.js');
+const { withProjectOperationLock, activeProjectLocks } = await import('../src/services/project-operation-lock.js');
 
 test('passwords are hashed and sessions are authenticated by cookie', () => {
   assert.throws(() => auth.setPassword('short'), /至少需要 10/);
@@ -214,6 +215,37 @@ test('Compose 保存锁串行执行，过期版本在锁内被拒绝', async () 
   await Promise.all([first, second]);
   assert.deepEqual(order, ['first-start', 'first-end', 'second-start', 'second-rejected']);
   assert.equal(current, 'version-b', '旧版本保存不得覆盖先完成的更新');
+});
+
+test('项目操作锁让 Compose 保存与升级/回滚互斥，并允许同项目嵌套调用', async () => {
+  const order = [];
+  let releaseFirst;
+  let markStarted;
+  const firstStarted = new Promise((resolve) => { markStarted = resolve; });
+  const gate = new Promise((resolve) => { releaseFirst = resolve; });
+
+  const upgrade = withProjectOperationLock('compose-lock-project', async () => {
+    order.push('upgrade-start');
+    markStarted();
+    await withProjectOperationLock('compose-lock-project', async () => {
+      order.push('nested-operation');
+    });
+    await gate;
+    order.push('upgrade-end');
+  });
+  await firstStarted;
+
+  const save = withProjectOperationLock('compose-lock-project', async () => {
+    order.push('save');
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['upgrade-start', 'nested-operation'], '升级期间保存必须等待，嵌套操作不能死锁');
+  assert.equal(activeProjectLocks(), 1);
+
+  releaseFirst();
+  await Promise.all([upgrade, save]);
+  assert.deepEqual(order, ['upgrade-start', 'nested-operation', 'upgrade-end', 'save']);
+  assert.equal(activeProjectLocks(), 0);
 });
 
 test('mount plan deduplicates exact paths without broadening permissions', () => {

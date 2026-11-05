@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import docker from './docker.js';
 import { ACTIONS, assertComposeVersion, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
@@ -389,7 +390,7 @@ export async function saveWorkspaceCompose(project, fileIndex, content, reason =
   }
   validateYaml(content);
   const { index, filePath, files } = selectedFile(project, fileIndex);
-  return withComposeFileLock(`${project.id}:${filePath}`, () => withRunner(project, async (container) => {
+  return withProjectOperationLock(project.id, () => withComposeFileLock(`${project.id}:${filePath}`, () => withRunner(project, async (container) => {
     const previous = await readArchiveFile(container, filePath);
     assertComposeVersion(previous.content, expectedContent);
     const tempName = `.composeops-${randomBytes(8).toString('hex')}.tmp`;
@@ -427,7 +428,7 @@ export async function saveWorkspaceCompose(project, fileIndex, content, reason =
       throw error;
     }
     return { ok: true, path: filePath };
-  }));
+  })));
 }
 
 export async function runWorkspaceComposeArgs(project, args, onOutput = () => {}, options = {}) {
