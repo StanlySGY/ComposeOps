@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 历史指标页增加节点切换、项目切换和组件卸载时的请求失效保护；运维中心增加任务详情请求序号保护，以及带方向键/Home/End 的 ARIA Tab 导航。
 - 新增监控布局、旧节点迟到请求、任务详情竞态、运维 Tab 键盘导航与 Compose/日志工具栏语义分组回归测试。
 - 两份早期改进规划与竞品研究文档增加归档边界；更新项目上下文以区分代码仓库基线和历史生产环境记录，并补充 2026-11-05 维护审计及当前 CI/Pages 证据。
+- ARM64 镜像验收改用公开仓库可用的原生 `ubuntu-24.04-arm` runner，并断言运行架构，避免 QEMU 交叉构建拖满 CI 超时。
 
 ### Added
 - Autonomous Ops Command Center：统一汇聚 Agent 计划/后台任务、工作流实例、批量任务、事件和操作审计；支持按关键词、状态和来源筛选，并查看各来源原始详情与可证实的执行时间线。

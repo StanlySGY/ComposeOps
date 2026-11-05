@@ -69,14 +69,17 @@ jobs:
   image-arm64:
     name: ARM64 image installation and restore
     needs: code
-    runs-on: ubuntu-latest
+    # The repository is public, so use GitHub's native ARM64 hosted runner.
+    # QEMU emulation made this full image build take almost the entire job timeout.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      - uses: docker/setup-qemu-action@v4
+      - name: Assert native ARM64 runner
+        run: test "$(uname -m)" = "aarch64"
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
