@@ -44,7 +44,7 @@
           <tbody>
             <tr v-for="backup in composeBackups" :key="backup.id" class="hover:bg-surface-800/25">
               <td class="font-medium text-surface-100">{{ backup.projectName || backup.projectId }}</td>
-              <td><span class="count-badge" :class="backup.reason === 'upgrade' ? 'text-amber-300' : 'text-sky-300'">{{ reasonLabel(backup.reason) }}</span></td>
+              <td><span class="count-badge" :class="backup.reason === 'upgrade' || backup.reason?.startsWith('upgrade:') ? 'text-amber-300' : 'text-sky-300'">{{ reasonLabel(backup.reason) }}</span></td>
               <td class="max-w-56 truncate font-mono text-xs text-surface-400" :title="backup.filePath">{{ backup.filePath }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(backup.createdAt) }}</td>
               <td class="text-right">
@@ -103,8 +103,8 @@
 
     <!-- 镜像升级回滚 -->
     <section class="section-panel">
-      <div class="mb-4"><h2 class="section-title">镜像升级回滚</h2><p class="mt-1 text-muted">升级后未通过健康检查的项目,可回滚到升级前配置</p></div>
-      <div v-if="!rollbackableProjectCount" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无待回滚的升级项目。</div>
+      <div class="mb-4"><h2 class="section-title">升级配置恢复</h2><p class="mt-1 text-muted">仅展示有升级前 Compose 备份且当前非运行状态的项目；恢复配置并重建容器，不保证回退已拉取的镜像版本</p></div>
+      <div v-if="!rollbackableProjectCount" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无符合条件的升级配置恢复项目。完成升级并生成 Compose 备份后,若项目异常停止,可在此恢复配置。</div>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>状态</th><th class="text-right">操作</th></tr></thead>
@@ -113,7 +113,7 @@
               <td class="font-medium text-surface-100">{{ project.projectName }}</td>
               <td><span class="status-badge" :class="project.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : project.status === 'stopped' ? 'bg-surface-800/40 text-surface-400' : project.status === 'partial' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'">{{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'partial' ? '部分异常' : '异常' }}</span></td>
               <td class="text-right">
-                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />回滚升级</button>
+                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />恢复升级前配置</button>
               </td>
             </tr>
           </tbody>
@@ -160,6 +160,7 @@ import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { FileCode2, GitBranch, HardDrive, History, RefreshCw, RotateCcw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
+import { getRollbackableProjects } from '../lib/rollback-projects.js';
 import { useServicesStore } from '../stores/services.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
@@ -182,11 +183,12 @@ const confirmTarget = ref(null);
 let pendingAction = null;
 let rollbackController = null;
 
-const rollbackableProjects = computed(() => store.projects.filter((p) => p.managed && p.editable && p.status !== 'running'));
+const rollbackableProjects = computed(() => getRollbackableProjects(store.projects, composeBackups.value));
 const rollbackableProjectCount = computed(() => rollbackableProjects.value.length);
 
 function reasonLabel(reason) {
-  return { save: '保存', upgrade: '升级', restore: '恢复', 'env.apply': '环境变量' }[reason] || reason;
+  if (reason === 'upgrade' || reason?.startsWith('upgrade:')) return '升级';
+  return { save: '保存', restore: '恢复', 'env.apply': '环境变量' }[reason] || reason;
 }
 function formatTime(value) {
   if (!value) return '—';
@@ -369,16 +371,16 @@ async function doRollbackGitops(commitHash) {
 
 function rollbackUpgrade(project) {
   confirmTarget.value = {
-    title: '回滚镜像升级',
-    message: `确认将项目「${project.projectName}」回滚到升级前的配置并重建容器?`,
+    title: '恢复升级前配置',
+    message: '确认将项目「' + project.projectName + '」恢复到最近一次升级前的 Compose 配置并重建容器？注意：这不会保证回退已经拉取的镜像版本。',
     tone: 'warning',
-    confirmText: '回滚升级',
+    confirmText: '恢复配置',
   };
   pendingAction = () => doRollbackUpgrade(project);
 }
 async function doRollbackUpgrade(project) {
   busy.value = true;
-  output.value = { open: true, text: '', title: `回滚升级 · ${project.projectName}`, running: true, status: 'running' };
+  output.value = { open: true, text: '', title: '恢复升级前配置 · ' + project.projectName, running: true, status: 'running' };
   rollbackController?.abort();
   rollbackController = new AbortController();
   try {

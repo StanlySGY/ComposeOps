@@ -1,8 +1,8 @@
-import { readFile, writeFile, copyFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { setSetting, addComposeBackup, addOperation } from '../lib/db.js';
+import { setSetting, addComposeBackup, addOperation, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { readCompose } from './compose-runner.js';
 import { getActivityDocker } from './docker-hosts.js';
 import { withRunner, readArchiveFile, putArchiveFile } from './compose-workspace.js';
@@ -263,28 +263,37 @@ export async function checkAllUpdates() {
 }
 
 async function writeUpgradeBackups(project) {
-  const stamp = `.backup.upgrade.${Date.now()}.${randomBytes(3).toString('hex')}`;
-  const backups = [];
-  if (project.mounted) {
-    for (let i = 0; i < project.composeFiles.length; i += 1) {
-      const file = project.composeFiles[i];
-      try {
-        const content = await readFile(file, 'utf8');
-        const backupPath = `${file}${stamp}`;
-        await writeFile(backupPath, content, 'utf8');
-        addComposeBackup(project.id, file, content, 'upgrade');
-        backups.push({ path: backupPath, file, content });
-      } catch { /* 单个备份文件不可读时继续扫描其他文件。 */ }
+  const files = Array.isArray(project.composeFiles) && project.composeFiles.length
+    ? project.composeFiles
+    : [project.composeFile].filter(Boolean);
+  if (!files.length) throw Object.assign(new Error('项目没有可备份的 Compose 配置文件'), { statusCode: 409 });
+  if (files.length > COMPOSE_BACKUP_KEEP) throw Object.assign(new Error('Compose 文件数量超过备份保留上限，已中止升级'), { statusCode: 409 });
+
+  const snapshots = [];
+  try {
+    if (project.mounted) {
+      for (const file of files) snapshots.push({ file, content: await readFile(file, 'utf8') });
+    } else if (project.workspaceAvailable) {
+      await withRunner(project, async (container) => {
+        for (const file of files) {
+          const { content } = await readArchiveFile(container, file);
+          snapshots.push({ file, content });
+        }
+      });
+    } else {
+      throw new Error('当前项目没有可读取 Compose 文件的挂载或工作区');
     }
-    const envPath = path.posix.join(project.workingDir, '.env');
-    try {
-      const content = await readFile(envPath, 'utf8');
-      const backupPath = `${envPath}${stamp}`;
-      await copyFile(envPath, backupPath);
-      backups.push({ path: backupPath, file: envPath, content });
-    } catch { /* env 备份不可读时继续扫描其他文件。 */ }
+  } catch (error) {
+    throw Object.assign(new Error('无法完整备份升级前 Compose 配置：' + error.message), { statusCode: 409 });
   }
-  return backups;
+
+  if (snapshots.length !== files.length || snapshots.some((item) => typeof item.content !== 'string')) {
+    throw Object.assign(new Error('升级前 Compose 配置备份不完整，已中止升级'), { statusCode: 409 });
+  }
+
+  const backupReason = 'upgrade:' + Date.now() + ':' + randomBytes(3).toString('hex');
+  for (const snapshot of snapshots) addComposeBackup(project.id, snapshot.file, snapshot.content, backupReason);
+  return snapshots;
 }
 
 /**
@@ -314,6 +323,12 @@ async function upgradeProjectLocked(project, { services, onOutput = () => {}, on
     throw Object.assign(new Error(`这些服务当前没有可确认的镜像更新，请重新检查：${stale.join(', ')}`), { statusCode: 409 });
   }
   const backups = await writeUpgradeBackups(project);
+  const expectedComposeFiles = Array.isArray(project.composeFiles) && project.composeFiles.length
+    ? project.composeFiles
+    : [project.composeFile].filter(Boolean);
+  if (!expectedComposeFiles.length || backups.length !== expectedComposeFiles.length) {
+    throw Object.assign(new Error('升级前 Compose 配置备份不完整，已中止升级；未执行镜像拉取或容器重建'), { statusCode: 409 });
+  }
   const { spawnComposeCommand } = await import('./compose-runner.js');
   const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
   let code;
@@ -369,7 +384,30 @@ function runStep(child, onOutput, onChild) {
   });
 }
 
-/** 从最近一次 upgrade 备份恢复 compose/.env 并 up -d。持项目操作锁,与升级/重启互斥。 */
+/** 恢复前要求当前 Compose 文件集与备份批次一一对应，避免混用新旧配置。 */
+export function hasMatchingComposeBackupFiles(backups = [], files = []) {
+  if (!Array.isArray(backups) || !Array.isArray(files) || !files.length || backups.length !== files.length) return false;
+  const backupFiles = new Set(backups.map((item) => item?.filePath).filter((file) => typeof file === 'string'));
+  const currentFiles = new Set(files);
+  return backupFiles.size === backups.length
+    && currentFiles.size === files.length
+    && backupFiles.size === currentFiles.size
+    && [...backupFiles].every((file) => currentFiles.has(file));
+}
+
+/** 从备份列表中选择最近一次完整升级批次；兼容旧版按时间戳分组的 upgrade 记录。 */
+export function selectLatestUpgradeBackupBatch(backups = []) {
+  const upgrades = (Array.isArray(backups) ? backups : []).filter((item) => (
+    item?.reason === 'upgrade' || (typeof item?.reason === 'string' && item.reason.startsWith('upgrade:'))
+  ));
+  const latest = upgrades[0];
+  if (!latest) return [];
+  return upgrades.filter((item) => item.reason === latest.reason && (
+    latest.reason !== 'upgrade' || item.createdAt === latest.createdAt
+  ));
+}
+
+/** 从最近一次升级批次恢复全部 Compose 文件并 up -d。持项目操作锁,与升级/重启互斥。 */
 export async function rollbackProject(project, options = {}) {
   if (!project?.managed || !project.editable) {
     throw Object.assign(new Error('当前节点下该项目不支持回滚'), { statusCode: 403 });
@@ -379,50 +417,56 @@ export async function rollbackProject(project, options = {}) {
 
 async function rollbackProjectLocked(project, { onOutput = () => {}, onChild = () => {} } = {}) {
   const { listComposeBackups, getComposeBackup } = await import('../lib/db.js');
-  const backups = listComposeBackups(project.id).filter((item) => item.reason === 'upgrade');
-  if (!backups.length && !cache.get(project.id)?.data) {
-    throw Object.assign(new Error('没有可用的升级备份'), { statusCode: 409 });
+  const files = Array.isArray(project.composeFiles) && project.composeFiles.length
+    ? project.composeFiles
+    : [project.composeFile].filter(Boolean);
+  // 新备份使用唯一 batch reason；旧版 reason='upgrade' 按 createdAt 分组。
+  const backups = selectLatestUpgradeBackupBatch(listComposeBackups(project.id));
+  if (!backups.length) throw Object.assign(new Error('没有可用的升级前 Compose 备份'), { statusCode: 409 });
+  if (!hasMatchingComposeBackupFiles(backups, files)) {
+    throw Object.assign(new Error('当前 Compose 文件集与升级备份不一致；为避免混合配置，已停止恢复，请先人工核对文件列表'), { statusCode: 409 });
   }
-  // 恢复 compose 备份(最近一份)。listComposeBackups 不返回 content(只有 size),
-  // 必须经 getComposeBackup 取正文,否则写入 undefined 恒抛错被吞、回滚恒 409。
+
   let restored = 0;
-  if (project.mounted) {
-    for (const backup of backups.slice(0, 1)) {
-      try {
-        const filePath = backup.filePath;
-        const index = project.composeFiles.indexOf(filePath);
-        if (index < 0) continue;
-        const full = getComposeBackup(project.id, backup.id);
-        if (typeof full?.content !== 'string') continue;
-        await writeFile(filePath, full.content, 'utf8');
-        restored += 1;
-      } catch (error) {
-        console.warn(`[image-updater] 恢复 compose 备份失败(${backup.filePath}):`, error.message);
-      }
+  const failedFiles = [];
+  for (const backup of backups) {
+    if (!files.includes(backup.filePath)) {
+      failedFiles.push(backup.filePath + '（已不属于当前 Compose 文件集）');
+      continue;
     }
-  } else {
-    for (const backup of backups.slice(0, 1)) {
-      try {
-        const index = project.composeFiles.indexOf(backup.filePath);
-        if (index < 0) continue;
-        const full = getComposeBackup(project.id, backup.id);
-        if (typeof full?.content !== 'string') continue;
+    const full = getComposeBackup(project.id, backup.id);
+    if (typeof full?.content !== 'string') {
+      failedFiles.push(backup.filePath + '（备份内容缺失）');
+      continue;
+    }
+    try {
+      if (project.mounted) {
+        await writeFile(backup.filePath, full.content, 'utf8');
+      } else if (project.workspaceAvailable) {
         await withRunner(project, async (container) => {
           const previous = await readArchiveFile(container, backup.filePath);
           await putArchiveFile(container, path.posix.dirname(backup.filePath), path.posix.basename(backup.filePath), full.content, previous.header);
         });
-        restored += 1;
-      } catch (error) {
-        console.warn(`[image-updater] 容器内恢复 compose 备份失败(${backup.filePath}):`, error.message);
+      } else {
+        continue;
       }
+      restored += 1;
+    } catch (error) {
+      failedFiles.push(backup.filePath + '（' + error.message + '）');
+      console.warn('[image-updater] 恢复 Compose 备份失败(' + backup.filePath + '):', error.message);
     }
   }
-  if (!restored) throw Object.assign(new Error('未找到可恢复的 Compose 备份'), { statusCode: 409 });
+  if (failedFiles.length || restored !== backups.length) {
+    throw Object.assign(new Error('Compose 配置仅恢复 ' + restored + '/' + backups.length + ' 个文件；未执行容器重建。失败项：' + failedFiles.join('；')), { statusCode: 409 });
+  }
+  if (!restored) throw Object.assign(new Error('未找到可恢复的 Compose 备份文件'), { statusCode: 409 });
+
   const { spawnComposeCommand } = await import('./compose-runner.js');
   const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
   const code = project.mounted
     ? await runStep(spawnComposeCommand(project, ['up', '-d', '--force-recreate']), onOutput, onChild)
     : await runWorkspaceComposeArgs(project, ['up', '-d', '--force-recreate'], onOutput);
-  addOperation({ projectId: project.id, projectName: project.projectName, action: 'images.rollback', status: code === 0 ? 'success' : 'failed' });
+  cache.delete(project.id);
+  addOperation({ projectId: project.id, projectName: project.projectName, action: 'images.rollback', status: code === 0 ? 'success' : 'failed', detail: '已恢复 ' + restored + ' 个 Compose 配置文件；不保证回退浮动 tag 对应的镜像版本' });
   return { code, restored };
 }

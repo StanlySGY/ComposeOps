@@ -28,7 +28,7 @@
         </div>
       </div>
       <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-xs text-surface-400">
-        <p>升级前会自动备份 <code class="font-mono text-surface-300">docker-compose.yml</code> 与 <code class="font-mono text-surface-300">.env</code>;升级完成后 15 秒内自动健康检查,若容器异常退出可一键回滚。</p>
+        <p>升级前会自动备份可读取的 Compose 配置文件；升级完成后 15 秒内自动健康检查。若容器异常退出，可恢复升级前配置并重建容器。注意：恢复配置不保证回退已拉取的镜像版本，浮动 tag 仍可能指向新镜像。</p>
       </div>
     </template>
     <template #footer>

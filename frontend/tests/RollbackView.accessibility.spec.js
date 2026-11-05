@@ -30,7 +30,7 @@ beforeEach(() => {
   streamRollback.mockReset();
   store.refresh.mockClear().mockResolvedValue(undefined);
   getVolumeBackups.mockResolvedValue({ backups: [] });
-  getBackups.mockResolvedValue({ backups: [] });
+  getBackups.mockResolvedValue({ backups: [{ id: 'upgrade-a', projectId: 'a', filePath: 'compose.yml', reason: 'upgrade', createdAt: '2026-11-05T00:00:00' }] });
   restoreBackup.mockResolvedValue(undefined);
   restoreVolumeBackup.mockResolvedValue({ message: '数据卷恢复完成' });
   streamRollback.mockResolvedValue(undefined);
@@ -101,7 +101,7 @@ describe('回滚中心加载反馈与执行结果语义', () => {
     streamRollback.mockResolvedValueOnce(undefined);
     wrapper = mountView();
     await flushPromises();
-    await wrapper.findAll('button').find(button => button.text().includes('回滚升级')).trigger('click');
+    await wrapper.findAll('button').find(button => button.text().includes('恢复升级前配置')).trigger('click');
     await wrapper.get('.confirm-stub button').trigger('click');
     await flushPromises();
 
@@ -117,7 +117,7 @@ describe('回滚中心加载反馈与执行结果语义', () => {
     });
     wrapper = mountView();
     await flushPromises();
-    const rollbackButton = wrapper.findAll('button').find(button => button.text().includes('回滚升级'));
+    const rollbackButton = wrapper.findAll('button').find(button => button.text().includes('恢复升级前配置'));
     await rollbackButton.trigger('click');
     await wrapper.get('.confirm-stub button').trigger('click');
     await flushPromises();
