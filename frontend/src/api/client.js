@@ -115,7 +115,7 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
-  getAuthStatus: () => request('/auth/status'),
+  getAuthStatus: (signal) => request('/auth/status', { signal }),
   // setupToken:服务端设置 SETUP_TOKEN 环境变量时,首次初始化必须携带该引导令牌
   setup: (password, setupToken = '') => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password, setupToken }) }),
   login: (password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
@@ -279,8 +279,8 @@ export const api = {
   getAgentAuditEvents: (limit = 100, filters = {}) => request(`/ai/agent/audit-events?${new URLSearchParams({ limit: String(limit), ...(filters.planId ? { planId: filters.planId } : {}), ...(filters.executionId ? { executionId: filters.executionId } : {}) })}`),
   // compose 语义校验 / 变更预览
   validateCompose: (projectId, fileIndex, content) => request(`/projects/${projectId}/compose/validate`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) }),
-  previewCompose: async (projectId, content) => {
-    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ content }) });
+  previewCompose: async (projectId, content, fileIndex = 0) => {
+    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ content, fileIndex }) });
     return result?.preview || null;
   },
   // system

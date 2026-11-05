@@ -1,4 +1,5 @@
 import * as YAML from 'yaml';
+import { isDeepStrictEqual } from 'node:util';
 
 /**
  * Compose 语义校验(仅静态分析,不依赖宿主机文件系统):
@@ -93,64 +94,48 @@ function normalizeList(value) {
 }
 
 /**
- * Compose 变更预览:静态对比新内容与当前运行容器,评估影响面。
- * 返回 { added, removed, changed, restarted, portConflicts }
+ * 保存前预览以所选文件的已保存内容为基线，只报告真实字段差异。
+ * 未提供文件基线时仅比较 Docker 列表实际提供的镜像，不猜测 env/卷/命令变化。
+ * 这不是 docker compose 合并、变量展开及实际部署计划。
  */
-export function previewComposeChange(newContent, project) {
-  const result = { added: [], removed: [], changed: [], restarted: [], portConflicts: [] };
-  let doc;
-  try {
-    doc = YAML.parse(newContent);
-  } catch {
-    return result; // YAML 无效时不提供预览
-  }
-  const newServices = doc && doc.services && typeof doc.services === 'object' ? doc.services : {};
-  const newNames = new Set(Object.keys(newServices));
-
-  const currentNames = new Set();
-  for (const container of project.containers || []) {
-    // 容器名形如 <project>-<service>-<n> 或 <project>_<service>_<n>
-    const match = /^[^-_]+[-_](.+)[-_]\d+$/.exec(container.name);
-    const service = match ? match[1] : container.name;
-    currentNames.add(service);
-    if (!newNames.has(service)) result.removed.push({ service, container: container.name, state: container.state });
+export function previewComposeChange(newContent, project, previousContent = null) {
+  const result = { added: [], removed: [], changed: [], restarted: [], portConflicts: [], basis: previousContent === null ? 'runtime-summary' : 'saved-file' };
+  const doc = YAML.parse(newContent);
+  const before = previousContent === null ? null : YAML.parse(previousContent);
+  const newServices = doc?.services || {};
+  const containers = project.containers || [];
+  const serviceName = (container) => {
+    if (container.service) return container.service;
+    for (const separator of ['-', '_']) {
+      const prefix = `${project.projectName}${separator}`;
+      if (project.projectName && container.name.startsWith(prefix)) {
+        return container.name.slice(prefix.length).replace(/[-_]\d+$/, '');
+      }
+    }
+    return /^[^-_]+[-_](.+)[-_]\d+$/.exec(container.name)?.[1] || container.name;
+  };
+  const currentServices = new Map(containers.map(container => [serviceName(container), container]));
+  const oldServices = previousContent === null
+    ? Object.fromEntries([...currentServices].map(([name, container]) => [name, { image: container.image }]))
+    : (before?.services || {});
+  const findContainer = (name) => containers.find(container => serviceName(container) === name
+    || container.name === oldServices[name]?.container_name || container.name === newServices[name]?.container_name);
+  const fieldLabels = { image: '镜像', environment: '环境变量', ports: '端口', volumes: '卷', command: '命令', entrypoint: '入口', build: '构建', networks: '网络', depends_on: '依赖', healthcheck: '健康检查', restart: '重启策略', deploy: '部署配置', labels: '标签', container_name: '容器名' };
+  for (const name of Object.keys(oldServices)) {
+    if (Object.hasOwn(newServices, name)) continue;
+    const container = findContainer(name);
+    result.removed.push({ service: name, container: container?.name || name, state: container?.state || 'unknown' });
   }
   for (const [name, service] of Object.entries(newServices)) {
-    if (!currentNames.has(name)) {
-      result.added.push({ service: name });
-      continue;
-    }
-    // 检测需要重建的变更(镜像/环境/卷/端口/命令变化)
-    const running = [...(project.containers || [])].find((c) => {
-      const match = /^[^-_]+[-_](.+)[-_]\d+$/.exec(c.name);
-      return match && match[1] === name;
-    });
-    if (!running) { result.added.push({ service: name }); continue; }
-    const sig = buildServiceSignature(service);
-    if (sig.imageChanged || sig.envChanged || sig.portsChanged || sig.volumesChanged || sig.commandChanged) {
-      result.changed.push({ service: name, reasons: sig.reasons, container: running.name, state: running.state });
-      if (running.state === 'running') result.restarted.push({ service: name, container: running.name });
-    }
-    // 端口冲突检测
-    for (const raw of normalizeList(service.ports || [])) {
-      const entry = String(raw);
-      if (/^\d+:\d+$/.test(entry)) result.portConflicts.push(entry);
-    }
+    if (!Object.hasOwn(oldServices, name)) { result.added.push({ service: name }); continue; }
+    const previous = oldServices[name] || {};
+    const next = service || {};
+    const keys = previousContent === null ? ['image'] : [...new Set([...Object.keys(previous), ...Object.keys(next)])];
+    const reasons = keys.filter(key => !isDeepStrictEqual(previous[key], next[key])).map(key => fieldLabels[key] || key);
+    if (!reasons.length) continue;
+    const container = findContainer(name);
+    result.changed.push({ service: name, reasons, container: container?.name || name, state: container?.state || 'unknown' });
+    if (container?.state === 'running') result.restarted.push({ service: name, container: container.name });
   }
   return result;
-}
-
-function buildServiceSignature(service) {
-  const reasons = [];
-  const imageChanged = typeof service.image === 'string' && /:/.test(service.image);
-  const envChanged = !!service.environment && (Array.isArray(service.environment) || typeof service.environment === 'object');
-  const portsChanged = !!service.ports && Array.isArray(service.ports) && service.ports.length > 0;
-  const volumesChanged = !!service.volumes && Array.isArray(service.volumes) && service.volumes.length > 0;
-  const commandChanged = !!service.command || !!service.entrypoint;
-  if (imageChanged) reasons.push('镜像');
-  if (envChanged) reasons.push('环境变量');
-  if (portsChanged) reasons.push('端口');
-  if (volumesChanged) reasons.push('卷');
-  if (commandChanged) reasons.push('命令/入口');
-  return { imageChanged, envChanged, portsChanged, volumesChanged, commandChanged, reasons };
 }

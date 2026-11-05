@@ -153,8 +153,8 @@ ComposeOps 采用渐进式 Worker Profile，而不是复制一套平行 Agent �
 
 ```sh
 # 仓库根目录；后端 test 已固定 --test-concurrency=1
-DB_PATH=/tmp/composeops-test.db npm run test:backend
-npm run test:frontend
+DB_PATH=/tmp/composeops-test.db npm test --workspace backend
+npm test --workspace frontend
 npm run lint
 npm run build
 npm --prefix frontend run build:preview

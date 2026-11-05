@@ -240,7 +240,7 @@ export default async function projectRoutes(fastify) {
       body: {
         type: 'object',
         additionalProperties: false,
-        properties: { content: { type: 'string', maxLength: CONTENT_MAX } },
+        properties: { content: { type: 'string', maxLength: CONTENT_MAX }, fileIndex: fileIndexField },
       },
     },
   }, async (request, reply) => {
@@ -251,7 +251,13 @@ export default async function projectRoutes(fastify) {
     if (typeof content !== 'string') {
       return reply.code(400).send({ error: 'invalid_content', message: '缺少预览内容' });
     }
-    return { preview: previewComposeChange(content, project) };
+    try {
+      const fileIndex = Number(request.body?.fileIndex) || 0;
+      const current = project.mounted ? await readCompose(project, fileIndex) : await readWorkspaceCompose(project, fileIndex);
+      return { preview: previewComposeChange(content, project, current.content) };
+    } catch (error) {
+      return reply.code(error.statusCode || 422).send({ error: 'compose_preview_failed', message: error.message });
+    }
   });
 
   // content 不设 required:缺失时 saveCompose 自己抛错并归到 compose_save_failed,

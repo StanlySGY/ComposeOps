@@ -121,7 +121,7 @@ export function registerConfigTools(agent) {
       },
     })
     .registerTool('config.preview', {
-      description: '预览 Compose 配置变更对运行容器的影响(diff/重启范围)',
+      description: '对比所选 Compose 文件的已保存配置，预览服务字段变化及可能受影响的容器；实际部署影响需另行预演',
       category: 'config',
       requiredPermission: 'editable',
       confirmationRequired: false,
@@ -136,10 +136,9 @@ export function registerConfigTools(agent) {
         required: ['projectId'],
       },
       execute: async (params, context) => {
-        const content = typeof params.content === 'string' && params.content
-          ? params.content
-          : await currentComposeContent(context.project, Number(params.fileIndex) || 0);
-        const preview = previewComposeChange(content, context.project);
+        const previous = await currentComposeContent(context.project, Number(params.fileIndex) || 0);
+        const content = typeof params.content === 'string' && params.content ? params.content : previous;
+        const preview = previewComposeChange(content, context.project, previous);
         return { preview, contentLength: content.length };
       },
     })
@@ -195,7 +194,7 @@ export function registerConfigTools(agent) {
           path: params.path,
           action: params.action,
           diff: diffTexts(before, after),
-          preview: previewComposeChange(after, context.project),
+          preview: previewComposeChange(after, context.project, before),
           issues,
           requiresRestart: true,
         };

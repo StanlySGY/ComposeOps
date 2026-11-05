@@ -151,6 +151,7 @@ async function scanProjectsUncached(activeDocker, nodeType) {
       name: (c.Names[0] || '').replace(/^\//, ''),
       state: c.State,
       statusText: c.Status,
+      service: labels['com.docker.compose.service'] || '',
       image: c.Image,
       imageId: c.ImageID || '',
       // Docker 列表 API 的 Mounts 包含 named/anonymous volume 引用；保留它们供 CMDB 建立血缘关系。

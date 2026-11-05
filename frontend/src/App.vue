@@ -1,10 +1,15 @@
 <template>
-  <div v-if="!auth.ready" class="h-dvh grid place-items-center text-surface-400">
-    <div class="flex flex-col items-center gap-3">
-      <span class="loading-mark"></span>
-      <span class="text-sm">正在连接 ComposeOps...</span>
+  <main v-if="!auth.ready || auth.connectionError" class="h-dvh grid place-items-center px-6 text-surface-400" aria-live="polite" :aria-busy="auth.checking">
+    <div class="flex max-w-md flex-col items-center gap-4 text-center">
+      <span v-if="auth.checking" class="loading-mark" aria-hidden="true"></span>
+      <WifiOff v-else class="h-8 w-8 text-amber-400" aria-hidden="true" />
+      <h1 class="text-lg font-semibold text-surface-100">{{ auth.connectionError ? '暂时无法连接 ComposeOps' : '正在连接 ComposeOps…' }}</h1>
+      <template v-if="auth.connectionError">
+        <p class="text-sm leading-6" role="alert">{{ auth.connectionError }}</p>
+        <button class="btn-primary" :disabled="auth.checking" @click="auth.check"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': auth.checking }" />{{ auth.checking ? '正在重试…' : '重新连接' }}</button>
+      </template>
     </div>
-  </div>
+  </main>
   <LoginView v-else-if="!auth.authenticated" />
   <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden relative">
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
@@ -44,7 +49,7 @@ import { useRoute, useRouter } from 'vue-router';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
-import { RefreshCw } from 'lucide-vue-next';
+import { RefreshCw, WifiOff } from 'lucide-vue-next';
 import CheatSheetModal from './components/common/CheatSheetModal.vue';
 import AgentDrawer from './components/AgentDrawer.vue';
 import OnboardingGuide from './components/common/OnboardingGuide.vue';
