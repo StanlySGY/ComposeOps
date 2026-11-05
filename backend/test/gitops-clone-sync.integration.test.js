@@ -138,6 +138,35 @@ test('gitops integration: same-repository sync, rollback, update and delete are 
   assert.equal(listGitOpsRepos().some((item) => item.id === parallelRepo.id), true, 'sync state write must preserve other repository configuration added in parallel');
 });
 
+test('gitops integration: sync reattaches the configured branch after branch changes and rollback', async () => {
+  const repo = addTestRepo('branch-reattach', 'main');
+  const initial = await syncGitOpsRepo(repo.id);
+  const mainCommit = initial.commit;
+
+  git(['checkout', '-b', 'release'], seedRepo);
+  writeFileSync(join(seedRepo, 'release.txt'), 'release branch\n');
+  git(['add', 'release.txt'], seedRepo);
+  git(['commit', '-m', 'release branch'], seedRepo);
+  git(['push', 'origin', 'release'], seedRepo);
+  git(['--git-dir', bareRepo, 'update-server-info']);
+
+  updateGitOpsRepo(repo.id, { branch: 'release' });
+  const switched = await syncGitOpsRepo(repo.id);
+  assert.equal(git(['symbolic-ref', '--short', 'HEAD'], repo.localPath), 'release', 'sync must switch the checkout to the configured branch, not only move the current branch pointer');
+  assert.equal(readFileSync(join(repo.localPath, 'release.txt'), 'utf8'), 'release branch\n');
+
+  await rollbackGitOpsRepo(repo.id, mainCommit);
+  assert.equal(git(['rev-parse', 'HEAD'], repo.localPath), mainCommit);
+  assert.throws(() => git(['symbolic-ref', '--short', 'HEAD'], repo.localPath), /detached|symbolic ref|not a symbolic ref/i);
+  assert.equal(listGitOpsRepos().find((item) => item.id === repo.id).status, 'rolled_back', 'rollback must not be reported as a normal branch sync');
+
+  const recovered = await syncGitOpsRepo(repo.id);
+  assert.equal(recovered.commit, switched.commit);
+  assert.equal(git(['symbolic-ref', '--short', 'HEAD'], repo.localPath), 'release', 'sync after rollback must reattach the configured branch');
+  assert.equal(git(['rev-parse', 'HEAD'], repo.localPath), switched.commit);
+  assert.equal(listGitOpsRepos().find((item) => item.id === repo.id).status, 'synced');
+});
+
 test('gitops integration: nonexistent branch leaves a clear error instead of a false synced state', async () => {
   const repo = addTestRepo('missing-branch', 'branch-that-does-not-exist');
   await assert.rejects(syncGitOpsRepo(repo.id), /Git 同步失败/);

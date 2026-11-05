@@ -288,7 +288,12 @@ export async function createVolumeBackup(project, volumeName) {
       throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
     });
     if (exitCode !== 0) {
-      throw Object.assign(new Error(`卷备份失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
+      const detail = output.slice(0, 200);
+      const lowSpace = /\bENOSPC\b|no space left on device|disk quota exceeded/i.test(output);
+      const message = lowSpace
+        ? `备份目录空间不足:${detail}。失败的临时归档会通过 EXIT trap 清理；为保护现有恢复点，本次不会自动删除任何已有备份。请先释放备份目录空间或调整 backup.volume_dir 后重试。`
+        : `卷备份失败(exit ${exitCode}):${detail}`;
+      throw Object.assign(new Error(message), { statusCode: 502, code: lowSpace ? 'VOLUME_BACKUP_DISK_FULL' : 'VOLUME_BACKUP_FAILED' });
     }
     const bytes = Number(output.split('\n').pop()) || (isLocalHost(host)
       ? (await stat(path.join(dir, file)).catch(() => null))?.size || 0

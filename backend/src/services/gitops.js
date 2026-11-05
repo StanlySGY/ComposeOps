@@ -305,7 +305,9 @@ async function syncGitOpsRepoUnlocked(id) {
         previousCommit = (await runGit(['-C', localPath, 'rev-parse', 'HEAD'], { encoding: 'utf-8', env })).trim();
       }
       await runGit(['-C', localPath, 'fetch', 'origin', branch], { env });
-      await runGit(['-C', localPath, 'reset', '--hard', 'origin/' + branch], { env });
+      // reset --hard 只移动当前 HEAD/分支指针,不会从 detached HEAD 重新挂回分支;
+      // 配置分支变更时也可能把旧分支指针移到新分支提交上。同步必须显式切到配置分支。
+      await runGit(['-C', localPath, 'checkout', '-B', branch, 'origin/' + branch], { env });
     }
 
     // 读取最新 commit
@@ -395,7 +397,7 @@ async function rollbackGitOpsRepoUnlocked(id, commitHash) {
 
     const commitMsg = (await runGit(['-C', localPath, 'log', '-1', '--pretty=%B'], { encoding: 'utf-8', env })).trim();
 
-    patchRepoState(id, { lastSync: new Date().toISOString(), lastCommit: commit, status: 'synced', lastError: null });
+    patchRepoState(id, { lastSync: new Date().toISOString(), lastCommit: commit, status: 'rolled_back', lastError: null });
 
     await sendNotification(
       'GitOps 版本回滚',

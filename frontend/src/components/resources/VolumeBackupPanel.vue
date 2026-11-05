@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-4">
-    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份。运行中的服务若持续写入，tar 快照不保证数据库事务一致；数据库卷请先停写或使用数据库原生备份。</p>
+    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份,只有新备份成功后才清理超额旧包；磁盘空间不足时会失败并保留已有备份,不会自动删掉旧恢复点来腾空间。运行中的服务若持续写入，tar 快照不保证数据库事务一致；数据库卷请先停写或使用数据库原生备份。</p>
     <div class="flex flex-wrap items-end gap-2">
       <label class="form-grid-label"><span>项目</span>
         <select v-model="projectId" class="input min-h-9! w-56 text-xs" aria-label="选择要备份卷的项目" @change="loadVolumes">

@@ -205,7 +205,7 @@
       </template>
     </BaseModal>
     <ConfirmDialog :show="!!deleteTarget" title="删除 GitOps 仓库" message="确认移除此 GitOps 配置?不会删除本地仓库文件。" tone="danger" confirm-text="删除仓库" @confirm="confirmDelete" @cancel="deleteTarget = null" />
-    <ConfirmDialog :show="!!rollbackTarget" title="回滚 GitOps 仓库" :message="`确认回滚到提交 ${rollbackTarget?.slice(0, 7) || ''}?仓库工作区会重置到该版本。`" tone="warning" confirm-text="确认回滚" @confirm="confirmRollback" @cancel="rollbackTarget = null" />
+    <ConfirmDialog :show="!!rollbackTarget" title="回滚 GitOps 仓库" :message="`确认回滚到提交 ${rollbackTarget?.slice(0, 7) || ''}?仓库会进入游离提交状态。之后手动同步或自动同步会重新挂回配置分支；自动同步开启时，下一轮同步会恢复远端分支版本。`" tone="warning" confirm-text="确认回滚" @confirm="confirmRollback" @cancel="rollbackTarget = null" />
   </div>
 </template>
 
@@ -427,6 +427,7 @@ function getStatusColor(status) {
   // 与 StatusBadge 语义对齐:pending 是等待态用中性灰,error 才是红。
   const colors = {
     synced: 'bg-emerald-500/10 text-emerald-400',
+    rolled_back: 'bg-amber-500/10 text-amber-300',
     pending: 'bg-surface-800/40 text-surface-400',
     error: 'bg-rose-500/10 text-rose-400',
   };
@@ -436,6 +437,7 @@ function getStatusColor(status) {
 function getStatusLabel(status) {
   const labels = {
     synced: '已同步',
+    rolled_back: '已回滚',
     pending: '待同步',
     error: '错误',
   };

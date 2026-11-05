@@ -113,6 +113,20 @@ describe('GitOps 页面加载反馈与异步状态语义', () => {
     expect(wrapper.attributes('aria-busy')).toBe('false');
   });
 
+  it('GitOps 回滚状态与正常同步状态明确区分', async () => {
+    getGitOpsRepos.mockResolvedValueOnce({ repositories: [
+      { id: 'rolled-back', name: '已回滚仓库', url: 'https://example.invalid/rollback.git', status: 'rolled_back' },
+      { id: 'synced', name: '已同步仓库', url: 'https://example.invalid/synced.git', status: 'synced' },
+    ] });
+    wrapper = mountView();
+    await flushPromises();
+
+    const rolledBackCard = wrapper.findAll('article').find(article => article.text().includes('已回滚仓库'));
+    const syncedCard = wrapper.findAll('article').find(article => article.text().includes('已同步仓库'));
+    expect(rolledBackCard.text()).toContain('已回滚');
+    expect(syncedCard.text()).toContain('已同步');
+  });
+
   it('漂移检测失败有错误播报和可重试操作，重试成功后清除错误', async () => {
     getGitOpsDrift.mockRejectedValueOnce(new Error('git host unavailable'));
     wrapper = mountView();
