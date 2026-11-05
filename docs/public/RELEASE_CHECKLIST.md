@@ -71,3 +71,21 @@
 - 已从 AI 助手发送只读项目状态请求，界面触发 project.list_managed 工具调用，默认渠道显示为 qwen3.8-flash-next-iq3_xxs。本轮没有把它当作上游模型完整验收通过：最终回答内容和错误/超时状态仍需进一步确认。完整核心 UI 检查清单保持未勾选，直到服务管理、Compose 保存/备份恢复、AI 渠道探针与 Agent 审批链路完成。
 - 先前对本机 zai-openai 与 axonhub 的无凭据 /v1/models 探测返回 HTTP 401 Invalid API key；这仅说明探测没有有效授权，不足以证明上游不可用。需在 UI 中使用已获授权的测试 channel 做真实探针，不要把密钥写入文档或聊天。
 - 当前无可用真实 SSH/TLS 测试节点；在登记非生产节点前，远程故障矩阵保持未勾选。数据库密钥仍仅存本机；异地/另一主机恢复保持未勾选。
+## 2026-11-05 仓库维护审计
+
+- [x] 当前主分支 `main` 提交 `2d1b9aa4050a3e696f00d3c8ff64f14e562184cf` 的 CI 全部 3 个 Job 成功：[run 41840504764](https://github.com/StanlySGY/ComposeOps/actions/runs/41840504764)。包括代码质量/测试/构建与 Playwright 预览、amd64 镜像安装/升级/恢复、ARM64 QEMU 安装/恢复。
+- [x] 同一提交的 Pages 预览工作流成功：[run 41841947965](https://github.com/StanlySGY/ComposeOps/actions/runs/41841947965)。
+- [ ] 六个 Dependabot PR（#18、#19、#20、#21、#23、#32）均须同步最新 main 并重新取得 CI 证据；旧分支 CI 不作为合并依据。依赖安装失败的 PR 必须更新根目录 `package-lock.json`，不得生成子目录 lockfile。详见 [维护审计记录](audits/2026-11-05-maintenance-audit.md)。
+- [ ] 原生 ARM64 硬件验收仍未完成；上面的 ARM64 CI 使用 QEMU/Buildx，不替代真机验收。
+- 本次只核对仓库与 GitHub 记录，没有执行生产环境操作；生产 UI、真实模型/通知、SSH/TLS 远程节点、独立密钥托管和异地恢复仍按本清单其他未勾选项管理。
+
+## 2026-11-05 本地依赖维护回归（非远端 CI）
+
+- [x] 根目录 npm ci 干净安装通过，且仅维护根 package-lock.json。
+- [x] Vite 8.3.5 正式构建与静态预览构建通过。
+- [x] 后端 489 pass / 1 skip；前端 420 pass；Playwright 桌面/移动预览 E2E 35 pass / 3 skip。
+- [x] Playwright 1.64.1 对应 Chromium 已安装并完成预览 E2E；这不替代 GitHub Actions 新 CI。
+- [x] Monaco 0.52.2 与 monaco-yaml 去重为单一实例；真实编辑器预览链路通过。Monaco 0.57 的 Worker RPC 不兼容已被实测，PR #23 暂缓。
+- [ ] 将本地维护分支提交并推送；同步 Dependabot #18/#19/#20/#21/#32 后取得新 CI 结果。#23 需单独解决 Worker 兼容性，不应与其他 PR 一起合并。
+
+上述为本地工作区验证，不代表代码已推送、GitHub PR 已更新或生产环境已部署。

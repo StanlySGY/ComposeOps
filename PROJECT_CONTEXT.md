@@ -1,8 +1,24 @@
 # 📌 ComposeOps - PROJECT_CONTEXT.md
-> **上次更新时间**:2026-10-21 (Asia/Shanghai)
+> **上次更新时间**:2026-11-05 (Asia/Seoul)
 > **当前版本/阶段**:仓库 package version 1.5.1；当前基线以 package.json、CHANGELOG 与 GitHub Actions 为准。
 
-## 0. 2026-10-21 最新运行状态（优先于下方历史快照）
+## 0. 当前代码仓库状态（2026-11-05；与生产环境状态分开）
+
+- **仓库基线**：`StanlySGY/ComposeOps` 默认分支为 `main`，本次审计基线为 `2d1b9aa4050a3e696f00d3c8ff64f14e562184cf`；指定工作区 `/home/sgy/workspace/ComposeOps` 在审计开始时干净，且与 `origin/main` 同步。
+- **当前主分支 CI**：2026-11-04 的 [Actions run 41840504764](https://github.com/StanlySGY/ComposeOps/actions/runs/41840504764) 在该提交上 3 个 Job 全部成功，覆盖 lint/测试/正式与预览构建/Playwright、amd64 安装升级恢复、ARM64 QEMU 安装恢复；[Pages run 41841947965](https://github.com/StanlySGY/ComposeOps/actions/runs/41841947965) 成功。QEMU 不等于原生 ARM64 硬件验收。
+- **依赖 PR 状态**：#18、#19、#20、#21、#23、#32 在本次审计时仍全部 open、未合并。#19/#20/#21 的历史 CI 通过基于旧 base；#18/#32 的历史失败是根 lockfile 不同步；#23 的历史失败发生在旧 workflow 的子目录 lockfile 缓存路径解析阶段。每个 PR 均须同步当前 main 并取得新 CI 证据后才能合并，详见 [2026-11-05 维护审计](docs/audits/2026-11-05-maintenance-audit.md)。
+- **依赖管理约定**：npm workspaces 只维护根目录 `package-lock.json`；不得在 `frontend/` 或 `backend/` 生成独立 lockfile。安装从仓库根目录执行。
+- **本节范围**：这是代码仓库与 GitHub 状态记录，不是生产环境实时检查。本轮没有登录生产 UI、探测生产容器/数据库或执行部署、重启。
+
+## 0.05 本地维护工作区（2026-11-05；未提交、未推送）
+
+- **工作分支**：docs/2026-11-05-repository-hygiene；本地维护改动尚未提交，不能视为 GitHub PR 已更新或合并。
+- **依赖基线**：Vite 8.3.5、Playwright 1.64.1；Monaco 固定为 0.52.2。monaco-yaml 与 monaco-worker-manager 已去重为同一份 Monaco，避免重复实例导致 Worker RPC 失效。
+- **CI Action**：Checkout v7、Docker Login v4、Buildx v4；根级 package-lock.json 是唯一锁文件。
+- **本地回归**：Lint、后端 489 pass/1 skip、前端 420 pass、预览 E2E 35 pass/3 skip、正式构建与预览构建通过。Monaco 0.57 曾在真实浏览器回归中触发 Missing requestHandler，故 PR #23 不纳入本轮升级。
+- **交付边界**：本轮没有 commit、push、合并 PR、部署或重启生产服务；用户后续可按会话交付命令自行提交推送。
+
+## 0.1 生产环境最后一次记录（2026-10-21；不是本轮实时状态）
 - **生产数据库静态加密仍有效**：容器 opsdash 当前 running/healthy；只读状态检查返回 status=encrypted、encryptedHeader=true、keyVerified=true；http://127.0.0.1:28765/health 返回 status=ok、docker=ok。本轮未重启或改写生产服务。
 - **密钥托管仍是未完成项**：密钥文件 /home/sgy/.config/composeops/db-encryption-key 权限 0600，父目录 0700。2026-10-21 已确认本机密钥可用，但尚未验证独立受控/异地密钥托管；不得删除本机密钥，也不要把密钥内容写入 Git、日志或工单。
 - **启动后保留策略历史说明**：2026-10-19 应用启动时记录 aiHistoryDeleted:1，清理了一条超过保留期限的旧 ai_history 记录（id=4，时间 2026-09-19 01:38:07）。这是启动后的历史保留清理，不是加密迁移复制遗漏；迁移前审计已通过。
