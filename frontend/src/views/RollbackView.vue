@@ -305,7 +305,7 @@ async function doRestoreCompose(backup) {
 function restoreVolume(backup) {
   confirmTarget.value = {
     title: '恢复数据卷',
-    message: `确认将卷「${backup.volume}」恢复到 ${formatTime(backup.createdAt)} 的备份?此操作会覆盖当前卷数据。`,
+    message: `确认将卷「${backup.volume}」完整恢复到 ${formatTime(backup.createdAt)} 的快照?此操作会替换卷内全部内容，备份中不存在的文件也会被删除。恢复中途失败时系统会尝试补偿原数据；若补偿也失败，会保留应急备份记录供再次恢复。建议先停止正在写入的容器。`,
     tone: 'danger',
     confirmText: '恢复卷',
   };

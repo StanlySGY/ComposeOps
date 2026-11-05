@@ -94,11 +94,19 @@ test('isolated Docker + protected API: create, verify, download, restore, delete
   assert.equal(volumeList.statusCode, 200, volumeList.body);
   assert.ok(volumeList.json().volumes.some((volume) => volume.name === volumeName && volume.exists === true), volumeList.body);
 
-  const created = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups', headers, payload: { projectId, volume: volumeName } });
+  const [created, concurrentCreated] = await Promise.all([
+    app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups', headers, payload: { projectId, volume: volumeName } }),
+    app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups', headers, payload: { projectId, volume: volumeName } }),
+  ]);
   assert.equal(created.statusCode, 200, created.body);
+  assert.equal(concurrentCreated.statusCode, 200, concurrentCreated.body);
   const backup = created.json();
+  const concurrentBackup = concurrentCreated.json();
   assert.ok(Number.isInteger(backup.id) && backup.id > 0, created.body);
+  assert.ok(Number.isInteger(concurrentBackup.id) && concurrentBackup.id > 0, concurrentCreated.body);
+  assert.notEqual(backup.file, concurrentBackup.file, 'concurrent backups of the same volume must publish unique archive names');
   assert.ok(fs.existsSync(path.join(backupDir, backup.file)), 'backup archive must exist on disk');
+  assert.ok(fs.existsSync(path.join(backupDir, concurrentBackup.file)), 'concurrent backup archive must exist on disk');
 
   const verify = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/verify', headers });
   assert.equal(verify.statusCode, 200, verify.body);
@@ -123,16 +131,69 @@ test('isolated Docker + protected API: create, verify, download, restore, delete
   const reverify = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/verify', headers });
   assert.equal(reverify.statusCode, 200, reverify.body);
 
+  // Fail after the target volume has been cleared; the restore EXIT trap must put the safety snapshot back.
+  await runInVolume("printf 'must-survive-restore-failure\\n' > /data/payload.txt && printf 'keep-after-failure\\n' > /data/keep.txt");
+  let failRestoreExtraction = true;
+  const originalCreateContainer = docker.createContainer.bind(docker);
+  const createContainerMock = t.mock.method(docker, 'createContainer', async (config) => {
+    const command = Array.isArray(config.Cmd) ? String(config.Cmd[2] || '') : '';
+    if (failRestoreExtraction && command.includes('cleanup_restore()')) {
+      failRestoreExtraction = false;
+      const failedCommand = command.replace(`tar xzf "/backup/${backup.file}" -C /src`, 'false');
+      assert.notEqual(failedCommand, command, 'fault injection must target the final restore extraction');
+      return originalCreateContainer({ ...config, Cmd: [...config.Cmd.slice(0, 2), failedCommand] });
+    }
+    return originalCreateContainer(config);
+  });
+  const interruptedRestore = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/restore', headers });
+  assert.equal(interruptedRestore.statusCode, 502, interruptedRestore.body);
+  assert.equal(failRestoreExtraction, false, 'fault injection should run exactly once');
+  await runInVolume("grep -q 'must-survive-restore-failure' /data/payload.txt && grep -q 'keep-after-failure' /data/keep.txt");
+  createContainerMock.mock.restore();
+
+  // If both extraction and compensation fail, retain and register the pre-restore safety archive.
+  await runInVolume("printf 'must-survive-emergency-snapshot\\n' > /data/payload.txt && printf 'emergency-keep\\n' > /data/keep.txt");
+  let failRestoreAndCompensation = true;
+  const emergencyCreateContainerMock = t.mock.method(docker, 'createContainer', async (config) => {
+    const command = Array.isArray(config.Cmd) ? String(config.Cmd[2] || '') : '';
+    if (failRestoreAndCompensation && command.includes('cleanup_restore()')) {
+      failRestoreAndCompensation = false;
+      const failedCommand = command
+        .replace(`tar xzf "/backup/${backup.file}" -C /src`, 'false')
+        .replace('tar xzf "$rollback" -C /src', 'false');
+      assert.notEqual(failedCommand, command, 'fault injection must fail both the requested restore and its compensation');
+      return originalCreateContainer({ ...config, Cmd: [...config.Cmd.slice(0, 2), failedCommand] });
+    }
+    return originalCreateContainer(config);
+  });
+  const failedCompensationRestore = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/restore', headers });
+  assert.equal(failedCompensationRestore.statusCode, 502, failedCompensationRestore.body);
+  assert.equal(failRestoreAndCompensation, false, 'compensation failure injection should run exactly once');
+  emergencyCreateContainerMock.mock.restore();
+
+  const backupsAfterCompensationFailure = await app.inject({ method: 'GET', url: '/api/v1/ops/storage/volume-backups?projectId=' + projectId, headers });
+  assert.equal(backupsAfterCompensationFailure.statusCode, 200, backupsAfterCompensationFailure.body);
+  const emergencyBackup = backupsAfterCompensationFailure.json().backups.find((row) => row.file.startsWith('.composeops-restore-'));
+  assert.ok(emergencyBackup?.id, 'failed compensation must register the preserved safety archive as a recoverable backup');
+  assert.ok(fs.existsSync(path.join(backupDir, emergencyBackup.file)), 'emergency safety archive must remain on disk');
+
+  const emergencyRestore = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + emergencyBackup.id + '/restore', headers });
+  assert.equal(emergencyRestore.statusCode, 200, emergencyRestore.body);
+  await runInVolume("grep -q 'must-survive-emergency-snapshot' /data/payload.txt && grep -q 'emergency-keep' /data/keep.txt");
+  const emergencyDeleted = await app.inject({ method: 'DELETE', url: '/api/v1/ops/storage/volume-backups/' + emergencyBackup.id, headers });
+  assert.equal(emergencyDeleted.statusCode, 200, emergencyDeleted.body);
+  assert.equal(fs.existsSync(path.join(backupDir, emergencyBackup.file)), false, 'emergency safety archive should be removable after recovery');
+
   const downloaded = await app.inject({ method: 'GET', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/download', headers });
   assert.equal(downloaded.statusCode, 200, downloaded.body.slice(0, 200));
   assert.match(String(downloaded.headers['content-type']), /application\/gzip/);
   const diskBytes = fs.readFileSync(path.join(backupDir, backup.file));
   assert.equal(sha256(Buffer.from(downloaded.rawPayload || downloaded.payload, 'binary')), sha256(diskBytes), 'download bytes must match stored archive');
 
-  await runInVolume("printf 'changed-payload\n' > /data/payload.txt");
+  await runInVolume("printf 'changed-payload\n' > /data/payload.txt && printf 'must-disappear-after-restore\n' > /data/stale.txt");
   const restore = await app.inject({ method: 'POST', url: '/api/v1/ops/storage/volume-backups/' + backup.id + '/restore', headers });
   assert.equal(restore.statusCode, 200, restore.body);
-  await runInVolume("grep -q 'composeops-isolated-original-payload' /data/payload.txt");
+  await runInVolume("grep -q 'composeops-isolated-original-payload' /data/payload.txt && test ! -e /data/stale.txt");
 
   const up = await app.inject({ method: 'POST', url: '/api/v1/projects/' + projectId + '/actions', headers, payload: { action: 'up' } });
   assert.equal(up.statusCode, 200, up.body);
@@ -156,9 +217,13 @@ test('isolated Docker + protected API: create, verify, download, restore, delete
   assert.equal(deleted.statusCode, 200, deleted.body);
   assert.equal(deleted.json().ok, true);
   assert.equal(fs.existsSync(path.join(backupDir, backup.file)), false, 'delete API must remove the archive');
+  const concurrentDeleted = await app.inject({ method: 'DELETE', url: '/api/v1/ops/storage/volume-backups/' + concurrentBackup.id, headers });
+  assert.equal(concurrentDeleted.statusCode, 200, concurrentDeleted.body);
+  assert.equal(fs.existsSync(path.join(backupDir, concurrentBackup.file)), false, 'delete API must remove the concurrent archive');
   const listed = await app.inject({ method: 'GET', url: '/api/v1/ops/storage/volume-backups?projectId=' + projectId, headers });
   assert.equal(listed.statusCode, 200, listed.body);
   assert.equal(listed.json().backups.some((row) => row.id === backup.id), false, 'delete API must remove the database record');
+  assert.equal(listed.json().backups.some((row) => row.id === concurrentBackup.id), false, 'delete API must remove the concurrent backup database record');
 });
 
 test.after(async () => {

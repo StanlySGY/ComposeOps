@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-4">
-    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份。</p>
+    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份。运行中的服务若持续写入，tar 快照不保证数据库事务一致；数据库卷请先停写或使用数据库原生备份。</p>
     <div class="flex flex-wrap items-end gap-2">
       <label class="form-grid-label"><span>项目</span>
         <select v-model="projectId" class="input min-h-9! w-56 text-xs" aria-label="选择要备份卷的项目" @change="loadVolumes">
@@ -56,7 +56,7 @@
               <td class="whitespace-nowrap px-3 py-2 text-right">
                 <a :href="api.volumeBackupDownloadUrl(backup.id)" class="inline-flex h-8 w-8 items-center justify-center rounded-md text-cyan-400 transition-colors hover:bg-cyan-500/10 hover:text-cyan-300" title="下载备份" :aria-label="`下载备份 ${backup.file}`"><Download class="h-3.5 w-3.5" /></a>
                 <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-emerald-400 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40" title="验证备份：在一次性临时卷中解包并统计文件数，不会修改原卷" :aria-label="`验证备份 ${backup.file}`" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
-                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-400 transition-colors hover:bg-amber-500/10 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '恢复到卷（会先自动验证备份；仅验证通过后才覆盖现有内容）'" :aria-label="restoringId === backup.id ? `正在恢复 ${backup.volume}` : `恢复卷 ${backup.volume} 的备份`" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-400 transition-colors hover:bg-amber-500/10 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '完整替换卷内容（备份中不存在的文件也会删除）'" :aria-label="restoringId === backup.id ? `正在恢复 ${backup.volume}` : `恢复卷 ${backup.volume} 的备份`" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
                 <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title="删除备份" :aria-label="`删除备份 ${backup.file}`" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
               </td>
             </tr>
@@ -67,7 +67,7 @@
     </div>
 
     <p v-if="backupStatus" class="text-xs leading-5" :role="backupStatusError ? 'alert' : 'status'" :aria-live="backupStatusError ? 'assertive' : 'polite'" aria-atomic="true">{{ backupStatus }}</p>
-    <ConfirmDialog :show="restoreTarget !== null" :busy="restoringId === restoreTarget?.id" title="恢复数据卷" :message="`将先验证 ${restoreTarget?.file} 并在临时卷演练；仅演练通过后才会用 ${restoreTarget?.host || 'local'} 节点上的备份覆盖卷「${restoreTarget?.volume}」的现有内容。若验证失败，将拒绝恢复。建议先停止正在写入的容器。继续?`" tone="warning" confirm-text="验证并恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
+    <ConfirmDialog :show="restoreTarget !== null" :busy="restoringId === restoreTarget?.id" title="完整恢复数据卷" :message="`将先验证 ${restoreTarget?.file} 并在临时卷演练；仅演练通过后才会用 ${restoreTarget?.host || 'local'} 节点上的快照完整替换卷「${restoreTarget?.volume}」的内容。备份中不存在的文件（包括备份后新增的文件）也会被删除。若恢复中途失败，系统会尝试补偿原卷；若补偿也失败，会保留可再次恢复的应急备份记录。建议先停止正在写入的容器。继续?`" tone="warning" confirm-text="验证并完整恢复" @confirm="doRestore" @cancel="restoreTarget = null" />
     <ConfirmDialog :show="deleteTarget !== null" title="删除备份" :message="`删除备份文件 ${deleteTarget?.file}?该操作不可恢复。`" tone="danger" confirm-text="删除" @confirm="doDelete" @cancel="deleteTarget = null" />
   </div>
 </template>

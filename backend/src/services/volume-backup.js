@@ -18,6 +18,7 @@ import { parse as parseYaml } from 'yaml';
 import { getActiveHost, getDockerForHost, getHost } from './docker-hosts.js';
 import { readCompose } from './compose-runner.js';
 import { readWorkspaceCompose } from './compose-workspace.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 import { collectDockerOutput, demuxStream } from '../lib/docker-streams.js';
 import { getSetting, addOperation, addVolumeBackup, listVolumeBackups, getVolumeBackup, deleteVolumeBackupRow, pruneVolumeBackups, updateVolumeBackupVerify } from '../lib/db.js';
 
@@ -131,12 +132,11 @@ function composeReaderForProject(project) {
 }
 
 /** 列出项目可备份卷:解析 compose + 校验卷在当前宿主上存在。 */
-export async function listProjectVolumes(project) {
+export async function listProjectVolumes(project, host = getActiveHost()) {
   const compose = await composeReaderForProject(project)(project);
   const { volumes, error } = parseProjectVolumes(compose.content);
   if (error) throw Object.assign(new Error(error), { statusCode: 400 });
-  const host = getActiveHost();
-  const docker = getDockerForHost(host.id);
+  const docker = getDockerForHost(host?.id || 'local');
   const existing = new Set();
   try {
     const all = await docker.listVolumes();
@@ -147,7 +147,13 @@ export async function listProjectVolumes(project) {
 
 function safeFileName(projectName, volume, timestamp = Date.now()) {
   const clean = (value) => String(value || 'x').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
-  return `${clean(projectName)}_${clean(volume)}_${timestamp}.tar.gz`;
+  return `${clean(projectName)}_${clean(volume)}_${timestamp}_${randomBytes(8).toString('hex')}.tar.gz`;
+}
+
+/** 同一项目操作与同一宿主上的共享卷操作都必须串行化。 */
+function withVolumeOperationLock(projectId, hostId, volume, task) {
+  return withProjectOperationLock(projectId, () =>
+    withProjectOperationLock(`volume:${hostId}:${volume}`, task));
 }
 
 function assertBackupFileName(file) {
@@ -245,37 +251,69 @@ export async function createVolumeBackup(project, volumeName) {
   volumeName = assertVolumeName(volumeName);
   const host = getActiveHost();
   const hostId = host?.id || 'local';
-  const dir = getBackupDir(host);
-  const docker = getDockerForHost(hostId);
-  if (isLocalHost(host)) await mkdir(dir, { recursive: true });
-  const file = safeFileName(project.projectName, volumeName);
-  const started = Date.now();
-  const { exitCode, output } = await runHelper(
-    docker,
-    `tar czf "/backup/${file}" -C /src . && du -b "/backup/${file}" | cut -f1`,
-    await volumeBinds(volumeName, 'ro', host, docker),
-  ).catch((error) => {
-    throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
-  });
-  if (exitCode !== 0) {
-    throw Object.assign(new Error(`卷备份失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
-  }
-  let bytes = Number(output.split('\n').pop()) || 0;
-  if (!bytes && isLocalHost(host)) {
-    bytes = (await stat(path.join(dir, file)).catch(() => null))?.size || 0;
-  }
-  const id = addVolumeBackup({ projectId: project.id, projectName: project.projectName, volume: volumeName, file, bytes, host: hostId });
-  addOperation({ action: 'volume.backup', status: 'success', detail: `${project.projectName}/${volumeName} → ${file}` });
-  // 清理同卷超限的旧备份(记录+文件)
-  for (const stale of pruneVolumeBackups(project.id, volumeName, { host: hostId })) {
-    try {
-      await removeBackupFile(stale.file, stale.host);
-      deleteVolumeBackupRow(stale.id);
-    } catch (error) {
-      console.error('[volume-backup] 旧备份清理失败,保留记录供重试:', error.message);
+  return withVolumeOperationLock(project?.id, hostId, volumeName, async () => {
+    const volumes = await listProjectVolumes(project, host);
+    const match = volumes.find((item) => item.name === volumeName);
+    if (!match) throw Object.assign(new Error('该卷未在项目 Compose 配置中声明'), { statusCode: 404 });
+    if (match.skip) throw Object.assign(new Error(match.skip), { statusCode: 400 });
+    if (match.exists !== true) {
+      const missing = match.exists === false;
+      throw Object.assign(
+        new Error(missing ? '该卷尚未在当前宿主上创建' : '无法确认该卷在当前宿主上存在，已拒绝自动创建空卷'),
+        { statusCode: missing ? 404 : 409 },
+      );
     }
-  }
-  return { id, file, bytes, durationMs: Date.now() - started };
+
+    const dir = getBackupDir(host);
+    const docker = getDockerForHost(hostId);
+    if (isLocalHost(host)) await mkdir(dir, { recursive: true });
+    const file = safeFileName(project.projectName, volumeName);
+    const temporaryFile = `.composeops-volume-${randomBytes(12).toString('hex')}.partial`;
+    const started = Date.now();
+    const command = [
+      'set -eu',
+      `tmp="/backup/${temporaryFile}"`,
+      `trap 'rm -f "$tmp"' EXIT`,
+      'tar czf "$tmp" -C /src .',
+      'size_output=$(du -b "$tmp")',
+      'bytes=$(printf "%s\\n" "$size_output" | cut -f1)',
+      `mv "$tmp" "/backup/${file}"`,
+      `printf '%s\\n' "$bytes"`,
+    ].join('; ');
+    const { exitCode, output } = await runHelper(
+      docker,
+      command,
+      await volumeBinds(volumeName, 'ro', host, docker),
+    ).catch((error) => {
+      throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
+    });
+    if (exitCode !== 0) {
+      throw Object.assign(new Error(`卷备份失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
+    }
+    const bytes = Number(output.split('\n').pop()) || (isLocalHost(host)
+      ? (await stat(path.join(dir, file)).catch(() => null))?.size || 0
+      : 0);
+    let id;
+    try {
+      id = addVolumeBackup({ projectId: project.id, projectName: project.projectName, volume: volumeName, file, bytes, host: hostId });
+    } catch (error) {
+      await removeBackupFile(file, hostId).catch((cleanupError) => {
+        console.error('[volume-backup] 数据库写入失败且新备份文件清理失败:', cleanupError.message);
+      });
+      throw error;
+    }
+    addOperation({ action: 'volume.backup', status: 'success', detail: `${project.projectName}/${volumeName} → ${file}` });
+    // 清理同卷超限的旧备份(记录+文件)
+    for (const stale of pruneVolumeBackups(project.id, volumeName, { host: hostId })) {
+      try {
+        await removeBackupFile(stale.file, stale.host);
+        deleteVolumeBackupRow(stale.id);
+      } catch (error) {
+        console.error('[volume-backup] 旧备份清理失败,保留记录供重试:', error.message);
+      }
+    }
+    return { id, file, bytes, durationMs: Date.now() - started };
+  });
 }
 
 async function removeBackupFile(file, hostId = 'local') {
@@ -288,28 +326,91 @@ async function removeBackupFile(file, hostId = 'local') {
 
 /** 恢复:把备份 tar 解回卷(覆盖现有内容)。 */
 export async function restoreVolumeBackup(id) {
-  const record = getVolumeBackup(id);
-  if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
-  const file = assertBackupFileName(record.file);
-  const volume = assertVolumeName(record.volume);
-  const host = hostForId(record.host);
-  const docker = getDockerForHost(host.id);
-  // Verify the entire gzip/tar archive and exercise extraction in a temporary volume before touching the target.
-  // A corrupt archive must never be allowed to partially overwrite the real volume before tar reports an error.
-  await verifyVolumeBackup(id);
+  const initial = getVolumeBackup(id);
+  if (!initial) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+  const initialVolume = assertVolumeName(initial.volume);
+  const initialHost = hostForId(initial.host);
+  return withVolumeOperationLock(initial.projectId, initialHost.id, initialVolume, async () => {
+    const record = getVolumeBackup(id);
+    if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+    const file = assertBackupFileName(record.file);
+    const volume = assertVolumeName(record.volume);
+    const host = hostForId(record.host);
+    const docker = getDockerForHost(host.id);
 
-  const { exitCode, output } = await runHelper(
-    docker,
-    `tar xzf "/backup/${file}" -C /src`,
-    await volumeBinds(volume, 'rw', host, docker),
-  ).catch((error) => {
-    throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
+    // Verify the whole archive and extraction in a disposable volume before touching the target.
+    await verifyVolumeBackup(id);
+
+    // The safety archive lives beside the requested archive, outside the volume being replaced.
+    // If replacement fails, the EXIT trap clears any partial restore and puts the original data back.
+    const safetyFile = `.composeops-restore-${record.id}-${randomBytes(8).toString('hex')}.tar.gz`;
+    const command = [
+      'set -eu',
+      `rollback="/backup/${safetyFile}"`,
+      'snapshot_ready=0',
+      'committed=0',
+      'cleanup_restore() {',
+      '  status=$?',
+      '  trap - EXIT',
+      '  if [ "$snapshot_ready" -eq 1 ] && [ "$committed" -eq 0 ]; then',
+      '    echo "卷恢复失败，正在补偿恢复原卷内容" >&2',
+      '    if ! find /src -mindepth 1 -maxdepth 1 -exec rm -rf {} +; then',
+      '      echo "ROLLBACK_FAILED: 无法清理部分恢复内容，原卷安全备份保留在 $rollback" >&2',
+      '      exit 90',
+      '    fi',
+      '    if ! tar xzf "$rollback" -C /src; then',
+      '      echo "ROLLBACK_FAILED: 原卷安全备份保留在 $rollback" >&2',
+      '      exit 90',
+      '    fi',
+      '  fi',
+      '  rm -f "$rollback" || true',
+      '  exit "$status"',
+      '}',
+      'trap cleanup_restore EXIT',
+      'tar czf "$rollback" -C /src .',
+      'snapshot_ready=1',
+      'find /src -mindepth 1 -maxdepth 1 -exec rm -rf {} +',
+      `tar xzf "/backup/${file}" -C /src`,
+      'committed=1',
+    ].join('\n');
+
+    let result;
+    try {
+      result = await runHelper(docker, command, await volumeBinds(volume, 'rw', host, docker));
+    } catch (error) {
+      const message = `helper 容器执行失败:${error.message}`;
+      addOperation({ action: 'volume.restore', status: 'failed', detail: `${record.projectName}/${record.volume} ← ${record.file}: ${message}` });
+      throw Object.assign(new Error(message), { statusCode: 502 });
+    }
+    if (result.exitCode !== 0) {
+      const compensationFailed = result.output.includes('ROLLBACK_FAILED');
+      let recoveryBackupId = null;
+      if (compensationFailed) {
+        try {
+          const safetyBytes = isLocalHost(host)
+            ? (await stat(path.join(getBackupDir(host), safetyFile)).catch(() => null))?.size || 0
+            : 0;
+          recoveryBackupId = addVolumeBackup({
+            projectId: record.projectId,
+            projectName: record.projectName,
+            volume: record.volume,
+            file: safetyFile,
+            bytes: safetyBytes,
+            host: host.id,
+          });
+        } catch (registrationError) {
+          console.error('[volume-backup] 卷恢复补偿失败，安全包未能登记为可下载备份:', registrationError.message);
+        }
+      }
+      const message = compensationFailed
+        ? `卷恢复失败(exit ${result.exitCode})，且原数据补偿恢复失败；安全包 ${safetyFile}${recoveryBackupId ? ` 已登记为备份记录 #${recoveryBackupId}，可下载并再次验证恢复` : ` 保留在备份目录 ${getBackupDir(host)}，但未能登记为可下载备份`}`
+        : `卷恢复失败(exit ${result.exitCode})；已尝试补偿恢复原卷数据:${result.output.slice(0, 200)}`;
+      addOperation({ action: 'volume.restore', status: 'failed', detail: `${record.projectName}/${record.volume} ← ${record.file}: ${message}` });
+      throw Object.assign(new Error(message), { statusCode: 502 });
+    }
+    addOperation({ action: 'volume.restore', status: 'success', detail: `${record.projectName}/${record.volume} ← ${record.file}` });
+    return { ok: true, volume: record.volume, replaced: true };
   });
-  if (exitCode !== 0) {
-    throw Object.assign(new Error(`卷恢复失败(exit ${exitCode}):${output.slice(0, 200)}`), { statusCode: 502 });
-  }
-  addOperation({ action: 'volume.restore', status: 'success', detail: `${record.projectName}/${record.volume} ← ${record.file}` });
-  return { ok: true, volume: record.volume };
 }
 
 /**
@@ -319,17 +420,20 @@ export async function restoreVolumeBackup(id) {
  * "能还原的备份才叫备份"——演练结果随备份记录持久化,供 UI 展示可信度。
  */
 export async function verifyVolumeBackup(id) {
-  const record = getVolumeBackup(id);
-  if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
-  const file = assertBackupFileName(record.file);
-  const host = hostForId(record.host);
-  const docker = getDockerForHost(host.id);
-  const started = Date.now();
-  const fail = (message) => {
-    updateVolumeBackupVerify(record.id, { status: 'failed', files: null });
-    addOperation({ action: 'volume.verify', status: 'failed', detail: `${record.projectName}/${record.volume} ← ${record.file}: ${message}` });
-    return Object.assign(new Error(message), { statusCode: 502 });
-  };
+  const initial = getVolumeBackup(id);
+  if (!initial) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+  return withProjectOperationLock(initial.projectId, async () => {
+    const record = getVolumeBackup(id);
+    if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+    const file = assertBackupFileName(record.file);
+    const host = hostForId(record.host);
+    const docker = getDockerForHost(host.id);
+    const started = Date.now();
+    const fail = (message) => {
+      updateVolumeBackupVerify(record.id, { status: 'failed', files: null });
+      addOperation({ action: 'volume.verify', status: 'failed', detail: `${record.projectName}/${record.volume} ← ${record.file}: ${message}` });
+      return Object.assign(new Error(message), { statusCode: 502 });
+    };
 
   // ① 压缩包完整性:列出全部条目(gzip CRC 校验贯穿整个解压过程)
   const listing = await runHelper(
@@ -361,18 +465,23 @@ export async function verifyVolumeBackup(id) {
     updateVolumeBackupVerify(record.id, { status, files });
     addOperation({ action: 'volume.verify', status: 'success', detail: `${record.projectName}/${record.volume} ← ${file}:${files} 个文件` });
     return { ok: true, status, entries, files, sizeHuman, durationMs: Date.now() - started };
-  } finally {
-    await docker.getVolume(tmpVolume).remove().catch(() => {});
-  }
+    } finally {
+      await docker.getVolume(tmpVolume).remove().catch(() => {});
+    }
+  });
 }
 
 export async function deleteVolumeBackup(id) {
-  const record = getVolumeBackup(id);
-  if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
-  await removeBackupFile(record.file, record.host);
-  deleteVolumeBackupRow(id);
-  addOperation({ action: 'volume.backup.delete', status: 'success', detail: `${record.projectName}/${record.volume} × ${record.file}` });
-  return { ok: true };
+  const initial = getVolumeBackup(id);
+  if (!initial) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+  return withProjectOperationLock(initial.projectId, async () => {
+    const record = getVolumeBackup(id);
+    if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
+    await removeBackupFile(record.file, record.host);
+    deleteVolumeBackupRow(id);
+    addOperation({ action: 'volume.backup.delete', status: 'success', detail: `${record.projectName}/${record.volume} × ${record.file}` });
+    return { ok: true };
+  });
 }
 
 export async function listBackups(projectId = '') {

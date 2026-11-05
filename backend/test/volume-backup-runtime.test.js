@@ -12,6 +12,28 @@ const { getActivityDocker } = await import('../src/services/docker-hosts.js');
 const { setSetting, addVolumeBackup, getVolumeBackup } = await import('../src/lib/db.js');
 setSetting('backup.volume_dir', tempDir);
 const docker = getActivityDocker();
+const projectDir = path.join(tempDir, 'project');
+const composeFile = path.join(projectDir, 'compose.yaml');
+fs.mkdirSync(projectDir, { recursive: true });
+fs.writeFileSync(composeFile, [
+  'services:',
+  '  app:',
+  '    image: busybox:1.36',
+  '    volumes:',
+  '      - data:/data',
+  'volumes:',
+  '  data:',
+  '    external: true',
+  '    name: test-volume',
+  '',
+].join('\n'));
+const project = {
+  id: 'test-project',
+  projectName: 'test-project',
+  composeMode: 'direct',
+  workingDir: projectDir,
+  composeFiles: [composeFile],
+};
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
 function frame(text) {
@@ -34,6 +56,7 @@ for (const mode of ['buffer', 'stream']) {
   test(`卷备份接受 Docker logs 的 ${mode} 响应,读取完整输出并移除 helper`, async (t) => {
     const removed = [];
     t.mock.method(docker, 'getImage', () => ({ inspect: async () => ({}) }));
+    t.mock.method(docker, 'listVolumes', async () => ({ Volumes: [{ Name: 'test-volume' }] }));
     t.mock.method(docker, 'createContainer', async () => ({
       start: async () => {}, wait: async () => ({ StatusCode: 0 }),
       logs: async () => {
@@ -44,8 +67,38 @@ for (const mode of ['buffer', 'stream']) {
       },
       remove: async () => removed.push(true),
     }));
-    const record = await createVolumeBackup({ id: 'test-project', projectName: 'test-project' }, 'test-volume');
+    const record = await createVolumeBackup(project, 'test-volume');
     assert.equal(record.bytes, 123);
     assert.equal(removed.length, 1);
   });
 }
+
+test('Agent/service 不能备份未在当前项目 Compose 中声明的其他数据卷', async (t) => {
+  t.mock.method(docker, 'listVolumes', async () => ({ Volumes: [{ Name: 'foreign-volume' }, { Name: 'test-volume' }] }));
+  let helperStarted = false;
+  t.mock.method(docker, 'createContainer', async () => {
+    helperStarted = true;
+    throw new Error('helper must not run for a foreign volume');
+  });
+
+  await assert.rejects(
+    () => createVolumeBackup(project, 'foreign-volume'),
+    (error) => error.statusCode === 404 && /未在项目 Compose/.test(error.message),
+  );
+  assert.equal(helperStarted, false, 'foreign volume contents must never be mounted into the backup helper');
+});
+
+test('卷备份拒绝自动创建已从 Docker 宿主消失的命名卷', async (t) => {
+  t.mock.method(docker, 'listVolumes', async () => ({ Volumes: [] }));
+  let helperStarted = false;
+  t.mock.method(docker, 'createContainer', async () => {
+    helperStarted = true;
+    throw new Error('helper must not auto-create a missing volume');
+  });
+
+  await assert.rejects(
+    () => createVolumeBackup(project, 'test-volume'),
+    (error) => error.statusCode === 404 && /尚未在当前宿主上创建/.test(error.message),
+  );
+  assert.equal(helperStarted, false, 'missing source volume must not be implicitly created by Docker bind semantics');
+});

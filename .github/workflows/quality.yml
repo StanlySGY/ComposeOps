@@ -62,6 +62,8 @@ jobs:
         run: node scripts/image-smoke.mjs composeops:ci-test
       - name: Compose multi-file rollback and failure compensation
         run: node scripts/compose-recovery-integration.mjs
+      - name: Volume backup and full-restore failure compensation
+        run: COMPOSEOPS_DOCKER_ACCEPTANCE=1 node --test --test-concurrency=1 backend/test/volume-backup-api.integration.test.js
       - name: Upgrade from supported baseline
         run: node scripts/image-smoke.mjs composeops:ci-test stanly1997/opsdash:1.4.0
   image-arm64:
