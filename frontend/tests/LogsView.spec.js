@@ -69,23 +69,19 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(wrapper.get('select[aria-label="按日志级别过滤"]').element.value).toBe('error');
   });
 
-  it('来自服务列表的日志页提供明确返回入口', async () => {
+  it('来自服务列表的来源参数供统一导航读取', async () => {
     await start('/logs?projectId=p&containerId=c&from=services');
-    const backButton = wrapper.findAll('button').find(button => button.text().includes('返回服务列表'));
-    expect(backButton).toBeTruthy();
-    await backButton.trigger('click');
-    await flushPromises();
-    expect(router.currentRoute.value.name).toBe('services');
+    expect(router.currentRoute.value.query.from).toBe('services');
+    expect(wrapper.findAll('button').some(button => button.text().includes('返回'))).toBe(false);
   });
 
-  it('通过通用日志导航重新进入时仍保留原始来源返回入口', async () => {
+  it('通过通用日志导航重新进入时保留日志上下文而不重写当前导航', async () => {
     await start('/logs?projectId=p&containerId=c&from=services');
     await router.push('/services');
     await flushPromises();
     await router.push('/logs');
     await flushPromises();
 
-    expect(wrapper.findAll('button').some(button => button.text().includes('返回服务列表'))).toBe(true);
     expect(router.currentRoute.value.query).toEqual({});
     expect(wrapper.get('select[aria-label="选择日志项目"]').element.value).toBe('p');
   });

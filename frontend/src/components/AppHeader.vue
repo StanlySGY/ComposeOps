@@ -81,6 +81,7 @@ import { api, bumpHostEpoch } from '../api/client.js';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
+import { pageDetails } from '../lib/navigation.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -144,8 +145,7 @@ const quickProjects = computed(() => {
     .filter((project) => !query || [project.projectName, project.owner, project.workingDir].some((value) => String(value || '').toLocaleLowerCase().includes(query)))
     .slice(0, 20);
 });
-const pageNames = { dashboard: '运维总览', services: '服务总览', compose: 'Compose 配置', logs: '实时日志', shell: '容器终端', agent: 'AI 智能运维 Agent', 'agent-history': 'Agent 执行历史', inspection: 'AI 巡检中心', monitor: '实时监控', review: '变更与回滚', events: '事件中心', resources: '存储清理', cron: '定时任务', gitops: 'GitOps', cost: '成本分析', topology: '服务拓扑', 'ops-center': '任务中心', 'maintenance-plan': '运维计划', 'node-groups': '节点组管理', cmdb: '资产中心', workflows: '工作流', marketplace: '应用市场', settings: '系统设置' };
-const currentPage = computed(() => pageNames[route.name] || '运维控制台');
+const currentPage = computed(() => pageDetails(route).label);
 const envProjects = ref([]);
 const appBlueprints = ref([]);
 const baseCommands = [
@@ -164,6 +164,7 @@ const baseCommands = [
   { to: '/topology', label: '服务拓扑', description: '查看服务依赖、端口和数据卷关系', icon: Layers, category: 'topology dependencies graph 拓扑 依赖' },
   { to: '/agent/history', label: 'Agent 执行历史', description: '查看工具调用、执行结果与 token 用量', icon: History, category: 'agent history usage 历史 用量' },
   { to: '/ops-center', label: '任务中心', description: '统一查看 Agent、后台任务、工作流、事件、审批和执行结果', icon: Play, category: 'operations command center jobs tasks 运维 任务 agent approval' },
+  { to: '/tickets', label: '长期任务', description: '跟踪持续排障、处置进度和任务记录', icon: Clock3, category: 'ticket task 长期 任务 跟进' },
   { to: '/maintenance-plan', label: '运维计划', description: '创建并管理可复用的定时备份、镜像更新和 AI 巡检计划', icon: Clock3, category: 'maintenance schedule 运维 计划 backup images inspection' },
   { to: '/workflows', label: '工作流', description: '创建可复用流程并处理待审批任务', icon: Layers, category: 'workflow automation 自动化 审批' },
   { to: '/cron', label: '定时任务', description: '自动备份、清理与镜像检查', icon: History, category: 'cron schedule 定时 计划 备份' },

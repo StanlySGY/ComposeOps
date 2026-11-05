@@ -64,6 +64,39 @@ async function mountSettings() {
 }
 
 describe('设置页面表单可访问性', () => {
+  it('偏好读取完成前不能保存默认值，其他面板慢加载不阻塞偏好', async () => {
+    let finishPreferences;
+    let finishMounts;
+    mocks.api.getPreferences.mockImplementationOnce(() => new Promise(resolve => { finishPreferences = resolve; }));
+    mocks.api.getMountPlan.mockImplementationOnce(() => new Promise(resolve => { finishMounts = resolve; }));
+    await mountSettings();
+    const save = () => wrapper.findAll('button').find(button => button.text().trim() === '保存偏好');
+    expect(save().element.disabled).toBe(true);
+    await save().trigger('click');
+    expect(mocks.api.savePreferences).not.toHaveBeenCalled();
+    finishPreferences({ refreshInterval: 10, logTail: 300 });
+    await flushPromises();
+    expect(save().element.disabled).toBe(false);
+    await wrapper.get('input[aria-label="日志默认行数"]').setValue(150);
+    await save().trigger('click');
+    await flushPromises();
+    expect(mocks.api.savePreferences).toHaveBeenCalledWith({ refreshInterval: 10, logTail: 150 });
+    finishMounts({ projects: [], summary: {} });
+    await flushPromises();
+    expect(wrapper.get('input[aria-label="日志默认行数"]').element.value).toBe('150');
+  });
+
+  it('偏好读取失败后保留禁用状态，重试成功恢复编辑', async () => {
+    mocks.api.getPreferences.mockRejectedValueOnce(new Error('连接失败'));
+    await mountSettings();
+    expect(wrapper.text()).toContain('读取偏好失败：连接失败');
+    expect(wrapper.findAll('button').find(button => button.text().trim() === '保存偏好').element.disabled).toBe(true);
+    await wrapper.findAll('button').find(button => button.text().trim() === '重试').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('读取偏好失败');
+    expect(wrapper.findAll('button').find(button => button.text().trim() === '保存偏好').element.disabled).toBe(false);
+  });
+
   it('为偏好、密码和联网检索控件提供稳定的可访问名称', async () => {
     await mountSettings();
     expect(wrapper.get('input[aria-label="自动刷新间隔（秒）"]').exists()).toBe(true);

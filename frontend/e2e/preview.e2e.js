@@ -17,7 +17,7 @@ const routes = {
   shell: '容器终端', monitor: '实时监控', resources: '存储清理', settings: '设置', topology: '服务拓扑中心', events: '事件中心',
   inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': 'Autonomous Ops', workflows: '工作流中心',
   cron: '定时任务', gitops: 'GitOps 集成', review: '变更与回滚', cmdb: '资产中心 (CMDB)', 'node-groups': '节点组管理',
-  marketplace: '应用市场', cost: '成本分析',
+  marketplace: '应用市场', cost: '成本分析', tickets: '长期运维任务',
 };
 test('真实应用导航和全部页面可访问，没有后端流量或渲染错误', async ({ page }) => {
   test.setTimeout(60000);
@@ -494,10 +494,10 @@ test('服务页进入日志再返回，筛选、展开、滚动与日志上下�
   const scrollTop = await page.locator('.app-main').evaluate(el => el.scrollTop);
   await logLink.click();
   await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回服务总览' })).toBeVisible();
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
   await page.getByRole('textbox', { name: '搜索和过滤实时日志' }).fill('ENOTFOUND');
-  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await page.getByRole('button', { name: '返回服务总览' }).click();
   await expect(page.getByRole('heading', { name: '服务总览', exact: true })).toBeVisible();
   await expect(search).toHaveValue('wiki-api');
   await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
@@ -506,10 +506,10 @@ test('服务页进入日志再返回，筛选、展开、滚动与日志上下�
   // 通过侧栏普通“日志”入口不带 query 重进,应保留项目上下文和原始来源。
   await page.getByRole('link', { name: '日志', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回服务总览' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: '选择日志项目' })).toHaveValue('knowledge-base');
   await expect(page.getByRole('textbox', { name: '搜索和过滤实时日志' })).toHaveValue('ENOTFOUND');
-  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await page.getByRole('button', { name: '返回服务总览' }).click();
   await expect(search).toHaveValue('wiki-api');
   await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
 });

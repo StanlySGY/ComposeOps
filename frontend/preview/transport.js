@@ -94,6 +94,8 @@ export async function previewFetch(input, options = {}) {
     '/ai/agent/tasks': { tasks: [] },
     '/ai/agent/feedback': { feedback: [] },
     '/jobs': { jobs: [...jobs.values()] },
+    '/ops-tickets': { tickets: [], stats: { open: 0, blocked: 0, review: 0, terminal: 0 } },
+    '/ops-tickets/worker/status': { running: false, mode: 'disabled' },
     '/cron': { jobs: [] }, '/cron/history': { history: [] },
     '/gitops': { repos: [] }, '/gitops/drift': { repos: [], summary: {} },
     '/metrics/alerts': { alerts: [] }, '/metrics/historical': { data: [], metrics: [] },

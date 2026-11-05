@@ -15,6 +15,19 @@ import {
 } from '../services/marketplace.js';
 import { addOperation } from '../lib/db.js';
 
+// An empty object schema serializes the created/updated template as {}. Keep
+// the public template fields so clients can immediately edit or deploy it.
+const templateResponse = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' }, name: { type: 'string' }, category: { type: 'string' },
+    description: { type: 'string' }, author: { type: 'string' },
+    createdAt: { type: 'string' }, updatedAt: { type: 'string' },
+    defaultCompose: { type: 'string' },
+    envSchema: { type: 'array', items: { type: 'object', additionalProperties: true } },
+  },
+};
+
 export default async function marketplaceRoutes(fastify) {
   // 获取所有模板
   fastify.get('/templates', {
@@ -150,7 +163,7 @@ export default async function marketplaceRoutes(fastify) {
         200: {
           type: 'object',
           properties: {
-            template: { type: 'object' }
+            template: templateResponse
           }
         }
       }
@@ -190,7 +203,7 @@ export default async function marketplaceRoutes(fastify) {
         200: {
           type: 'object',
           properties: {
-            template: { type: 'object' }
+            template: templateResponse
           }
         }
       }

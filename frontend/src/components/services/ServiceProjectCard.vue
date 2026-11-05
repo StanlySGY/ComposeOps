@@ -3,10 +3,10 @@
        与 z-index 无关,菜单层级再高也逃不出去)。这里也不能用 isolate 代替 —— 那会让本卡片
        成为独立层叠上下文,菜单反而被后面的兄弟卡片盖住。卡片内各子元素自身不触及圆角,
        无需裁剪。 -->
-  <article :id="`project-${project.id}`" class="card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused }">
+  <article :id="`project-${project.id}`" class="card service-project-card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused }">
     <header class="service-project-card__header min-h-16 flex items-center gap-1 px-2 md:px-4">
       <input type="checkbox" class="ml-2 accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @click.stop @change="$emit('toggle-select')" />
-      <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" @click="toggleFavorite(project)">
+      <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" :aria-pressed="!!project.favorite" :disabled="favoriteSaving" @click="toggleFavorite(project)">
         <Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-amber-400' : ''" />
       </button>
       <button class="service-project-card__toggle min-w-0 flex-1 self-stretch flex items-center gap-3 text-left px-1" :aria-expanded="expanded" @click="$emit('toggle-expand')">
@@ -89,10 +89,10 @@
               <div v-if="container.stoppedAt || container.startedAt" class="text-muted text-[11px]">{{ containerStateHint(container) }}</div>
             </div>
             <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
-            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" aria-label="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
+            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" aria-label="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" aria-label="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" aria-label="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
           </div>
 
           <!-- 移动端触控友好卡片模式 -->
@@ -162,6 +162,7 @@ import WebUiLauncher from './WebUiLauncher.vue';
 import SparklineChart from '../common/SparklineChart.vue';
 import { api, streamProjectStats } from '../../api/client.js';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
+import { useToastStore } from '../../stores/toast.js';
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -174,6 +175,8 @@ const props = defineProps({
 });
 const emit = defineEmits(['toggle-expand', 'toggle-select', 'action', 'activity', 'env', 'db-dump', 'upgrade', 'refresh']);
 const stopConfirm = ref(false);
+const favoriteSaving = ref(false);
+const toast = useToastStore();
 
 const metrics = ref({});
 const updateInfo = ref(null);
@@ -329,7 +332,18 @@ function trigger(action) {
   emit('action', action);
 }
 function confirmStop() { stopConfirm.value = false; if (!locked.value) emit('action', 'stop'); }
-async function toggleFavorite(project) { project.favorite = !project.favorite; await api.saveProjectPreference(project.id, { favorite: project.favorite }); emit('refresh'); }
+async function toggleFavorite(project) {
+  if (favoriteSaving.value) return;
+  favoriteSaving.value = true;
+  const favorite = !project.favorite;
+  try {
+    await api.saveProjectPreference(project.id, { favorite });
+    project.favorite = favorite;
+    emit('refresh');
+  } catch (error) {
+    toast.error(`收藏未保存：${error.message}`);
+  } finally { favoriteSaving.value = false; }
+}
 async function editNote(project) {
   const note = window.prompt('项目备注（最多 500 字）', project.note || '');
   if (note === null) return;

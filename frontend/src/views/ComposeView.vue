@@ -4,7 +4,6 @@
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
       <div class="page-actions compose-toolbar-actions">
         <div class="compose-toolbar-group" role="group" aria-label="项目与配置文件">
-        <button class="btn-secondary" title="返回服务总览" @click="router.push('/services')"><ArrowLeft class="w-4 h-4" />返回</button>
         <select :value="projectId" class="input min-w-52" aria-label="选择 Compose 项目" :disabled="saving || previewLoading || hostStale" @change="selectProject($event.target.value); $event.target.value = projectId"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
         <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" :disabled="saving || previewLoading || hostStale" @click="selectProject('')"><X class="w-4 h-4" /></button>
         <select v-if="project?.composeFiles.length > 1" :value="fileIndex" class="input" aria-label="选择 Compose 配置文件" :disabled="saving || previewLoading || hostStale" @change="selectFile($event)"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
@@ -172,7 +171,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
-import { AlignLeft, ArrowLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
+import { AlignLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
 import DockerRunConverter from '../components/DockerRunConverter.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import { diffLines } from '../lib/diff.js';

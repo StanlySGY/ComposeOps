@@ -94,6 +94,36 @@ afterEach(() => {
 });
 
 describe('OpsTicketsView long-lived operations workspace', () => {
+  it('任务和标签页写入地址，离开后重新进入能恢复同一详情', async () => {
+    await wrapper.findAll('[role="tab"]').find(item => item.text().includes('报告验收')).trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.query).toEqual({ ticket: 'opt-1', tab: 'reports' });
+    const source = router.currentRoute.value.fullPath;
+    wrapper.unmount(); wrapper = null;
+    await router.push('/ops-center');
+    await router.push(source);
+    wrapper = mount(OpsTicketsView, { global: { plugins: [router] } });
+    await flushPromises();
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain('报告验收');
+    expect(api.getOpsTicket).toHaveBeenLastCalledWith('opt-1');
+  });
+
+  it('快速切换任务时迟到的详情不能覆盖当前任务', async () => {
+    const two = { ...ticket, id: 'opt-2', title: '第二个任务' };
+    const three = { ...ticket, id: 'opt-3', title: '第三个任务' };
+    api.getOpsTickets.mockResolvedValue({ tickets: [ticket, two, three], stats: {} });
+    await wrapper.get('button').trigger('click'); await flushPromises();
+    let resolveTwo;
+    api.getOpsTicket.mockImplementation(id => id === 'opt-2' ? new Promise(resolve => { resolveTwo = resolve; }) : Promise.resolve({ ...structuredClone(detail), ticket: three }));
+    await wrapper.findAll('aside button').find(button => button.text().includes(two.title)).trigger('click');
+    await wrapper.findAll('aside button').find(button => button.text().includes(three.title)).trigger('click');
+    await flushPromises();
+    resolveTwo({ ...structuredClone(detail), ticket: two }); await flushPromises();
+    expect(wrapper.findAll('h2').map(heading => heading.text())).toContain(three.title);
+    expect(wrapper.findAll('h2').map(heading => heading.text())).not.toContain(two.title);
+    expect(router.currentRoute.value.query.ticket).toBe('opt-3');
+  });
+
   it('loads independent Tickets and presents Mandates, Assignments and Effect states', () => {
     expect(wrapper.text()).toContain('长期运维任务');
     expect(wrapper.text()).toContain(ticket.title);

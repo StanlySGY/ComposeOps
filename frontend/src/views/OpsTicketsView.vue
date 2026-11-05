@@ -64,7 +64,7 @@
           <p class="mt-1 text-xs text-surface-500">创建 Ticket 后，执行记录将不再依赖某一个聊天会话。</p>
         </div>
         <div v-else class="max-h-[72vh] overflow-y-auto">
-          <button v-for="item in tickets" :key="item.id" class="block w-full border-b border-surface-800/80 p-3 text-left transition hover:bg-surface-800/30" :class="{ 'bg-surface-800/55': selectedTicketId === item.id }" @click="selectTicket(item.id)">
+          <button v-for="item in tickets" :key="item.id" class="block w-full border-b border-surface-800/80 p-3 text-left transition hover:bg-surface-800/30 disabled:opacity-50" :class="{ 'bg-surface-800/55': selectedTicketId === item.id }" :disabled="saving" :aria-current="selectedTicketId === item.id ? 'true' : undefined" @click="selectTicket(item.id)">
             <div class="flex items-start justify-between gap-2">
               <span class="min-w-0 text-sm font-semibold text-surface-100">{{ item.title }}</span>
               <span class="status-badge shrink-0" :class="ticketTone(item.status)">{{ ticketLabel(item.status) }}</span>
@@ -80,7 +80,8 @@
       </aside>
 
       <div class="min-w-0 space-y-4">
-        <div v-if="!selectedTicket" class="card flex min-h-80 flex-col items-center justify-center p-8 text-center">
+        <div v-if="detailLoading" class="card flex min-h-80 items-center justify-center gap-3 text-sm text-surface-400" role="status"><span class="loading-mark"></span>正在加载任务详情…</div>
+        <div v-else-if="!selectedTicket" class="card flex min-h-80 flex-col items-center justify-center p-8 text-center">
           <ClipboardList class="mb-3 h-9 w-9 text-surface-600" />
           <h2 class="text-base font-semibold text-surface-200">选择一个长期任务</h2>
           <p class="mt-1 max-w-md text-sm text-surface-500">查看授权版本、执行派工、结构化报告和持久化副作用意图。一个任务可以经历多个 Session 和 Worker。</p>
@@ -270,7 +271,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api/client.js';
 import {
@@ -287,10 +288,30 @@ const tickets = ref([]);
 const stats = ref({});
 const detail = ref({ ticket: null, mandates: [], assignments: [], reports: [], effects: [], activity: [] });
 const workerStatus = ref(null);
-const selectedTicketId = ref('');
+const selectedTicketId = ref(typeof route.query.ticket === 'string' ? route.query.ticket : '');
 const query = ref('');
 const statusFilter = ref('');
-const activeTab = ref('overview');
+const ticketTabs = ['overview', 'mandates', 'assignments', 'reports', 'effects'];
+const activeTab = ref(ticketTabs.includes(route.query.tab) ? route.query.tab : 'overview');
+const detailLoading = ref(false);
+let detailRequest = 0;
+let disposed = false;
+watch([selectedTicketId, activeTab], () => {
+  if (disposed || route.path !== '/tickets') return;
+  const query = { ...route.query };
+  if (selectedTicketId.value) query.ticket = selectedTicketId.value; else delete query.ticket;
+  if (activeTab.value !== 'overview') query.tab = activeTab.value; else delete query.tab;
+  void router.replace({ path: '/tickets', query });
+});
+watch(() => [route.query.ticket, route.query.tab], ([id, tab]) => {
+  if (route.path !== '/tickets' || saving.value) return;
+  activeTab.value = ticketTabs.includes(tab) ? tab : 'overview';
+  if (typeof id === 'string' && id !== selectedTicketId.value && tickets.value.some(item => item.id === id)) {
+    selectedTicketId.value = id;
+    void refreshDetail(id).catch(cause => { error.value = cause.message; });
+  }
+});
+onBeforeUnmount(() => { disposed = true; detailRequest += 1; });
 const showTicketForm = ref(false);
 const showMandateForm = ref(false);
 const showAssignmentForm = ref(false);
@@ -349,10 +370,20 @@ function eventLabel(type) { return ({ ticket_created: '任务创建', ticket_upd
 function activitySummary(item) { const d = item.details || {}; return d.note || d.reason || d.title || d.summary || d.effectType || d.workerRole || d.to || d.from || d.mandateId || d.reportId || '记录已写入审计时间线'; }
 
 async function refreshDetail(id = selectedTicketId.value) {
-  if (!id) { detail.value = { ticket: null, mandates: [], assignments: [], reports: [], effects: [], activity: [] }; return; }
-  const result = await api.getOpsTicket(id);
-  detail.value = result;
-  if (detail.value.ticket) ticketStatusDraft.value = detail.value.ticket.status;
+  const request = ++detailRequest;
+  detail.value = { ticket: null, mandates: [], assignments: [], reports: [], effects: [], activity: [] };
+  detailLoading.value = !!id;
+  if (!id) return;
+  try {
+    const result = await api.getOpsTicket(id);
+    if (disposed || request !== detailRequest || id !== selectedTicketId.value) return;
+    detail.value = result;
+    if (detail.value.ticket) ticketStatusDraft.value = detail.value.ticket.status;
+  } catch (cause) {
+    if (!disposed && request === detailRequest && id === selectedTicketId.value) throw cause;
+  } finally {
+    if (!disposed && request === detailRequest) detailLoading.value = false;
+  }
 }
 async function loadWorkerStatus() {
   try { workerStatus.value = await api.getOpsEffectWorkerStatus(); }
@@ -371,7 +402,7 @@ async function load({ preserve = true } = {}) {
   finally { loading.value = false; }
 }
 async function selectTicket(id) {
-  if (selectedTicketId.value === id) return;
+  if (saving.value || selectedTicketId.value === id) return;
   selectedTicketId.value = id; activeTab.value = 'overview'; error.value = '';
   try { await refreshDetail(id); } catch (e) { error.value = e.message || '读取任务详情失败'; }
 }
@@ -521,6 +552,6 @@ onMounted(() => {
     showTicketForm.value = true;
     router.replace({ path: '/tickets', query: {} });
   }
-  load({ preserve: false });
+  load();
 });
 </script>

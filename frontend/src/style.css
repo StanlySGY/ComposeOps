@@ -2864,3 +2864,17 @@ body {
   .app-header button[aria-label="打开页面 Agent"] { display: none; }
   .app-header > div:last-child { gap: 4px; }
 }
+
+/* The location bar stays available while the content scrolls. */
+.app-workspace { padding-top: calc(4rem + env(safe-area-inset-top)); }
+.app-workspace .app-main > .content-outer { padding-top: 20px; }
+.app-sidebar .mobile-destination-active { border-color: rgba(96,165,250,.5); background: rgba(59,130,246,.12); color: #dbeafe; }
+.filter-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #99a6b8; font-size: 12px; }
+.filter-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid rgba(96,165,250,.22); border-radius: 7px; color: #bfdbfe; background: rgba(59,130,246,.08); transition: background-color 140ms; }
+.filter-chip:hover { background: rgba(59,130,246,.16); }
+.filter-chip span { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-reset { min-height: 32px; padding: 4px 8px; border-radius: 7px; color: #aab6c6; }
+.filter-reset:hover { color: #f1f5f9; background: rgba(148,163,184,.08); }
+.terminal-session-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 38px; padding: 8px 12px; border-bottom: 1px solid rgba(148,163,184,.12); background: #141a22; font-size: 12px; color: #a8b4c5; }
+.terminal-session-bar strong { color: #e2e8f0; font-weight: 500; }
+@media (max-width: 767px) { .app-workspace .app-main > .content-outer { padding-top: 14px; } .filter-chip { min-height: 36px; } }

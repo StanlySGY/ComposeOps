@@ -15,7 +15,9 @@
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
     <div class="flex min-h-0 flex-1 overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
       <AppSidebar />
-      <main class="app-main flex-1 min-w-0 overflow-auto" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
+      <div class="app-workspace flex min-w-0 min-h-0 flex-1 flex-col">
+      <WorkspaceNavigation />
+      <main class="app-main flex-1 min-h-0 min-w-0 overflow-auto" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
         <div class="pull-indicator" :style="{ transform: 'translateY(' + pullY + 'px)', opacity: pullY > 0 ? 1 : 0 }">
           <span v-if="refreshing" class="loading-mark"></span>
           <RefreshCw v-else class="w-4 h-4" :class="{ 'rotate-180': pullY >= pullThreshold }" />
@@ -30,6 +32,7 @@
           </router-view>
         </div>
       </main>
+      </div>
     </div>
     <div v-if="runtimeError" class="runtime-error-bar">
       <span class="min-w-0 flex-1 truncate">{{ runtimeError }}</span>
@@ -48,6 +51,7 @@ import { onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
+import WorkspaceNavigation from './components/WorkspaceNavigation.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
 import { RefreshCw, WifiOff } from 'lucide-vue-next';
 import CheatSheetModal from './components/common/CheatSheetModal.vue';

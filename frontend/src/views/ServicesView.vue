@@ -54,15 +54,21 @@
         <button class="metric-tile" :class="{ active: filter === 'running' }" @click="filter = filter === 'running' ? 'all' : 'running'"><span class="metric-icon text-emerald-300"><CircleCheckBig class="h-5 w-5" /></span><span><strong>{{ healthyCount }}</strong><small>健康运行</small></span><span class="metric-meta">项目状态正常</span></button>
         <button class="metric-tile" :class="{ active: filter === 'attention' }" @click="filter = filter === 'attention' ? 'all' : 'attention'"><span class="metric-icon text-amber-300"><AlertTriangle class="h-5 w-5" /></span><span><strong>{{ attentionCount }}</strong><small>需要关注</small></span><span class="metric-meta">停止、部分异常或不健康</span></button>
         <button class="metric-tile" :class="{ active: filter === 'stopped' }" @click="filter = filter === 'stopped' ? 'all' : 'stopped'"><span class="metric-icon text-surface-300"><Container class="h-5 w-5" /></span><span><strong>{{ runningContainerCount }} / {{ containerCount }}</strong><small>运行中容器</small></span><span class="metric-meta">{{ stoppedContainerCount }} 个未运行</span></button>
-        <button class="metric-tile"><span class="metric-icon" :class="healthTone"><Gauge class="h-5 w-5" /></span><span><strong class="font-mono tabular-nums" :class="healthTone">{{ healthScore }}</strong><small>健康分数</small></span><span class="metric-meta">综合项目与容器状态</span></button>
+        <div class="metric-tile cursor-default"><span class="metric-icon" :class="healthTone"><Gauge class="h-5 w-5" /></span><span><strong class="font-mono tabular-nums" :class="healthTone">{{ healthScore }}</strong><small>健康分数</small></span><span class="metric-meta">综合项目与容器状态</span></div>
       </div>
     </section>
     <div v-if="store.projects.length" class="toolbar-panel">
-      <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" placeholder="搜索项目、容器、镜像或路径" /></label>
+      <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" type="search" aria-label="搜索服务项目" placeholder="搜索项目、容器、镜像或路径" /></label>
       <select v-model="filter" class="input sm:w-40" aria-label="状态筛选"><option value="all">全部项目</option><option value="attention">需要关注</option><option value="running">健康运行</option><option value="stopped">已停止</option><option value="managed">已纳管</option><option value="unmanaged">未纳管</option><option value="favorites">仅收藏</option></select>
       <select v-model="sort" class="input sm:w-40" aria-label="项目排序"><option value="priority">异常与收藏优先</option><option value="name">按项目名称</option><option value="owner">按项目归属</option></select>
       <label class="toggle-label whitespace-nowrap"><input type="checkbox" :checked="allVisibleSelected" :disabled="!visibleManagedProjects.length" @change="toggleAllVisible" />选择当前</label>
-      <span class="ml-auto whitespace-nowrap text-muted">显示 {{ visibleProjects.length }} / {{ store.projects.length }}</span>
+      <span class="ml-auto whitespace-nowrap text-muted" role="status" aria-live="polite">显示 {{ visibleProjects.length }} / {{ store.projects.length }}</span>
+    </div>
+    <div v-if="searchQuery || filter !== 'all'" class="filter-summary" role="group" aria-label="当前服务筛选">
+      <span>正在筛选</span>
+      <button v-if="searchQuery" class="filter-chip" aria-label="清除搜索关键词" @click="searchQuery = ''"><Search class="h-3 w-3 shrink-0" /><span>{{ searchQuery }}</span><X class="h-3 w-3 shrink-0" /></button>
+      <button v-if="filter !== 'all'" class="filter-chip" aria-label="清除状态筛选" @click="filter = 'all'"><span>{{ filterLabels[filter] }}</span><X class="h-3 w-3" /></button>
+      <button class="filter-reset" @click="resetFilters">重置筛选</button>
     </div>
     <BatchOperationsBar v-if="selectedProjects.length" :selected-count="selectedProjects.length" :busy="busy" @run="runBatch" @clear="selectedIds = []" />
     <ConfirmDialog :show="batchConfirmation.show" :title="'批量' + actionLabel(batchConfirmation.action)" :message="'将对 ' + batchConfirmation.count + ' 个已纳管项目执行“' + actionLabel(batchConfirmation.action) + '”。操作会按顺序执行，失败项目仍会保留在结果中。确认继续?'" tone="warning" :confirm-text="'确认' + actionLabel(batchConfirmation.action)" :busy="batchSubmitting" @confirm="confirmBatch" @cancel="batchConfirmation.show = false" />
@@ -90,7 +96,7 @@
 <script setup>
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search } from 'lucide-vue-next';
+import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search, X } from 'lucide-vue-next';
 import { useServicesStore } from '../stores/services.js';
 import { useToastStore } from '../stores/toast.js';
 import { useKeyboardNavigation } from '../composables/useKeyboardNavigation.js';
@@ -116,6 +122,7 @@ const router = useRouter();
 const { openAgent, updateAgentContext } = useAgentConsole();
 const autoRefresh = ref(true); const busy = ref(false); const expandedIds = ref(new Set());
 const searchQuery = ref(''); const filter = ref('all'); const sort = ref('priority');
+const filterLabels = { attention: '需要关注', running: '健康运行', stopped: '已停止', managed: '已纳管', unmanaged: '未纳管', favorites: '仅收藏' };
 const selectedIds = ref([]); const updateSettings = ref({ lastResults: [] }); const focusedProject = ref('');
 const inspection = ref(null); const inspectionLoading = ref(false);
 const batchTasks = ref([]); const activityProject = ref(null); const envProject = ref(null); const diagnosis = ref(null); const upgradeProject = ref(null); const dbDumpProject = ref(null); const runningAction = ref({ id: '', action: '' }); const kbFocusId = ref(''); const restartTarget = ref(null);

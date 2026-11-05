@@ -2,7 +2,6 @@
   <div class="page-shell page-shell-workspace logs-view">
     <div class="page-header">
       <div class="flex min-w-0 items-center gap-3">
-        <button v-if="returnTarget" class="btn-secondary shrink-0" @click="goBackToSource"><ArrowLeft class="h-4 w-4" />{{ returnTarget.label }}</button>
         <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
       </div>
       <div class="page-actions logs-toolbar-actions">
@@ -106,7 +105,7 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeft, Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import LogPane from '../components/logs/LogPane.vue';
@@ -181,10 +180,6 @@ const containers = computed(() => projects.value.find((p) => p.id === projectId.
 const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
 const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
-const returnTarget = computed(() => ({
-  services: { path: '/services', label: '返回服务列表' },
-  topology: { path: '/topology', label: '返回拓扑' },
-})[logSourceRoute.value] || null);
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
@@ -285,13 +280,6 @@ function syncRouteContext() {
 }
 function onProjectChange() { containerId.value = ''; selectedContainers.value = []; containerQuery.value = ''; disconnect(); closeStats(); clearLines(); syncRouteContext(); }
 function onContainerChange() { disconnect(); clearLines(); syncRouteContext(); }
-function goBackToSource() {
-  if (!returnTarget.value) return;
-  const historyBack = window.history.state?.back;
-  const historyBackName = historyBack ? router.resolve(historyBack).name : null;
-  if (historyBackName === logSourceRoute.value) router.back();
-  else router.push(returnTarget.value.path);
-}
 function toggleAggregate() {
   aggregateMode.value = !aggregateMode.value;
   selectedContainers.value = [];
