@@ -13,8 +13,10 @@ const { ApprovalGate } = await import('../src/services/agent/approval-gate.js');
 const { assessRisk } = await import('../src/services/agent-tools.js');
 const { nextRunTime } = await import('../src/services/cron-scheduler.js');
 const { addGitOpsRepo, listGitOpsRepos } = await import('../src/services/gitops.js');
+const { default: db } = await import('../src/lib/db.js');
 const {
   addComposeBackup,
+  addComposeBackupBatch,
   getComposeBackup,
   listComposeBackups,
   setSetting,
@@ -135,6 +137,34 @@ test('compose 备份: 写入与清理共用同一保留常量,均为 20 份', ()
   const newest = kept[0];
   const full = getComposeBackup('audit-rollback-project', newest.id);
   assert.equal(full.content, 'version: "3"\n# rev 24', 'getComposeBackup 必须返回正文——rollbackProject 依赖它');
+});
+
+test('compose 备份批次: 多文件写入共享事务,任一插入失败时整批回滚', () => {
+  const projectId = 'audit-rollback-batch-atomic';
+  db.prepare('DELETE FROM compose_backups WHERE project_id = ?').run(projectId);
+  const reason = 'upgrade:atomic-test';
+  const ids = addComposeBackupBatch(projectId, [
+    { filePath: 'compose.yml', content: 'main-before' },
+    { filePath: 'compose.override.yml', content: 'override-before' },
+  ], reason);
+  assert.equal(ids.length, 2);
+  assert.deepEqual(listComposeBackups(projectId).map((item) => item.reason), [reason, reason]);
+
+  db.exec(`CREATE TRIGGER compose_backup_batch_test_failure
+    BEFORE INSERT ON compose_backups
+    WHEN NEW.project_id = '${projectId}' AND NEW.file_path = 'trigger-failure.yml'
+    BEGIN SELECT RAISE(ABORT, 'simulated batch insert failure'); END`);
+  try {
+    assert.throws(() => addComposeBackupBatch(projectId, [
+      { filePath: 'compose.next.yml', content: 'next-main' },
+      { filePath: 'trigger-failure.yml', content: 'failure' },
+    ], 'upgrade:must-rollback'), /simulated batch insert failure/);
+    const retained = listComposeBackups(projectId);
+    assert.equal(retained.length, 2, '失败批次不能残留任何一条记录');
+    assert.ok(retained.every((item) => item.reason === reason));
+  } finally {
+    db.exec('DROP TRIGGER IF EXISTS compose_backup_batch_test_failure');
+  }
 });
 
 test('export: docker.hosts 整键排除,SSH 凭据不外泄', () => {

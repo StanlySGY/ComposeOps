@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compareImageDigests, extractImageServices, parseImageRef, selectLatestUpgradeBackupBatch, hasMatchingComposeBackupFiles } from '../src/services/image-updater.js';
+import { compareImageDigests, extractImageServices, parseImageRef, selectLatestUpgradeBackupBatch, hasMatchingComposeBackupFiles, restoreComposeBackupBatch } from '../src/services/image-updater.js';
 
 test('parseImageRef: normalizes Docker Hub official images and default tags', () => {
   assert.deepEqual(parseImageRef('nginx'), {
@@ -118,4 +118,52 @@ test('hasMatchingComposeBackupFiles: requires a one-to-one match with the curren
   assert.equal(hasMatchingComposeBackupFiles(backups, ['compose.yml', 'compose.new.yml']), false);
   assert.equal(hasMatchingComposeBackupFiles([{ filePath: 'compose.yml' }, { filePath: 'compose.yml' }], ['compose.yml', 'compose.override.yml']), false);
   assert.equal(hasMatchingComposeBackupFiles([], []), false);
+});
+
+test('restoreComposeBackupBatch: a later write failure compensates every file already touched', async () => {
+  const disk = new Map([
+    ['compose.yml', 'current-main'],
+    ['compose.override.yml', 'current-override'],
+  ]);
+  const backups = [
+    { filePath: 'compose.yml', content: 'backup-main' },
+    { filePath: 'compose.override.yml', content: 'backup-override' },
+  ];
+  const current = [...disk].map(([filePath, content]) => ({ filePath, content }));
+  await assert.rejects(
+    restoreComposeBackupBatch(backups, current, async (filePath, content) => {
+      if (filePath === 'compose.override.yml' && content === 'backup-override') {
+        throw new Error('simulated write failure');
+      }
+      disk.set(filePath, content);
+    }),
+    /simulated write failure.*已将本次触及的文件恢复为操作前内容/,
+  );
+  assert.equal(disk.get('compose.yml'), 'current-main');
+  assert.equal(disk.get('compose.override.yml'), 'current-override');
+});
+
+test('restoreComposeBackupBatch: reads must be complete and paths must match before any write', async () => {
+  let writes = 0;
+  const writer = async () => { writes += 1; };
+  await assert.rejects(
+    restoreComposeBackupBatch(
+      [{ filePath: 'compose.yml', content: 'backup' }, { filePath: 'override.yml', content: 'backup' }],
+      [{ filePath: 'compose.yml', content: 'current' }],
+      writer,
+    ),
+    /恢复批次不完整/,
+  );
+  await assert.rejects(
+    restoreComposeBackupBatch(
+      [
+        { filePath: 'compose.yml', content: 'backup-main' },
+        { filePath: 'override.yml', content: 'backup-override' },
+      ],
+      [{ filePath: 'compose.yml', content: 'current' }, { filePath: 'compose.yml', content: 'duplicate' }],
+      writer,
+    ),
+    /快照不完整或包含重复文件/,
+  );
+  assert.equal(writes, 0);
 });

@@ -1487,6 +1487,39 @@ export function addComposeBackup(projectId, filePath, content, reason = 'save') 
   })();
 }
 
+/** 将同一次升级的多个 Compose 文件作为一个备份批次原子写入。 */
+export function addComposeBackupBatch(projectId, snapshots, reason = 'save') {
+  if (typeof projectId !== 'string' || !projectId.trim()) throw new Error('Compose 备份项目标识无效');
+  if (!Array.isArray(snapshots) || !snapshots.length || snapshots.length > COMPOSE_BACKUP_KEEP) {
+    throw new Error('Compose 备份批次文件数量无效');
+  }
+  const filePaths = new Set();
+  for (const snapshot of snapshots) {
+    if (!snapshot || typeof snapshot.filePath !== 'string' || !snapshot.filePath.trim()
+      || typeof snapshot.content !== 'string' || filePaths.has(snapshot.filePath)) {
+      throw new Error('Compose 备份批次包含无效或重复文件');
+    }
+    filePaths.add(snapshot.filePath);
+  }
+  if (typeof reason !== 'string' || !reason.trim()) throw new Error('Compose 备份原因无效');
+
+  return db.transaction(() => {
+    const insert = db.prepare(
+      'INSERT INTO compose_backups(project_id, file_path, content, reason) VALUES(?, ?, ?, ?)'
+    );
+    const ids = snapshots.map((snapshot) => Number(
+      insert.run(projectId, snapshot.filePath, snapshot.content, reason).lastInsertRowid
+    ));
+    db.prepare(`
+      DELETE FROM compose_backups
+      WHERE project_id = ? AND id NOT IN (
+        SELECT id FROM compose_backups WHERE project_id = ? ORDER BY id DESC LIMIT ${COMPOSE_BACKUP_KEEP}
+      )
+    `).run(projectId, projectId);
+    return ids;
+  })();
+}
+
 export function listComposeBackups(projectId) {
   return db.prepare(`
     SELECT id, project_id AS projectId, file_path AS filePath, reason, created_at AS createdAt,
