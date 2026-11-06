@@ -131,4 +131,29 @@ describe('resource cleanup workflow', () => {
     expect(api.getStorageResources).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).toContain('remote');
   });
+  it('a refreshed inventory from another host clears same-ID selections and an open confirmation', async () => {
+    await start();
+    await wrapper.get('[aria-label="选择资源 alpha:old"]').setValue(true);
+    await button('批量删除').trigger('click');
+    api.getStorageResources.mockResolvedValue(inventory('remote'));
+    await button('刷新清单').trigger('click'); await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.get('[aria-label="选择资源 alpha:old"]').element.checked).toBe(false);
+    expect(wrapper.text()).toContain('已清空原节点的选择和确认');
+    expect(api.removeStorageResource).not.toHaveBeenCalled();
+  });
+  it.each(['remote', 'local'])('a server host conflict stops the queue and clears selection even when refresh returns %s', async nextHost => {
+    api.removeStorageResource.mockRejectedValueOnce(Object.assign(new Error('节点已切换'), { code: 'resource_host_changed' }));
+    await start();
+    await wrapper.get('[aria-label="全选可删除资源"]').setValue(true);
+    await button('批量删除').trigger('click');
+    api.getStorageResources.mockResolvedValue(inventory(nextHost));
+    await button('确认删除').trigger('click'); await flushPromises();
+    expect(api.removeStorageResource).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('剩余删除已停止，请重新选择');
+    expect(wrapper.get('[aria-label="选择资源 alpha:old"]').element.checked).toBe(false);
+    expect(wrapper.get('[aria-label="选择资源 beta:old"]').element.checked).toBe(false);
+    expect(wrapper.find('.resource-selection').exists()).toBe(false);
+  });
+
 });

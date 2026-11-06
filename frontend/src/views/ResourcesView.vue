@@ -197,7 +197,7 @@ async function performRemoval() {
   const failed = [];
   batchProgress.value = { total: plan.rows.length, done: 0, current: '' };
   try {
-    for (const [index, row] of plan.rows.entries()) {
+    for (const row of plan.rows) {
       if (!active || contextGeneration !== plan.generation) break;
       batchProgress.value.current = row.primary;
       try {
@@ -205,11 +205,13 @@ async function performRemoval() {
         succeeded++;
         selected.value = selected.value.filter(key => key !== row.key);
       } catch (e) {
-        failed.push({ ...row, message: e.message });
+        if (!active || contextGeneration !== plan.generation) break;
         if (e.code === 'resource_host_changed') {
-          failed.push(...plan.rows.slice(index + 1).map(item => ({ ...item, message: '未执行：节点已切换，请刷新后重新选择' })));
+          onHostChanged();
+          flash.value = `已在 ${plan.hostName} 删除 ${succeeded} 项资源。节点已切换，剩余删除已停止，请重新选择。`;
           break;
         }
+        failed.push({ ...row, message: e.message });
       }
       batchProgress.value.done++;
     }
@@ -231,6 +233,13 @@ async function refresh() {
   try {
     const result = await api.getStorageResources(true);
     if (!active || generation !== requestGeneration) return;
+    // Another tab/session may switch the shared active host without a local event.
+    // A matching resource name/ID on the new host must never inherit old intent.
+    if (data.value?.hostId && data.value.hostId !== result.hostId) {
+      invalidateContext();
+      failures.value = [];
+      flash.value = '节点已切换，已清空原节点的选择和确认，请重新选择资源。';
+    }
     data.value = result;
     const available = new Set(rows.value.filter(row => row.deletable).map(row => row.key));
     selected.value = selected.value.filter(key => available.has(key));
