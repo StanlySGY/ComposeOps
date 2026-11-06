@@ -44,6 +44,12 @@ try {
     const divider = cookie.indexOf('=');
     await context.addCookies([{ name: cookie.slice(0, divider), value: cookie.slice(divider+1), url: base }]);
     const page = await context.newPage(); const errors=[]; page.on('pageerror', e => errors.push(e.message));
+    const heartbeatFrames = [];
+    page.on('websocket', socket => {
+      if (/\/ws\/(logs|aggregated-logs)/.test(socket.url())) socket.on('framereceived', event => {
+        if (String(event.payload) === '{"type":"pong"}') heartbeatFrames.push(event.payload);
+      });
+    });
     await page.goto(base + '/#/services?q=' + projectName);
     const card = page.locator('[id="project-' + project.id + '"]');
     await card.locator('.service-project-card__toggle').click();
@@ -57,6 +63,20 @@ try {
     await card.locator('.service-project-card__toggle').click();
     await card.getByRole('link', { name: '实时日志', exact: true }).click();
     await expect(page.getByText('UX_WORKSPACE_READY', { exact: false })).toBeVisible();
+    if (viewport.width === 1440) {
+      await expect.poll(() => heartbeatFrames.length, { timeout: 20000 }).toBeGreaterThan(0);
+      // Real browser offline mode interrupts the authenticated WebSocket, then
+      // resumes it against the candidate backend while preserving displayed logs.
+      await context.setOffline(true);
+      await expect(page.getByText('网络离线', { exact: true })).toBeVisible();
+      await expect(page.getByText('UX_WORKSPACE_READY', { exact: false })).toBeVisible();
+      await context.setOffline(false);
+      await expect(page.getByText('已连接', { exact: true })).toBeVisible();
+      await expect(page.locator('.log-reconnect-notice')).toContainText('可能重复');
+      const target = docker([...composeArgs, 'ps', '-q', 'app']);
+      docker(['exec', target, 'sh', '-c', 'printf "UX_AFTER_RECONNECT\\n" > /proc/1/fd/1']);
+      await expect(page.getByText('UX_AFTER_RECONNECT', { exact: true })).toBeVisible();
+    }
     const nav=page.getByRole('navigation', { name: '项目内导航' });
     await nav.getByRole('link', { name: '配置', exact: true }).click();
     await page.getByRole('button', { name: '可视化', exact: true }).click();
@@ -95,7 +115,7 @@ try {
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: '/tmp/composeops-workspace-real-'+viewport.width+'.png' });
-    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: note persistence, logs, config review/save, navigation guard, apply, running state, terminal, cancel stop');
+    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: note persistence, logs'+(viewport.width === 1440 ? ', heartbeat, offline recovery, fresh Docker log after reconnect' : '')+', config review/save, navigation guard, apply, running state, terminal, cancel stop');
     await context.close();
   }
 } finally {

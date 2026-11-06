@@ -7,7 +7,7 @@ jobs:
   code:
     name: Tests, lint and builds
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -23,7 +23,7 @@ jobs:
       - run: npm run build
       - run: npm --prefix frontend run build:preview
       - name: Install browser
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
         working-directory: frontend
       - name: Preview browser checks
         run: npm --prefix frontend run test:preview

@@ -263,7 +263,15 @@ function safeSend(socket, payload) {
 /** 在任何异步初始化之前绑定断连,迟到的 Docker 流由同一 signal 回收。 */
 function socketAbortController(socket) {
   const controller = new AbortController();
-  socket.once('close', () => controller.abort());
+  // Application heartbeat detects half-open log streams even when no log is produced.
+  // It is intentionally scoped to logs; terminal input never enters this protocol.
+  const heartbeat = (data, isBinary) => {
+    if (isBinary || data.length > 64) return;
+    try { if (JSON.parse(data.toString()).type === 'ping') safeSend(socket, { type: 'pong' }); }
+    catch { /* Ignore unsupported control frames. */ }
+  };
+  socket.on('message', heartbeat);
+  socket.once('close', () => { socket.removeListener('message', heartbeat); controller.abort(); });
   if (socket.readyState !== WebSocket.OPEN) controller.abort();
   return controller;
 }

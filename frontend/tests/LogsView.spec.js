@@ -7,7 +7,7 @@ const { api, channels } = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getPr
 vi.mock('../src/api/client.js', () => ({ api, wsUrl: path => path, streamProjectStats: api.streamProjectStats }));
 vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket: (url, options) => {
   const connected = ref(false);
-  const channel = { url, options, connected, reconnecting: ref(false), connect: vi.fn(() => { connected.value = true; }), close: vi.fn(() => { connected.value = false; }) };
+  const channel = { url, options, connected, connecting: ref(false), offline: ref(false), reconnecting: ref(false), connect: vi.fn(() => { connected.value = true; }), close: vi.fn(() => { connected.value = false; }) };
   channels.push(channel);
   return channel;
 } }));
@@ -154,6 +154,37 @@ describe('日志页面生命周期与数据完整性', () => {
     await start('/logs?projectId=p');
     expect(channels[1].connect).toHaveBeenCalledOnce();
     expect(channels[1].url()).toContain('tail=200');
+  });
+  it('聚合容器的点击、全选与清空都会重建来源，旧行不会冒充新选择', async () => {
+    api.getProjects.mockResolvedValue({ projects: [{ id: 'p', projectName: '测试', managed: true, containers: [{ id: 'a', name: 'api' }, { id: 'b', name: 'web' }] }] });
+    await start('/logs?projectId=p');
+    send({ type: 'line', data: { containerId: 'b', data: 'previous source' } }, true);
+    await flushPromises();
+    await wrapper.findAll('.container-chip')[0].trigger('click');
+    expect(channels[1].url()).toContain('containers=a');
+    expect(channels[1].connect).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).not.toContain('previous source');
+    await wrapper.findAll('button').find(button => button.text() === '全选可见').trigger('click');
+    expect(channels[1].url()).toContain('containers=a%2Cb');
+    await wrapper.findAll('button').find(button => button.text() === '清空').trigger('click');
+    expect(channels[1].url()).toContain('containers=&');
+    expect(channels[1].connect).toHaveBeenCalledTimes(4);
+  });
+  it('恢复提示在筛选之外可见，暂停时恢复分隔行遵守待显示队列', async () => {
+    await start();
+    channels[0].options.onOpen({ resumed: false });
+    await wrapper.get('button[title="暂停显示"]').trigger('click');
+    channels[0].options.onError(new Error('temporary network'));
+    channels[0].options.onOpen({ resumed: true });
+    await flushPromises();
+    expect(wrapper.find('.alert-error').exists()).toBe(false);
+    expect(wrapper.text()).toContain('可能重复');
+    expect(wrapper.text()).toContain('1 条待显示');
+    expect(wrapper.find('.aggregate-line').exists()).toBe(false);
+    await wrapper.get('button[title="继续接收"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('以下为重新读取的日志');
+    expect(wrapper.text()).not.toContain('WARN 1');
   });
 
   it('离开页面后迟到的初始化请求不会再建立连接', async () => {

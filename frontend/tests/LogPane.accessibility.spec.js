@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { ref } from 'vue';
 import LogPane from '../src/components/logs/LogPane.vue';
 import LogLine from '../src/components/logs/LogLine.vue';
 
@@ -93,5 +94,28 @@ describe('实时日志阅读区域可访问性', () => {
     await button.trigger('click');
     expect(wrapper.get('button.json-toggle').attributes('aria-expanded')).toBe('true');
     expect(wrapper.get('pre.json-block').text()).toContain('"service": "api"');
+  });
+  it('缓存页面失活后停止测量和滚底，返回后重新订阅可见行', async () => {
+    const observers = [];
+    const frames = new Map(); let serial = 0;
+    vi.stubGlobal('requestAnimationFrame', callback => { frames.set(++serial, callback); return serial; });
+    vi.stubGlobal('cancelAnimationFrame', id => frames.delete(id));
+    vi.stubGlobal('ResizeObserver', class {
+      observe = vi.fn(); disconnect = vi.fn(); unobserve = vi.fn();
+      constructor() { observers.push(this); }
+    });
+    const visible = ref(true);
+    wrapper = mount({ components: { LogPane }, setup: () => ({ visible }), template: '<KeepAlive><LogPane v-if="visible" :lines="[{id: 1, data: \'cached log\'}]" /></KeepAlive>' });
+    await flushPromises();
+    expect(observers).toHaveLength(1);
+    expect(observers[0].observe.mock.calls.length).toBeGreaterThan(1);
+    visible.value = false;
+    await flushPromises();
+    expect(observers[0].disconnect).toHaveBeenCalledOnce();
+    expect(frames.size).toBe(0);
+    visible.value = true;
+    await flushPromises();
+    expect(observers).toHaveLength(2);
+    expect(observers[1].observe.mock.calls.length).toBeGreaterThan(1);
   });
 });

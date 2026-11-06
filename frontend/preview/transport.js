@@ -189,7 +189,10 @@ class PreviewSocket extends EventTarget {
     });
   }
   message(value) { if (this.readyState !== 1) return; const event = new MessageEvent('message', { data: JSON.stringify(clone(value)) }); this.onmessage?.(event); this.dispatchEvent(event); }
-  send() { /* No network transport. */ }
+  send(payload) {
+    // Mirror the read-only log heartbeat without opening a network transport.
+    if (/\/ws\/(logs|aggregated-logs)/.test(this.url) && payload === '{"type":"ping"}') this.message({ type: 'pong' });
+  }
   close() { if (this.readyState === 3) return; this.readyState = 3; sockets.delete(this); const event = new Event('close'); this.onclose?.(event); this.dispatchEvent(event); }
 }
 export function installPreviewTransport() {

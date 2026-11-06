@@ -400,7 +400,7 @@ test('Agent 富内容放大预览提供模态语义、焦点循环、Escape 关�
 
   const trigger = page.getByRole('button', { name: '打开图表预览' });
   await trigger.focus();
-  await trigger.click();
+  await trigger.press('Enter');
 
   const dialog = page.getByRole('dialog', { name: '放大预览' });
   await expect(dialog).toBeVisible();
@@ -617,7 +617,7 @@ test('手动刷新等待最新响应，显示忙碌状态且阻止重复提交',
   await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
 });
 
-test('持续日志流保持历史阅读位置，点击新日志提示才回到底部', async ({ page }) => {
+test('持续日志流保持历史阅读位置，点击新日志提示才回到底部', async ({ page, isMobile, browserName }) => {
   await page.goto('./#/services');
   await expect(page.locator('#project-knowledge-base')).toBeVisible();
   await page.evaluate(() => {
@@ -636,8 +636,16 @@ test('持续日志流保持历史阅读位置，点击新日志提示才回到�
   await region.focus();
   await page.keyboard.press('Home');
   await expect.poll(() => region.evaluate(el => el.scrollTop)).toBe(0);
-  await region.hover();
-  await page.mouse.wheel(0, 48);
+  if (isMobile && browserName === 'webkit') {
+    // Mobile WebKit does not implement wheel input. Exercise its touch/scroll
+    // handlers; physical touch inertia remains a real-device verification item.
+    await region.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientX: 120, clientY: 400 }] });
+    await region.evaluate(el => { el.scrollTop += 48; el.dispatchEvent(new Event('scroll')); });
+    await region.dispatchEvent('touchend');
+  } else {
+    await region.hover();
+    await page.mouse.wheel(0, 48);
+  }
   await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
   const top = await region.evaluate(el => el.scrollTop);
   await page.evaluate(() => window.__logSocket.message({ type: 'stdout', data: 'arrived-while-reading' }));

@@ -16,7 +16,7 @@
         </div>
         <div class="logs-toolbar-group logs-stream-actions" role="group" aria-label="日志流操作">
         <button class="icon-btn log-option" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
-        <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
+        <button v-if="!connected && !connecting && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
         <button v-else class="btn-secondary log-disconnect" @click="disconnect"><Square class="w-4 h-4" />断开</button>
         <button class="btn-secondary log-pause" :aria-pressed="paused" :title="paused ? '继续接收' : '暂停显示'" :aria-label="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /><span>{{ paused ? '继续' : '暂停' }}</span></button>
         <button class="icon-btn log-option" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
@@ -55,13 +55,16 @@
     </div>
 
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="offline || reconnecting" class="log-reconnect-notice" role="status">{{ offline ? '网络已离线，恢复联网后自动重连。' : '连接中断，正在自动重试。' }}已显示的日志会保留。<button v-if="!offline" class="filter-reset" @click="retryConnection">立即重试</button></p>
+    <p v-else-if="recoveryNotice" class="log-reconnect-notice" role="status">{{ recoveryNotice }}<button class="filter-reset" aria-label="关闭日志恢复提示" @click="recoveryNotice = ''">关闭</button></p>
     <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
     <div v-if="levelFilter" class="filter-summary" role="group" aria-label="当前日志级别筛选"><span>仅显示 {{ levelFilter.toUpperCase() }}</span><button class="filter-reset" @click="levelFilter = ''">清除级别筛选</button></div>
     <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
     <div class="log-status-strip flex flex-wrap items-center gap-3 text-muted">
-      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
+      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : offline ? '网络离线' : reconnecting ? '重连中…' : connecting ? '连接中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
+      <span v-if="lines.length >= MAX_LINES" title="更早的日志会随新日志到达移出本地缓冲区">仅保留最近 {{ MAX_LINES }} 条</span>
       <span v-if="splitMode" class="text-surface-400">{{ panes.length }} 栏</span>
       <span v-if="levelCounts.error" class="text-rose-400">ERROR {{ levelCounts.error }}</span>
       <span v-if="levelCounts.warn" class="text-amber-400">WARN {{ levelCounts.warn }}</span>
@@ -84,6 +87,9 @@
         :paused="paused"
         :revision="revision"
         :resume-signal="resumeSignal"
+        :expanded-ids="expandedIds"
+        :retained-from="lines[0]?.id"
+        @toggle-json="toggleJson"
       />
       <p v-if="!panes.length" class="text-muted px-2 py-1">没有匹配当前查询的容器日志。</p>
     </div>
@@ -97,6 +103,9 @@
       :paused="paused"
       :revision="revision"
       :resume-signal="resumeSignal"
+      :expanded-ids="expandedIds"
+      :retained-from="lines[0]?.id"
+      @toggle-json="toggleJson"
     />
 
     <QuerySyntaxModal :open="syntaxOpen" @close="syntaxOpen = false" />
@@ -106,7 +115,7 @@
 
 <script setup>
 import ProjectContextNav from '../components/services/ProjectContextNav.vue';
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, shallowRef, triggerRef, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, SlidersHorizontal, Sparkles, Square, Trash2 } from 'lucide-vue-next';
@@ -136,8 +145,12 @@ const queryError = ref('');
 const revision = ref(0);
 const resumeSignal = ref(0);
 const tail = ref(200);
-const lines = ref([]);
-const pending = ref([]);
+const lines = shallowRef([]);
+const pending = shallowRef([]);
+const expandedIds = ref(new Set());
+let flushFrame = 0;
+const recoveryNotice = ref('');
+let openedBefore = false;
 const search = ref('');
 const paused = ref(false);
 const pausedDropped = ref(0);
@@ -161,6 +174,8 @@ let statsController = null;
 const logSocket = useWebSocket(
   () => wsUrl(`/ws/logs?projectId=${encodeURIComponent(projectId.value)}&containerId=${encodeURIComponent(containerId.value)}&tail=${tail.value}`),
   {
+    watchNetwork: true,
+    heartbeatInterval: 15000,
     onOpen: onStreamOpen,
     onMessage: (event) => ingest(event, false),
     onError: (err) => { error.value = err.message || '日志连接失败'; },
@@ -172,6 +187,8 @@ const aggSocket = useWebSocket(
     return wsUrl(`/ws/aggregated-logs?projectId=${encodeURIComponent(projectId.value)}&containers=${ids ? encodeURIComponent(ids) : ''}&tail=${tail.value}`);
   },
   {
+    watchNetwork: true,
+    heartbeatInterval: 15000,
     onOpen: onStreamOpen,
     onMessage: (event) => ingest(event, true),
     onError: (err) => { error.value = err.message || '聚合日志连接失败'; },
@@ -179,6 +196,8 @@ const aggSocket = useWebSocket(
 );
 
 const connected = computed(() => logSocket.connected.value || aggSocket.connected.value);
+const connecting = computed(() => logSocket.connecting.value || aggSocket.connecting.value);
+const offline = computed(() => logSocket.offline.value || aggSocket.offline.value);
 const reconnecting = computed(() => logSocket.reconnecting.value || aggSocket.reconnecting.value);
 
 const selectedProject = computed(() => projects.value.find(p => p.id === projectId.value));
@@ -216,6 +235,8 @@ const emptyMessage = computed(() => {
   if (queryError.value) return '查询语法有误，已保留上一次结果。';
   if (lines.value.length && !filtered.value.length) return '没有匹配的日志，试试清除搜索或级别筛选。';
   if (streamEnded.value) return '日志已结束，当前没有可显示的内容。';
+  if (offline.value) return '网络已离线，等待联网后恢复日志。';
+  if (connecting.value || reconnecting.value) return '正在连接日志源，请稍候…';
   if (!connected.value && !reconnecting.value) return '日志已断开，点击「连接」继续查看。';
   return '已连接，等待新的日志…';
 });
@@ -237,7 +258,7 @@ const panes = computed(() => {
 });
 
 // 只重读项目列表:日志流本身由 WebSocket 推,下拉刷新不主动断流重建连接。
-usePullRefresh(reloadProjects);
+usePullRefresh(reloadProjects, { keepAlive: true });
 onMounted(() => {
   window.addEventListener('composeops:host-changed', onHostChanged);
   window.addEventListener('keydown', onKeydown);
@@ -310,7 +331,6 @@ function pickContainer(container) {
     const index = selectedContainers.value.indexOf(container.id);
     if (index >= 0) selectedContainers.value.splice(index, 1);
     else selectedContainers.value.push(container.id);
-    if (connected.value) connect();
     return;
   }
   if (containerId.value === container.id) return;
@@ -318,23 +338,30 @@ function pickContainer(container) {
   onContainerChange();
 }
 function selectVisibleContainers() { selectedContainers.value = visibleContainers.value.map((c) => c.id); }
+watch(() => selectedContainers.value.join(','), () => {
+  if (!aggregateMode.value || disposed || !(connected.value || connecting.value || reconnecting.value)) return;
+  disconnect();
+  clearLines();
+  connect();
+});
 
 function connect() {
   if (disposed || !canConnect.value) return;
-  // 聚合模式改选容器:URL 是 getter,直接 connect 即可让 useWebSocket 换址重连,
-  // 先 close 会让日志整段断一下,肉眼可见地闪。
-  if (!(aggregateMode.value && aggSocket.connected.value)) disconnect();
   streamEnded.value = false;
   error.value = '';
   if (aggregateMode.value) aggSocket.connect();
   else logSocket.connect();
 }
+function retryConnection() { disconnect(); connect(); }
 
 /** 重连成功后插入分隔行,提示上方日志与下方日志之间可能存在缺口。 */
 function onStreamOpen({ resumed } = {}) {
-  if (!resumed) return;
   error.value = '';
-  append({ id: ++sequence.value, type: 'stdout', level: 'warn', data: '—— 连接已恢复,期间日志可能有缺失 ——' });
+  if (resumed || openedBefore) {
+    recoveryNotice.value = '连接已恢复，已重新读取最近日志；重连前后可能重复，断线期间可能有缺失。';
+    queueLine({ id: ++sequence.value, type: 'stdout', level: 'info', data: '—— 连接已恢复 · 以下为重新读取的日志，可能重复或有缺失 ——' });
+  }
+  openedBefore = true;
 }
 
 function ingest(event, aggregate) {
@@ -346,30 +373,39 @@ function ingest(event, aggregate) {
     const line = aggregate ? (frame.type === 'line' ? frame.data : null)
       : (['stdout', 'stderr'].includes(frame.type) ? frame : null);
     if (!line || typeof line.data !== 'string') return;
-    pending.value.push({ ...line, id: ++sequence.value });
-    if (pending.value.length > MAX_LINES) {
-      const overflow = pending.value.length - MAX_LINES;
-      pending.value.splice(0, overflow);
-      pausedDropped.value += overflow;
-    }
-    flushPending();
+    queueLine({ ...line, id: ++sequence.value });
   } catch {
     // 非法 WebSocket 帧被丢弃,连接仍可继续接收后续日志。
   }
 }
-function flushPending() {
-  if (paused.value) return;
-  for (const item of pending.value.splice(0)) append(item);
+function queueLine(line) {
+  pending.value.push(line);
+  if (pending.value.length > MAX_LINES) {
+    const overflow = pending.value.length - MAX_LINES;
+    pending.value.splice(0, overflow);
+    if (paused.value) pausedDropped.value += overflow;
+  }
+  if (!flushFrame) flushFrame = requestAnimationFrame(() => { flushFrame = 0; flushPending(); });
 }
-function append(item) {
-  const level = item.level || classifyLevel(item.data);
-  item.level = level;
-  lines.value.push(item);
-  levelCounts.value[level] = (levelCounts.value[level] || 0) + 1;
-  if (level === 'error') { errorLines.value += 1; sawError.value = true; retainedCount.value += 1; }
-  if (lines.value.length > MAX_LINES) {
-    const removed = lines.value.splice(0, lines.value.length - MAX_LINES);
+function flushPending() {
+  if (paused.value) { triggerRef(pending); return; }
+  if (!pending.value.length) return;
+  const batch = pending.value;
+  pending.value = [];
+  appendBatch(batch);
+}
+function appendBatch(batch) {
+  for (const item of batch) {
+    const level = item.level || classifyLevel(item.data);
+    item.level = level;
+    levelCounts.value[level] = (levelCounts.value[level] || 0) + 1;
+    if (level === 'error') { errorLines.value += 1; sawError.value = true; retainedCount.value += 1; }
+  }
+  const combined = [...lines.value, ...batch];
+  if (combined.length > MAX_LINES) {
+    const removed = combined.splice(0, combined.length - MAX_LINES);
     for (const oldLine of removed) {
+      expandedIds.value.delete(oldLine.id);
       const oldLevel = oldLine.level || classifyLevel(oldLine.data);
       levelCounts.value[oldLevel] = Math.max(0, (levelCounts.value[oldLevel] || 0) - 1);
       if (oldLevel === 'error') {
@@ -378,11 +414,18 @@ function append(item) {
       }
     }
   }
+  lines.value = combined;
   bumpRevision();
 }
+function toggleJson(id, value) { if (value) expandedIds.value.add(id); else expandedIds.value.delete(id); }
 function clearLines() {
+  cancelAnimationFrame(flushFrame);
+  flushFrame = 0;
   lines.value = [];
   pending.value = [];
+  expandedIds.value.clear();
+  recoveryNotice.value = '';
+  openedBefore = false;
   pausedDropped.value = 0;
   errorLines.value = 0;
   levelCounts.value = { error: 0, warn: 0, info: 0 };
@@ -396,7 +439,7 @@ function classifyLevel(text = '') {
   if (/(warn|deprecat)/i.test(t)) return 'warn';
   return 'info';
 }
-function togglePause() { paused.value = !paused.value; if (!paused.value) flushPending(); }
+function togglePause() { flushPending(); paused.value = !paused.value; if (!paused.value) flushPending(); }
 /** 虚拟滚动与跟随都在 LogPane 内部,这里只广播"有新行"和"回到底部"两个信号。 */
 function bumpRevision() { revision.value += 1; }
 function resumeScroll() { resumeSignal.value += 1; }
@@ -407,6 +450,9 @@ function toggleSplit() {
   resumeSignal.value += 1;
 }
 function disconnect() {
+  cancelAnimationFrame(flushFrame);
+  flushFrame = 0;
+  flushPending();
   logSocket.close();
   aggSocket.close();
 }
@@ -485,6 +531,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .logs-view > .page-header { display: flex; flex-wrap: wrap; }
+.log-reconnect-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--color-surface-700); border-radius: 8px; font-size: 12px; color: var(--color-surface-300); background: var(--panel-raised); }
 .logs-options-toggle { display: none; }
 .logs-view .page-header > :first-child { margin-bottom: 14px; }
 .logs-toolbar-actions { justify-content: space-between; width: 100%; max-width: none; }

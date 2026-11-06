@@ -1030,7 +1030,8 @@
 .log-mark { @apply bg-rose-500/20 text-rose-300 rounded-xs px-px; }
 .json-block { @apply min-w-0 flex-1 whitespace-nowrap overflow-x-auto text-emerald-200; }
 .json-block.open { @apply text-emerald-100 whitespace-pre-wrap; }
-.json-toggle { @apply shrink-0 text-[10px] text-accent hover:underline; }
+.json-toggle { @apply sticky top-1 inline-flex min-h-8 min-w-10 shrink-0 items-center justify-center rounded-md border border-surface-700 bg-surface-900 px-2 text-[11px] text-accent transition-colors hover:bg-surface-800; }
+@media (pointer: coarse) { .json-toggle { min-height: 44px; min-width: 44px; } }
 .scroll-resume-chip { @apply fixed bottom-24 right-6 z-60 rounded-full border border-accent/50 bg-surface-900 px-3 py-1.5 text-xs text-accent shadow-lg shadow-black/40 transition-colors hover:bg-surface-800; }
 /* 日志页:开关态图标按钮、查询语法表、按容器分栏(每栏自带标题与独立虚拟滚动) */
 .icon-btn-on { @apply bg-accent/15 text-accent ring-1 ring-accent/40; }
@@ -1283,9 +1284,10 @@ body {
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.rich-block:hover .rich-zoom-btn { opacity: 1; }
+.rich-block:hover .rich-zoom-btn, .rich-block:focus-within .rich-zoom-btn { opacity: 1; }
 .rich-block .rich-zoom-btn:hover { color: var(--cyan-strong); border-color: var(--cyan-border); }
 @media (hover: none) { .rich-block .rich-zoom-btn { opacity: 0.75; } }
+@media (pointer: coarse) { .rich-block .rich-zoom-btn { width: 44px; height: 44px; } }
 /* ===== 富内容放大浮层(页面内 lightbox) ===== */
 .rich-zoom-mask {
   position: fixed;

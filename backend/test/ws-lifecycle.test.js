@@ -97,3 +97,20 @@ test('单容器日志与聚合日志共用完整行和时间戳解析', async (t
   assert.equal(frames[1].type, 'end');
   assert.equal(socket.readyState, 3);
 });
+
+test('空闲日志流响应心跳，断开时移除处理器且不影响终端输入', async (t) => {
+  const request = await fixture(t);
+  t.mock.method(docker, 'getContainer', () => ({ inspect: async () => ({ Config: { Tty: true } }), logs: async () => new PassThrough() }));
+  for (const route of ['/logs', '/aggregated-logs']) {
+    const socket = new Socket();
+    await routes.get(route)(socket, request);
+    const before = socket.messages.length;
+    socket.emit('message', Buffer.from('{"type":"ping"}'), false);
+    assert.deepEqual(JSON.parse(socket.messages.at(-1)), { type: 'pong' });
+    socket.emit('message', Buffer.from('{"type":"ping"}'), true);
+    socket.emit('message', Buffer.from('bad JSON'), false);
+    assert.equal(socket.messages.length, before + 1);
+    socket.close();
+    assert.equal(socket.listenerCount('message'), 0);
+  }
+});
