@@ -55,4 +55,15 @@ describe('BaseModal 键盘焦点循环', () => {
     expect(forward.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(first);
   });
+  it('保存中被 fieldset 禁用的控件不参与 Tab 循环', async () => {
+    await mountModal();
+    const modal = document.querySelector('.modal');
+    const last = document.querySelector('#last');
+    const fieldset = document.createElement('fieldset'); fieldset.disabled = true;
+    last.replaceWith(fieldset); fieldset.append(last);
+    const close = modal.querySelector('[aria-label="关闭"]');
+    close.focus();
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(document.querySelector('#first'));
+  });
 });

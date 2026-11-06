@@ -953,7 +953,7 @@
   /* Toast 进度条收缩动画（与自动消失时长同步） */
   @keyframes toast-bar {
     from {
-      transform: scaleX(1);
+      transform: scaleX(var(--toast-progress-start, 1));
     }
     to {
       transform: scaleX(0);

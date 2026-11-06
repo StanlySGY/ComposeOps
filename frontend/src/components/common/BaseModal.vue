@@ -51,7 +51,7 @@ const modalRef = ref(null);
 let previousFocus = null;
 function focusableIn(root) {
   return [...root.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-    .filter((el) => !el.disabled && el.offsetParent !== null);
+    .filter((el) => !el.matches(':disabled') && el.offsetParent !== null);
 }
 function trapTab(event) {
   if (event.key !== 'Tab') return;

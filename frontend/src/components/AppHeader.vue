@@ -56,7 +56,7 @@
     </div>
   </header>
 
-  <CommandPalette :show="commandOpen" :commands="commands" @close="commandOpen = false" @execute="runCommand" />
+  <CommandPalette :show="commandOpen" :commands="commands" :recent-ids="recentPageIds" @close="commandOpen = false" @execute="runCommand" @clear-recent="recentPageIds = clearRecentPages()" />
   <ConfirmDialog
     :show="!!pendingProjectAction"
     title="停止项目"
@@ -82,6 +82,7 @@ import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { pageDetails } from '../lib/navigation.js';
+import { clearRecentPages, readRecentPages, rememberPage } from '../lib/command-history.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -179,6 +180,8 @@ const baseCommands = [
   { to: '/settings?tab=notifications', label: '异常通知', description: '设置容器、内存和存储告警渠道', icon: Settings, category: 'alert webhook telegram email 告警' },
   { to: '/settings?tab=maintenance', label: 'Docker 维护', description: '检查镜像更新并清理可回收空间', icon: Settings, category: 'prune image update cleanup 清理 镜像' },
 ];
+const recentAllowedIds = baseCommands.map(item => item.to);
+const recentPageIds = ref(readRecentPages(recentAllowedIds));
 const commands = computed(() => {
   const nodeCommands = hostsStore.hosts
     .filter((host) => host.id !== hostsStore.activeHostId)
@@ -291,9 +294,15 @@ async function ping() {
   backendOnline.value = online;
 }
 function closeCommand() { commandOpen.value = false; }
-function runCommand(item) {
+async function runCommand(item) {
   if (item.run) { item.run(); closeCommand(); return; }
-  router.push(item.to); closeCommand();
+  closeCommand();
+  try {
+    const failure = await router.push(item.to);
+    if (!failure && recentAllowedIds.includes(item.id)) recentPageIds.value = rememberPage(recentPageIds.value, item.id, recentAllowedIds);
+  } catch (error) {
+    toast.error(`页面打开失败：${error?.message || '请重试'}`);
+  }
 }
 async function switchNode(host) {
   try {

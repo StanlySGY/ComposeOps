@@ -1,4 +1,6 @@
 import db from '../lib/db.js';
+import { Worker } from 'node:worker_threads';
+import { compactMetrics } from './metrics-retention.js';
 
 /**
  * 数据聚合策略：根据时间范围自动选择合适的聚合粒度
@@ -315,48 +317,23 @@ export function getMetricsStats(containerId, metricType, hours = 24) {
  * - 2秒原始数据保留7天
  * - 超过7天的数据聚合为5分钟粒度后删除原始数据
  */
+let retentionInFlight;
 export function applyRetentionPolicy() {
-  const now = Date.now();
-  const sevenDaysAgo = now - 7 * 24 * 3600 * 1000;
-  const thirtyDaysAgo = now - 30 * 24 * 3600 * 1000;
-
-  // 删除超过30天的聚合数据
-  const deleted30d = db.prepare(
-    'DELETE FROM container_metrics WHERE timestamp < ?'
-  ).run(thirtyDaysAgo);
-
-  // 对7-30天的数据进行聚合并删除原始数据
-  const oldMetrics = db.prepare(
-    'SELECT DISTINCT container_id, metric_type FROM container_metrics WHERE timestamp < ? AND timestamp >= ?'
-  ).all(sevenDaysAgo, thirtyDaysAgo);
-
-  for (const { container_id, metric_type } of oldMetrics) {
-    const metrics = queryHistoricalMetrics({
-      containerId: container_id,
-      metricType: metric_type,
-      startTime: thirtyDaysAgo,
-      endTime: sevenDaysAgo,
-      aggregation: 300, // 5分钟聚合
+  if (retentionInFlight) return retentionInFlight;
+  const databasePath = db.pragma('database_list').find(row => row.name === 'main')?.file;
+  const task = databasePath ? new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./metrics-retention-worker.js', import.meta.url), { workerData: { databasePath, now: Date.now() } });
+    let received = false;
+    worker.once('message', response => {
+      received = true;
+      if (response.error) reject(new Error(response.error));
+      else resolve(response.result);
     });
-
-    // 删除原始数据
-    db.prepare(
-      'DELETE FROM container_metrics WHERE container_id = ? AND metric_type = ? AND timestamp < ? AND timestamp >= ?'
-    ).run(container_id, metric_type, sevenDaysAgo, thirtyDaysAgo);
-
-    // 插入聚合后的数据
-    const insert = db.prepare(
-      'INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp) VALUES(?, ?, ?, ?, ?)'
-    );
-    for (const metric of metrics) {
-      insert.run(metric.container_id, metric.metric_type, metric.value, metric.unit, metric.timestamp);
-    }
-  }
-
-  return {
-    deleted30d: deleted30d.changes,
-    aggregatedPeriod: '7-30 days',
-  };
+    worker.once('error', reject);
+    worker.once('exit', code => { if (!received) reject(new Error(`指标保留任务提前退出 (${code})`)); });
+  }) : compactMetrics(db); // In-memory databases are only used by isolated tests.
+  retentionInFlight = task.finally(() => { retentionInFlight = null; });
+  return retentionInFlight;
 }
 
 /**

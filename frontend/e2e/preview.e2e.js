@@ -307,13 +307,20 @@ test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) 
   await page.getByRole('button', { name: '新建工作流' }).click();
   const dialog = page.getByRole('dialog', { name: '新建工作流' });
   await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await dialog.locator('input, select, button').evaluateAll(elements => elements.every(element => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.x >= 0 && bounds.right <= innerWidth;
+  }))).toBe(true);
   await dialog.getByRole('button', { name: '保存' }).click();
-  await expect(page.getByText('请填写工作流名称')).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('请填写工作流名称');
+  await expect(dialog.getByLabel('名称', { exact: true })).toBeFocused();
   await dialog.getByPlaceholder('如:故障自动处理').fill('回归测试工作流');
   const nodeIds = dialog.getByPlaceholder('节点 ID');
   await nodeIds.nth(1).fill('trigger');
   await dialog.getByRole('button', { name: '保存' }).click();
-  await expect(page.getByText('节点 ID 重复:trigger')).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('节点 ID 重复:trigger');
+  await expect(nodeIds.nth(1)).toBeFocused();
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);

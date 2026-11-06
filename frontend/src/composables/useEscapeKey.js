@@ -50,7 +50,7 @@ export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBo
   }
 
   function onKeydown(event) {
-    if (event.key !== 'Escape' || !layerStack.length) return;
+    if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || !layerStack.length) return;
     const top = layerStack[layerStack.length - 1];
     if (top.close !== onClose) return; // 只处理栈顶
     event.preventDefault();

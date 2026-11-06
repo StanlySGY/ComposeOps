@@ -266,7 +266,7 @@ export default async function metricsRoutes(fastify) {
   fastify.post(
     '/retention-policy',
     async () => {
-      const result = applyRetentionPolicy();
+      const result = await applyRetentionPolicy();
       return {
         success: true,
         result,
