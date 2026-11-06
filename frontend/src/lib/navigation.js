@@ -1,3 +1,5 @@
+import { projectReturnLocation } from './project-navigation.js';
+
 // Shared labels keep the header, breadcrumbs and browser tab in agreement.
 export const PAGE_DETAILS = {
   dashboard: { label: '运维总览', group: '工作台' },
@@ -43,5 +45,5 @@ export function fallbackTarget(router, route) {
   const name = source || pageDetails(route).parent || 'dashboard';
   if (route.name === name) return null;
   const projectId = typeof route.query?.projectId === 'string' ? route.query.projectId : '';
-  return router.resolve({ name, query: name === 'services' && projectId ? { focus: projectId } : {} });
+  return router.resolve(name === 'services' ? projectReturnLocation(route.query?.returnTo, projectId) : { name });
 }

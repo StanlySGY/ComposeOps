@@ -1,5 +1,6 @@
 <template>
   <div class="page-shell page-shell-workspace">
+    <ProjectContextNav :project="project" :container-id="String(route.query.containerId || '')" :disabled="hostStale" />
     <div class="page-header">
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
       <div class="page-actions compose-toolbar-actions">
@@ -29,6 +30,11 @@
     <div v-if="filePath" class="text-muted font-mono truncate">{{ filePath }}<span v-if="dirty" class="text-amber-400 ml-2">● 未保存</span></div>
     <div v-if="hostStale" class="alert-warning flex flex-wrap items-center gap-3" role="alert"><span class="flex-1">节点已切换，当前草稿属于原节点。请先复制保留需要的内容，再重新载入。</span><button class="btn-secondary" @click="showHostChangedDialog = true">重新载入当前节点</button></div>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p><p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p>
+    <div v-if="savedPendingApply && !dirty && !hostStale" class="compose-saved-next" role="status">
+      <CircleCheck :size="18" class="text-emerald-300 shrink-0" />
+      <div class="min-w-0 flex-1"><strong>配置文件已保存</strong><p>保存文件不会自动更新容器。返回项目后选择「应用配置」，再查看状态或日志确认结果。</p></div>
+      <RouterLink class="btn-secondary" :to="projectReturnLocation(route.query.returnTo, projectId)">返回项目<ArrowRight :size="15" /></RouterLink>
+    </div>
     <div v-if="semanticIssues.length" class="card p-3 space-y-1.5 border border-amber-900/40">
       <div class="flex items-center gap-2 text-xs font-semibold text-amber-300"><ShieldAlert class="w-4 h-4" />语义校验 {{ semanticIssues.filter((i) => i.level === 'error').length }} 个错误 · {{ semanticIssues.filter((i) => i.level === 'warn').length }} 个警告</div>
       <p v-for="(issue, index) in semanticIssues" :key="index" class="flex items-start gap-2 text-xs" :class="issue.level === 'error' ? 'text-rose-300' : issue.level === 'warn' ? 'text-amber-200' : 'text-surface-400'">
@@ -167,11 +173,13 @@
 </template>
 
 <script setup>
+import { projectReturnLocation } from '../lib/project-navigation.js';
+import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
-import { AlignLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
+import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
+import { ArrowRight, CircleCheck, AlignLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
 import DockerRunConverter from '../components/DockerRunConverter.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import { diffLines } from '../lib/diff.js';
@@ -249,6 +257,7 @@ const fileIndex = ref(0); const filePath = ref(''); const content = ref(''); con
 const saving = ref(false); const error = ref(''); const message = ref(''); const backups = ref([]);
 const loadingConfig = ref(false);
 const hostStale = ref(false);
+const savedPendingApply = ref(false);
 let configVersion = 0;
 let pendingSave = null;
 const showBackups = ref(false); const comparison = ref(null); const showConverter = ref(false);
@@ -302,6 +311,7 @@ function resetLoadedConfig() {
   original.value = '';
   error.value = '';
   message.value = '';
+  savedPendingApply.value = false;
   semanticIssues.value = [];
   changePreview.value = null;
   showPreview.value = false;
@@ -675,6 +685,7 @@ async function load() {
   const requestedProjectId = projectId.value;
   const requestedFileIndex = fileIndex.value;
   const version = ++configVersion;
+  savedPendingApply.value = false;
   loadingConfig.value = true;
   error.value = ''; message.value = ''; semanticIssues.value = []; closePreview();
   filePath.value = ''; original.value = ''; content.value = ''; editor?.setValue('');
@@ -750,7 +761,8 @@ async function confirmSave() {
     if (!sameContext(snapshot)) return;
     // 请求期间仍可编辑；只有服务器确认的快照成为基线，后来输入的内容继续标记未保存。
     original.value = snapshot.content;
-    message.value = dirty.value ? '已保存提交的版本；后续修改仍未保存' : `已校验并保存 · ${new Date().toLocaleTimeString()}`;
+    savedPendingApply.value = true;
+    message.value = dirty.value ? '已保存提交的版本；后续修改仍未保存' : `已校验并保存文件 · ${new Date().toLocaleTimeString()}`;
     closePreview(); semanticIssues.value = [];
   } catch (e) { if (sameContext(snapshot)) error.value = e.message; }
   finally { saving.value = false; }
@@ -966,4 +978,10 @@ watch(content, () => {
     justify-content: flex-end;
   }
 }
+</style>
+
+<style scoped>
+.compose-saved-next { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border: 1px solid #34d39940; border-radius: 10px; padding: 14px 16px; background: #10b98108; font-size: 12px; }
+.compose-saved-next strong { font-weight: 600; }
+.compose-saved-next p { color: var(--color-surface-400); margin-top: 4px; }
 </style>

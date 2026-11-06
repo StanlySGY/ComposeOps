@@ -11,6 +11,16 @@ afterEach(() => {
 });
 
 describe('操作输出抽屉可访问性', () => {
+  it('未收到退出码时不把断流误报为成功', () => {
+    wrapper = mount(OperationOutputDrawer, { props: { projectId: 'p', text: 'Starting service...', running: false, exitCode: null } });
+    expect(wrapper.get('[data-state="unknown"]').text()).toContain('尚未确认执行结果');
+    expect(wrapper.text()).not.toContain('执行完成');
+    expect(wrapper.findAll('button').some(button => button.text() === '查看项目状态')).toBe(true);
+  });
+  it('退出码为零只说明命令成功，仍引导检查业务状态', () => {
+    wrapper = mount(OperationOutputDrawer, { props: { projectId: 'p', text: 'done', running: false, exitCode: 0 } });
+    expect(wrapper.get('[data-state="success"]').text()).toContain('确认容器状态与业务是否正常');
+  });
   it('为对话框标题、焦点进入与恢复、关闭按钮、输出区域和批量进度提供语义', async () => {
     const opener = document.createElement('button');
     opener.type = 'button';

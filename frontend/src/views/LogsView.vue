@@ -1,5 +1,6 @@
 <template>
   <div class="page-shell page-shell-workspace logs-view">
+    <ProjectContextNav :project="selectedProject" :container-id="containerId" />
     <div class="page-header">
       <div class="flex min-w-0 items-center gap-3">
         <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
@@ -102,6 +103,7 @@
 </template>
 
 <script setup>
+import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
@@ -116,7 +118,7 @@ import { useWebSocket } from '../composables/useWebSocket.js';
 
 const route = useRoute();
 const router = useRouter();
-const logSourceRoute = ref(['services', 'topology'].includes(String(route.query.from || '')) ? String(route.query.from) : '');
+const logSourceRoute = ref(['services', 'topology', 'dashboard'].includes(String(route.query.from || '')) ? String(route.query.from) : '');
 const projects = ref([]);
 const projectId = ref(route.query.projectId || '');
 const containerId = ref(route.query.containerId || '');
@@ -176,6 +178,7 @@ const aggSocket = useWebSocket(
 const connected = computed(() => logSocket.connected.value || aggSocket.connected.value);
 const reconnecting = computed(() => logSocket.reconnecting.value || aggSocket.reconnecting.value);
 
+const selectedProject = computed(() => projects.value.find(p => p.id === projectId.value));
 const containers = computed(() => projects.value.find((p) => p.id === projectId.value)?.containers || []);
 const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
 const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
@@ -269,10 +272,11 @@ watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nex
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 });
 watch(() => route.query.from, (source) => {
-  if (['services', 'topology'].includes(String(source || ''))) logSourceRoute.value = String(source);
+  if (['services', 'topology', 'dashboard'].includes(String(source || ''))) logSourceRoute.value = String(source);
 });
 function syncRouteContext() {
   const query = {};
+  if (typeof route.query.returnTo === 'string') query.returnTo = route.query.returnTo;
   if (projectId.value) query.projectId = projectId.value;
   if (containerId.value) query.containerId = containerId.value;
   if (logSourceRoute.value) query.from = logSourceRoute.value;
@@ -467,6 +471,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.logs-view > .page-header { display: block; }
+.logs-view .page-header > :first-child { margin-bottom: 14px; }
+.logs-toolbar-actions { justify-content: space-between; width: 100%; max-width: none; }
+
 .logs-toolbar-actions {
   align-items: stretch;
 }

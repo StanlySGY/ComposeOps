@@ -1,16 +1,18 @@
 <template>
   <div class="page-shell page-shell-workspace">
+    <ProjectContextNav :project="selectedProject" :container-id="containerId" />
     <div class="page-header">
       <div><h1 class="page-title">容器终端</h1><p class="page-subtitle">受限于当前 Compose 项目的交互式 Shell</p></div>
       <div class="page-actions">
         <select v-model="projectId" class="input" aria-label="选择终端项目" :disabled="loading" @change="containerId = ''; selectionChanged()"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <select v-model="containerId" class="input" aria-label="选择终端容器" :disabled="loading" @change="selectionChanged"><option value="">选择容器</option><option v-for="c in containers" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+        <select v-model="containerId" class="input" aria-label="选择终端容器" :disabled="loading" @change="selectionChanged"><option value="">选择容器</option><option v-for="c in containers" :key="c.id" :value="c.id" :disabled="c.state !== 'running'">{{ c.name }}{{ c.state !== 'running' ? ' · 未运行' : '' }}</option></select>
         <select v-model="cmd" class="input" aria-label="选择终端 Shell" @change="selectionChanged"><option value="sh">sh</option><option value="bash">bash</option></select>
         <button v-if="!connected && !connecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Plug class="w-4 h-4" />连接</button>
         <button v-else class="btn-danger" @click="disconnect"><Unplug class="w-4 h-4" />断开</button>
       </div>
     </div>
     <p v-if="!loading && loaded && !capabilities.shellEnabled" class="alert-warning" role="alert">Web Shell 当前未启用，请在部署环境设置 ENABLE_SHELL=1。</p>
+    <p v-else-if="selectedContainer && selectedContainer.state !== 'running'" class="alert-warning" role="status">当前容器未运行，无法建立终端。可切换到「日志」排查，或返回项目启动容器。</p>
     <div v-if="error" class="alert-error flex items-center justify-between gap-3" role="alert"><span>{{ error }}</span><button v-if="!loaded" class="btn-secondary shrink-0" :disabled="loading" @click="loadData()">重新加载</button></div>
     <div class="card flex flex-1 min-h-[420px] flex-col overflow-hidden terminal-host">
       <div class="terminal-session-bar" role="status" aria-live="polite">
@@ -52,6 +54,7 @@
   </div>
 </template>
 <script setup>
+import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
@@ -92,9 +95,10 @@ const socket = useWebSocket(
   }
 );
 const connected = socket.connected;
+const selectedProject = computed(() => projects.value.find(p => p.id === projectId.value));
 const containers = computed(() => projects.value.find((p) => p.id === projectId.value)?.containers || []);
 const selectedContainer = computed(() => containers.value.find(container => container.id === containerId.value));
-const canConnect = computed(() => termReady.value && !loading.value && loaded.value && capabilities.value.shellEnabled && !!selectedContainer.value);
+const canConnect = computed(() => termReady.value && !loading.value && loaded.value && capabilities.value.shellEnabled && selectedContainer.value?.state === 'running');
 // 终端刻意不自动重连(maxReconnectAttempts: 0),下拉刷新只重读项目列表,不动现有会话。
 usePullRefresh(() => loadData());
 onMounted(async () => {

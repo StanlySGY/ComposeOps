@@ -42,13 +42,13 @@ describe('服务筛选地址与导航', () => {
     await flushPromises();
     expect(router.currentRoute.value.fullPath).toBe('/logs?q=error');
   });
-  it('直达项目优先于旧筛选，用户重新筛选时取消项目定位', async () => {
+  it('定位项目不抹掉原筛选，用户重新筛选时取消项目定位', async () => {
     const { router, filters } = await start('/services?focus=cache&filter=attention&q=wiki');
-    expect(filters.filter.value).toBe('all');
-    expect(filters.searchQuery.value).toBe('');
+    expect(filters.filter.value).toBe('attention');
+    expect(filters.searchQuery.value).toBe('wiki');
     filters.filter.value = 'favorites';
     await flushPromises();
-    expect(router.currentRoute.value.query).toEqual({ filter: 'favorites' });
+    expect(router.currentRoute.value.query).toEqual({ filter: 'favorites', q: 'wiki' });
   });
   it('无效或重复参数安全回退，纯服务入口恢复全部项目', async () => {
     const { router, filters } = await start('/services?filter=toString&sort=__proto__&q=a&q=b');

@@ -5,10 +5,9 @@ const FILTERS = ['all', 'attention', 'running', 'stopped', 'managed', 'unmanaged
 const SORTS = ['priority', 'name', 'owner'];
 
 export function readServiceFilters(query = {}) {
-  const focused = typeof query.focus === 'string' && !!query.focus;
   return {
-    q: !focused && typeof query.q === 'string' ? query.q : '',
-    filter: !focused && FILTERS.includes(query.filter) ? query.filter : 'all',
+    q: typeof query.q === 'string' ? query.q : '',
+    filter: FILTERS.includes(query.filter) ? query.filter : 'all',
     sort: SORTS.includes(query.sort) ? query.sort : 'priority',
   };
 }

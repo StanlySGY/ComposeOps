@@ -494,7 +494,7 @@ test('服务页进入日志再返回，筛选、展开、滚动与日志上下�
   await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
   await card.locator('.service-project-card__toggle').click();
   await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
-  const logLink = card.locator('a[href*="/logs"][href*="containerId=demo-wiki-api"]:visible');
+  const logLink = card.locator('[data-container="demo-wiki-api"]').getByRole('link', { name: '实时日志', exact: true });
   await expect(logLink).toBeVisible();
   // 移动端的卡片日志入口位于展开内容下方;先让真实入口进入视口,再记录离开时的位置。
   await logLink.scrollIntoViewIfNeeded();

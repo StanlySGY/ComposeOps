@@ -56,7 +56,7 @@ test('配置草稿拦截统一返回，取消后可继续编辑且不会锁死�
   const confirm = page.getByRole('dialog', { name: '配置尚未保存' });
   await expect(confirm).toBeVisible();
   await confirm.getByRole('button', { name: '取消', exact: true }).click();
-  await expect(page).toHaveURL(/#\/compose\?projectId=cache$/);
+  await expect(page).toHaveURL(/#\/compose\?projectId=cache(?:&|$)/);
   await expect(page.getByText('redis:7.4', { exact: true })).toBeVisible();
   await nav.getByRole('button', { name: '返回服务总览' }).click();
   await confirm.getByRole('button', { name: '继续', exact: true }).click();

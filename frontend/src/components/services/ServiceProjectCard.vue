@@ -1,165 +1,85 @@
 <template>
-  <!-- 刻意不加 overflow-hidden:它会裁掉 WebUiLauncher 的多端口下拉菜单(overflow 裁剪
-       与 z-index 无关,菜单层级再高也逃不出去)。这里也不能用 isolate 代替 —— 那会让本卡片
-       成为独立层叠上下文,菜单反而被后面的兄弟卡片盖住。卡片内各子元素自身不触及圆角,
-       无需裁剪。 -->
-  <article :id="`project-${project.id}`" class="card service-project-card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused }">
-    <header class="service-project-card__header min-h-16 flex items-center gap-1 px-2 md:px-4">
-      <input type="checkbox" class="ml-2 accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @click.stop @change="$emit('toggle-select')" />
-      <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" :aria-pressed="!!project.favorite" :disabled="favoriteSaving" @click="toggleFavorite(project)">
-        <Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-amber-400' : ''" />
-      </button>
-      <button class="service-project-card__toggle min-w-0 flex-1 self-stretch flex items-center gap-3 text-left px-1" :aria-expanded="expanded" @click="$emit('toggle-expand')">
-        <div class="min-w-0 flex-1 sm:flex-none sm:w-48 md:w-60">
-          <div class="font-mono text-sm font-medium truncate">{{ project.projectName }}</div>
-        </div>
-        <span class="status-dot sm:hidden" :class="statusDotClass"></span>
-        <div class="hidden sm:block"><StatusBadge :status="project.status" /></div>
-        <span class="count-badge shrink-0" :class="project.managed ? 'text-emerald-300' : ''">{{ project.managed ? '已纳管' : '未纳管' }}</span>
-        <span v-if="imageState === 'updated'" class="count-badge shrink-0 bg-amber-950/50 text-amber-300">镜像待应用</span>
-        <span v-else-if="imageState === 'failed'" class="count-badge hidden shrink-0 bg-rose-950/50 text-rose-300 lg:inline">镜像检查失败</span>
-        <span v-else-if="imageState === 'current'" class="count-badge hidden shrink-0 text-emerald-300 xl:inline">镜像已检查</span>
-        <span class="hidden sm:inline text-muted shrink-0">{{ project.containers.length }} 个容器</span>
-        <span v-if="statusHint" class="hidden sm:inline text-muted shrink-0" :class="statusHintClass">{{ statusHint }}</span>
-        <span class="hidden lg:inline text-muted shrink-0">{{ project.owner }}</span>
-        <span class="hidden md:block text-muted font-mono truncate flex-1" :title="project.workingDir">{{ project.workingDir }}</span>
+  <article :id="`project-${project.id}`" class="card service-project-card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused, 'is-expanded': expanded }">
+    <header class="service-project-card__header">
+      <input type="checkbox" class="accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @change="$emit('toggle-select')" />
+      <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" :aria-pressed="!!project.favorite" :disabled="favoriteSaving" @click="toggleFavorite(project)"><Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-amber-400' : ''" /></button>
+      <button class="service-project-card__toggle" :aria-expanded="expanded" :aria-controls="`project-detail-${project.id}`" @click="$emit('toggle-expand')">
+        <span class="project-identity"><strong>{{ project.projectName }}</strong><span>{{ project.note || project.owner || 'Compose 项目' }}</span></span>
+        <span class="project-health-summary"><StatusBadge :status="project.status" :health="attention && project.status === 'running' ? 'unhealthy' : ''" /><span class="project-container-count">{{ runningCount }}/{{ project.containers.length }} 容器运行</span></span>
+        <span class="project-mode">{{ project.managed ? (project.editable ? 'Compose' : '容器模式') : '未纳管' }}</span>
+        <span class="project-path" :title="project.workingDir">{{ project.workingDir }}</span>
         <ChevronDown class="w-4 h-4 text-surface-500 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
       </button>
-      <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden md:inline-flex" />
-      <button v-if="updateInfo?.hasUpdate" class="update-badge shrink-0" title="检测到镜像可更新,点击一键升级" @click.stop="$emit('upgrade')"><Sparkles class="w-3.5 h-3.5" />可更新</button>
-      <button class="icon-btn" title="编辑备注" aria-label="编辑备注" @click="editNote(project)"><Pencil class="w-4 h-4" /></button>
+      <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden lg:inline-flex" />
+      <button v-if="updateInfo?.hasUpdate" class="update-badge shrink-0" title="检测到镜像可更新" @click="$emit('upgrade')"><Sparkles class="w-3.5 h-3.5" />可更新</button>
+      <button class="icon-btn hidden sm:inline-flex" title="编辑备注" aria-label="编辑备注" @click="editNote"><Pencil class="w-4 h-4" /></button>
     </header>
 
-    <div v-if="expanded" class="border-t border-surface-800 p-3 md:p-4 space-y-3">
-      <div class="flex flex-col lg:flex-row lg:items-center gap-2">
-        <div class="min-w-0 flex-1">
-          <p class="text-muted font-mono break-all">{{ project.workingDir || 'Docker 标签未提供工作目录' }}</p>
-          <div v-if="dependencyText" class="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span class="count-badge text-[10px] bg-surface-800/60 text-surface-300"><GitBranch class="w-3 h-3" />依赖</span>
-            <span class="text-xs text-surface-400">{{ dependencyText }}</span>
-          </div>
-          <div v-if="envPreview.length" class="mt-1.5">
-            <div class="flex items-center gap-1.5"><span class="count-badge text-[10px] bg-surface-800/60 text-surface-300"><KeyRound class="w-3 h-3" />环境变量</span><button class="text-[10px] text-surface-500 hover:text-surface-300" @click="showEnvPreview = !showEnvPreview">{{ showEnvPreview ? '收起' : '预览' }}</button></div>
-            <div v-if="showEnvPreview" class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
-              <span v-for="entry in envPreview" :key="entry.key" class="truncate font-mono text-[11px]"><span class="text-surface-500">{{ entry.key }}</span><span class="text-surface-400">={{ entry.masked }}</span></span>
-            </div>
-          </div>
-          <p v-if="project.note" class="text-sm text-surface-300 border-l-2 border-surface-700 pl-2 mt-2">{{ project.note }}</p>
-        </div>
-        <span v-if="project.managed" class="count-badge self-start lg:self-auto">{{ project.editable ? 'Compose 模式' : '现有容器模式' }}</span>
+    <div v-if="expanded" :id="`project-detail-${project.id}`" class="project-detail">
+      <div v-if="attention" class="project-attention-summary"><AlertTriangle :size="16" /><span><strong>{{ attentionSummary.label }}</strong> · {{ attentionSummary.detail }}</span><span class="hidden md:inline text-muted ml-auto">先查看日志定位原因，再决定是否重启</span></div>
+      <div class="project-actions" role="group" :aria-label="`${project.projectName} 项目操作`">
+        <CapabilityLink class="btn-primary" :disabled="!project.managed" reason="纳管项目后可查看日志" :to="toolLocation('logs', attentionContainer?.id)"><ScrollText :size="16" />{{ attention ? '查看异常日志' : '项目日志' }}</CapabilityLink>
+        <CapabilityLink class="btn-secondary" :disabled="!project.editable" reason="需要可访问的 Compose 目录" :to="toolLocation('compose')"><FileCode2 :size="16" />配置</CapabilityLink>
+        <button class="btn-ghost" :disabled="!project.editable || locked" @click="$emit('env')"><KeyRound :size="16" />环境变量</button>
+        <button class="btn-ghost" :disabled="!project.managed || locked" @click="$emit('activity')"><History :size="16" />活动</button>
+        <span v-if="actionRunning" class="text-xs text-muted" role="status"><LoaderCircle class="inline w-3.5 h-3.5 animate-spin" />正在执行…</span>
+        <ActionDisclosure class="ml-auto">
+          <button :disabled="!project.managed || locked" @click="trigger('up')"><Play :size="15" />{{ project.editable ? '应用配置 / 启动' : '启动容器' }}</button>
+          <button :disabled="!project.managed || locked" @click="trigger('restart')"><RotateCw :size="15" />重启项目</button>
+          <button :disabled="!project.editable || locked" @click="trigger('pull')"><Download :size="15" />拉取镜像</button>
+          <button v-if="updateInfo?.hasUpdate" :disabled="!project.editable || locked" @click="$emit('upgrade')"><Sparkles :size="15" />平滑升级</button>
+          <button :disabled="!project.managed || locked" @click="trigger('ps')"><ListTree :size="15" />查看详细状态</button>
+          <button v-if="dbContainers.length" :disabled="!project.managed || locked" @click="$emit('db-dump')"><Database :size="15" />备份数据库</button>
+          <button @click="editNote"><Pencil :size="15" />编辑备注</button>
+          <hr />
+          <button class="text-rose-300" :disabled="!project.managed || locked" @click="trigger('stop')"><Square :size="15" />停止项目</button>
+        </ActionDisclosure>
       </div>
+      <div v-if="!project.managed" class="alert-warning flex flex-wrap items-center gap-2"><span class="flex-1">项目尚未纳管。纳管后可操作容器、查看日志与终端。</span><router-link class="btn-secondary" :to="`/settings?tab=mounts&projectId=${project.id}`"><FolderCog :size="16" />项目纳管</router-link></div>
+      <div v-else-if="!project.editable" class="project-capability-note"><FolderCog :size="15" /><span>{{ project.mountState === 'remote_api_only' ? '此节点仅提供 Docker API。可管理容器，配置编辑需要 SSH 访问。' : '当前管理已有容器。挂载 Compose 目录后可编辑并应用配置。' }}</span><router-link v-if="project.mountState !== 'remote_api_only'" :to="`/settings?tab=mounts&projectId=${project.id}`">设置挂载</router-link></div>
 
-      <div class="flex flex-wrap gap-1.5">
-        <button class="btn-primary" :disabled="!project.managed || locked" :title="project.editable ? '通过 Docker Compose 启动' : '启动项目中已有的容器'" @click="trigger('up')"><Play class="w-4 h-4" :class="{ 'animate-spin': actionRunning === 'up' }" />启动</button>
-        <button class="btn-secondary" :disabled="!project.managed || locked" @click="trigger('restart')"><RotateCw class="w-4 h-4" :class="{ 'animate-spin': actionRunning === 'restart' }" />重启</button>
-        <button class="btn-danger" :disabled="!project.managed || locked" @click="trigger('stop')"><Square class="w-4 h-4" :class="{ 'animate-spin': actionRunning === 'stop' }" />停止</button>
-        <button class="btn-ghost" :disabled="!project.managed || locked" @click="trigger('ps')"><ListTree class="w-4 h-4" />状态</button>
-        <button class="btn-secondary" :disabled="!project.editable || locked" title="需在项目纳管中勾选 Compose" @click="trigger('pull')"><Download class="w-4 h-4" :class="{ 'animate-spin': actionRunning === 'pull' }" />拉取</button>
-        <button v-if="updateInfo?.hasUpdate" class="btn-secondary" :disabled="!project.editable || locked" title="一键平滑升级到最新镜像" @click="$emit('upgrade')"><Sparkles class="w-4 h-4" />平滑升级</button>
-        <router-link class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :to="`/compose?projectId=${project.id}`"><FileCode2 class="w-4 h-4" />配置</router-link>
-        <button class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :disabled="!project.editable || busy" title="编辑项目环境变量 (.env)" @click="$emit('env')"><KeyRound class="w-4 h-4" />环境变量</button>
-        <button class="btn-ghost" :disabled="!project.managed || busy" @click="$emit('activity')"><History class="h-4 w-4" />活动</button>
-        <button v-if="dbContainers.length" class="btn-ghost" :disabled="!project.managed || busy" title="一键导出数据库备份并下载" @click="$emit('db-dump')"><Database class="h-4 w-4 text-emerald-300" />备份数据库</button>
-      </div>
-
-      <div v-if="!project.managed" class="alert-warning flex flex-col sm:flex-row sm:items-center gap-2">
-        <span class="flex-1">项目尚未纳管，所有控制与容器入口均已禁用。</span>
-        <router-link class="btn-ghost shrink-0" :to="`/settings?tab=mounts&projectId=${project.id}`"><FolderCog class="w-4 h-4" />项目纳管</router-link>
-      </div>
-      <div v-else-if="!project.editable" class="alert-warning flex flex-col sm:flex-row sm:items-center gap-2">
-        <span v-if="project.mountState === 'remote_api_only'" class="flex-1">当前节点只有 Docker API、没有 SSH,无法编辑远端 Compose 文件。容器启停、日志和终端仍可用。</span>
-        <template v-else>
-          <span class="flex-1">当前可控制已有容器；请勾选 Compose 目录并应用挂载，解锁拉取、创建缺失服务和配置编辑。</span>
-          <router-link class="btn-ghost shrink-0" :to="`/settings?tab=mounts&projectId=${project.id}`"><FolderCog class="w-4 h-4" />选择 Compose 目录</router-link>
-        </template>
-      </div>
-
-      <div class="divide-y divide-surface-800/60 border-t border-surface-800/80">
-        <div v-for="container in project.containers" :key="container.id" class="py-2.5">
-          <!-- 桌面端紧凑单行模式 -->
-          <div class="hidden sm:flex items-center gap-2">
-            <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5">
-                <span class="text-sm font-mono truncate">{{ container.name }}</span>
-                <span v-if="metrics[container.id]?.cpu != null" class="metric-chip" :class="metrics[container.id].cpu >= 85 ? 'bg-rose-950/50 text-rose-300' : metrics[container.id].cpu >= 60 ? 'bg-amber-950/50 text-amber-300' : 'text-emerald-300'">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
-                <span v-if="metrics[container.id]?.mem != null" class="metric-chip" :class="metrics[container.id].mem >= 90 ? 'bg-rose-950/50 text-rose-300' : 'text-emerald-300'">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB / {{ numberValue(metrics[container.id].mem).toFixed(1) }}%</span>
-              </div>
-              <div class="text-muted truncate">{{ container.image }}<span v-if="container.ports.length"> · {{ portText(container) }}</span><span v-if="container.health" :class="healthClass(container.health)"> · {{ container.health }}</span></div>
-              <div v-if="container.stoppedAt || container.startedAt" class="text-muted text-[11px]">{{ containerStateHint(container) }}</div>
-            </div>
-            <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" aria-label="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
-            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" aria-label="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" aria-label="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" aria-label="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
-          </div>
-
-          <!-- 移动端触控友好卡片模式 -->
-          <div class="flex sm:hidden flex-col gap-2 rounded-xl p-2.5 bg-surface-900/50 border border-surface-800/70">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2 min-w-0">
-                <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
-                <span class="text-sm font-mono font-medium truncate">{{ container.name }}</span>
-              </div>
-              <StatusBadge :status="container.state" size="sm" />
-            </div>
-            <div class="text-[11px] text-muted truncate font-mono">{{ container.image }}</div>
-            <div v-if="container.ports.length" class="text-[11px] text-surface-400">{{ portText(container) }}</div>
-            <div class="flex flex-wrap gap-1.5 mt-0.5">
-              <span v-if="metrics[container.id]?.cpu != null" class="metric-chip text-[10px]">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
-              <span v-if="metrics[container.id]?.mem != null" class="metric-chip text-[10px]">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB</span>
-            </div>
-            <!-- 异常时的一键 Agent 诊断 -->
-            <router-link
-              v-if="container.state !== 'running' && project.managed"
-              :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"
-              class="flex items-center justify-center gap-1.5 rounded-lg bg-amber-950/40 border border-amber-500/30 px-3 py-1.5 text-xs text-amber-300 font-medium active:scale-98"
-            >
-              <Bot class="w-3.5 h-3.5" />
-              <span>容器异常 · 唤醒 Agent 一键诊断</span>
-            </router-link>
-            <!-- 底部触控大按钮行 -->
-            <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-surface-800/50">
-              <router-link
-                :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"
-                class="flex items-center justify-center gap-1 rounded-lg bg-surface-800/80 py-1.5 text-xs text-surface-200 active:bg-surface-700"
-                :class="{ 'pointer-events-none opacity-40': !project.managed }"
-              >
-                <ScrollText class="w-3.5 h-3.5" />
-                <span>日志</span>
-              </router-link>
-              <router-link
-                :to="`/shell?projectId=${project.id}&containerId=${container.id}`"
-                class="flex items-center justify-center gap-1 rounded-lg bg-surface-800/80 py-1.5 text-xs text-surface-200 active:bg-surface-700"
-                :class="{ 'pointer-events-none opacity-40': !project.managed }"
-              >
-                <TerminalSquare class="w-3.5 h-3.5" />
-                <span>终端</span>
-              </router-link>
-              <router-link
-                :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"
-                class="flex items-center justify-center gap-1 rounded-lg bg-accent/20 border border-accent/40 py-1.5 text-xs text-blue-300 active:bg-accent/30"
-                :class="{ 'pointer-events-none opacity-40': !project.managed }"
-              >
-                <Bot class="w-3.5 h-3.5" />
-                <span>AI 诊断</span>
-              </router-link>
-            </div>
+      <div class="project-container-table">
+        <div class="project-container-heading"><span>容器 / 镜像</span><span>状态与资源</span><span>快捷操作</span></div>
+        <div v-for="container in project.containers" :key="container.id" class="project-container-row" :data-container="container.id">
+          <div class="project-container-identity"><Box :size="17" class="text-surface-500 shrink-0" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">{{ portText(container) }}</small></div></div>
+          <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="text-xs text-muted font-mono">{{ numberValue(metrics[container.id].cpu).toFixed(1) }}% · {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="text-xs text-muted">{{ containerStateHint(container) }}</span></div>
+          <div class="project-container-actions">
+            <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="toolLocation('logs', container.id)" class="container-action" aria-label="实时日志"><ScrollText :size="15" /><span>日志</span></CapabilityLink>
+            <CapabilityLink :disabled="!project.managed || container.state !== 'running'" :reason="!project.managed ? '项目尚未纳管' : '容器运行后才能打开终端'" :to="toolLocation('shell', container.id)" class="container-action" aria-label="容器终端"><TerminalSquare :size="15" /><span>终端</span></CapabilityLink>
+            <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="{ ...toolLocation('agent', container.id), query: { ...toolLocation('agent', container.id).query, diagnose: '1' } }" class="container-action" aria-label="AI 诊断"><Bot :size="15" /><span>诊断</span></CapabilityLink>
           </div>
         </div>
+        <p v-if="!project.containers.length" class="p-4 text-xs text-muted">还没有容器。可通过「更多操作 → 应用配置 / 启动」创建服务。</p>
       </div>
+      <footer class="project-detail-footer">
+        <span class="truncate" :title="project.workingDir"><FolderOpen :size="13" />{{ project.workingDir || '未提供工作目录' }}</span>
+        <span v-if="dependencyText" class="truncate" :title="dependencyText"><GitBranch :size="13" />{{ dependencyText }}</span>
+        <span v-if="imageState === 'updated'" class="text-amber-300">镜像待应用</span><span v-else-if="imageState === 'failed'" class="text-rose-300">镜像检查失败</span>
+      </footer>
     </div>
   </article>
-  <ConfirmDialog :show="stopConfirm" title="停止项目容器" :message="`确认停止 ${project.projectName} 中现有的容器?不会删除容器和网络。`" tone="warning" confirm-text="停止容器" @confirm="confirmStop" @cancel="stopConfirm = false" />
+  <ConfirmDialog :show="!!pendingAction" :title="confirmationTitle" :message="confirmationMessage" tone="warning" :confirm-text="confirmationTitle" @confirm="confirmAction" @cancel="pendingAction = ''" />
+  <BaseModal :show="noteOpen" title="编辑项目备注" :close-disabled="noteSaving" size-class="max-w-lg" @close="noteOpen = false">
+    <form id="project-note-form" class="space-y-3" @submit.prevent="saveNote">
+      <label class="block text-sm">{{ project.projectName }}<textarea v-model="noteDraft" aria-label="项目备注" class="input mt-2 min-h-28 w-full resize-y" maxlength="500" placeholder="记录用途、负责人或操作提醒" :disabled="noteSaving"></textarea></label>
+      <div class="text-right text-xs text-muted">{{ noteDraft.length }} / 500</div><p v-if="noteError" class="alert-error" role="alert">{{ noteError }}</p>
+    </form>
+    <template #footer><button class="btn-secondary" :disabled="noteSaving" @click="noteOpen = false">取消</button><button class="btn-primary" form="project-note-form" type="submit" :disabled="noteSaving">{{ noteSaving ? '保存中…' : '保存备注' }}</button></template>
+  </BaseModal>
 </template>
 
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
-import { Bot, ChevronDown, Database, Download, FileCode2, FolderCog, GitBranch, History, KeyRound, Layers, ListTree, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
+import { AlertTriangle, Bot, Box, ChevronDown, Database, Download, FileCode2, FolderCog, FolderOpen, GitBranch, History, KeyRound, ListTree, LoaderCircle, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
 import StatusBadge from '../common/StatusBadge.vue';
-import WebUiLauncher from './WebUiLauncher.vue';
 import SparklineChart from '../common/SparklineChart.vue';
+import WebUiLauncher from './WebUiLauncher.vue';
+import ActionDisclosure from '../common/ActionDisclosure.vue';
+import CapabilityLink from '../common/CapabilityLink.vue';
+import BaseModal from '../common/BaseModal.vue';
+import { useRoute } from 'vue-router';
+import { projectAttention } from '../../lib/project-health.js';
+import { projectToolLocation } from '../../lib/project-navigation.js';
 import { api, streamProjectStats } from '../../api/client.js';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
 import { useToastStore } from '../../stores/toast.js';
@@ -173,8 +93,24 @@ const props = defineProps({
   actionRunning: { type: String, default: '' },
   lastResults: { type: Array, default: () => [] },
 });
-const emit = defineEmits(['toggle-expand', 'toggle-select', 'action', 'activity', 'env', 'db-dump', 'upgrade', 'refresh']);
-const stopConfirm = ref(false);
+const emit = defineEmits(['toggle-expand', 'toggle-select', 'action', 'activity', 'env', 'db-dump', 'upgrade', 'refresh', 'note-saved']);
+const route = useRoute();
+const pendingAction = ref('');
+const noteOpen = ref(false);
+const noteDraft = ref('');
+const noteError = ref('');
+const noteSaving = ref(false);
+const runningCount = computed(() => props.project.containers.filter(c => c.state === 'running').length);
+const attentionSummary = computed(() => projectAttention(props.project));
+const attentionContainer = computed(() => props.project.containers.find(c => c.state !== 'running') || props.project.containers.find(c => c.health === 'unhealthy'));
+function toolLocation(name, containerId = '') { return projectToolLocation(name, props.project, containerId, { from: 'services', returnTo: route.fullPath }); }
+const confirmationTitle = computed(() => ({ up: '应用配置', restart: '重启项目', stop: '停止项目' })[pendingAction.value] || '确认操作');
+const confirmationMessage = computed(() => {
+  const name = props.project.projectName;
+  if (pendingAction.value === 'up') return `将对 ${name} 执行 Docker Compose up。新增服务会被创建，配置变化的容器可能重建。执行后请确认容器状态。`;
+  if (pendingAction.value === 'restart') return `确认重启 ${name}？服务会短暂中断。重启不会应用 Compose 文件中的配置变更。`;
+  return `确认停止 ${name} 中的容器？服务将不可访问，容器和数据会保留。`;
+});
 const favoriteSaving = ref(false);
 const toast = useToastStore();
 
@@ -182,17 +118,16 @@ const metrics = ref({});
 const updateInfo = ref(null);
 const webuiLinks = ref([]);
 const dependencyMap = ref(new Map());
-const envPreview = ref([]);
-const showEnvPreview = ref(false);
 let statsAbort = null;
 let statsTimer = null;
 
 watch(() => props.expanded, (expanded) => {
   if (!expanded) { closeStats(); return; }
+  loadDependencies();
   openStats();
 });
-watch(() => props.project.id, () => { closeStats(); checkUpdates(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
-onMounted(() => { checkUpdates(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
+watch(() => props.project.id, () => { closeStats(); checkUpdates(); loadWebUi(); if (props.expanded) { loadDependencies(); openStats(); } });
+onMounted(() => { checkUpdates(); loadWebUi(); if (props.expanded) { loadDependencies(); openStats(); } });
 let activatedBefore = false;
 onActivated(() => {
   if (!activatedBefore) { activatedBefore = true; return; }
@@ -222,21 +157,6 @@ async function loadWebUi() {
   }
 }
 
-async function loadEnvPreview() {
-  envPreview.value = [];
-  if (!props.project.editable) return;
-  try {
-    const data = await api.getProjectEnv(props.project.id, true);
-    const entries = data?.entries || data?.env || [];
-    if (!Array.isArray(entries)) return;
-    envPreview.value = entries.slice(0, 24).map((entry) => {
-      const key = String(entry.key || '').split('=')[0];
-      const value = String(entry.value ?? entry[key] ?? '');
-      const isSecret = /(SECRET|TOKEN|PASSWORD|PASSWD|\bPASS\b|(?:API|PRIVATE|ACCESS|SECRET|AUTH|SIGNING)[_-]?KEY)/i.test(key);
-      return { key, masked: isSecret ? '••••••' : (value.length > 28 ? value.slice(0, 28) + '…' : value) };
-    });
-  } catch { envPreview.value = []; }
-}
 async function loadDependencies() {
   dependencyMap.value = new Map();
   if (!props.project.editable) return;
@@ -296,23 +216,6 @@ function closeStats() {
 const locked = computed(() => props.busy || !!props.actionRunning);
 const dbContainers = computed(() => props.project.containers.filter((c) => /(postgres|postgis|mysql|mariadb|redis|valkey|mongo)/i.test(c.image)));
 const attention = computed(() => props.project.status !== 'running' || props.project.containers.some((container) => container.health === 'unhealthy'));
-const statusDotClass = computed(() => (props.project.status === 'running' ? 'bg-emerald-400' : props.project.status === 'partial' ? 'bg-amber-400' : 'bg-rose-400'));
-const statusHint = computed(() => {
-  if (!props.project.containers.length) return '';
-  // 最近一次状态变化:优先 'x 分钟前停止',其次启动时间
-  const stopped = props.project.containers.filter((c) => c.state !== 'running' && c.stoppedAt);
-  if (stopped.length) {
-    const latest = stopped.reduce((a, b) => (a.stoppedAt > b.stoppedAt ? a : b));
-    return `${timeAgo(latest.stoppedAt)}前停止`;
-  }
-  const running = props.project.containers.filter((c) => c.state === 'running' && c.startedAt);
-  if (running.length) {
-    const latest = running.reduce((a, b) => (a.startedAt > b.startedAt ? a : b));
-    return `${timeAgo(latest.startedAt)}前启动`;
-  }
-  return '';
-});
-const statusHintClass = computed(() => (props.project.status === 'running' ? 'text-emerald-300/80' : 'text-amber-300/80'));
 const dependencyText = computed(() => {
   const entries = [...dependencyMap.value.entries()]
     .filter(([, deps]) => deps && deps.length)
@@ -328,10 +231,11 @@ const imageState = computed(() => {
 
 function trigger(action) {
   if (!props.project.managed || locked.value) return;
-  if (action === 'stop') { stopConfirm.value = true; return; }
+  if (action === 'pull' && !props.project.editable) return;
+  if (['stop', 'restart'].includes(action) || (action === 'up' && props.project.editable)) { pendingAction.value = action; return; }
   emit('action', action);
 }
-function confirmStop() { stopConfirm.value = false; if (!locked.value) emit('action', 'stop'); }
+function confirmAction() { const action = pendingAction.value; pendingAction.value = ''; if (!locked.value && props.project.managed && action) emit('action', action); }
 async function toggleFavorite(project) {
   if (favoriteSaving.value) return;
   favoriteSaving.value = true;
@@ -344,13 +248,22 @@ async function toggleFavorite(project) {
     toast.error(`收藏未保存：${error.message}`);
   } finally { favoriteSaving.value = false; }
 }
-async function editNote(project) {
-  const note = window.prompt('项目备注（最多 500 字）', project.note || '');
-  if (note === null) return;
-  project.note = note.slice(0, 500); await api.saveProjectPreference(project.id, { note: project.note });
+function editNote() { noteDraft.value = props.project.note || ''; noteError.value = ''; noteOpen.value = true; }
+async function saveNote() {
+  if (noteSaving.value) return;
+  noteSaving.value = true;
+  noteError.value = '';
+  const note = noteDraft.value.slice(0, 500);
+  try {
+    await api.saveProjectPreference(props.project.id, { note });
+    emit('note-saved', note);
+    noteOpen.value = false;
+    toast.success('项目备注已保存');
+    emit('refresh');
+  } catch (error) { noteError.value = `备注未保存：${error.message}`; }
+  finally { noteSaving.value = false; }
 }
 function portText(container) { return container.ports.map((port) => `${port.public}:${port.private}`).join(', '); }
-function healthClass(health) { return health === 'unhealthy' ? 'text-rose-400' : health === 'healthy' ? 'text-emerald-400' : 'text-amber-400'; }
 function timeAgo(ts) {
   if (!ts) return '';
   const diff = Math.max(0, Date.now() - Number(ts));
@@ -368,3 +281,51 @@ function containerStateHint(container) {
   return '';
 }
 </script>
+
+<style scoped>
+.service-project-card { border-radius: 11px; }
+.service-project-card__header { display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 78px; }
+.service-project-card__toggle { display: flex; flex: 1; align-self: stretch; align-items: center; min-width: 0; gap: 18px; padding: 8px 6px; text-align: left; background: transparent !important; }
+.project-identity { min-width: 0; flex: 1; }
+.project-identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.project-identity > span { display: block; margin-top: 5px; color: var(--color-surface-400); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-health-summary { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.project-container-count { color: var(--color-surface-400); font-size: 11px; font-variant-numeric: tabular-nums; }
+.project-mode { color: var(--color-surface-400); border: 1px solid var(--line-subtle); border-radius: 5px; padding: 2px 5px; font-size: 10px; white-space: nowrap; }
+.project-path { width: 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-surface-500); font-size: 11px; }
+.project-detail { padding: 0 18px; border-top: 1px solid var(--line-subtle); }
+.project-attention-summary { display: flex; align-items: center; gap: 8px; padding: 14px 0 0; color: #f4c575; font-size: 12px; }
+.project-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 16px 0; }
+.project-capability-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--color-surface-400); padding-bottom: 12px; }
+.project-capability-note a { color: var(--link-color); }
+.project-container-table { border-top: 1px solid var(--line-subtle); }
+.project-container-heading, .project-container-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .6fr) auto; gap: 20px; align-items: center; }
+.project-container-heading { padding: 10px 0; font-size: 10px; color: var(--color-surface-500); }
+.project-container-heading > :last-child { width: 180px; text-align: right; }
+.project-container-row { padding: 15px 0; border-top: 1px solid var(--line-subtle); }
+.project-container-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.project-container-identity strong { display: block; font-family: var(--font-mono); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-container-identity span, .project-container-identity small { display: block; color: var(--color-surface-400); font-size: 11px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-container-state { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; }
+.project-container-actions { display: flex; justify-content: flex-end; gap: 3px; }
+.container-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 7px; border-radius: 6px; font-size: 11px; color: var(--color-surface-300); }
+a.container-action:hover { background: var(--panel-raised); color: var(--color-surface-50); }
+.project-detail-footer { display: flex; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line-subtle); font-size: 10px; color: var(--color-surface-500); }
+.project-detail-footer span { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 1100px) { .project-path { display: none; } .project-container-count { display: none; } .project-container-row, .project-container-heading { gap: 12px; } }
+@media (max-width: 639px) {
+  .service-project-card__header { min-height: 76px; padding-inline: 8px; gap: 2px; }
+  .service-project-card__toggle { gap: 8px; }
+  .project-identity strong { font-size: 13px; }
+  .project-health-summary { flex-direction: column; align-items: flex-end; }
+  .project-mode { display: none; }
+  .project-detail { padding: 0 12px; }
+  .project-actions { gap: 6px; } .project-actions > .btn-ghost { font-size: 11px; padding-inline: 6px; }
+  .project-container-heading { display: none; }
+  .project-container-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 14px 0; }
+  .project-container-state { align-items: flex-end; }
+  .project-container-actions { grid-column: 1 / -1; justify-content: stretch; gap: 8px; }
+  .container-action { flex: 1; min-height: 40px; background: var(--panel-raised); }
+  .project-detail-footer { flex-direction: column; gap: 8px; }
+}
+</style>

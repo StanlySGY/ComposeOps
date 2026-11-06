@@ -17,7 +17,7 @@ test('首页异常可直达失败容器日志，并原路返回', async ({ page 
   await tab.close();
 });
 
-test('异常总览与服务筛选相连，筛选支持刷新、详情返回和前进', async ({ page, isMobile }) => {
+test('异常总览与服务筛选相连，筛选支持刷新、详情返回和前进', async ({ page }) => {
   await page.goto('./#/dashboard');
   await page.getByRole('region', { name: '需要处理' }).getByRole('link', { name: '查看全部' }).click();
   await expect(page.getByLabel('状态筛选', { exact: true })).toHaveValue('attention');
@@ -32,7 +32,7 @@ test('异常总览与服务筛选相连，筛选支持刷新、详情返回和�
   await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
   const card = page.locator('#project-cache');
   await card.locator('.service-project-card__toggle').click();
-  await card.getByRole('link', { name: isMobile ? '日志' : '实时日志', exact: true }).first().click();
+  await card.getByRole('link', { name: '实时日志', exact: true }).first().click();
   const nav = page.getByRole('navigation', { name: '页面导航' });
   await nav.getByRole('button', { name: '返回服务总览' }).click();
   await expect(page.getByLabel('搜索服务项目')).toHaveValue('redis');

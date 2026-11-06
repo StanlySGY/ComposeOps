@@ -20,6 +20,10 @@ describe('工作台返回路径', () => {
     expect(fallbackTarget(router, router.resolve('/shell?projectId=p')).fullPath).toBe('/services?focus=p');
     expect(fallbackTarget(router, router.resolve('/agent/history')).name).toBe('agent');
   });
+  it('刷新后的默认返回仍保留进入项目时的服务筛选', () => {
+    const route = router.resolve({ path: '/logs', query: { projectId: 'p', returnTo: '/services?q=redis&filter=managed&sort=name' } });
+    expect(fallbackTarget(router, route).query).toEqual({ q: 'redis', filter: 'managed', sort: 'name', focus: 'p' });
+  });
   it('日志直达遵守明确来源，拒绝任意 from 跳转', () => {
     expect(fallbackTarget(router, router.resolve('/logs?from=topology')).name).toBe('topology');
     expect(fallbackTarget(router, router.resolve('/logs?projectId=p&from=dashboard')).name).toBe('dashboard');

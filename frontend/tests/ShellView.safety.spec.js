@@ -18,7 +18,7 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
 import ShellView from '../src/views/ShellView.vue';
 
-const projects = [{ id: 'p', managed: true, projectName: '测试项目', containers: [{ id: 'c1', name: 'web' }, { id: 'c2', name: 'worker' }] }];
+const projects = [{ id: 'p', managed: true, projectName: '测试项目', containers: [{ id: 'c1', name: 'web', state: 'running' }, { id: 'c2', name: 'worker', state: 'running' }] }];
 let wrapper; let router;
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
 async function start() {
@@ -36,6 +36,13 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.unstubAllGlobals(); });
 
 describe('终端目标与会话一致性', () => {
+  it('深链进入停止容器时解释原因且不尝试连接', async () => {
+    mocks.api.getProjects.mockResolvedValue({ projects: [{ ...projects[0], containers: [{ id: 'c1', name: 'web', state: 'exited' }] }] });
+    await start();
+    expect(mocks.channels[0].connect).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('当前容器未运行');
+    expect(wrapper.findAll('button').find(button => button.text() === '连接').attributes('disabled')).toBeDefined();
+  });
   it('切换容器先断开旧会话，输入不再发送，显式连接后才连接新目标', async () => {
     await start();
     const channel = mocks.channels[0];

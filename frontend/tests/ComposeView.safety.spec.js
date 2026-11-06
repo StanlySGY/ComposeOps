@@ -76,6 +76,21 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = null; document.body.innerHTML = ''; });
 
 describe('Compose 草稿与保存事务', () => {
+  it('保存成功明确区分文件保存与应用，提供返回项目的下一步', async () => {
+    await open(); await edit();
+    await button('保存').trigger('click'); await flushPromises();
+    expect(view().text()).toContain('保存文件不会自动更新容器');
+    expect(view().get('a.btn-secondary[href*="focus=one"]').text()).toContain('返回项目');
+    await edit(latestDraft);
+    expect(view().text()).not.toContain('保存文件不会自动更新容器');
+  });
+  it('切换文件清除上一个文件的保存提示', async () => {
+    await open(); await edit();
+    await button('保存').trigger('click'); await flushPromises();
+    expect(view().text()).toContain('保存文件不会自动更新容器');
+    await view().get('select[aria-label="选择 Compose 配置文件"]').setValue('1'); await flushPromises();
+    expect(view().text()).not.toContain('保存文件不会自动更新容器');
+  });
   it('切换项目取消时保留选择与草稿，确认后才加载新项目', async () => {
     await open(); await edit();
     await view().get('select[aria-label="选择 Compose 项目"]').setValue('two');
