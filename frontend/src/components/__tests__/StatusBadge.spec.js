@@ -4,13 +4,13 @@ import StatusBadge from '../common/StatusBadge.vue';
 
 describe('StatusBadge.vue', () => {
   describe('status rendering', () => {
-    it('renders running status with pulse animation', () => {
+    it('renders stable running status without continuous animation', () => {
       const wrapper = mount(StatusBadge, {
         props: { status: 'running' }
       });
       expect(wrapper.text()).toContain('运行中');
-      expect(wrapper.find('[data-pulse="true"]').exists()).toBe(true);
-      expect(wrapper.find('.status-badge-pulse').exists()).toBe(true);
+      expect(wrapper.find('[data-pulse="false"]').exists()).toBe(true);
+      expect(wrapper.find('.status-badge-pulse').exists()).toBe(false);
       expect(wrapper.classes()).toContain('text-emerald-300');
     });
 
@@ -50,12 +50,12 @@ describe('StatusBadge.vue', () => {
   });
 
   describe('health status priority', () => {
-    it('renders healthy status when health prop is set', () => {
+    it('does not label a stopped container healthy from an earlier check', () => {
       const wrapper = mount(StatusBadge, {
         props: { status: 'stopped', health: 'healthy' }
       });
-      expect(wrapper.text()).toContain('健康');
-      expect(wrapper.classes()).toContain('text-emerald-300');
+      expect(wrapper.text()).toContain('已停止');
+      expect(wrapper.classes()).not.toContain('text-emerald-300');
     });
 
     it('renders unhealthy status when health prop is set', () => {

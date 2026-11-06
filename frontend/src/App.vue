@@ -12,12 +12,13 @@
   </main>
   <LoginView v-else-if="!auth.authenticated" />
   <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden relative">
+    <button class="skip-link" @click="focusMainContent">跳到主要内容</button>
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
     <div class="flex min-h-0 flex-1 overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
       <AppSidebar />
       <div class="app-workspace flex min-w-0 min-h-0 flex-1 flex-col">
       <WorkspaceNavigation />
-      <main class="app-main flex-1 min-h-0 min-w-0 overflow-auto" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
+      <main id="main-content" class="app-main flex-1 min-h-0 min-w-0 overflow-auto" tabindex="-1" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
         <div class="pull-indicator" :style="{ transform: 'translateY(' + pullY + 'px)', opacity: pullY > 0 ? 1 : 0 }">
           <span v-if="refreshing" class="loading-mark"></span>
           <RefreshCw v-else class="w-4 h-4" :class="{ 'rotate-180': pullY >= pullThreshold }" />
@@ -81,6 +82,7 @@ const servicesStore = useServicesStore();
 const toast = useToastStore();
 const { openAgent, startPageTracking, stopPageTracking } = useAgentConsole();
 const cheatSheet = ref(false);
+function focusMainContent() { document.getElementById('main-content')?.focus({ preventScroll: true }); }
 /* ---- 下拉刷新(移动端触屏)与头部大标题收缩 ---- */
 const pullY = ref(0);
 const refreshing = ref(false);

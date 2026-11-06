@@ -68,4 +68,18 @@ describe('总览数据与跳转', () => {
     expect(quickActions.get('a[href="/logs"]').text()).toContain('查看日志');
     expect(quickActions.get('a[href="/agent"]').text()).toContain('AI 助手');
   });
+  it('摘要区正确区分部分运行，未纳管项目引导到管理页面', async () => {
+    state.store.projects = [{ id: 'partial', projectName: '示例', status: 'partial', managed: false, containers: [{ id: 'one', state: 'exited' }] }];
+    await start();
+    expect(wrapper.get('.overview-attention').text()).toContain('部分运行');
+    expect(wrapper.get('.overview-attention').text()).toContain('1 个未运行');
+    expect(wrapper.find('[aria-label="查看 示例 异常日志"]').exists()).toBe(false);
+    expect(wrapper.get('[aria-label="打开 示例"]').exists()).toBe(true);
+  });
+  it('数据不完整时不显示全部正常的成功状态', async () => {
+    api.getOperations.mockRejectedValue(new Error('操作记录不可用'));
+    await start();
+    expect(wrapper.text()).toContain('状态待确认');
+    expect(wrapper.text()).not.toContain('当前项目状态正常');
+  });
 });

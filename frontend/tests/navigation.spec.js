@@ -22,6 +22,7 @@ describe('工作台返回路径', () => {
   });
   it('日志直达遵守明确来源，拒绝任意 from 跳转', () => {
     expect(fallbackTarget(router, router.resolve('/logs?from=topology')).name).toBe('topology');
+    expect(fallbackTarget(router, router.resolve('/logs?projectId=p&from=dashboard')).name).toBe('dashboard');
     expect(fallbackTarget(router, router.resolve('/logs?from=https://example.com')).name).toBe('services');
     expect(fallbackTarget(router, router.resolve('/dashboard'))).toBeNull();
   });

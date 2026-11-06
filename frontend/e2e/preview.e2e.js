@@ -117,7 +117,7 @@ test('真实 Agent 审批门可拒绝、确认，刷新后重置示例', async (
   await page.evaluate(() => { location.hash = '/services'; });
   await expect(page.locator('#project-knowledge-base')).toContainText('运行中');
   await page.getByRole('button', { name: '重置演示', exact: true }).click();
-  await expect(page.locator('#project-knowledge-base')).toContainText('部分异常');
+  await expect(page.locator('#project-knowledge-base')).toContainText('部分运行');
   expect(observed.errors).toEqual([]);
   expect(observed.network).toEqual([]);
 });

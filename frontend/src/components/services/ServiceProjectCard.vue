@@ -26,7 +26,7 @@
         <ChevronDown class="w-4 h-4 text-surface-500 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
       </button>
       <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden md:inline-flex" />
-      <button v-if="updateInfo?.hasUpdate" class="update-badge shrink-0" title="检测到镜像可更新,点击一键升级" @click.stop="$emit('upgrade')"><Sparkles class="w-3.5 h-3.5" />Update Available</button>
+      <button v-if="updateInfo?.hasUpdate" class="update-badge shrink-0" title="检测到镜像可更新,点击一键升级" @click.stop="$emit('upgrade')"><Sparkles class="w-3.5 h-3.5" />可更新</button>
       <button class="icon-btn" title="编辑备注" aria-label="编辑备注" @click="editNote(project)"><Pencil class="w-4 h-4" /></button>
     </header>
 

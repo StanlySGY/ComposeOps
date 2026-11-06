@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell">
+  <div class="page-shell services-view">
     <div class="page-header">
       <div><h1 class="page-title">服务总览</h1><p class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
       <div class="page-actions">
@@ -57,7 +57,10 @@
         <div class="metric-tile cursor-default"><span class="metric-icon" :class="healthTone"><Gauge class="h-5 w-5" /></span><span><strong class="font-mono tabular-nums" :class="healthTone">{{ healthScore }}</strong><small>健康分数</small></span><span class="metric-meta">综合项目与容器状态</span></div>
       </div>
     </section>
-    <div v-if="store.projects.length" class="toolbar-panel">
+    <div v-if="store.projects.length" class="service-filter-views" role="group" aria-label="常用服务筛选">
+      <button v-for="view in quickFilters" :key="view.value" :aria-pressed="filter === view.value" @click="filter = view.value"><component :is="view.icon" class="h-3.5 w-3.5" />{{ view.label }}<span>{{ view.count }}</span></button>
+    </div>
+    <div v-if="store.projects.length" class="toolbar-panel service-toolbar">
       <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" type="search" aria-label="搜索服务项目" placeholder="搜索项目、容器、镜像或路径" /></label>
       <select v-model="filter" class="input sm:w-40" aria-label="状态筛选"><option value="all">全部项目</option><option value="attention">需要关注</option><option value="running">健康运行</option><option value="stopped">已停止</option><option value="managed">已纳管</option><option value="unmanaged">未纳管</option><option value="favorites">仅收藏</option></select>
       <select v-model="sort" class="input sm:w-40" aria-label="项目排序"><option value="priority">异常与收藏优先</option><option value="name">按项目名称</option><option value="owner">按项目归属</option></select>
@@ -96,7 +99,7 @@
 <script setup>
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search, X } from 'lucide-vue-next';
+import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search, Star, X } from 'lucide-vue-next';
 import { useServicesStore } from '../stores/services.js';
 import { useToastStore } from '../stores/toast.js';
 import { useKeyboardNavigation } from '../composables/useKeyboardNavigation.js';
@@ -115,13 +118,14 @@ import OperationOutputDrawer from '../components/services/OperationOutputDrawer.
 import EmptyState from '../components/common/EmptyState.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import { useServiceFilters } from '../composables/useServiceFilters.js';
 
 const store = useServicesStore();
 const route = useRoute();
 const router = useRouter();
 const { openAgent, updateAgentContext } = useAgentConsole();
 const autoRefresh = ref(true); const busy = ref(false); const expandedIds = ref(new Set());
-const searchQuery = ref(''); const filter = ref('all'); const sort = ref('priority');
+const { searchQuery, filter, sort, resetFilters } = useServiceFilters();
 const filterLabels = { attention: '需要关注', running: '健康运行', stopped: '已停止', managed: '已纳管', unmanaged: '未纳管', favorites: '仅收藏' };
 const selectedIds = ref([]); const updateSettings = ref({ lastResults: [] }); const focusedProject = ref('');
 const inspection = ref(null); const inspectionLoading = ref(false);
@@ -143,7 +147,7 @@ const inspectionIssueCounts = computed(() => {
 });
 const inspectionIssueTotal = computed(() => inspectionIssueCounts.value.critical + inspectionIssueCounts.value.warning);
 function loadCollapsedState(key) {
-  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+  try { const value = localStorage.getItem(key); return value === null || value === '1'; } catch { return true; }
 }
 const inspectionCollapsed = ref(loadCollapsedState('services.inspectionCollapsed'));
 const metricsCollapsed = ref(loadCollapsedState('services.metricsCollapsed'));
@@ -206,6 +210,12 @@ const runningContainerCount = computed(() => store.projects.reduce((count, proje
 const stoppedContainerCount = computed(() => containerCount.value - runningContainerCount.value);
 const healthyCount = computed(() => store.projects.filter((project) => !hasAttention(project)).length);
 const attentionCount = computed(() => store.projects.filter(hasAttention).length);
+const quickFilters = computed(() => [
+  { value: 'all', label: '全部项目', icon: Boxes, count: store.projects.length },
+  { value: 'attention', label: '需要关注', icon: AlertTriangle, count: attentionCount.value },
+  { value: 'running', label: '健康运行', icon: CircleCheckBig, count: healthyCount.value },
+  { value: 'favorites', label: '我的收藏', icon: Star, count: store.projects.filter(project => project.favorite).length },
+]);
 const healthScore = computed(() => {
   if (!store.projects.length) return 100;
   const total = store.projects.reduce((count, project) => count + Math.max(1, project.containers.length), 0);
@@ -233,7 +243,6 @@ function hasAttention(project) { return project.status !== 'running' || project.
 function searchIndex(project) { return [project.projectName, project.owner, project.workingDir, project.note, ...project.containers.flatMap((container) => [container.name, container.image])].join(' ').toLowerCase(); }
 const statusMatchers = { attention: (p) => hasAttention(p), running: (p) => !hasAttention(p), managed: (p) => p.managed, unmanaged: (p) => !p.managed, favorites: (p) => p.favorite, stopped: (p) => p.containers.some((c) => c.state !== 'running') };
 const sortComparators = { name: (a, b) => a.projectName.localeCompare(b.projectName), owner: (a, b) => a.owner.localeCompare(b.owner) || a.projectName.localeCompare(b.projectName), priority: (a, b) => Number(hasAttention(b)) - Number(hasAttention(a)) || Number(b.favorite) - Number(a.favorite) || Number(b.managed) - Number(a.managed) || a.projectName.localeCompare(b.projectName) };
-function resetFilters() { searchQuery.value = ''; filter.value = 'all'; sort.value = 'priority'; }
 function toggleSelection(projectId) { selectedIds.value = selectedIds.value.includes(projectId) ? selectedIds.value.filter((id) => id !== projectId) : [...selectedIds.value, projectId]; }
 function toggleAllVisible() { const visibleIds = visibleManagedProjects.value.map((project) => project.id); selectedIds.value = allVisibleSelected.value ? selectedIds.value.filter((id) => !visibleIds.includes(id)) : [...new Set([...selectedIds.value, ...visibleIds])]; }
 function toggleExpanded(projectId) { const next = new Set(expandedIds.value); if (next.has(projectId)) next.delete(projectId); else next.add(projectId); expandedIds.value = next; }
@@ -366,9 +375,10 @@ async function pollJob(jobId) {
 async function focusProject() {
   const projectId = String(route.query.focus || '');
   if (!projectId || focusedProject.value === projectId || !store.projects.some((project) => project.id === projectId)) return;
-  focusedProject.value = projectId; searchQuery.value = ''; filter.value = 'all';
+  focusedProject.value = projectId;
   if (!expandedIds.value.has(projectId)) toggleExpanded(projectId);
-  await nextTick(); document.getElementById(`project-${projectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  await nextTick();
+  if (route.name === 'services' && route.query.focus === projectId) document.getElementById(`project-${projectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function closeEnv() {
   envProject.value = null;
@@ -422,8 +432,11 @@ watch(autoRefresh, (value) => {
   }
   startRealtime();
 });
-watch([() => route.query.focus, () => store.projects], () => {
-  if (route.name === 'services') focusProject();
+watch([() => route.name, () => route.query.focus, () => store.projects], () => {
+  if (route.name === 'services') {
+    if (!route.query.focus) focusedProject.value = '';
+    void focusProject();
+  } else focusedProject.value = '';
 }, { deep: true });
 usePullRefresh(refresh);
 onMounted(async () => {
@@ -507,3 +520,19 @@ onActivated(async () => {
 onDeactivated(() => { pageActive = false; pageActivationToken += 1; pausePage(); });
 onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); });
 </script>
+
+<style scoped>
+.service-filter-views { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line-subtle); }
+.service-filter-views button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--color-surface-400); font-size: 12px; transition: background-color 140ms, color 140ms; }
+.service-filter-views button:hover { background: var(--panel-raised); color: var(--color-surface-100); }
+.service-filter-views button[aria-pressed="true"] { background: var(--panel-raised); border-color: var(--line-subtle); color: var(--color-surface-100); }
+.service-filter-views button span { min-width: 18px; text-align: center; padding: 0 4px; border-radius: 4px; background: rgba(154, 171, 194, .1); font-size: 10px; font-variant-numeric: tabular-nums; }
+.service-toolbar { margin-top: -10px; border: 0; padding: 0; background: transparent; box-shadow: none; }
+@media (max-width: 639px) {
+  .service-filter-views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .service-filter-views button { justify-content: flex-start; min-height: 40px; padding-inline: 10px; }
+  .service-filter-views button span { margin-left: auto; }
+  .service-toolbar { margin-top: -5px; }
+}
+@media (prefers-reduced-motion: reduce) { .service-filter-views button { transition: none; } }
+</style>

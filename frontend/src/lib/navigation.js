@@ -39,7 +39,7 @@ export function historyTarget(router, value, current) {
 }
 
 export function fallbackTarget(router, route) {
-  const source = ['services', 'topology'].includes(route.query?.from) ? route.query.from : null;
+  const source = ['services', 'topology', 'dashboard'].includes(route.query?.from) ? route.query.from : null;
   const name = source || pageDetails(route).parent || 'dashboard';
   if (route.name === name) return null;
   const projectId = typeof route.query?.projectId === 'string' ? route.query.projectId : '';
