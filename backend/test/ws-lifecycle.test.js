@@ -93,9 +93,34 @@ test('单容器日志与聚合日志共用完整行和时间戳解析', async (t
   raw.end();
   await settle();
   const frames = socket.messages.map(data => JSON.parse(data));
-  assert.deepEqual(frames[0], { type: 'stdout', data: 'ERROR 中文🙂', ts: '2026-09-29T12:00:00Z', level: 'error' });
+  assert.deepEqual(frames[0], { type: 'stdout', data: 'ERROR 中文🙂', ts: '2026-09-29T12:00:00Z', level: 'error', containerId: row.Id, containerName: 'audit' });
   assert.equal(frames[1].type, 'end');
   assert.equal(socket.readyState, 3);
+});
+
+test('两种日志路由按精确容器身份补读，忽略其他容器游标', async (t) => {
+  const request = await fixture(t);
+  const options = [];
+  t.mock.method(docker, 'getContainer', () => ({ inspect: async () => ({ Config: { Tty: true } }), logs: async value => { options.push(value); return new PassThrough(); } }));
+  for (const route of ['/logs', '/aggregated-logs']) {
+    for (const [resume, since] of [[{ [row.Id]: 1793966399 }, 1793966399], [{ 'test': 1793966300 }, undefined]]) {
+      const socket = new Socket();
+      await routes.get(route)(socket, { query: { ...request.query, tail: 200, resume: JSON.stringify(resume) } });
+      assert.equal(options.at(-1).since, since);
+      assert.equal(options.at(-1).tail, since ? '5000' : '200');
+      socket.close();
+    }
+  }
+});
+
+test('无效续读参数关闭日志连接并提供可见错误', async (t) => {
+  const request = await fixture(t);
+  for (const resume of ['bad', '[]', 'null', '{"a":-1}', '{"a":"1"}', '{"a":1.5}', ' '.repeat(8193)]) {
+    const socket = new Socket();
+    await routes.get('/logs')(socket, { query: { ...request.query, resume } });
+    assert.equal(socket.readyState, 3);
+    assert.match(socket.messages.join(''), /日志续读参数无效/);
+  }
 });
 
 test('空闲日志流响应心跳，断开时移除处理器且不影响终端输入', async (t) => {

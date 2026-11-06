@@ -126,6 +126,7 @@ import QuerySyntaxModal from '../components/logs/QuerySyntaxModal.vue';
 import { filterContainers } from '../lib/container-match.js';
 import { matchLogQuery, parseLogQuery } from '../lib/log-query.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
+import { createLogResume } from '../lib/log-resume.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -151,6 +152,11 @@ const expandedIds = ref(new Set());
 let flushFrame = 0;
 const recoveryNotice = ref('');
 let openedBefore = false;
+let logResume = createLogResume([]);
+function prepareLogUrl(url) {
+  logResume = createLogResume([...lines.value, ...pending.value]);
+  return url + logResume.query;
+}
 const search = ref('');
 const paused = ref(false);
 const pausedDropped = ref(0);
@@ -176,6 +182,7 @@ const logSocket = useWebSocket(
   {
     watchNetwork: true,
     heartbeatInterval: 15000,
+    prepareUrl: prepareLogUrl,
     onOpen: onStreamOpen,
     onMessage: (event) => ingest(event, false),
     onError: (err) => { error.value = err.message || '日志连接失败'; },
@@ -189,6 +196,7 @@ const aggSocket = useWebSocket(
   {
     watchNetwork: true,
     heartbeatInterval: 15000,
+    prepareUrl: prepareLogUrl,
     onOpen: onStreamOpen,
     onMessage: (event) => ingest(event, true),
     onError: (err) => { error.value = err.message || '聚合日志连接失败'; },
@@ -278,7 +286,13 @@ onDeactivated(() => {
   closeStats();
 });
 
-function onHostChanged() { if (disposed) return; disconnect(); closeStats(); clearLines(); projects.value = []; void reloadProjects(); }
+function onHostChanged() {
+  loadId += 1;
+  disconnect(); closeStats(); clearLines();
+  projects.value = []; projectId.value = ''; containerId.value = ''; selectedContainers.value = [];
+  recoveryNotice.value = '节点已切换，请重新选择项目和容器。';
+  if (!disposed) { syncRouteContext(); void reloadProjects(); }
+}
 async function reloadProjects() {
   const currentLoad = ++loadId;
   const [result, prefs] = await Promise.allSettled([api.getProjects(true), api.getPreferences()]);
@@ -354,12 +368,14 @@ function connect() {
 }
 function retryConnection() { disconnect(); connect(); }
 
-/** 重连成功后插入分隔行,提示上方日志与下方日志之间可能存在缺口。 */
+/** 补读仍受 Docker 日志保留和前端缓存限制,不承诺无损历史。 */
 function onStreamOpen({ resumed } = {}) {
   error.value = '';
   if (resumed || openedBefore) {
-    recoveryNotice.value = '连接已恢复，已重新读取最近日志；重连前后可能重复，断线期间可能有缺失。';
-    queueLine({ id: ++sequence.value, type: 'stdout', level: 'info', data: '—— 连接已恢复 · 以下为重新读取的日志，可能重复或有缺失 ——' });
+    recoveryNotice.value = logResume.query
+      ? '连接已恢复，正在从上次位置补读并去重；每容器最多补读 5000 条。超出上限、容器重建或日志轮转时可能有缺失。'
+      : '连接已恢复，缺少可用读取位置，已重新读取最近日志；可能重复或有缺失。';
+    queueLine({ id: ++sequence.value, type: 'stdout', level: 'info', data: '—— 连接已恢复 · 以下为重新读取的日志 ——' });
   }
   openedBefore = true;
 }
@@ -373,6 +389,7 @@ function ingest(event, aggregate) {
     const line = aggregate ? (frame.type === 'line' ? frame.data : null)
       : (['stdout', 'stderr'].includes(frame.type) ? frame : null);
     if (!line || typeof line.data !== 'string') return;
+    if (!logResume.accept(line)) return;
     queueLine({ ...line, id: ++sequence.value });
   } catch {
     // 非法 WebSocket 帧被丢弃,连接仍可继续接收后续日志。
@@ -426,6 +443,7 @@ function clearLines() {
   expandedIds.value.clear();
   recoveryNotice.value = '';
   openedBefore = false;
+  logResume = createLogResume([]);
   pausedDropped.value = 0;
   errorLines.value = 0;
   levelCounts.value = { error: 0, warn: 0, info: 0 };

@@ -12,6 +12,7 @@ import { getCurrentInstance, isRef, onUnmounted, ref, shallowRef } from 'vue';
  * @param {Function} options.onOpen - 连接建立回调,收到 { resumed } 标记是否为重连恢复
  * @param {Function} options.onError - 错误回调
  * @param {Function} options.onClose - 被动关闭回调(主动 close() 不触发)
+ * @param {Function} options.prepareUrl - 真正建连前补充动态参数,不改变连接身份
  * @param {string} options.binaryType - 二进制帧类型,如 'arraybuffer'
  * @param {number} options.reconnectDelay - 首次重连延迟(ms),默认 2000,逐次翻倍
  * @param {number} options.maxReconnectDelay - 重连延迟上限(ms),默认 15000
@@ -26,6 +27,7 @@ export function useWebSocket(url, options = {}) {
     onOpen,
     onError,
     onClose,
+    prepareUrl,
     binaryType,
     reconnectDelay = 2000,
     maxReconnectDelay = 15000,
@@ -140,7 +142,7 @@ export function useWebSocket(url, options = {}) {
     let socket;
     connecting.value = true;
     currentUrl = target;
-    try { socket = new WebSocket(target); }
+    try { socket = new WebSocket(prepareUrl ? prepareUrl(target) : target); }
     catch (error) {
       connecting.value = false;
       activeErrorHandler?.(error);

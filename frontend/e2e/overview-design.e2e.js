@@ -70,6 +70,10 @@ test('最近事件进入对应记录页面，键盘可跳过全站导航', async
   await expect(page).toHaveURL(/#\/events$/);
   if (!isMobile) {
     await page.goto('./#/dashboard');
+    // The app shell appears before the lazy route; Tab cannot land on a refresh
+    // control until the dashboard has mounted and completed its initial load.
+    await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+    await expect(page.locator('.page-fade-enter-active,.page-fade-leave-active')).toHaveCount(0);
     // The preview has its own banner, so focus the actual app's first control.
     const skip = page.getByRole('button', { name: '跳到主要内容' });
     await skip.focus();

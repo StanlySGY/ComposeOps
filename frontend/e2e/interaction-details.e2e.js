@@ -91,9 +91,26 @@ test('窄屏最近页面面板没有横向溢出，减少动画设置隐藏倒�
   await navigate(page, '应用市场');
   const dialog = await openCommands(page);
   await expect(dialog.getByRole('group', { name: '最近使用', exact: true })).toBeVisible();
+  await expect(dialog).not.toHaveClass(/modal-pop-enter/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const box = await dialog.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(320);
   expect(box.y + box.height).toBeLessThanOrEqual(640);
+  // Landscape/keyboard-sized viewport: controls remain accessible and only the
+  // results list scrolls, regardless of how many recent commands are present.
+  await page.setViewportSize({ width: 568, height: 320 });
+  await expect.poll(async () => {
+    const bounds = await dialog.boundingBox();
+    return bounds.y >= 0 && bounds.y + bounds.height <= 320;
+  }).toBe(true);
+  await expect(dialog.getByRole('combobox')).toBeVisible();
+  const closeBox = await dialog.getByRole('button', { name: '关闭命令面板' }).boundingBox();
+  expect(closeBox.width).toBeGreaterThanOrEqual(44);
+  expect(closeBox.height).toBeGreaterThanOrEqual(44);
+  await dialog.getByRole('combobox').press('End');
+  await dialog.getByRole('combobox').press('ArrowUp');
+  await expect(dialog.locator('[aria-selected="true"]')).toBeInViewport();
+  await dialog.getByRole('button', { name: '关闭命令面板' }).click();
+  await expect(dialog).toHaveCount(0);
 });

@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="show" class="modal-backdrop z-60" @click.self="close">
+      <div v-if="show" class="modal-backdrop command-backdrop z-60" @click.self="close">
         <Transition name="modal-pop" appear>
           <div ref="dialogRef" class="command-palette" role="dialog" aria-modal="true" aria-label="快速跳转与操作" @keydown.tab.prevent="moveFocus">
             <div class="command-input-wrapper">
@@ -24,7 +24,7 @@
                 @keydown.enter="executeSelected"
               />
               <button v-if="query" class="text-xs text-surface-400 hover:text-surface-100 whitespace-nowrap" aria-label="清空搜索" @click="clearQuery">清空</button>
-              <button class="shortcut-key text-[10px]" aria-label="关闭命令面板" @click="close">Esc</button>
+              <button class="command-close shortcut-key text-[10px]" aria-label="关闭命令面板" @click="close"><span class="sm:hidden">关闭</span><span class="hidden sm:inline">Esc</span></button>
             </div>
             <div v-if="!query.trim() && recentCommands.length" class="flex items-center justify-between border-b border-surface-800/60 px-4 py-2 text-[11px] text-surface-500">
               <span>常去的页面，少输几个字</span>
@@ -181,7 +181,20 @@ onBeforeUnmount(restoreFocus);
 <style scoped>
 @reference '../../style.css';
 .command-palette {
-  @apply relative mx-4 w-full max-w-xl overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl;
+  @apply relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl;
+  max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+.command-palette > :not(.command-list) { flex-shrink: 0; }
+.command-backdrop {
+  align-items: start;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+}
+@media (min-width: 768px) {
+  .command-backdrop { align-items: center; }
+}
+@media (max-width: 767px) {
+  .command-close { min-width: 44px; min-height: 44px; }
+  .command-input-wrapper { padding-block: 0.5rem; }
 }
 
 .command-input-wrapper {
@@ -193,7 +206,7 @@ onBeforeUnmount(restoreFocus);
 }
 
 .command-list {
-  @apply max-h-[min(55dvh,32rem)] overflow-y-auto overscroll-contain;
+  @apply min-h-0 max-h-[min(55dvh,32rem)] overflow-y-auto overscroll-contain;
   scroll-padding-block: 2rem;
 }
 

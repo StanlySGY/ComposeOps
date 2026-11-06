@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { ref } from 'vue';
+import { KeepAlive, ref } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 const { api, channels } = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getPreferences: vi.fn(), streamProjectStats: vi.fn(() => new Promise(() => {})) }, channels: [] }));
@@ -43,6 +43,41 @@ describe('日志页面生命周期与数据完整性', () => {
     await flushPromises();
   }
   const send = (data, aggregate = false) => channels[aggregate ? 1 : 0].options.onMessage({ data: JSON.stringify(data) });
+  it('暂停期间的已接收日志也参与续读去重，清屏会清除位置', async () => {
+    await start();
+    const first = { containerId: 'c', type: 'stdout', ts: '2026-11-06T12:00:00.123456789Z', data: 'before disconnect' };
+    channels[0].options.prepareUrl('/logs');
+    send(first);
+    await wrapper.get('button[title="暂停显示"]').trigger('click');
+    const second = { ...first, ts: '2026-11-06T12:00:01.123456789Z', data: 'paused line' };
+    send(second);
+    expect(channels[0].options.prepareUrl('/logs')).toContain('resume=');
+    send(first); send(second); send({ ...second, data: 'offline line' });
+    await wrapper.get('button[title="继续接收"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('.aggregate-line')).toHaveLength(3);
+    await wrapper.get('button[title="清屏"]').trigger('click');
+    expect(channels[0].options.prepareUrl('/logs')).toBe('/logs');
+  });
+  it('日志页缓存期间切换节点也清除旧来源，返回时不自动订阅旧容器', async () => {
+    router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/logs', name: 'logs', component: LogsView },
+      { path: '/services', name: 'services', component: { template: '<div>服务列表</div>' } },
+    ] });
+    await router.push('/logs?projectId=p&containerId=c');
+    wrapper = mount({ components: { KeepAlive }, template: '<router-view v-slot="{ Component }"><KeepAlive><component :is="Component" /></KeepAlive></router-view>' }, { global: { plugins: [router] } });
+    await flushPromises();
+    send({ containerId: 'c', type: 'stdout', ts: '2026-11-06T12:00:00Z', data: 'old host' });
+    await router.push('/services'); await flushPromises();
+    const loads = api.getProjects.mock.calls.length;
+    window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises();
+    expect(api.getProjects).toHaveBeenCalledTimes(loads);
+    await router.push('/logs'); await flushPromises();
+    expect(wrapper.text()).not.toContain('old host');
+    expect(wrapper.get('select[aria-label="选择日志项目"]').element.value).toBe('');
+    expect(channels[0].connect).toHaveBeenCalledOnce();
+    expect(channels[0].options.prepareUrl('/logs')).toBe('/logs');
+  });
 
   it('日志工具栏将来源过滤与流控制拆分成具名分组', async () => {
     await start();

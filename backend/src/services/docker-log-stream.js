@@ -12,7 +12,7 @@ export function parseLogLine(rawLine, type = 'stdout') {
 }
 
 /** 单容器与聚合日志共用的 TTY/多路复用解码和生命周期。取消可以发生在任一 await 期间。 */
-export async function followContainerLogs({ container, tail = 200, signal, onLine, onError = () => {}, onEnd = () => {} }) {
+export async function followContainerLogs({ container, tail = 200, since, signal, onLine, onError = () => {}, onEnd = () => {} }) {
   let stopped = false;
   let raw;
   let demux;
@@ -44,7 +44,12 @@ export async function followContainerLogs({ container, tail = 200, signal, onLin
     checkCancelled();
     const inspection = await container.inspect();
     checkCancelled();
-    raw = await container.logs({ follow: true, stdout: true, stderr: true, tail: String(Math.max(0, Math.min(Number(tail) || (Number(tail) === 0 ? 0 : 200), 5000))), timestamps: true });
+    // Reconnection must not reuse the initial 200-line tail. Bound replay to the
+    // reader's 5000-line retention while asking Docker for the missing interval.
+    const resume = Number.isSafeInteger(since) && since > 0;
+    raw = await container.logs({ follow: true, stdout: true, stderr: true,
+      tail: resume ? '5000' : String(Math.max(0, Math.min(Number(tail) || (Number(tail) === 0 ? 0 : 200), 5000))),
+      ...(resume ? { since } : {}), timestamps: true });
     checkCancelled();
     raw.on('error', finish);
     raw.on('close', () => {

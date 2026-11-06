@@ -79,3 +79,16 @@ test('等待 Docker 返回期间取消,迟到的日志流会立即销毁', async
   t.after(() => agg.stop());
   assert.equal(raw.destroyed, true);
 });
+
+test('聚合恢复使用各自的容器位置，新建容器保留初次读取行为', async (t) => {
+  const options = new Map();
+  t.mock.method(docker, 'getContainer', id => ({ inspect: async () => ({ Config: { Tty: true } }), logs: async value => { options.set(id, value); return new PassThrough(); } }));
+  const agg = await aggregateProjectLogs({ project: { containers: [{ id: 'a', name: 'api' }, { id: 'b', name: 'worker' }, { id: 'new', name: 'recreated' }] }, resume: { a: 1793966399, b: 1793966300, old: 1793966200 }, tail: 100 });
+  t.after(() => agg.stop());
+  assert.equal(options.get('a').since, 1793966399);
+  assert.equal(options.get('b').since, 1793966300);
+  assert.equal(options.get('a').tail, '5000');
+  assert.equal(options.get('new').since, undefined);
+  assert.equal(options.get('new').tail, '100');
+  assert.equal(options.has('old'), false);
+});

@@ -14,6 +14,19 @@ class TestSocket {
 describe('WebSocket 连接代际与卸载', () => {
   beforeEach(() => { TestSocket.instances = []; vi.stubGlobal('WebSocket', TestSocket); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  it('动态续读参数仅在建连时更新，不造成同来源重复连接', () => {
+    vi.useFakeTimers();
+    let cursor = 1;
+    const prepareUrl = vi.fn(url => `${url}&since=${cursor}`);
+    const hook = useWebSocket('/logs?container=a', { prepareUrl, reconnectDelay: 10 });
+    hook.connect();
+    cursor = 2; hook.connect();
+    expect(TestSocket.instances).toHaveLength(1);
+    expect(prepareUrl).toHaveBeenCalledOnce();
+    TestSocket.instances[0].onclose({}); vi.advanceTimersByTime(10);
+    expect(TestSocket.instances[1].url).toBe('/logs?container=a&since=2');
+    hook.close();
+  });
   it('主动关闭后迟到的 open 不会让页面再次显示已连接', () => {
     const hook = useWebSocket('/test');
     hook.connect();

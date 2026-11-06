@@ -65,15 +65,41 @@ try {
     await expect(page.getByText('UX_WORKSPACE_READY', { exact: false })).toBeVisible();
     if (viewport.width === 1440) {
       await expect.poll(() => heartbeatFrames.length, { timeout: 20000 }).toBeGreaterThan(0);
-      // Real browser offline mode interrupts the authenticated WebSocket, then
-      // resumes it against the candidate backend while preserving displayed logs.
-      await context.setOffline(true);
-      await expect(page.getByText('网络离线', { exact: true })).toBeVisible();
-      await expect(page.getByText('UX_WORKSPACE_READY', { exact: false })).toBeVisible();
-      await context.setOffline(false);
-      await expect(page.getByText('已连接', { exact: true })).toBeVisible();
-      await expect(page.locator('.log-reconnect-notice')).toContainText('可能重复');
       const target = docker([...composeArgs, 'ps', '-q', 'app']);
+      for (const mode of ['aggregate', 'single']) {
+        const aggregate = page.getByTitle('当前为聚合模式,点击切换为单容器', { exact: true });
+        if ((await aggregate.count() > 0) !== (mode === 'aggregate')) {
+          await page.getByTitle(mode === 'aggregate' ? '聚合所有选中容器' : '当前为聚合模式,点击切换为单容器', { exact: true }).click();
+        }
+        if (mode === 'single') {
+          // Exercise the visible mode/source controls so the actual project's
+          // returnTo (which itself contains a query) remains intact.
+          await page.locator('.container-chip').first().click();
+        }
+        const connect = page.getByRole('button', { name: '连接', exact: true });
+        if (await connect.isVisible()) await connect.click();
+        await expect(page.getByText('已连接', { exact: true })).toBeVisible();
+        const search = page.getByRole('textbox', { name: '搜索和过滤实时日志' });
+        // An anchor immediately before the outage must appear only once after replay.
+        docker(['exec', target, 'sh', '-c', `printf "UX_ANCHOR_${mode}\\n" > /proc/1/fd/1`]);
+        await expect(page.getByText('UX_ANCHOR_' + mode, { exact: true })).toBeVisible();
+        await context.setOffline(true);
+        await expect(page.getByText('网络离线', { exact: true })).toBeVisible();
+        // Exceed the initial 200-line tail while the browser is actually offline.
+        docker(['exec', target, 'sh', '-c', `i=0; while [ "$i" -lt 360 ]; do printf "UX_OUTAGE_${mode}_%03d\\n" "$i"; i=$((i+1)); done > /proc/1/fd/1`]);
+        await context.setOffline(false);
+        await expect(page.getByText('已连接', { exact: true })).toBeVisible();
+        await expect(page.locator('.log-reconnect-notice')).toContainText('从上次位置补读并去重');
+        await search.fill('UX_OUTAGE_' + mode + '_');
+        await expect(page.locator('.log-status-strip').getByText('360 条', { exact: true })).toBeVisible();
+        await search.fill('UX_OUTAGE_' + mode + '_000');
+        await expect(page.getByText('UX_OUTAGE_' + mode + '_000', { exact: true })).toBeVisible();
+        await search.fill('UX_OUTAGE_' + mode + '_359');
+        await expect(page.getByText('UX_OUTAGE_' + mode + '_359', { exact: true })).toBeVisible();
+        await search.fill('UX_ANCHOR_' + mode);
+        await expect(page.getByText('UX_ANCHOR_' + mode, { exact: true })).toHaveCount(1);
+        await search.fill('');
+      }
       docker(['exec', target, 'sh', '-c', 'printf "UX_AFTER_RECONNECT\\n" > /proc/1/fd/1']);
       await expect(page.getByText('UX_AFTER_RECONNECT', { exact: true })).toBeVisible();
     }
@@ -115,7 +141,7 @@ try {
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: '/tmp/composeops-workspace-real-'+viewport.width+'.png' });
-    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: note persistence, logs'+(viewport.width === 1440 ? ', heartbeat, offline recovery, fresh Docker log after reconnect' : '')+', config review/save, navigation guard, apply, running state, terminal, cancel stop');
+    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: note persistence, logs'+(viewport.width === 1440 ? ', heartbeat, 360 offline lines recovered in both aggregate/single modes, deduplication, fresh Docker log after reconnect' : '')+', config review/save, navigation guard, apply, running state, terminal, cancel stop');
     await context.close();
   }
 } finally {

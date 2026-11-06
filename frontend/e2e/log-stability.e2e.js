@@ -150,3 +150,28 @@ test('断线保留搜索和内容，网络恢复重连，主动断开与离开�
   await page.evaluate(() => { window.dispatchEvent(new Event('offline')); window.dispatchEvent(new Event('online')); });
   expect(await page.evaluate(() => window.__logSockets.filter(socket => socket.readyState === 1).length)).toBe(0);
 });
+
+test('续读携带位置并按出现次数去重，切换来源不会带入旧游标', async ({ page }) => {
+  await openLogs(page);
+  const record = { containerId: 'demo-wiki-api', type: 'stdout', ts: '2026-11-06T12:00:00.123456789Z', data: 'replay-duplicate' };
+  await page.evaluate(record => {
+    window.__logSockets.at(-1).message(record);
+    window.__logSockets.at(-1).message(record);
+    window.dispatchEvent(new Event('offline'));
+    window.dispatchEvent(new Event('online'));
+  }, record);
+  await expect(page.locator('.log-reconnect-notice')).toContainText('从上次位置补读并去重');
+  expect(await page.evaluate(() => new URL(window.__logSockets.at(-1).url).searchParams.has('resume'))).toBe(true);
+  await page.evaluate(record => {
+    for (let i = 0; i < 3; i++) window.__logSockets.at(-1).message(record);
+    window.__logSockets.at(-1).message({ ...record, ts: '2026-11-06T12:00:00.123456790Z', data: 'replay-new' });
+  }, record);
+  const search = page.getByRole('textbox', { name: '搜索和过滤实时日志' });
+  await search.fill('replay');
+  await expect(page.locator('.aggregate-line')).toHaveCount(4);
+  await expect(page.getByText('replay-duplicate', { exact: true })).toHaveCount(3);
+  await expect(page.getByText('replay-new', { exact: true })).toBeVisible();
+  await page.evaluate(() => { location.hash = '/logs?projectId=knowledge-base'; });
+  await expect.poll(() => page.evaluate(() => window.__logSockets.length)).toBe(3);
+  expect(await page.evaluate(() => new URL(window.__logSockets.at(-1).url).searchParams.has('resume'))).toBe(false);
+});
