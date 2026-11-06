@@ -1,32 +1,33 @@
 <template>
-  <div class="page-shell page-shell-workspace logs-view">
+  <div class="page-shell page-shell-workspace logs-view" :class="{ 'show-options': optionsOpen || !projectId }">
     <ProjectContextNav :project="selectedProject" :container-id="containerId" />
     <div class="page-header">
       <div class="flex min-w-0 items-center gap-3">
-        <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
+        <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle log-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
       </div>
-      <div class="page-actions logs-toolbar-actions">
+      <button v-if="projectId" class="btn-secondary logs-options-toggle" :aria-expanded="optionsOpen" aria-controls="log-toolbar" @click="optionsOpen = !optionsOpen"><SlidersHorizontal :size="15" />{{ optionsOpen ? '收起选项' : '日志选项' }}</button>
+      <div id="log-toolbar" class="page-actions logs-toolbar-actions">
         <div class="logs-toolbar-group" role="group" aria-label="日志来源与过滤">
-        <select v-model="projectId" class="input" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
-        <select v-model="levelFilter" class="input w-28" title="级别过滤" aria-label="按日志级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
-        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" aria-label="搜索和过滤实时日志" placeholder="level:error | container:api" /></label>
-        <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
+        <select v-model="projectId" class="input log-option" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <button class="btn-secondary log-option" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
+        <select v-model="levelFilter" class="input w-28 log-option" title="级别过滤" aria-label="按日志级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
+        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" aria-label="搜索和过滤实时日志" placeholder="搜索日志，支持 level:error 等条件" /></label>
+        <button class="icon-btn log-option" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
         </div>
         <div class="logs-toolbar-group logs-stream-actions" role="group" aria-label="日志流操作">
-        <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
+        <button class="icon-btn log-option" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
         <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
-        <button v-else class="btn-danger" @click="disconnect"><Square class="w-4 h-4" />断开</button>
-        <button class="icon-btn" :title="paused ? '继续接收' : '暂停显示'" :aria-label="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /></button>
-        <button class="icon-btn" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
-        <button class="icon-btn" title="清屏" aria-label="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
+        <button v-else class="btn-secondary log-disconnect" @click="disconnect"><Square class="w-4 h-4" />断开</button>
+        <button class="btn-secondary log-pause" :aria-pressed="paused" :title="paused ? '继续接收' : '暂停显示'" :aria-label="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /><span>{{ paused ? '继续' : '暂停' }}</span></button>
+        <button class="icon-btn log-option" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
+        <button class="icon-btn log-option" title="清屏" aria-label="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
         <button v-if="hasErrors" class="btn-primary" @click="diagnosis = true"><Sparkles class="w-4 h-4" />AI 诊断</button>
         </div>
       </div>
     </div>
 
     <!-- 容器选择条(借鉴 Dozzle:模糊匹配容器名 + 名称旁直接挂实时 CPU/内存) -->
-    <div v-if="containers.length" class="container-picker">
+    <div v-if="containers.length" class="container-picker log-option">
       <div class="flex flex-wrap items-center gap-2">
         <label class="search-field w-44"><Filter class="h-4 w-4" /><input v-model="containerQuery" aria-label="过滤容器列表" :placeholder="aggregateMode ? '过滤容器(可多选)' : '过滤容器(支持缩写)'" /></label>
         <span class="text-[11px] text-muted">{{ aggregateMode ? (selectedContainers.length ? `已选 ${selectedContainers.length} 个容器` : '未选择时聚合全部容器') : '点击容器切换日志源' }}</span>
@@ -56,15 +57,16 @@
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
+    <div v-if="levelFilter" class="filter-summary" role="group" aria-label="当前日志级别筛选"><span>仅显示 {{ levelFilter.toUpperCase() }}</span><button class="filter-reset" @click="levelFilter = ''">清除级别筛选</button></div>
     <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
-    <div class="flex flex-wrap items-center gap-3 text-muted">
+    <div class="log-status-strip flex flex-wrap items-center gap-3 text-muted">
       <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
       <span v-if="splitMode" class="text-surface-400">{{ panes.length }} 栏</span>
       <span v-if="levelCounts.error" class="text-rose-400">ERROR {{ levelCounts.error }}</span>
       <span v-if="levelCounts.warn" class="text-amber-400">WARN {{ levelCounts.warn }}</span>
       <span v-if="paused" class="text-amber-400">已暂停 · {{ pending.length }} 条待显示</span>
-      <span v-if="sawError && !paused" class="text-rose-300">当前保留 {{ retainedCount }} 行异常日志</span>
+      <span v-if="sawError && !paused" class="text-rose-300 log-retained">当前保留 {{ retainedCount }} 行异常日志</span>
       <label class="toggle-label ml-auto"><input v-model="autoScroll" type="checkbox" />自动滚动</label>
     </div>
 
@@ -89,7 +91,7 @@
       v-else
       :lines="filtered"
       :fallback-name="activeContainerName"
-      :empty-text="queryError ? '查询语法有误,已保留上一次结果' : '等待日志…'"
+      :empty-text="emptyMessage"
       :auto-scroll="autoScroll"
       :connected="connected"
       :paused="paused"
@@ -107,7 +109,7 @@ import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
-import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, SlidersHorizontal, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import LogPane from '../components/logs/LogPane.vue';
@@ -129,6 +131,7 @@ const levelFilter = ref('');
 // 分栏视图只在聚合流上有意义:每条日志都带 containerName,才能按容器拆栏。
 const splitMode = ref(false);
 const syntaxOpen = ref(false);
+const optionsOpen = ref(false);
 const queryError = ref('');
 const revision = ref(0);
 const resumeSignal = ref(0);
@@ -205,6 +208,16 @@ const filtered = computed(() => {
   if (levelFilter.value) result = result.filter((line) => (line.level || classifyLevel(line.data)) === levelFilter.value);
   if (activeQuery.value.active) result = result.filter((line) => matchLogQuery(activeQuery.value, line));
   return result;
+});
+
+const emptyMessage = computed(() => {
+  if (!projectId.value) return '选择项目和日志来源后开始查看。';
+  if (!canConnect.value) return '请选择容器，或开启聚合查看整个项目。';
+  if (queryError.value) return '查询语法有误，已保留上一次结果。';
+  if (lines.value.length && !filtered.value.length) return '没有匹配的日志，试试清除搜索或级别筛选。';
+  if (streamEnded.value) return '日志已结束，当前没有可显示的内容。';
+  if (!connected.value && !reconnecting.value) return '日志已断开，点击「连接」继续查看。';
+  return '已连接，等待新的日志…';
 });
 
 /** 分栏:按 containerName 归组(聚合流的每一行都由服务端打上容器名),栏头顺序稳定。 */
@@ -471,7 +484,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.logs-view > .page-header { display: block; }
+.logs-view > .page-header { display: flex; flex-wrap: wrap; }
+.logs-options-toggle { display: none; }
 .logs-view .page-header > :first-child { margin-bottom: 14px; }
 .logs-toolbar-actions { justify-content: space-between; width: 100%; max-width: none; }
 
@@ -514,8 +528,21 @@ onBeforeUnmount(() => {
     flex: 1 1 8rem;
   }
 
-  .logs-stream-actions {
-    padding-top: .25rem;
-  }
+  .logs-view { gap: 10px; }
+  .logs-view > .page-header { flex-direction: row; align-items: center; }
+  .logs-view .page-header > :first-child { margin-bottom: 0; flex: 1; width: auto; }
+  .logs-options-toggle { display: inline-flex; margin-left: auto; min-height: 36px; font-size: 12px; }
+  .log-subtitle { display: none; }
+  .logs-view:not(.show-options) .log-option { display: none; }
+  .logs-toolbar-actions { gap: 8px; }
+  .logs-toolbar-group .search-field { flex: 1 0 100%; order: -1; min-height: 40px; }
+  .logs-stream-actions { padding: 0; gap: 6px; }
+  .logs-stream-actions .btn-secondary, .logs-stream-actions .btn-primary { min-height: 36px; padding: 6px 10px; font-size: 12px; }
+  .log-pause { order: -1; }
+  .log-status-strip { font-size: 11px; gap: 8px; }
+  .log-retained { display: none; }
+  .log-status-strip .toggle-label { font-size: 11px; }
+  .log-status-strip + .log-pane { min-height: 300px; }
+
 }
 </style>

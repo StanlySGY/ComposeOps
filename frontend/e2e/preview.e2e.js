@@ -514,6 +514,8 @@ test('服务页进入日志再返回，筛选、展开、滚动与日志上下�
   await page.getByRole('link', { name: '日志', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '返回服务总览' })).toBeVisible();
+  const options = page.getByRole('button', { name: '日志选项', exact: true });
+  if (await options.isVisible()) await options.click();
   await expect(page.getByRole('combobox', { name: '选择日志项目' })).toHaveValue('knowledge-base');
   await expect(page.getByRole('textbox', { name: '搜索和过滤实时日志' })).toHaveValue('ENOTFOUND');
   await page.getByRole('button', { name: '返回服务总览' }).click();
@@ -531,7 +533,122 @@ test('手机窄屏日志搜索框保持完整宽度并可实际过滤', async ({
   const width = await search.evaluate(element => element.getBoundingClientRect().width);
   expect(width).toBeGreaterThanOrEqual(250);
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
+  const logBox = await page.locator('.log-pane-body').boundingBox();
+  expect(logBox.y).toBeLessThan(500);
+  await expect(page.getByRole('combobox', { name: '选择日志项目' })).toBeHidden();
+  await page.getByRole('button', { name: '日志选项', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: '选择日志项目' })).toBeVisible();
+  await page.getByRole('combobox', { name: '按日志级别过滤' }).selectOption('error');
+  await page.getByRole('button', { name: '收起选项', exact: true }).click();
+  await expect(page.getByRole('group', { name: '当前日志级别筛选' })).toContainText('ERROR');
+  await page.getByRole('button', { name: '清除级别筛选' }).click();
+  await expect(page.getByRole('group', { name: '当前日志级别筛选' })).toHaveCount(0);
   await search.fill('ENOTFOUND');
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+});
+
+test('筛选外的批量选择明确提示，确认列出实际项目，取消不执行', async ({ page }) => {
+  await page.goto('./#/services');
+  await page.getByRole('checkbox', { name: '选择 knowledge-base', exact: true }).check();
+  await expect(page.getByRole('checkbox', { name: '选择当前', exact: true })).toHaveJSProperty('indeterminate', true);
+  await page.getByRole('checkbox', { name: '选择 cache', exact: true }).check();
+  await page.getByRole('searchbox', { name: '搜索服务项目' }).fill('wiki-api');
+  const bar = page.getByRole('region', { name: '批量项目操作' });
+  await expect(bar).toContainText('已选择 2 个项目');
+  await expect(bar).toContainText('其中 1 个不在当前筛选中');
+  await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
+  await page.evaluate(() => {
+    window.__batchRequests = 0;
+    const fetch = window.fetch;
+    window.fetch = (...args) => { if (String(args[0]).endsWith('/jobs') && args[1]?.method === 'POST') window.__batchRequests++; return fetch(...args); };
+  });
+  await bar.getByRole('button', { name: '重启', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '批量重启' });
+  await expect(dialog).toContainText('knowledge-base');
+  await expect(dialog).toContainText('cache');
+  await expect(dialog).toContainText('重启不会应用配置或新镜像');
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  expect(await page.evaluate(() => window.__batchRequests)).toBe(0);
+  await expect(bar).toBeVisible();
+  await bar.getByRole('button', { name: '取消选择' }).click();
+  await expect(bar).toHaveCount(0);
+});
+
+test('平板服务搜索保留可输入宽度，筛选和批量选择可同时使用', async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto('./#/services');
+  const search = page.getByRole('searchbox', { name: '搜索服务项目' });
+  await expect(search).toBeVisible();
+  expect((await search.boundingBox()).width).toBeGreaterThanOrEqual(250);
+  await page.getByRole('checkbox', { name: '选择 knowledge-base', exact: true }).check();
+  await page.getByRole('checkbox', { name: '选择 cache', exact: true }).check();
+  await search.fill('wiki-api');
+  await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
+  await expect(page.getByRole('region', { name: '批量项目操作' })).toContainText('其中 1 个不在当前筛选中');
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 768);
+});
+
+test('手动刷新等待最新响应，显示忙碌状态且阻止重复提交', async ({ page }) => {
+  await page.goto('./#/services');
+  await expect(page.locator('#project-knowledge-base')).toBeVisible();
+  await page.getByRole('checkbox', { name: '自动刷新', exact: true }).uncheck();
+  await page.evaluate(() => {
+    const fetch = window.fetch;
+    window.__refreshRequests = 0;
+    window.fetch = async (...args) => {
+      if (!String(args[0]).endsWith('/projects')) return fetch(...args);
+      window.__refreshRequests++;
+      await new Promise(resolve => { window.__releaseRefresh = resolve; });
+      const response = await fetch(...args);
+      const body = await response.json();
+      body.projects.find(project => project.id === 'knowledge-base').note = '已取得本次刷新数据';
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    };
+  });
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  const refreshing = page.getByRole('button', { name: '刷新中', exact: true });
+  await expect(refreshing).toBeDisabled();
+  await expect(refreshing).toHaveAttribute('aria-busy', 'true');
+  await refreshing.evaluate(element => element.click());
+  expect(await page.evaluate(() => window.__refreshRequests)).toBe(1);
+  await page.evaluate(() => window.__releaseRefresh());
+  await expect(page.locator('#project-knowledge-base')).toContainText('已取得本次刷新数据');
+  await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+});
+
+test('持续日志流保持历史阅读位置，点击新日志提示才回到底部', async ({ page }) => {
+  await page.goto('./#/services');
+  await expect(page.locator('#project-knowledge-base')).toBeVisible();
+  await page.evaluate(() => {
+    const message = WebSocket.prototype.message;
+    WebSocket.prototype.message = function (value) { if (this.url.includes('/ws/logs')) window.__logSocket = this; return message.call(this, value); };
+    location.hash = '/logs?projectId=knowledge-base&containerId=demo-wiki-api';
+  });
+  const region = page.getByRole('region', { name: 'wiki-api实时日志' });
+  await expect(region).toBeVisible();
+  await expect.poll(() => page.evaluate(() => !!window.__logSocket)).toBe(true);
+  await page.evaluate(() => { for (let i = 0; i < 180; i++) window.__logSocket.message({ type: 'stdout', data: `reading-line-${i}` }); });
+  // scrollHeight/clientHeight are rounded integers; allow a few pixels after font/layout settling.
+  await expect.poll(() => region.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(3);
+  await expect(page.getByText('reading-line-179', { exact: true })).toBeVisible();
+  await region.scrollIntoViewIfNeeded();
+  await region.focus();
+  await page.keyboard.press('Home');
+  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBe(0);
+  await region.hover();
+  await page.mouse.wheel(0, 48);
+  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  const top = await region.evaluate(el => el.scrollTop);
+  await page.evaluate(() => window.__logSocket.message({ type: 'stdout', data: 'arrived-while-reading' }));
+  const resume = page.getByRole('button', { name: '1 条新日志 · 回到最新' });
+  await expect(resume).toBeVisible();
+  await expect(region).toHaveJSProperty('scrollTop', top);
+  const chip = await resume.boundingBox(), pane = await page.locator('.log-pane').boundingBox();
+  expect(chip.x).toBeGreaterThanOrEqual(pane.x);
+  expect(chip.y + chip.height).toBeLessThanOrEqual(pane.y + pane.height);
+  await resume.click();
+  await expect(resume).toHaveCount(0);
+  await expect.poll(() => region.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(3);
+  await expect(page.getByText('arrived-while-reading', { exact: true })).toBeVisible();
 });

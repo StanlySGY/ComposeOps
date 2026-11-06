@@ -2,11 +2,11 @@
   <div class="page-shell services-view">
     <div class="page-header">
       <div><h1 class="page-title">服务总览</h1><p class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
-      <div class="page-actions">
+      <div class="page-actions service-page-actions">
         <span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">更新于 {{ lastUpdated }}</span>
         <label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label>
-        <button class="btn-secondary" :disabled="store.loading" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': store.loading }" />刷新</button>
-        <button class="icon-btn" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
+        <button class="btn-secondary" :disabled="manualRefreshing || store.loading" :aria-busy="manualRefreshing" @click="manualRefresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': manualRefreshing || store.loading }" />{{ manualRefreshing ? '刷新中' : '刷新' }}</button>
+        <button class="icon-btn hidden md:inline-grid" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
       </div>
     </div>
     <p v-if="store.error" class="alert-error" role="alert">{{ store.error }}</p>
@@ -53,7 +53,7 @@
       <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" type="search" aria-label="搜索服务项目" placeholder="搜索项目、容器、镜像或路径" /></label>
       <select v-model="filter" class="input sm:w-40" aria-label="状态筛选"><option value="all">全部项目</option><option value="attention">需要关注</option><option value="running">健康运行</option><option value="stopped">已停止</option><option value="managed">已纳管</option><option value="unmanaged">未纳管</option><option value="favorites">仅收藏</option></select>
       <select v-model="sort" class="input sm:w-40" aria-label="项目排序"><option value="priority">异常与收藏优先</option><option value="name">按项目名称</option><option value="owner">按项目归属</option></select>
-      <label class="toggle-label whitespace-nowrap"><input type="checkbox" :checked="allVisibleSelected" :disabled="!visibleManagedProjects.length" @change="toggleAllVisible" />选择当前</label>
+      <label class="service-select-all"><input type="checkbox" :checked="allVisibleSelected" :indeterminate="someVisibleSelected && !allVisibleSelected" :disabled="busy || !visibleManagedProjects.length" @change="toggleAllVisible" />选择当前</label>
       <span class="ml-auto whitespace-nowrap text-muted" role="status" aria-live="polite">显示 {{ visibleProjects.length }} / {{ store.projects.length }}</span>
     </div>
     <div v-if="searchQuery || filter !== 'all'" class="filter-summary" role="group" aria-label="当前服务筛选">
@@ -63,8 +63,8 @@
       <button class="filter-reset" @click="resetFilters">重置筛选</button>
     </div>
     <p v-if="focusedOutsideFilter" class="text-xs text-muted" role="status">定位项目不在当前筛选中，已临时显示在列表首位；原筛选条件仍然保留。</p>
-    <BatchOperationsBar v-if="selectedProjects.length" :selected-count="selectedProjects.length" :busy="busy" @run="runBatch" @clear="selectedIds = []" />
-    <ConfirmDialog :show="batchConfirmation.show" :title="'批量' + actionLabel(batchConfirmation.action)" :message="'将对 ' + batchConfirmation.count + ' 个已纳管项目执行“' + actionLabel(batchConfirmation.action) + '”。操作会按顺序执行，失败项目仍会保留在结果中。确认继续?'" tone="warning" :confirm-text="'确认' + actionLabel(batchConfirmation.action)" :busy="batchSubmitting" @confirm="confirmBatch" @cancel="batchConfirmation.show = false" />
+    <BatchOperationsBar v-if="selectedProjects.length" :selected-count="selectedProjects.length" :hidden-count="hiddenSelectedCount" :can-pull="selectedProjects.every(project => project.editable)" :busy="busy" @run="runBatch" @clear="selectedIds = []" />
+    <ConfirmDialog :show="batchConfirmation.show" :title="'批量' + actionLabel(batchConfirmation.action)" :message="batchConfirmationMessage" tone="warning" :confirm-text="'确认' + actionLabel(batchConfirmation.action)" :busy="batchSubmitting" @confirm="confirmBatch" @cancel="batchConfirmation.show = false" />
     <ConfirmDialog :show="!!restartTarget" title="重启项目" :message="`确认重启 ${restartTarget?.projectName || ''}?`" tone="warning" confirm-text="重启" @confirm="confirmKeyboardRestart" @cancel="restartTarget = null" />
     <Skeleton v-if="store.loading && !store.projects.length" variant="cards" :rows="4" label="服务列表加载中" class="flex-1" />
     <EmptyState v-else-if="!store.projects.length" icon="Boxes" title="暂未发现 Compose 项目" description="Docker 中没有带 Compose 标签的项目,或尚未扫描" />
@@ -193,7 +193,12 @@ function askAgentReviewInspection() {
 let jobPollTimer; let activeJobId = ''; let jobPollInFlight = false;
 let controlController = null;
 const output = reactive({ open: false, text: '', action: '', name: '', projectId: '', exitCode: null, failureReason: '', resultConfirmed: false, running: false });
-const batchConfirmation = reactive({ show: false, action: '', count: 0 });
+const batchConfirmation = reactive({ show: false, action: '', projects: [] });
+const batchConfirmationMessage = computed(() => {
+  const names = batchConfirmation.projects.map(project => project.projectName).join('、');
+  const impact = { up: '新增服务会被创建，配置或镜像变化的容器可能重建。', restart: '服务会短暂中断；重启不会应用配置或新镜像。', stop: '服务将不可访问，容器和数据保留。', pull: '只下载镜像，不更新运行中的容器；之后需应用配置。' }[batchConfirmation.action] || '';
+  return `将对 ${batchConfirmation.projects.length} 个项目执行${actionLabel(batchConfirmation.action)}：${names}。${impact}操作按顺序执行。`;
+});
 const batchSubmitting = ref(false);
 const containerCount = computed(() => store.projects.reduce((count, project) => count + project.containers.length, 0));
 const managedCount = computed(() => store.projects.filter((project) => project.managed).length);
@@ -228,6 +233,14 @@ const visibleProjects = computed(() => focusedOutsideFilter.value ? [focusedOuts
 const visibleManagedProjects = computed(() => visibleProjects.value.filter((project) => project.managed));
 const selectedProjects = computed(() => store.projects.filter((project) => selectedIds.value.includes(project.id) && project.managed));
 const allVisibleSelected = computed(() => visibleManagedProjects.value.length > 0 && visibleManagedProjects.value.every((project) => selectedIds.value.includes(project.id)));
+const someVisibleSelected = computed(() => visibleManagedProjects.value.some(project => selectedIds.value.includes(project.id)));
+const hiddenSelectedCount = computed(() => selectedProjects.value.filter(project => !visibleProjects.value.some(visible => visible.id === project.id)).length);
+const manualRefreshing = ref(false);
+async function manualRefresh() {
+  if (manualRefreshing.value) return;
+  manualRefreshing.value = true;
+  try { await refresh(true); } finally { manualRefreshing.value = false; }
+}
 const completedBatchTasks = computed(() => batchTasks.value.filter((task) => ['success', 'failed'].includes(task.status)).length);
 const batchProgress = computed(() => batchTasks.value.length ? Math.round(completedBatchTasks.value / batchTasks.value.length * 100) : 0);
 
@@ -317,15 +330,15 @@ function inspectOutputProject() {
 }
 async function runBatch(action) {
   const projects = selectedProjects.value;
-  if (!projects.length) return;
+  if (busy.value || !projects.length || (action === 'pull' && projects.some(project => !project.editable))) return;
   batchConfirmation.action = action;
-  batchConfirmation.count = projects.length;
+  batchConfirmation.projects = [...projects];
   batchConfirmation.show = true;
 }
 async function confirmBatch() {
   if (batchSubmitting.value || busy.value) return;
   const action = batchConfirmation.action;
-  const projects = selectedProjects.value;
+  const projects = batchConfirmation.projects;
   if (!projects.length || !action) return;
   batchSubmitting.value = true;
   busy.value = true; output.open = true; output.text = ''; output.action = action; output.name = String(projects.length) + ' 个项目';
@@ -429,7 +442,7 @@ watch([() => route.name, () => route.query.focus, () => store.projects], () => {
     void focusProject();
   } else focusedProject.value = '';
 }, { deep: true });
-usePullRefresh(refresh);
+usePullRefresh(manualRefresh, { keepAlive: true });
 onMounted(async () => {
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
   // 后续 WS 打开成功会做一次非重连刷新,失败则降级轮询。
@@ -524,9 +537,21 @@ onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); }
 .service-filter-views button:hover { background: var(--panel-raised); color: var(--color-surface-100); }
 .service-filter-views button[aria-pressed="true"] { background: var(--panel-raised); border-color: var(--line-subtle); color: var(--color-surface-100); }
 .service-filter-views button span { min-width: 18px; text-align: center; padding: 0 4px; border-radius: 4px; background: rgba(154, 171, 194, .1); font-size: 10px; font-variant-numeric: tabular-nums; }
-.service-toolbar { margin-top: -10px; border: 0; padding: 0; background: transparent; box-shadow: none; }
+.service-select-all { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 12px; color: var(--color-surface-400); min-height: 36px; }
+.service-select-all input { width: 16px; height: 16px; accent-color: var(--color-accent); }
+.service-toolbar { flex-wrap: wrap; margin-top: -10px; border: 0; padding: 0; background: transparent; box-shadow: none; }
+.service-toolbar .search-field { flex: 1 1 18rem; min-width: min(100%, 16rem); }
+@media (min-width: 640px) and (max-width: 1023px) {
+  .service-toolbar .search-field { flex-basis: 100%; }
+  .service-toolbar > .input { flex: 1 1 10rem; }
+}
 @media (max-width: 639px) {
-  .service-filter-views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .service-overview-strip { flex-wrap: nowrap; gap: 8px; overflow-x: auto; scrollbar-width: thin; }
+  .service-overview-strip > * { flex-shrink: 0; white-space: nowrap; }
+  .service-page-actions { justify-content: space-between; width: 100%; }
+  .service-page-actions > span { display: none; }
+  .service-filter-views { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+  .service-filter-views button { flex-shrink: 0; white-space: nowrap; }
   .service-filter-views button { justify-content: flex-start; min-height: 40px; padding-inline: 10px; }
   .service-filter-views button span { margin-left: auto; }
   .service-toolbar { margin-top: -5px; }
@@ -536,5 +561,6 @@ onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); }
   .service-toolbar > .toggle-label { width: auto; }
   .service-toolbar > [role="status"] { margin-left: 0; text-align: right; }
 }
+.service-filter-views { scroll-padding-inline: 10px; }
 @media (prefers-reduced-motion: reduce) { .service-filter-views button { transition: none; } }
 </style>

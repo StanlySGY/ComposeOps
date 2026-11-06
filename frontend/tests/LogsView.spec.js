@@ -54,6 +54,17 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(streamGroup.get('button[aria-label="下载日志"]').exists()).toBe(true);
   });
 
+  it('无匹配与断开状态有具体说明，不一直显示等待', async () => {
+    await start();
+    send({ type: 'stdout', data: 'service started' });
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('not-present');
+    expect(wrapper.text()).toContain('没有匹配的日志');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('');
+    await wrapper.get('button[title="清屏"]').trigger('click');
+    await wrapper.findAll('button').find(button => button.text() === '断开').trigger('click');
+    expect(wrapper.text()).toContain('日志已断开，点击「连接」继续查看');
+  });
+
   it('离开日志模块再通过导航返回时保留项目、容器和筛选条件', async () => {
     await start();
     await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error');
@@ -164,7 +175,7 @@ describe('日志页面生命周期与数据完整性', () => {
     await flushPromises();
     expect(wrapper.findAll('.aggregate-line')).toHaveLength(3);
 
-    await wrapper.get('input[placeholder="level:error | container:api"]').setValue('container:api level:error');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('container:api level:error');
     const rows = wrapper.findAll('.aggregate-line');
     expect(rows).toHaveLength(1);
     expect(rows[0].text()).toContain('ERROR boom');
@@ -175,7 +186,7 @@ describe('日志页面生命周期与数据完整性', () => {
     await start();
     send({ type: 'stdout', data: '第一行日志' });
     await flushPromises();
-    const searchInput = wrapper.get('input[placeholder="level:error | container:api"]');
+    const searchInput = wrapper.get('input[aria-label="搜索和过滤实时日志"]');
     await searchInput.setValue('第一行');
     expect(wrapper.findAll('.aggregate-line')).toHaveLength(1);
 
@@ -191,7 +202,7 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(wrapper.findAll('.aggregate-line')).toHaveLength(0);
     await searchInput.setValue('不存在的关键字 container:');
     expect(wrapper.get('.alert-warning').text()).toContain('字段 container: 缺少取值');
-    expect(wrapper.text()).toContain('查询语法有误,已保留上一次结果');
+    expect(wrapper.text()).toContain('查询语法有误，已保留上一次结果');
   });
 
   it('分栏按容器名拆栏,每栏自带徽章与本栏计数', async () => {
@@ -223,13 +234,13 @@ describe('日志页面生命周期与数据完整性', () => {
     await wrapper.get('button[title="按容器分栏显示(快捷键 s)"]').trigger('click');
     expect(wrapper.findAll('.log-pane')).toHaveLength(2);
 
-    await wrapper.get('input[placeholder="level:error | container:api"]').setValue('level:error');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error');
     const panes = wrapper.findAll('.log-pane');
     expect(panes).toHaveLength(1);
     expect(panes[0].get('.container-badge').text()).toBe('api');
     expect(wrapper.text()).toContain('1 栏');
 
-    await wrapper.get('input[placeholder="level:error | container:api"]').setValue('level:error container:missing');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error container:missing');
     expect(wrapper.findAll('.log-pane')).toHaveLength(0);
     expect(wrapper.text()).toContain('没有匹配当前查询的容器日志。');
   });

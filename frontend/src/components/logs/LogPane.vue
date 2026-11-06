@@ -6,7 +6,7 @@
       <span class="text-[11px] text-muted tabular-nums">{{ lines.length }} 条</span>
       <span v-if="paneErrorCount" class="text-[11px] text-rose-400">ERROR {{ paneErrorCount }}</span>
     </div>
-    <div ref="boxEl" class="terminal-output card log-pane-body" role="region" :aria-label="`${heading || fallbackName || '容器'}实时日志`" tabindex="0" aria-live="off" @scroll="onScroll" @wheel="onWheel">
+    <div ref="boxEl" class="terminal-output card log-pane-body" role="region" :aria-label="`${heading || fallbackName || '容器'}实时日志`" tabindex="0" aria-live="off" @scroll="onScroll" @wheel.passive="onWheel" @touchstart.passive="startTouch" @touchend.passive="endTouch" @touchcancel.passive="endTouch" @keydown="onKeydown">
       <template v-if="lines.length">
         <div :style="{ height: scrollPadTop + 'px' }" aria-hidden="true"></div>
         <!-- 单容器与聚合共用 LogLine:单容器流的帧里没有 containerName,由 fallback-name 补上徽章。 -->
@@ -15,7 +15,7 @@
       </template>
       <p v-else class="text-muted px-2 py-1">{{ emptyText }}</p>
     </div>
-    <button v-if="connected && autoScrollPaused && !paused" class="scroll-resume-chip" @click="resume">已暂停自动滚动(向上) · 点击回到底部</button>
+    <button v-if="autoScroll && autoScrollPaused && !paused" class="scroll-resume-chip" @click="resume"><ArrowDown :size="14" />{{ unreadCount ? `${unreadCount} 条新日志 · ` : '正在查看历史 · ' }}回到最新</button>
   </div>
 </template>
 
@@ -23,6 +23,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { hashColor } from '../../lib/log-colors.js';
 import LogLine from './LogLine.vue';
+import { ArrowDown } from 'lucide-vue-next';
 
 const props = defineProps({
   lines: { type: Array, required: true },
@@ -47,7 +48,11 @@ const boxEl = ref(null);
 const viewStart = ref(0);
 const viewEnd = ref(0);
 const autoScrollPaused = ref(false);
+const touching = ref(false);
+const seenId = ref(null);
+const unreadCount = computed(() => seenId.value == null ? 0 : props.lines.filter(line => line.id > seenId.value).length);
 let followFrame = 0;
+let lastScrollTop = 0;
 let resizeObserver;
 
 const badgeClass = computed(() => hashColor(props.heading || props.fallbackName || ''));
@@ -55,7 +60,7 @@ const scrollPadTop = computed(() => viewStart.value * LINE_H);
 const scrollPadBottom = computed(() => Math.max(0, (props.lines.length - viewEnd.value) * LINE_H));
 const visibleLines = computed(() => viewEnd.value > viewStart.value ? props.lines.slice(viewStart.value, viewEnd.value) : []);
 const paneErrorCount = computed(() => props.lines.reduce((sum, line) => sum + (line.level === 'error' ? 1 : 0), 0));
-const followActive = computed(() => props.autoScroll && !props.paused && !autoScrollPaused.value);
+const followActive = computed(() => props.autoScroll && !props.paused && !autoScrollPaused.value && !touching.value);
 
 function syncViewport() {
   if (!boxEl.value) return;
@@ -67,31 +72,75 @@ function syncViewport() {
 /** rAF 合并的滚底调度:高频日志每帧只滚一次,避免反复强制 reflow 卡死主线程。 */
 function scheduleFollow() {
   if (!followActive.value || followFrame) return;
-  followFrame = requestAnimationFrame(() => {
+  followFrame = requestAnimationFrame(async () => {
     followFrame = 0;
-    if (!boxEl.value) return;
+    if (!boxEl.value || !followActive.value) return;
     boxEl.value.scrollTop = boxEl.value.scrollHeight;
+    lastScrollTop = boxEl.value.scrollTop;
+    seenId.value = props.lines.at(-1)?.id ?? null;
+    syncViewport();
+    // 切换虚拟窗口后，徽章/JSON 的实际行高可能改变 scrollHeight。
+    // 等渲染完成再对齐一次；用户若已开始阅读历史，绝不覆盖其位置。
+    await nextTick();
+    if (!boxEl.value || !followActive.value) return;
+    boxEl.value.scrollTop = boxEl.value.scrollHeight;
+    lastScrollTop = boxEl.value.scrollTop;
     syncViewport();
   });
 }
-function onScroll() { syncViewport(); }
+function cancelFollow() {
+  if (followFrame) cancelAnimationFrame(followFrame);
+  followFrame = 0;
+}
+function pauseFollow() {
+  if (!autoScrollPaused.value) seenId.value = props.lines.at(-1)?.id ?? null;
+  autoScrollPaused.value = true;
+  cancelFollow();
+}
+function onScroll() {
+  syncViewport();
+  const box = boxEl.value;
+  if (!box || !props.autoScroll) return;
+  const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+  const movedUp = box.scrollTop < lastScrollTop - 1;
+  lastScrollTop = box.scrollTop;
+  if (distance > 32 && (movedUp || touching.value)) pauseFollow();
+  else if (distance <= 32) { autoScrollPaused.value = false; seenId.value = props.lines.at(-1)?.id ?? null; }
+  // 内容增长/虚拟窗口重排产生的 scroll 事件不代表用户向上滚动。
+  if (distance > 1 && followActive.value) scheduleFollow();
+}
 function onWheel(event) {
-  if (!props.connected || !props.autoScroll) return;
-  if (event.deltaY < 0) { autoScrollPaused.value = true; return; }
+  if (props.autoScroll && event.deltaY < 0) pauseFollow();
+  // Downward scrolling resumes following only after the reader reaches the end.
+}
+function startTouch() { touching.value = true; cancelFollow(); }
+function endTouch() { touching.value = false; onScroll(); scheduleFollow(); }
+function onKeydown(event) {
+  if (event.target !== boxEl.value) return;
+  if (props.autoScroll && ['ArrowUp', 'PageUp', 'Home'].includes(event.key)) pauseFollow();
+  if (event.key === 'Home') {
+    // 原生 Home 动画按滚动前的虚拟高度计算终点，窗口重排后可能停在第一行之外。
+    event.preventDefault();
+    boxEl.value.scrollTop = 0;
+    syncViewport();
+  }
+}
+function resume() {
   autoScrollPaused.value = false;
+  seenId.value = props.lines.at(-1)?.id ?? null;
   scheduleFollow();
 }
-function resume() { autoScrollPaused.value = false; scheduleFollow(); }
 
 // 行数或调用方修订号变化:能跟随就跟随,否则只重算可视区间(过滤变窄时不能强行滚底)。
 watch([() => props.revision, () => props.lines.length], () => {
   if (followActive.value) scheduleFollow();
   else syncViewport();
 });
-watch(() => props.resumeSignal, () => { autoScrollPaused.value = false; scheduleFollow(); });
+watch(() => props.resumeSignal, resume);
+watch(() => props.autoScroll, value => { if (value) resume(); else cancelFollow(); });
 
 onMounted(() => {
-  nextTick(syncViewport);
+  nextTick(() => { syncViewport(); scheduleFollow(); });
   if (boxEl.value && typeof ResizeObserver === 'function') {
     resizeObserver = new ResizeObserver(syncViewport);
     resizeObserver.observe(boxEl.value);
@@ -102,3 +151,9 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
 });
 </script>
+
+<style scoped>
+.log-pane { position: relative; }
+.scroll-resume-chip { position: absolute; bottom: 12px; right: 12px; left: auto; z-index: 10; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 24px); min-height: 36px; background: var(--panel-raised); }
+.log-pane-body { overscroll-behavior: contain; overflow-anchor: none; }
+</style>
