@@ -56,6 +56,15 @@ jobs:
           tags: composeops:ci-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Install browser test dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Real Docker project workflows
+        run: |
+          node scripts/project-workspace-browser.mjs composeops:ci-test
+          node scripts/project-workspace-browser.mjs composeops:ci-test --workspace
       - name: Fresh installation and online backup restore
         run: node scripts/image-smoke.mjs composeops:ci-test
       - name: Upgrade from supported baseline

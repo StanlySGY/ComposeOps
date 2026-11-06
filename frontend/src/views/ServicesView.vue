@@ -231,7 +231,7 @@ const allVisibleSelected = computed(() => visibleManagedProjects.value.length > 
 const completedBatchTasks = computed(() => batchTasks.value.filter((task) => ['success', 'failed'].includes(task.status)).length);
 const batchProgress = computed(() => batchTasks.value.length ? Math.round(completedBatchTasks.value / batchTasks.value.length * 100) : 0);
 
-function refresh() { return store.refresh().finally(() => { if (!store.error) lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false }); }); }
+function refresh(force = false) { return store.refresh(force === true).finally(() => { if (!store.error) lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false }); }); }
 function hasAttention(project) { return project.status !== 'running' || project.containers.some((container) => container.health === 'unhealthy'); }
 function searchIndex(project) { return [project.projectName, project.owner, project.workingDir, project.note, ...project.containers.flatMap((container) => [container.name, container.image])].join(' ').toLowerCase(); }
 const statusMatchers = { attention: (p) => hasAttention(p), running: (p) => !hasAttention(p), managed: (p) => p.managed, unmanaged: (p) => !p.managed, favorites: (p) => p.favorite, stopped: (p) => p.containers.some((c) => c.state !== 'running') };
@@ -252,7 +252,7 @@ async function run(project, action) {
     await streamComposeControl(project.id, action, (frame) => {
       applyOperationFrame(output, frame);
     }, null, null, controlController.signal);
-    await refresh();
+    await refresh(true);
   } catch (error) { if (error.name !== 'AbortError') { output.text += `\n[请求失败] ${error.message}`; output.exitCode = 1; }
   } finally { controlController = null; busy.value = false; runningAction.value = { id: '', action: '' }; output.running = false; }
 }
@@ -269,7 +269,7 @@ async function handleEnvApply({ project }) {
     }, `/projects/${project.id}/env/apply`, { restart: true }, controlController.signal);
     if (operationSucceeded(output)) useToastStore().success('环境变量应用命令已完成，请确认容器状态');
     else useToastStore().error(output.failureReason || '尚未确认应用成功，请检查操作输出');
-    await refresh();
+    await refresh(true);
   } catch (error) {
     if (error.name !== 'AbortError') { output.text += `\n[请求失败] ${error.message}`; output.exitCode = 1; }
   } finally { controlController = null; busy.value = false; output.running = false; }
@@ -287,7 +287,7 @@ async function handleUpgrade({ project, services }) {
     }, controlController.signal);
     if (operationSucceeded(output, { requireResult: true })) useToastStore().success('镜像升级并通过健康检查');
     else useToastStore().error(output.failureReason || '尚未确认升级成功，请检查操作输出');
-    await store.refresh();
+    await refresh(true);
   } catch (error) {
     if (error.name !== 'AbortError') { output.text += `\n[请求失败] ${error.message}`; output.exitCode = 1; }
   } finally { controlController = null; busy.value = false; output.running = false; }
@@ -349,7 +349,7 @@ function applyJob(job) {
   output.text = job.items.map((item) => `\n\n===== ${item.projectName} =====\n${item.output || ''}`).join('');
   busy.value = ['queued', 'running'].includes(job.status);
   output.running = busy.value;
-  if (!busy.value) { selectedIds.value = []; refresh(); }
+  if (!busy.value) { selectedIds.value = []; refresh(true); }
 }
 async function pollJob(jobId) {
   if (jobPollInFlight && activeJobId === jobId) return;

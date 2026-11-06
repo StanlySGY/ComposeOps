@@ -17,7 +17,7 @@
     </div>
     <div v-if="!batchTasks.length" class="operation-result" role="status" aria-live="polite" :data-state="running ? 'running' : failed ? 'failed' : exitCode === 0 ? 'success' : 'unknown'">
       <LoaderCircle v-if="running" class="h-5 w-5 animate-spin" /><CircleX v-else-if="failed" class="h-5 w-5" /><CircleCheck v-else-if="exitCode === 0" class="h-5 w-5" /><CircleHelp v-else class="h-5 w-5" />
-      <div><strong>{{ running ? '正在执行' : failed ? '执行失败' : exitCode === 0 ? '命令执行成功' : '尚未确认执行结果' }}</strong><p>{{ running ? '输出会实时更新，关闭面板不会发送停止命令。' : exitCode === 0 ? '命令退出码为 0；请继续确认容器状态与业务是否正常。' : failed ? '查看下方输出定位原因，也可以交给 AI 分析。' : '没有收到退出码。请检查项目状态，避免重复提交操作。' }}</p></div>
+      <div><strong>{{ running ? '正在执行' : failed ? '执行失败' : exitCode === 0 ? '命令执行成功' : '尚未确认执行结果' }}</strong><p>{{ running ? '输出会实时更新，关闭面板不会发送停止命令。' : failed ? (failureReason || '查看下方输出定位原因，也可以交给 AI 分析。') : exitCode === 0 ? '命令退出码为 0；请继续确认容器状态与业务是否正常。' : '没有收到退出码。请检查项目状态，避免重复提交操作。' }}</p></div>
     </div>
     <pre class="terminal-output flex-1" role="region" aria-label="操作执行输出" aria-live="off" tabindex="0">{{ text }}</pre>
     <div v-if="!running && projectId" class="ai-diagnose-bar">

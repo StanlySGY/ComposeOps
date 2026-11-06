@@ -98,17 +98,24 @@ export async function resolveProjectFile(project, fileIndex = 0) {
   return selected;
 }
 
+export function composeProjectOptions(project, files = project.composeFiles) {
+  // Discovered project identity must win over directory names, .env and a
+  // changed top-level `name:`. Otherwise `up` can create a different stack.
+  const name = project.projectName;
+  return [...(name ? ['--project-name', name] : []), ...files.flatMap((file) => ['-f', file])];
+}
+
 export function composeArgs(project, action, overrideFiles = null) {
   const actionArgs = ACTIONS[action];
   if (!actionArgs) throw Object.assign(new Error('不支持的 Compose 操作'), { statusCode: 400 });
   const files = overrideFiles || project.composeFiles;
-  return [...composeBase().slice(1), ...files.flatMap((file) => ['-f', file]), ...actionArgs];
+  return [...composeBase().slice(1), ...composeProjectOptions(project, files), ...actionArgs];
 }
 
 export function spawnComposeCommand(project, args, overrideFiles = null) {
   const base = composeBase();
   const files = overrideFiles || project.composeFiles;
-  return spawn(base[0], [...base.slice(1), ...files.flatMap((file) => ['-f', file]), ...args], {
+  return spawn(base[0], [...base.slice(1), ...composeProjectOptions(project, files), ...args], {
     cwd: project.workingDir,
     env: nodeEnv(project),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -129,7 +136,7 @@ export function spawnCompose(project, action) {
 function runConfigCheck(project, files) {
   return new Promise((resolve, reject) => {
     const base = composeBase();
-    const args = [...base.slice(1), ...files.flatMap((file) => ['-f', file]), 'config', '--quiet'];
+    const args = [...base.slice(1), ...composeProjectOptions(project, files), 'config', '--quiet'];
     const child = spawn(base[0], args, {
       cwd: project.workingDir,
       env: nodeEnv(project),

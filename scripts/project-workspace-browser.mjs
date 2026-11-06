@@ -1,13 +1,15 @@
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 const require = createRequire(new URL('../frontend/package.json', import.meta.url));
 const { chromium, expect } = require('@playwright/test');
 // Only a randomly named temporary project is granted management permissions.
 const candidate = process.argv[2] || 'stanly1997/opsdash:latest';
+const workspaceMode = process.argv.includes('--workspace');
+let targetProjectId;
 const suffix = randomBytes(4).toString('hex');
 const name = 'composeops-ux-candidate-' + suffix;
 const projectName = 'composeops-ux-target-' + suffix;
@@ -19,7 +21,7 @@ let browser;
 try {
   writeFileSync(compose, 'services:\n  app:\n    image: node:22-alpine\n    command: ["sh", "-c", "echo UX_WORKSPACE_READY; sleep 3600"]\n');
   docker([...composeArgs, 'up', '-d']);
-  docker(['run', '-d', '--name', name, '-p', '127.0.0.1::3001', '-v', '/var/run/docker.sock:/var/run/docker.sock', '-v', root + ':' + root, '-e', 'LOG_LEVEL=error', '-e', 'OPS_EFFECT_WORKER_ENABLED=0', '-e', 'ENABLE_SHELL=1', candidate]);
+  docker(['run', '-d', '--name', name, '-p', '127.0.0.1::3001', '-v', '/var/run/docker.sock:/var/run/docker.sock', ...(workspaceMode ? [] : ['-v', root + ':' + root]), '-e', 'LOG_LEVEL=error', '-e', 'OPS_EFFECT_WORKER_ENABLED=0', '-e', 'ENABLE_SHELL=1', candidate]);
   const base = 'http://' + docker(['port', name, '3001/tcp']);
   for (let i = 0; i < 80; i++) { try { if ((await fetch(base + '/health')).ok) break; } catch {} await delay(500); }
   const password = randomBytes(24).toString('hex');
@@ -32,8 +34,11 @@ try {
   }
   const project = (await request('/projects?refresh=1')).projects.find(p => p.projectName === projectName);
   assert.ok(project, 'test project discovered');
+  targetProjectId = project.id;
   await request('/projects/management', 'PUT', { projectIds: [project.id], mountProjectIds: [project.id] });
-  browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] });
+  const managed = await request('/projects/' + project.id);
+  assert.equal(managed.mounted, !workspaceMode, 'test the intended execution mode');
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined), headless: true, args: ['--no-sandbox'] });
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport });
     const divider = cookie.indexOf('=');
@@ -75,6 +80,9 @@ try {
     await page.getByRole('dialog', { name: '应用配置', exact: true }).getByRole('button', { name: '应用配置', exact: true }).click();
     await expect(page.getByText('命令执行成功', { exact: true })).toBeVisible({ timeout: 30000 });
     assert.equal(docker(['inspect', containerName, '--format', '{{.State.Status}}']), 'running');
+    assert.equal(docker(['inspect', containerName, '--format', '{{index .Config.Labels "com.docker.compose.project"}}']), projectName, 'apply must keep the original project identity');
+    const sameRoot = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project.working_dir=' + root]).split('\n').filter(Boolean);
+    assert.equal(sameRoot.length, 1, 'apply must replace the original container without creating another stack');
     await page.getByRole('button', { name: '查看项目状态', exact: true }).click();
     await expect(page.getByLabel('搜索服务项目')).toHaveValue(projectName);
     await card.getByRole('link', { name: '容器终端', exact: true }).click();
@@ -87,12 +95,26 @@ try {
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: '/tmp/composeops-workspace-real-'+viewport.width+'.png' });
-    console.log('PASS real backend '+viewport.width+'px: note persistence, logs, config review/save, navigation guard, apply, running state, terminal, cancel stop');
+    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: note persistence, logs, config review/save, navigation guard, apply, running state, terminal, cancel stop');
     await context.close();
   }
 } finally {
   await browser?.close();
   try { docker(['rm','-f',name]); } catch {}
   try { docker([...composeArgs, 'down', '--remove-orphans']); } catch {}
+  // Cleanup also covers the regression where Compose used the directory name
+  // instead of the original -p name. Only this exact temporary root is eligible.
+  try {
+    const leftovers = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project.working_dir=' + root]).split('\n').filter(Boolean);
+    const helpers = targetProjectId ? docker(['ps', '-aq', '--filter', 'label=composeops.helper=compose-workspace', '--filter', 'label=composeops.project=' + targetProjectId]).split('\n').filter(Boolean) : [];
+    if (helpers.length) docker(['rm', '-f', ...helpers]);
+    const projects = new Set([projectName]);
+    for (const id of leftovers) projects.add(docker(['inspect', id, '--format', '{{index .Config.Labels "com.docker.compose.project"}}']));
+    if (leftovers.length) docker(['rm', '-f', ...leftovers]);
+    for (const value of projects) {
+      const networks = docker(['network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + value]).split('\n').filter(Boolean);
+      if (networks.length) docker(['network', 'rm', ...networks]);
+    }
+  } catch {}
   rmSync(root, { recursive: true, force: true });
 }

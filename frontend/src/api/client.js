@@ -384,21 +384,28 @@ export async function streamComposeControl(projectId, action, onFrame, path = nu
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split('\n\n');
-    buf = parts.pop();
-    for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith('data:')) continue;
-      try {
-        onFrame(JSON.parse(line.slice(5).trim()));
-      } catch {
-        // 跳过无法解析的控制流帧,让连接继续接收后续事件。
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        try {
+          onFrame(JSON.parse(line.slice(5).trim()));
+        } catch {
+          // 跳过无法解析的控制流帧,让连接继续接收后续事件。
+        }
       }
     }
+  } finally {
+    // Polling during a long command can cache containers that are being replaced.
+    // Clear them again on completion or interruption before callers refresh.
+    invalidateSwr('/');
+    reader.releaseLock();
   }
 }
 
