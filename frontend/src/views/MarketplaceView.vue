@@ -54,24 +54,15 @@
 
     <!-- 统计卡片 -->
     <section v-if="statsLoaded" class="stats-grid" :aria-busy="statsLoading">
-      <div class="stat-card">
-        <div class="label">内置模板</div>
-        <div class="value">{{ stats.totalBuiltin }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">社区模板</div>
-        <div class="value">{{ stats.totalCommunity }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">自定义模板</div>
-        <div class="value">{{ stats.totalCustom }}</div>
-      </div>
-      <div class="stat-card" :class="{ highlight: stats.totalFavorites > 0 }">
-        <div class="label">我的收藏</div>
-        <div class="value">{{ stats.totalFavorites }}</div>
-      </div>
+      <button class="stat-card" :aria-pressed="selectedSource === 'builtin'" :class="{ highlight: selectedSource === 'builtin' }" @click="filterBySource('builtin')">
+        <div class="label">内置模板</div><div class="value">{{ stats.totalBuiltin }}</div>
+      </button>
+      <button class="stat-card" :disabled="!stats.communityAvailable" :aria-pressed="selectedSource === 'community'" @click="filterBySource('community')"><div class="label">社区模板<span v-if="!stats.communityAvailable" class="ml-2 text-[10px]">未接入</span></div><div class="value">{{ stats.totalCommunity }}</div></button>
+      <button class="stat-card" :aria-pressed="selectedSource === 'custom'" :class="{ highlight: selectedSource === 'custom' }" @click="filterBySource('custom')"><div class="label">自定义模板</div><div class="value">{{ stats.totalCustom }}</div></button>
+      <button class="stat-card" :class="{ highlight: onlyFavorites }" :aria-pressed="onlyFavorites" @click="filterFavorites"><div class="label">我的收藏</div><div class="value">{{ stats.totalFavorites }}</div></button>
     </section>
 
+    <div class="mb-4 flex items-center justify-between gap-3 text-xs text-surface-500"><span>{{ loading ? '正在查找模板…' : `找到 ${filteredTemplates.length} 个模板` }}</span><button v-if="hasFilters" class="btn-ghost" @click="clearFilters">重置筛选</button></div>
     <div v-if="loading" class="loading-state" role="status" aria-live="polite" aria-atomic="true">
       <div class="spinner"></div>
       <p>加载模板...</p>
@@ -103,6 +94,8 @@
           <h3>{{ template.name }}<span v-if="template.featured" class="featured-badge">精选</span></h3>
           <button
             @click="toggleFavorite(template.id)"
+            :disabled="favoritePending.has(template.id)"
+            :aria-busy="favoritePending.has(template.id)"
             class="favorite-btn"
             :class="{ active: template.favorited }"
             :aria-label="template.favorited ? `取消收藏：${template.name}` : `收藏：${template.name}`"
@@ -173,7 +166,7 @@
         </div>
         <div class="modal-footer">
           <button @click="closeModal" class="btn-secondary btn-cancel">取消</button>
-          <button @click="saveTemplate" class="btn-primary btn-save">保存</button>
+          <button @click="saveTemplate" class="btn-primary btn-save" :disabled="savingTemplate">{{ savingTemplate ? '保存中…' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -228,15 +221,16 @@
             <pre><code>{{ viewingTemplate.defaultCompose || viewingTemplate.compose }}</code></pre>
           </div>
         </div>
+        <div class="modal-footer"><button class="btn-secondary" @click="viewingTemplate = null">返回列表</button><button v-if="isDeployableTemplate(viewingTemplate)" class="btn-primary" @click="openDeploy(viewingTemplate)"><Rocket class="h-4 w-4" />配置并部署</button></div>
       </div>
     </div>
 
     <!-- 部署模板模态框 -->
-    <div v-if="deployTarget" class="modal-backdrop" @click.self="closeDeploy" :class="{ 'pointer-events-none': deploying }">
-      <div ref="deployModalRef" class="modal deploy-modal" role="dialog" aria-modal="true" aria-labelledby="market-deploy-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, closeDeploy)">
+    <div v-if="deployTarget" class="modal-backdrop" @click.self="closeDeploy()" :class="{ 'pointer-events-none': deploying }">
+      <div ref="deployModalRef" class="modal deploy-modal" role="dialog" aria-modal="true" aria-labelledby="market-deploy-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, () => closeDeploy())">
         <div class="modal-header">
           <h2 id="market-deploy-dialog-title">部署应用: {{ deployTarget.name }}</h2>
-          <button @click="closeDeploy" class="icon-btn close-btn" aria-label="关闭部署弹窗">×</button>
+          <button @click="closeDeploy()" class="icon-btn close-btn" aria-label="关闭部署弹窗">×</button>
         </div>
         <div class="modal-body space-y-4">
           <p class="template-description">{{ deployTarget.description || '暂无描述' }}</p>
@@ -258,7 +252,7 @@
           <p v-if="deployError" class="text-xs text-rose-400" role="alert">{{ deployError }}</p>
         </div>
         <div class="modal-footer">
-          <button @click="closeDeploy" class="btn-secondary btn-cancel">取消</button>
+          <button @click="closeDeploy()" class="btn-secondary btn-cancel" :disabled="deploying">{{ deployReturnTemplate ? '返回详情' : '取消' }}</button>
           <button @click="deployTemplate" class="btn-primary btn-save" :disabled="deploying">
             <LoaderCircle v-if="deploying" class="w-4 h-4 animate-spin" />
             {{ deploying ? '部署中…' : '部署' }}
@@ -280,7 +274,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -292,6 +286,8 @@ import { Bot, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
 const toast = useToastStore();
 const { openAgent, updateAgentContext } = useAgentConsole();
 
+let active = true;
+const savingTemplate = ref(false);
 const loading = ref(false);
 const error = ref('');
 const stats = ref({ totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [], communityAvailable: false, communityMessage: '' });
@@ -304,6 +300,18 @@ const searchQuery = ref('');
 const selectedSource = ref('all');
 const selectedCategory = ref('all');
 const onlyFavorites = ref(false);
+const favoritePending = ref(new Set());
+const hasFilters = computed(() => searchQuery.value || selectedSource.value !== 'all' || selectedCategory.value !== 'all' || onlyFavorites.value);
+function filterBySource(source) {
+  selectedSource.value = selectedSource.value === source ? 'all' : source;
+  onlyFavorites.value = false;
+  void loadTemplates();
+}
+function filterFavorites() {
+  onlyFavorites.value = !onlyFavorites.value;
+  selectedSource.value = 'all';
+  void loadTemplates();
+}
 
 const showCreateModal = ref(false);
 const editingTemplate = ref(null);
@@ -326,6 +334,7 @@ const showDeleteDialog = ref(false);
 const pendingDeleteId = ref(null);
 
 async function loadStats() {
+  if (!active) return;
   const requestId = ++statsRequestId;
   statsLoading.value = true;
   statsError.value = '';
@@ -345,6 +354,7 @@ async function loadStats() {
 
 let templatesRequestId = 0;
 async function loadTemplates() {
+  if (!active) return;
   const requestId = ++templatesRequestId;
   loading.value = true;
   error.value = '';
@@ -382,6 +392,8 @@ function handleSearch() {
 }
 
 async function toggleFavorite(templateId) {
+  if (favoritePending.value.has(templateId)) return;
+  favoritePending.value.add(templateId);
   try {
     const isFavorited = filteredTemplates.value.find(t => t.id === templateId)?.favorited;
     await api.toggleMarketplaceFavorite(templateId, isFavorited);
@@ -390,7 +402,7 @@ async function toggleFavorite(templateId) {
     toast.success(isFavorited ? '已取消收藏' : '已添加收藏');
   } catch (err) {
     toast.error(err.message || '操作失败');
-  }
+  } finally { favoritePending.value.delete(templateId); }
 }
 
 function viewTemplate(template) {
@@ -408,6 +420,7 @@ function editTemplate(template) {
 }
 
 async function saveTemplate() {
+  if (savingTemplate.value) return;
   if (!formData.value.name.trim()) {
     toast.error('模板名称不能为空');
     return;
@@ -417,6 +430,7 @@ async function saveTemplate() {
     return;
   }
 
+  savingTemplate.value = true;
   try {
     if (editingTemplate.value) {
       await api.updateMarketplaceTemplate(editingTemplate.value.id, formData.value);
@@ -425,11 +439,12 @@ async function saveTemplate() {
     }
 
     toast.success(editingTemplate.value ? '模板已更新' : '模板已创建');
+    savingTemplate.value = false;
     closeModal();
     await Promise.all([loadTemplates(), loadStats()]);
   } catch (err) {
     toast.error(err.message || '保存失败');
-  }
+  } finally { savingTemplate.value = false; }
 }
 
 function deleteTemplate(id) {
@@ -501,6 +516,7 @@ function useAiTemplate() {
 }
 
 function closeModal() {
+  if (savingTemplate.value) return;
   showCreateModal.value = false;
   editingTemplate.value = null;
   formData.value = { name: '', category: '', description: '', defaultCompose: '' };
@@ -520,6 +536,7 @@ function isDeployableTemplate(template) {
 }
 
 const deployTarget = ref(null);
+const deployReturnTemplate = ref(null);
 const deployProjectName = ref('');
 const deployValues = ref({});
 const deploying = ref(false);
@@ -604,14 +621,18 @@ watch(
 );
 
 function openDeploy(template) {
+  deployReturnTemplate.value = viewingTemplate.value;
+  viewingTemplate.value = null;
   deployTarget.value = template;
   deployProjectName.value = '';
   deployValues.value = {};
   deployError.value = '';
 }
 
-function closeDeploy() {
+function closeDeploy(returnToDetails = true) {
   if (deploying.value) return;
+  if (returnToDetails) viewingTemplate.value = deployReturnTemplate.value;
+  deployReturnTemplate.value = null;
   deployTarget.value = null;
   deployProjectName.value = '';
   deployValues.value = {};
@@ -648,7 +669,7 @@ async function deployTemplate() {
     });
     if (succeeded) {
       deploying.value = false;
-      closeDeploy();
+      closeDeploy(false);
       await Promise.all([loadTemplates(), loadStats()]);
     }
   } catch (err) {
@@ -671,8 +692,18 @@ onMounted(async () => {
   await Promise.all([loadStats(), loadTemplates()]);
 });
 let activatedOnce = false;
-onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void Promise.all([loadStats(), loadTemplates()]); });
+onActivated(() => { active = true; if (!activatedOnce) { activatedOnce = true; return; } void Promise.all([loadStats(), loadTemplates()]); });
 
+function stopPendingReads() {
+  active = false;
+  clearTimeout(searchTimeout);
+  templatesRequestId++;
+  statsRequestId++;
+  loading.value = false;
+  statsLoading.value = false;
+}
+onDeactivated(stopPendingReads);
+onBeforeUnmount(stopPendingReads);
 </script>
 
 <style scoped>
@@ -700,7 +731,9 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
   gap: 1rem;
   margin-bottom: 2rem;
 }
-.stat-card { @apply panel-card !p-5; }
+.stat-card { @apply panel-card !p-5 text-left; }
+.stat-card:not(:disabled):hover { border-color: var(--market-accent-2); }
+.stat-card:disabled { opacity: .55; }
 .stat-card.highlight { @apply border-accent/60 bg-accent/5; }
 .stat-card .label { @apply mb-2 text-[13px] text-surface-400; }
 .stat-card .value { @apply text-3xl font-semibold tracking-tight text-surface-50; }
@@ -720,7 +753,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 
 .templates-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 1.5rem;
 }
 
@@ -740,7 +773,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
 .card-header h3 { @apply m-0 flex-1 text-lg font-semibold text-surface-50; }
 
-.favorite-btn { @apply px-2 py-1 text-xl text-surface-500 transition-colors hover:text-amber-400; background: transparent; border: none; cursor: pointer; }
+.favorite-btn { min-height: 44px; min-width: 44px; @apply px-2 py-1 text-xl text-surface-500 transition-colors hover:text-amber-400; background: transparent; border: none; cursor: pointer; }
 .favorite-btn.active { @apply text-amber-400; }
 
 .card-body { display: grid; gap: 0.75rem; }

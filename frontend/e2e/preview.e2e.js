@@ -152,7 +152,7 @@ test('真实服务搜索、日志与卷备份界面可交互', async ({ page }) 
   await page.goto('./#/logs?projectId=knowledge-base&containerId=demo-wiki-api');
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
   await page.goto('./#/resources');
-  await page.getByRole('button', { name: '卷备份' }).click();
+  await page.getByRole('tab', { name: '卷备份' }).click();
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
   await page.getByRole('button', { name: '验证备份 cache-data-demo.tar.gz' }).click();
   await expect(page.getByText('✓ 128 文件')).toBeVisible();
@@ -271,7 +271,7 @@ test('移动端更多功能抽屉可访问、焦点受限、Escape 可关闭且�
 
 test('数据卷恢复和删除均先展示明确的确认门，取消后不执行破坏性操作', async ({ page }) => {
   await page.goto('./#/resources');
-  await page.getByRole('button', { name: '卷备份' }).click();
+  await page.getByRole('tab', { name: '卷备份' }).click();
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
   await page.getByRole('button', { name: '恢复卷 cache_data 的备份' }).click();
   const restoreDialog = page.getByRole('dialog', { name: '恢复数据卷' });

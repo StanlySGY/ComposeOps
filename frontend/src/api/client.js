@@ -30,13 +30,16 @@ function doFetch(path, opts = {}) {
   }).then(async (res) => {
     if (!res.ok) {
       let msg = res.statusText;
+      let code;
       try {
         const body = await res.json();
         msg = body.message || body.error || JSON.stringify(body);
+        code = body.error;
       } catch {
         // 错误响应可能不是 JSON,保留 HTTP 状态文本作为兜底。
       }
       const err = new Error(msg);
+      err.code = code;
       err.status = res.status;
       if (res.status === 401) window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
       throw err;
@@ -216,7 +219,7 @@ export const api = {
   verifyVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}/verify`, { method: 'POST' }),
   deleteVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}`, { method: 'DELETE' }),
   volumeBackupDownloadUrl: (id) => `/api/v1/ops/storage/volume-backups/${id}/download`,
-  removeStorageResource: (kind, id) => request(`/ops/storage/resources/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  removeStorageResource: (kind, id, hostId) => request(`/ops/storage/resources/${kind}/${encodeURIComponent(id)}${hostId ? `?expectedHostId=${encodeURIComponent(hostId)}` : ''}`, { method: 'DELETE' }),
   // app blueprints
   getBlueprints: () => request('/ops/blueprints'),
   streamBlueprintDeploy: (blueprintId, values, onFrame) => streamComposeControl(null, null, onFrame, '/ops/blueprints/deploy', { blueprintId, values }),

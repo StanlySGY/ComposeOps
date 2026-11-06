@@ -32,3 +32,32 @@ export const logs = '2026-10-01T09:42:01Z [INFO] Starting wiki-api (示例日志
 export const compose = new Map(projects.map(p => [p.id, p.id === 'knowledge-base'
   ? 'services:\n  wiki-api:\n    image: example/wiki-api:2.3\n    environment:\n      DB_HOST: db-old\n    depends_on:\n      - postgres\n  postgres:\n    image: postgres:17-alpine\n    volumes:\n      - data:/var/lib/postgresql/data\nvolumes:\n  data:\n'
   : 'services:\n  ' + p.containers[0].service + ':\n    image: ' + p.containers[0].image + '\n    restart: unless-stopped\n']));
+
+// Representative inventory; all IDs and names are fictional, and writes stay in memory.
+export const resources = {
+  hostId: 'local', hostName: '本机 · 示例', warnings: [],
+  images: [
+    { id: 'sha256:demo-wiki-current', tags: ['example/wiki-api:2.3'], size: 320 * 1024 ** 2, created: Date.parse(at), containers: 1, inUse: true, dangling: false },
+    { id: 'sha256:demo-wiki-previous', tags: ['example/wiki-api:2.2', 'example/wiki-api:previous'], size: 305 * 1024 ** 2, created: Date.parse(at) - 604800000, containers: 0, inUse: false, dangling: false },
+    { id: 'sha256:demo-nginx', tags: ['nginx:1.28-alpine'], size: 53 * 1024 ** 2, created: Date.parse(at), containers: 1, inUse: true, dangling: false },
+    { id: 'sha256:demo-build-cache', tags: [], size: 128 * 1024 ** 2, created: Date.parse(at) - 86400000, containers: 0, inUse: false, dangling: true },
+    { id: 'sha256:demo-worker', tags: ['example/worker:0.9'], size: 96 * 1024 ** 2, created: Date.parse(at) - 864000000, containers: 0, inUse: false, dangling: false },
+  ],
+  volumes: [
+    { name: 'cache_data', driver: 'local', scope: 'local', mountpoint: '/var/lib/docker/volumes/cache_data/_data', refCount: 1, orphan: false, size: null, createdAt: Date.parse(at) },
+    { name: 'knowledge-base_data', driver: 'local', scope: 'local', mountpoint: '/var/lib/docker/volumes/knowledge-base_data/_data', refCount: 1, orphan: false, size: null, createdAt: Date.parse(at) },
+    { name: 'sandbox_old-data', driver: 'local', scope: 'local', mountpoint: '/var/lib/docker/volumes/sandbox_old-data/_data', refCount: 0, orphan: true, size: null, createdAt: Date.parse(at) - 864000000 },
+  ],
+  networks: [
+    { id: 'demo-net-default', name: 'bridge', driver: 'bridge', scope: 'local', builtin: true, unused: false, attached: 0, createdAt: Date.parse(at) },
+    { id: 'demo-net-wiki', name: 'knowledge-base_default', driver: 'bridge', scope: 'local', builtin: false, unused: false, attached: 2, createdAt: Date.parse(at) },
+    { id: 'demo-net-sandbox', name: 'sandbox_previous', driver: 'bridge', scope: 'local', builtin: false, unused: true, attached: 0, createdAt: Date.parse(at) - 864000000 },
+  ],
+};
+
+export const marketplaceTemplates = [
+  { id: 'builtin-nginx', name: 'Nginx', category: 'Web', description: '轻量的 Web 服务与反向代理。通过端口变量适配你的本地环境。', featured: true, favorited: true, envSchema: [{ key: 'HTTP_PORT', label: 'HTTP 端口', default: '8080' }], defaultCompose: 'services:\n  nginx:\n    image: nginx:alpine\n    ports:\n      - "${HTTP_PORT}:80"\n    restart: unless-stopped\n' },
+  { id: 'builtin-redis', name: 'Redis', category: 'Database', description: '为应用提供高速缓存。使用命名卷保存持久化数据。', favorited: false, envSchema: [], defaultCompose: 'services:\n  redis:\n    image: redis:7-alpine\n    volumes:\n      - data:/data\nvolumes:\n  data:\n' },
+  { id: 'builtin-uptime-kuma', name: 'Uptime Kuma', category: 'DevOps', description: '跟踪站点与服务的可用性，建立自己的状态页面。', favorited: false, envSchema: [], defaultCompose: 'services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:2\n    ports:\n      - "3001:3001"\n    volumes:\n      - data:/app/data\nvolumes:\n  data:\n' },
+  { id: 'custom-team-tools', name: '团队工具箱', category: 'Custom', description: '自定义模板示例，可查看和复制配置，在自己的部署中编辑使用。', favorited: false, defaultCompose: 'services:\n  homepage:\n    image: ghcr.io/gethomepage/homepage:latest\n    ports:\n      - "3000:3000"\n' },
+];

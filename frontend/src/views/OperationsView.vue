@@ -84,26 +84,29 @@
     </section>
 
     <BaseModal :show="!!selectedOperation" :title="selectedOperation ? actionLabel(selectedOperation.action) : ''" @close="selectedOperation = null">
+      <div v-if="selectedOperation" class="mb-4 flex flex-wrap items-center gap-2 text-xs text-surface-400"><span>{{ selectedOperation.projectName || '全局操作' }}</span><span>·</span><time>{{ formatTime(selectedOperation.createdAt) }}</time><span class="ml-auto" :class="selectedOperation.status === 'success' ? 'text-emerald-300' : 'text-rose-300'">{{ selectedOperation.status === 'success' ? '成功' : '失败' }}</span></div>
       <pre v-if="selectedOperation" class="terminal-output max-h-[70vh] min-h-48">{{ selectedOperation.detail }}</pre>
     </BaseModal>
 
-    <BaseModal :show="!!selectedJob" :title="selectedJob ? `${actionLabel(selectedJob.action)} · ${selectedJob.total} 个项目` : ''" size-class="flex max-h-[88vh] max-w-5xl flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="closeJob">
+    <BaseModal :show="!!requestedJobId" :title="selectedJob ? `${actionLabel(selectedJob.action)} · ${selectedJob.total} 个项目` : ''" size-class="flex max-h-[88vh] max-w-5xl flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="closeJob()">
       <template #header-actions>
         <StatusBadge v-if="selectedJob" :status="selectedJob.status === 'running' ? 'task' : selectedJob.status" />
       </template>
+      <p v-if="jobLoading && !selectedJob" class="p-6 text-sm text-surface-400" role="status">正在加载任务详情…</p>
+      <div v-if="jobError" class="alert-error m-4 flex items-center gap-3" role="alert"><span class="flex-1">{{ jobError }}</span><button class="btn-secondary" :disabled="jobLoading" @click="openJob(requestedJobId)">重试</button></div>
       <template v-if="selectedJob">
         <div class="shrink-0 border-b border-surface-800 p-4">
           <div class="mb-2 flex items-center justify-between text-muted"><span>{{ formatTime(selectedJob.createdAt) }} 创建</span><span>{{ selectedJob.completed }} / {{ selectedJob.total }} 已完成</span></div>
           <div class="progress"><span :style="{ width: `${jobProgress(selectedJob)}%` }"></span></div>
         </div>
         <div class="grid min-h-0 flex-1 md:grid-cols-[17rem_minmax(0,1fr)]">
-          <div class="overflow-y-auto border-b border-surface-800 p-2 md:border-b-0 md:border-r">
+          <div class="max-h-44 overflow-y-auto border-b border-surface-800 p-2 md:max-h-none md:border-b-0 md:border-r">
             <button v-for="item in selectedJob.items" :key="item.id" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-surface-800" :class="{ 'bg-surface-800': selectedJobItem?.id === item.id }" @click="selectedJobItem = item">
               <LoaderCircle v-if="item.status === 'running'" class="h-4 w-4 shrink-0 animate-spin text-accent" /><CircleCheckBig v-else-if="item.status === 'success'" class="h-4 w-4 shrink-0 text-emerald-400" /><CircleX v-else-if="item.status === 'failed'" class="h-4 w-4 shrink-0 text-rose-400" /><TriangleAlert v-else-if="item.status === 'interrupted'" class="h-4 w-4 shrink-0 text-amber-400" /><span v-else class="h-2 w-2 shrink-0 rounded-full bg-surface-600"></span>
               <span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-surface-200">{{ item.projectName }}</strong><small class="mt-0.5 block text-muted">{{ item.exitCode === null ? statusLabel(item.status) : `退出码 ${item.exitCode}` }}</small></span>
             </button>
           </div>
-          <pre class="terminal-output min-h-52">{{ selectedJobItem?.output || '该项目尚无输出。' }}</pre>
+          <pre class="terminal-output min-h-32 max-md:max-h-[40dvh] md:min-h-52">{{ selectedJobItem?.output || '该项目尚无输出。' }}</pre>
         </div>
       </template>
     </BaseModal>
@@ -119,6 +122,7 @@ import { api } from '../api/client.js';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import BaseModal from '../components/common/BaseModal.vue';
+import { formatTimestamp as formatTime } from '../lib/date-time.js';
 import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 
 const route = useRoute();
@@ -146,6 +150,11 @@ const query = ref(''); const jobQuery = ref('');
 const statusFilter = ref(savedFilters.statusFilter || (!props.embedded && route.query.status === 'failed' ? 'failed' : 'all'));
 const jobStatusFilter = ref(savedFilters.jobStatusFilter || 'all');
 const activeTab = ref(props.embedded ? 'operations' : (route.query.tab === 'jobs' || route.query.job ? 'jobs' : 'operations'));
+const jobLoading = ref(false);
+const jobError = ref('');
+const requestedJobId = ref(null);
+let jobGeneration = 0;
+let disposed = false;
 let jobPollTimer;
 let jobStreamController = null;
 
@@ -176,6 +185,7 @@ async function load() {
   error.value = '';
   try {
     const [operationData, jobData] = await Promise.all([api.getOperations(), api.listJobs(100)]);
+    if (disposed) return;
     operations.value = operationData.operations || [];
     jobs.value = jobData.jobs || [];
   } catch (loadError) { error.value = loadError.message || '操作记录加载失败';
@@ -191,64 +201,62 @@ function setTab(tab) {
   if (tab !== 'jobs') delete next.job;
   router.replace({ query: next });
 }
-async function openJob(id, updateRoute = true) {
+function stopJobUpdates() {
+  jobGeneration++;
   clearTimeout(jobPollTimer);
-  if (jobStreamController) {
-    jobStreamController.abort();
-    jobStreamController = null;
-  }
-  
-  activeTab.value = 'jobs';
-  const job = await api.getJob(id);
-  selectedJob.value = job;
-  const previousItemId = selectedJobItem.value?.id;
-  selectedJobItem.value = job.items.find((item) => item.id === previousItemId) || job.items[0] || null;
-  const index = jobs.value.findIndex((item) => item.id === job.id);
-  if (index >= 0) jobs.value[index] = { ...jobs.value[index], ...job, items: undefined };
-  if (updateRoute && !props.embedded && route.query.job !== id) router.replace({ query: { ...route.query, tab: 'jobs', job: id } });
-  
-  // 活跃任务使用 SSE 推送
-  if (['queued', 'running'].includes(job.status)) {
-    jobStreamController = new AbortController();
-    api.streamJobUpdates(id, (frame) => {
-      if (frame.type === 'snapshot') {
-        selectedJob.value = frame.job;
-        const idx = jobs.value.findIndex((item) => item.id === frame.job.id);
-        if (idx >= 0) jobs.value[idx] = { ...jobs.value[idx], ...frame.job, items: undefined };
-      } else if (frame.type === 'update') {
-        selectedJob.value = frame.job;
-        const idx = jobs.value.findIndex((item) => item.id === frame.job.id);
-        if (idx >= 0) jobs.value[idx] = { ...jobs.value[idx], ...frame.job, items: undefined };
-        // 任务结束时清理流
-        if (!['queued', 'running'].includes(frame.job.status)) {
-          if (jobStreamController) {
-            jobStreamController.abort();
-            jobStreamController = null;
-          }
-        }
-      }
-    }, jobStreamController.signal).catch(() => {
-      // SSE 连接失败时降级到轮询
-      if (['queued', 'running'].includes(job.status)) {
-        jobPollTimer = setTimeout(() => void openJob(id, false), 1200);
-      }
-    });
-  }
+  jobStreamController?.abort();
+  jobStreamController = null;
 }
-function closeJob() {
-  clearTimeout(jobPollTimer);
-  if (jobStreamController) {
-    jobStreamController.abort();
-    jobStreamController = null;
-  }
+function applyJob(job) {
+  selectedJob.value = job;
+  selectedJobItem.value = job.items?.find(item => item.id === selectedJobItem.value?.id) || job.items?.[0] || null;
+  const index = jobs.value.findIndex(item => item.id === job.id);
+  if (index >= 0) jobs.value[index] = { ...jobs.value[index], ...job, items: undefined };
+}
+async function openJob(id, updateRoute = true) {
+  stopJobUpdates();
+  if (disposed) return;
+  const generation = jobGeneration;
+  requestedJobId.value = id;
+  if (selectedJob.value?.id !== id) { selectedJob.value = null; selectedJobItem.value = null; }
+  activeTab.value = 'jobs';
+  jobLoading.value = true;
+  jobError.value = '';
+  try {
+    const job = await api.getJob(id);
+    if (disposed || generation !== jobGeneration) return;
+    applyJob(job);
+    if (updateRoute && !props.embedded && route.query.job !== id) void router.replace({ query: { ...route.query, tab: 'jobs', job: id } });
+    if (['queued', 'running'].includes(job.status)) {
+      const controller = new AbortController();
+      jobStreamController = controller;
+      const pollIfActive = () => {
+        if (!disposed && generation === jobGeneration && !controller.signal.aborted && ['queued', 'running'].includes(selectedJob.value?.status)) jobPollTimer = setTimeout(() => void openJob(id, false), 1200);
+      };
+      api.streamJobUpdates(id, frame => {
+        if (disposed || generation !== jobGeneration || controller.signal.aborted || frame.job?.id !== id) return;
+        if (frame.type === 'snapshot' || frame.type === 'update') {
+          applyJob(frame.job);
+          if (!['queued', 'running'].includes(frame.job.status)) controller.abort();
+        }
+      }, controller.signal).then(pollIfActive, pollIfActive);
+    }
+  } catch (e) {
+    if (!disposed && generation === jobGeneration) jobError.value = e.message || '任务详情加载失败';
+  } finally { if (generation === jobGeneration) jobLoading.value = false; }
+}
+function closeJob(updateRoute = true) {
+  stopJobUpdates();
+  requestedJobId.value = null;
   selectedJob.value = null;
   selectedJobItem.value = null;
-  if (props.embedded) return;
+  jobLoading.value = false;
+  jobError.value = '';
+  if (props.embedded || !updateRoute) return;
   const next = { ...route.query };
   delete next.job;
-  router.replace({ query: next });
+  void router.replace({ query: next });
 }
-function formatTime(value) { return value ? new Date(`${value}Z`).toLocaleString() : '—'; }
 function jobProgress(job) { return job.total ? Math.round(job.completed / job.total * 100) : 0; }
 function statusLabel(status) { return ({ pending: '等待执行', queued: '排队中', running: '执行中', success: '执行成功', failed: '执行失败', interrupted: '意外中断' })[status] || status; }
 function actionLabel(action) {
@@ -261,24 +269,10 @@ watch([statusFilter, jobStatusFilter], () => {
 });
 watch(() => route.query.job, (id) => {
   if (props.embedded) return;
-  if (id && selectedJob.value?.id !== String(id)) void openJob(String(id), false);
-  if (!id && selectedJob.value) {
-    clearTimeout(jobPollTimer);
-    if (jobStreamController) {
-      jobStreamController.abort();
-      jobStreamController = null;
-    }
-    selectedJob.value = null;
-    selectedJobItem.value = null;
-  }
+  if (id && requestedJobId.value !== String(id)) void openJob(String(id), false);
+  if (!id && requestedJobId.value) closeJob(false);
 });
 usePullRefresh(load);
-onMounted(async () => { await load(); if (!props.embedded && route.query.job) await openJob(String(route.query.job), false); });
-onUnmounted(() => {
-  clearTimeout(jobPollTimer);
-  if (jobStreamController) {
-    jobStreamController.abort();
-    jobStreamController = null;
-  }
-});
+onMounted(async () => { await load(); if (!disposed && !props.embedded && route.query.job) await openJob(String(route.query.job), false); });
+onUnmounted(() => { disposed = true; stopJobUpdates(); });
 </script>

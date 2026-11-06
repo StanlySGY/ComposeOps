@@ -90,6 +90,7 @@ export default async function opsRoutes(fastify) {
   // 资源可能在前端确认后被新容器引用;服务层一律非强制删除以保护运行中资源与持久数据。
   fastify.delete('/storage/resources/:kind/:id', {
     schema: {
+      querystring: { type: 'object', properties: { expectedHostId: { type: 'string', minLength: 1, maxLength: 128 } } },
       params: {
         type: 'object',
         required: ['kind', 'id'],
@@ -102,11 +103,11 @@ export default async function opsRoutes(fastify) {
       return reply.code(400).send({ error: 'unknown_resource_kind', message: `未知资源类型:${kind}` });
     }
     try {
-      const result = await removeDockerResource(kind, id, false);
+      const result = await removeDockerResource(kind, id, false, request.query.expectedHostId);
       addOperation({ action: `resource.remove.${kind}`, status: 'success', detail: id });
       return { ok: true, ...result };
     } catch (error) {
-      return reply.code(error.statusCode || 502).send({ error: 'resource_remove_failed', message: error.message });
+      return reply.code(error.statusCode || 502).send({ error: error.code === 'resource_host_changed' ? error.code : 'resource_remove_failed', message: error.message });
     }
   });
 

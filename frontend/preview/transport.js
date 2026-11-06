@@ -1,5 +1,5 @@
 import { parseDocument } from 'yaml';
-import { at, projects, metrics, inspection, operations, alerts, storage, channels, preferences, backups, logs, compose } from './fixtures.js';
+import { at, projects, metrics, inspection, operations, alerts, storage, resources, marketplaceTemplates, channels, preferences, backups, logs, compose } from './fixtures.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -81,7 +81,7 @@ export async function previewFetch(input, options = {}) {
     '/ops/inspection/overview': inspection,
     '/ops/alert-events': { events: alerts },
     '/ops/storage/df': storage,
-    '/ops/storage/resources': { counts: { danglingImages: 0, orphanVolumes: 0, unusedNetworks: 0 }, images: [], containers: [], volumes: [{ name: 'cache_data', driver: 'local', size: 1048576, usedBy: ['redis'], inUse: true }], networks: [] },
+    '/ops/storage/resources': { ...resources, checkedAt: Date.now() },
     '/ops/storage/volume-backups': { backups },
     '/ops/storage/volume-volumes': { volumes: [{ name: 'cache_data', driver: 'local' }] },
     '/ai/config': aiConfig(),
@@ -106,8 +106,20 @@ export async function previewFetch(input, options = {}) {
     '/cmdb/assets': { assets: [], total: 0 }, '/cmdb/topology': { nodes: [], edges: [] },
     '/cost-analysis/report': { summary: { totalProjects: 4, totalContainers: 5, runningContainers: 4 }, projects: [], containers: [], images: [], trends: [], storage },
     '/cost-analysis/suggestions': { suggestions: [] },
-    '/marketplace/stats': { total: 0, favorites: 0, categories: [] }, '/marketplace/templates/search': { templates: [], total: 0, categories: [] },
+    '/marketplace/stats': { totalBuiltin: 3, totalCommunity: 0, totalCustom: 1, totalFavorites: marketplaceTemplates.filter(t => t.favorited).length, categories: ['Web', 'Database', 'DevOps', 'Custom'], communityAvailable: false },
   };
+  if (path === '/marketplace/templates/search' && method === 'GET') {
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const source = url.searchParams.get('source');
+    const category = url.searchParams.get('category');
+    return json({ results: marketplaceTemplates.filter(t => (!q || `${t.name} ${t.description} ${t.category}`.toLowerCase().includes(q)) && (!source || source === 'all' || t.id.startsWith(source + '-')) && (!category || category === 'all' || t.category === category) && (url.searchParams.get('onlyFavorites') !== 'true' || t.favorited)) });
+  }
+  if (path.startsWith('/marketplace/favorites/') && ['POST', 'DELETE'].includes(method)) {
+    const template = marketplaceTemplates.find(t => t.id === path.split('/').pop());
+    if (!template) return json({ message: '示例模板不存在' }, 404);
+    template.favorited = method === 'POST';
+    return json({ ok: true });
+  }
   if (method === 'GET') {
     if (path in reads) return json(clone(reads[path]));
     if (path.startsWith('/jobs/') && jobs.has(pid)) return json(jobs.get(pid));
@@ -124,6 +136,17 @@ export async function previewFetch(input, options = {}) {
       if (path.endsWith('/stats/stream')) return eventStream([{ type: 'stats', containers: metrics.containers.filter(c => c.projectId === pid) }]);
     }
     if (path.endsWith('/compaction')) return json({ compactedBeforeId: 0, summary: '' });
+  }
+  if (path.startsWith('/ops/storage/resources/') && method === 'DELETE') {
+    if (url.searchParams.get('expectedHostId') !== resources.hostId) return json({ error: 'resource_host_changed', message: '示例节点已切换，请刷新后重试' }, 409);
+    const [, , , , kind, rawId] = path.split('/');
+    const key = { image: 'images', volume: 'volumes', network: 'networks' }[kind];
+    const id = decodeURIComponent(rawId || '');
+    const row = resources[key]?.find(item => (kind === 'volume' ? item.name : item.id) === id);
+    if (!row) return json({ message: '示例资源不存在' }, 404);
+    if (row.inUse || row.builtin || (kind === 'volume' && !row.orphan) || (kind === 'network' && !row.unused)) return json({ message: '资源仍被引用，拒绝删除' }, 409);
+    resources[key] = resources[key].filter(item => item !== row);
+    return json({ ok: true, removed: true, kind, id });
   }
   if (path === '/ai/agent/execute-stream' && method === 'POST') return agentStream(body, options.signal);
   if (path === '/ai/agent/approve' && method === 'POST') {

@@ -126,3 +126,13 @@ test('API boundary: 通知设置支持全部 7 个渠道回存(含钉钉/飞书)
   assert.equal(save.statusCode, 200, save.body);
   assert.equal(save.json().channels.length, 7);
 });
+
+test('resource API validates expected host before deletion and reports a stable conflict code', async t => {
+  const remove = t.mock.method(docker, 'getVolume', () => { throw new Error('must never run'); });
+  const conflict = await app.inject({ method: 'DELETE', url: '/api/v1/ops/storage/resources/volume/shared-name?expectedHostId=old-host', headers: headers() });
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.json().error, 'resource_host_changed');
+  assert.equal(remove.mock.callCount(), 0);
+  const invalid = await app.inject({ method: 'DELETE', url: '/api/v1/ops/storage/resources/volume/shared-name?expectedHostId=', headers: headers() });
+  assert.equal(invalid.statusCode, 400);
+});
