@@ -55,9 +55,12 @@ test('备份文件删除失败时保留记录并报告失败', async (t) => {
 for (const mode of ['buffer', 'stream']) {
   test(`卷备份接受 Docker logs 的 ${mode} 响应,读取完整输出并移除 helper`, async (t) => {
     const removed = [];
+    let helperNetworkMode = '';
     t.mock.method(docker, 'getImage', () => ({ inspect: async () => ({}) }));
     t.mock.method(docker, 'listVolumes', async () => ({ Volumes: [{ Name: 'test-volume' }] }));
-    t.mock.method(docker, 'createContainer', async () => ({
+    t.mock.method(docker, 'createContainer', async (options) => {
+      helperNetworkMode = options.HostConfig?.NetworkMode || '';
+      return ({
       start: async () => {}, wait: async () => ({ StatusCode: 0 }),
       logs: async () => {
         if (mode === 'buffer') return frame('123\n');
@@ -66,10 +69,12 @@ for (const mode of ['buffer', 'stream']) {
         return stream;
       },
       remove: async () => removed.push(true),
-    }));
+      });
+    });
     const record = await createVolumeBackup(project, 'test-volume');
     assert.equal(record.bytes, 123);
     assert.equal(removed.length, 1);
+    assert.equal(helperNetworkMode, 'none', 'volume helper should not attach to a Docker network');
   });
 }
 

@@ -56,7 +56,23 @@ test('inspection: 概览返回最新报告与调度配置', async () => {
   if (body.latest) {
     assert.ok(Array.isArray(body.latest.findings));
     assert.ok('score' in body.latest);
+    assert.deepEqual(Object.keys(body.latest.counts).sort(), ['critical', 'info', 'warning']);
+    assert.ok(Object.values(body.latest.counts).every((value) => Number.isInteger(value) && value >= 0));
   }
+});
+
+test('notifications: 测试接口明确返回 skipped,不伪报发送成功', async () => {
+  const cookie = await login();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/personal/notifications/test',
+    headers: { ...authHeaders, ...auth(cookie) },
+    payload: { enabled: false },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, false);
+  assert.equal(response.json().skipped, true);
+  assert.match(response.json().message, /未发送/);
 });
 
 test('inspection: 执行巡检并写入报告(移除前保持数据最小)', async () => {

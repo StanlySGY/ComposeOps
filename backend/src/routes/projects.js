@@ -7,7 +7,8 @@ import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listP
 import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
 import { readContainerStat } from '../services/stats.js';
-import { validateComposeSemantics, previewComposeChange } from '../services/compose-validator.js';
+import { createComposeChangePreview, validateComposeSemantics } from '../services/compose-validator.js';
+import { getActivityDocker } from '../services/docker-hosts.js';
 import { listProjectDbContainers, runDbDump } from '../services/db-dumper.js';
 import { scanProjectWebPorts, buildWebUiLinks } from '../services/project-ports.js';
 import {
@@ -240,7 +241,7 @@ export default async function projectRoutes(fastify) {
       body: {
         type: 'object',
         additionalProperties: false,
-        properties: { content: { type: 'string', maxLength: CONTENT_MAX } },
+        properties: { content: { type: 'string', maxLength: CONTENT_MAX }, fileIndex: fileIndexField },
       },
     },
   }, async (request, reply) => {
@@ -251,7 +252,11 @@ export default async function projectRoutes(fastify) {
     if (typeof content !== 'string') {
       return reply.code(400).send({ error: 'invalid_content', message: '缺少预览内容' });
     }
-    return { preview: previewComposeChange(content, project) };
+    const fileIndex = Number(request.body?.fileIndex) || 0;
+    const current = project.mounted ? await readCompose(project, fileIndex) : await readWorkspaceCompose(project, fileIndex);
+    let docker = null;
+    try { docker = getActivityDocker(); } catch { /* Preview will mark port occupancy as unknown. */ }
+    return { preview: await createComposeChangePreview(content, project, current.content, docker) };
   });
 
   // content 不设 required:缺失时 saveCompose 自己抛错并归到 compose_save_failed,

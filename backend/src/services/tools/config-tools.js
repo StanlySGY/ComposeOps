@@ -7,7 +7,7 @@ import { execReadonly, readContainerLogs } from '../../lib/docker-exec.js';
 import { assertCommandAllowed } from '../../lib/command-guard.js';
 import { callOpenAI, getAiConfig } from '../ai.js';
 import { readCompose, saveCompose } from '../compose-runner.js';
-import { previewComposeChange, validateComposeSemantics } from '../compose-validator.js';
+import { createComposeChangePreview, validateComposeSemantics } from '../compose-validator.js';
 import { getActiveHost, getActiveHostType, getActivityDocker } from '../docker-hosts.js';
 import { sshExec } from '../remote-shell.js';
 import { realpath } from 'node:fs/promises';
@@ -136,10 +136,9 @@ export function registerConfigTools(agent) {
         required: ['projectId'],
       },
       execute: async (params, context) => {
-        const content = typeof params.content === 'string' && params.content
-          ? params.content
-          : await currentComposeContent(context.project, Number(params.fileIndex) || 0);
-        const preview = previewComposeChange(content, context.project);
+        const currentContent = await currentComposeContent(context.project, Number(params.fileIndex) || 0);
+        const content = typeof params.content === 'string' && params.content ? params.content : currentContent;
+        const preview = await createComposeChangePreview(content, context.project, currentContent, getActivityDocker());
         return { preview, contentLength: content.length };
       },
     })
@@ -195,7 +194,7 @@ export function registerConfigTools(agent) {
           path: params.path,
           action: params.action,
           diff: diffTexts(before, after),
-          preview: previewComposeChange(after, context.project),
+          preview: await createComposeChangePreview(after, context.project, before, getActivityDocker()),
           issues,
           requiresRestart: true,
         };

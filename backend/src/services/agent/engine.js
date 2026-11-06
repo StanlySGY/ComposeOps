@@ -498,9 +498,9 @@ export class OperationsAgent {
       const cfg = getAiConfig();
       
       if (!cfg.apiKey) {
-        onEvent({ type: 'error', content: '未配置 AI API Key,无法使用 Tool Loop 模式' });
+        onEvent({ type: 'error', content: '未配置 AI API Key，无法使用 Tool Loop 模式。请先在 [设置 → AI 渠道](#/settings?tab=ai) 配置并启用支持工具调用的渠道。' });
         updateAgentPlan(planId, { status: 'failed', resultJson: { error: 'AI 未配置 API Key' }, executedAt: new Date().toISOString() });
-        return { success: false, messages, finalContent: '需要配置 AI API Key' };
+        return { success: false, messages, finalContent: '需要配置 AI API Key。请先在 [设置 → AI 渠道](#/settings?tab=ai) 配置并启用支持工具调用的渠道。' };
       }
 
       // 获取当前角色的可用工具

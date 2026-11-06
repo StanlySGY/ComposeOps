@@ -7,7 +7,7 @@ import test from 'node:test';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-volbackup-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
-const { parseProjectVolumes, resolveProjectVolumeNames, getBackupDir, resolveMountedHostPath, createVolumeBackup, openBackupStream, listProjectVolumes } = await import('../src/services/volume-backup.js');
+const { parseProjectVolumes, resolveProjectVolumeNames, getBackupDir, resolveMountedHostPath, createVolumeBackup, openBackupStream, listProjectVolumes, safeFileName } = await import('../src/services/volume-backup.js');
 const db = (await import('../src/lib/db.js')).default;
 const {
   addVolumeBackup, pruneVolumeBackups, pruneAiData,
@@ -23,6 +23,11 @@ test('volume-backup: 容器内备份目录映射到宿主机持久化卷真实�
     { Type: 'bind', Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock' },
   ] }, '/app/backend/data/volume-backups');
   assert.equal(hostPath, '/var/lib/docker/volumes/opsdash-data/_data/volume-backups');
+});
+
+test('volume-backup: 自动命名卷的文件名不重复项目名前缀', () => {
+  const file = safeFileName('composeops-ux-demo', 'composeops-ux-demo_webdata', 123456);
+  assert.match(file, /^composeops-ux-demo_webdata_123456_[a-f0-9]{16}\.tar\.gz$/);
 });
 
 test('volume-backup: 宿主机路径映射选择最深的匹配挂载点', () => {

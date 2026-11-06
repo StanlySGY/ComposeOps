@@ -39,8 +39,9 @@ export default async function personalRoutes(fastify) {
     try {
       // 测试通知不应持久化配置,只验证渠道可达性
       const testConfig = request.body;
-      await sendNotification('ComposeOps 测试通知', '通知渠道配置成功。', testConfig);
-      return { ok: true };
+      const result = await sendNotification('ComposeOps 测试通知', '通知渠道配置成功。', testConfig);
+      if (result.skipped) return { ok: false, skipped: true, message: '通知未发送：通知功能或所有通知渠道均未启用。' };
+      return { ok: true, skipped: false, results: result.results || [] };
     } catch (error) {
       return reply.code(502).send({ error: 'notification_failed', message: error.message });
     }

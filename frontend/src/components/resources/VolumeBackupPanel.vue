@@ -14,7 +14,7 @@
 
     <div v-if="projectId && volumes.length" class="grid gap-1.5 sm:grid-cols-2">
       <label v-for="volume in volumes" :key="volume.name" class="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-xs" :class="volume.skip ? 'border-surface-800/60 bg-surface-950/30 text-zinc-600' : selected.includes(volume.name) ? 'border-accent/50 bg-accent/10' : 'border-surface-800 bg-surface-950/40 hover:border-surface-700'">
-        <input v-if="!volume.skip" v-model="selected" type="checkbox" :value="volume.name" class="accent-cyan-500" />
+        <input v-if="!volume.skip" v-model="selected" type="checkbox" :value="volume.name" :aria-label="`选择数据卷 ${volume.name}`" class="accent-cyan-500" />
         <Ban v-else class="h-3.5 w-3.5 shrink-0 text-zinc-700" />
         <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{{ volume.name }}</span>
         <span v-if="volume.skip" class="shrink-0 text-[10px]">{{ volume.skip }}</span>

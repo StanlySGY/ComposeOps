@@ -145,9 +145,12 @@ export async function listProjectVolumes(project, host = getActiveHost()) {
   return resolveProjectVolumeNames(volumes, project.projectName, existing);
 }
 
-function safeFileName(projectName, volume, timestamp = Date.now()) {
+export function safeFileName(projectName, volume, timestamp = Date.now()) {
   const clean = (value) => String(value || 'x').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
-  return `${clean(projectName)}_${clean(volume)}_${timestamp}_${randomBytes(8).toString('hex')}.tar.gz`;
+  const project = clean(projectName);
+  const actualVolume = clean(volume);
+  const volumeSuffix = actualVolume.startsWith(`${project}_`) ? actualVolume.slice(project.length + 1) : actualVolume;
+  return `${project}_${volumeSuffix || 'volume'}_${timestamp}_${randomBytes(8).toString('hex')}.tar.gz`;
 }
 
 /** 同一项目操作与同一宿主上的共享卷操作都必须串行化。 */
@@ -189,7 +192,8 @@ async function runHelper(docker, cmd, binds) {
   const container = await docker.createContainer({
     Image: HELPER_IMAGE,
     Cmd: ['sh', '-c', cmd],
-    HostConfig: { Binds: binds },
+    // The helper only needs its bind mounts; a transient network endpoint is unnecessary.
+    HostConfig: { Binds: binds, NetworkMode: 'none' },
     Labels: { 'composeops.role': 'volume-backup' },
   });
   try {

@@ -279,8 +279,8 @@ export const api = {
   getAgentAuditEvents: (limit = 100, filters = {}) => request(`/ai/agent/audit-events?${new URLSearchParams({ limit: String(limit), ...(filters.planId ? { planId: filters.planId } : {}), ...(filters.executionId ? { executionId: filters.executionId } : {}) })}`),
   // compose 语义校验 / 变更预览
   validateCompose: (projectId, fileIndex, content) => request(`/projects/${projectId}/compose/validate`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) }),
-  previewCompose: async (projectId, content) => {
-    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ content }) });
+  previewCompose: async (projectId, fileIndex, content) => {
+    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) });
     return result?.preview || null;
   },
   // system

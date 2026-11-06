@@ -86,7 +86,7 @@
     </BaseModal>
 
     <BaseModal :show="showBackups" title="配置备份（最近 20 份）" size-class="max-w-[calc(100vw-2rem)] sm:max-w-3xl" body-class="p-3 space-y-2 overflow-auto max-h-[60vh]" @close="showBackups = false">
-      <EmptyState icon="History" compact title="暂无配置备份" description="保存一次配置后会自动产生备份" />
+      <EmptyState v-if="!backups.length" icon="History" compact title="暂无配置备份" description="保存一次配置后会自动产生备份" />
       <div v-for="backup in backups" :key="backup.id" class="card p-3 flex items-center gap-3">
         <div class="flex-1"><div class="text-sm">{{ formatTime(backup.createdAt) }}</div><div class="text-muted">{{ backup.reason }} · {{ backup.size }} 字符</div></div>
         <button class="btn-ghost" @click="previewBackup(backup)"><Eye class="w-4 h-4" />比较</button>
@@ -114,7 +114,13 @@
           <div class="text-xs font-semibold text-rose-300">将被移除的服务 {{ changePreview.removed.length }}</div>
           <div class="mt-1 space-y-1"><p v-for="item in changePreview.removed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-500">· {{ item.container }} ({{ item.state }})</span></p></div>
         </div>
-        <p v-if="!changePreview.added.length && !changePreview.changed.length && !changePreview.restarted.length && !changePreview.removed.length" class="text-xs text-surface-400">未检测到会影响现有容器的变更,可直接保存。</p>
+        <div v-if="changePreview.portConflicts?.length" class="rounded-lg border border-rose-900/50 bg-rose-950/25 p-2.5">
+          <div class="text-xs font-semibold text-rose-300">宿主端口冲突 {{ changePreview.portConflicts.length }}</div>
+          <p v-for="(item, index) in changePreview.portConflicts" :key="`${item.service}-${item.port}-${index}`" class="mt-1 text-xs text-surface-300">{{ item.service }} · {{ item.ip }}:{{ item.port }}/{{ item.protocol }} 已被 {{ item.holder }} 占用</p>
+        </div>
+        <p v-else-if="changePreview.portConflictsKnown === false" class="text-xs text-amber-300">未能读取宿主容器端口占用情况，本次未完成端口冲突检测。</p>
+        <p v-if="changePreview.changeAnalysisKnown === false" class="text-xs text-amber-300">未能读取当前 Compose 文件，本次无法比较服务配置差异。</p>
+        <p v-if="!changePreview.added.length && !changePreview.changed.length && !changePreview.restarted.length && !changePreview.removed.length && !changePreview.portConflicts.length" class="text-xs text-surface-400">未检测到已确认的容器变更。</p>
       </template>
       <template #footer>
         <button class="btn-ghost" :disabled="saving" @click="closePreview">取消</button>
@@ -638,13 +644,13 @@ async function save() {
   // 保存前展示变更预览(影响哪些容器会被重建/重启)
   previewLoading.value = true;
   try {
-    changePreview.value = await api.previewCompose(projectId.value, content.value);
+    changePreview.value = await api.previewCompose(projectId.value, fileIndex.value, content.value);
     if (!changePreview.value) {
       error.value = '变更预览未返回结果,未保存,请重试';
       return;
     }
     const preview = changePreview.value || {};
-    const impactful = (preview.added || []).length + (preview.changed || []).length + (preview.restarted || []).length + (preview.removed || []).length;
+    const impactful = (preview.added || []).length + (preview.changed || []).length + (preview.restarted || []).length + (preview.removed || []).length + (preview.portConflicts || []).length + Number(preview.portConflictsKnown === false || preview.changeAnalysisKnown === false);
     if (impactful) { showPreview.value = true; return; } // 有影响,等用户确认
   } catch (e) {
     changePreview.value = null;

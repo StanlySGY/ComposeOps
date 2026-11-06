@@ -92,65 +92,141 @@ function normalizeList(value) {
   return [value];
 }
 
-/**
- * Compose 变更预览:静态对比新内容与当前运行容器,评估影响面。
- * 返回 { added, removed, changed, restarted, portConflicts }
- */
-export function previewComposeChange(newContent, project) {
-  const result = { added: [], removed: [], changed: [], restarted: [], portConflicts: [] };
-  let doc;
-  try {
-    doc = YAML.parse(newContent);
-  } catch {
-    return result; // YAML 无效时不提供预览
-  }
-  const newServices = doc && doc.services && typeof doc.services === 'object' ? doc.services : {};
-  const newNames = new Set(Object.keys(newServices));
+const RECREATE_FIELDS = [
+  ['image', '镜像'], ['build', '构建配置'], ['environment', '环境变量'], ['env_file', '环境文件'],
+  ['ports', '端口映射'], ['expose', '暴露端口'], ['volumes', '卷挂载'], ['tmpfs', '临时文件系统'],
+  ['command', '命令'], ['entrypoint', '入口'], ['user', '运行用户'], ['working_dir', '工作目录'],
+  ['hostname', '主机名'], ['domainname', '域名'], ['labels', '标签'], ['healthcheck', '健康检查'],
+  ['restart', '重启策略'], ['networks', '网络'], ['devices', '设备'], ['privileged', '特权模式'],
+  ['read_only', '只读根文件系统'], ['cap_add', 'Linux capabilities'], ['cap_drop', 'Linux capabilities'],
+  ['security_opt', '安全选项'], ['deploy', '部署配置'],
+];
 
-  const currentNames = new Set();
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function parseServices(content) {
+  if (typeof content !== 'string' || !content.trim()) return null;
+  try {
+    const doc = YAML.parse(content);
+    return doc?.services && typeof doc.services === 'object' ? doc.services : {};
+  } catch { return null; }
+}
+
+function containerService(container, projectName, knownServices) {
+  if (typeof container.service === 'string' && container.service.trim()) return container.service.trim();
+  const name = String(container.name || '');
+  const prefix = String(projectName || '');
+  if (prefix) {
+    for (const separator of ['-', '_']) {
+      const start = `${prefix}${separator}`;
+      if (!name.startsWith(start)) continue;
+      const suffix = name.slice(start.length).replace(/[-_]\d+$/, '');
+      if (suffix) return suffix;
+    }
+  }
+  return knownServices.find((service) => name === service ||
+    (name.startsWith(`${service}-`) && /-\d+$/.test(name)) ||
+    (name.startsWith(`${service}_`) && /_\d+$/.test(name))) || null;
+}
+
+function changedReasons(previous, next) {
+  if (!previous || !next) return [];
+  return RECREATE_FIELDS
+    .filter(([field]) => JSON.stringify(stableValue(previous[field])) !== JSON.stringify(stableValue(next[field])))
+    .map(([, label]) => label);
+}
+
+function parsePublishedPort(spec) {
+  if (spec && typeof spec === 'object') {
+    const published = Number(spec.published ?? spec.published_port);
+    if (!Number.isInteger(published) || published < 1 || published > 65535) return null;
+    return { port: published, ip: String(spec.host_ip || spec.hostIp || '0.0.0.0'), protocol: String(spec.protocol || 'tcp').toLowerCase() };
+  }
+  const parts = String(spec || '').split(':');
+  if (parts.length < 2) return null;
+  const published = Number(parts.at(-2));
+  if (!Number.isInteger(published) || published < 1 || published > 65535) return null;
+  const ip = parts.length > 2 ? parts.slice(0, -2).join(':').replace(/^\[|\]$/g, '') : '0.0.0.0';
+  const target = parts.at(-1).split('/');
+  return { port: published, ip: ip || '0.0.0.0', protocol: (target[1] || 'tcp').toLowerCase() };
+}
+
+function addressesConflict(left, right) {
+  const wildcard = (value) => ['', '0.0.0.0', '::', '[::]'].includes(String(value || '').toLowerCase());
+  return wildcard(left) || wildcard(right) || String(left).toLowerCase() === String(right).toLowerCase();
+}
+
+/** Compare edited/current Compose services and only report host ports observed on other containers. */
+export function previewComposeChange(newContent, project, {
+  currentContent = '', occupiedPorts = null, portConflictsKnown = Array.isArray(occupiedPorts),
+} = {}) {
+  const result = {
+    added: [], removed: [], changed: [], restarted: [], portConflicts: [],
+    portConflictsKnown: !!portConflictsKnown, changeAnalysisKnown: false,
+  };
+  const newServices = parseServices(newContent);
+  if (!newServices) return result;
+  const oldServices = parseServices(currentContent);
+  result.changeAnalysisKnown = oldServices !== null;
+  const names = [...new Set([...Object.keys(newServices), ...Object.keys(oldServices || {})])];
+  const containersByService = new Map();
   for (const container of project.containers || []) {
-    // 容器名形如 <project>-<service>-<n> 或 <project>_<service>_<n>
-    const match = /^[^-_]+[-_](.+)[-_]\d+$/.exec(container.name);
-    const service = match ? match[1] : container.name;
-    currentNames.add(service);
-    if (!newNames.has(service)) result.removed.push({ service, container: container.name, state: container.state });
+    const service = containerService(container, project.projectName, names);
+    if (!service) continue;
+    if (!containersByService.has(service)) containersByService.set(service, []);
+    containersByService.get(service).push(container);
+    if (!Object.hasOwn(newServices, service)) result.removed.push({ service, container: container.name, state: container.state });
   }
   for (const [name, service] of Object.entries(newServices)) {
-    if (!currentNames.has(name)) {
-      result.added.push({ service: name });
-      continue;
+    const containers = containersByService.get(name) || [];
+    if (!containers.length) result.added.push({ service: name });
+    else if (oldServices && Object.hasOwn(oldServices, name)) {
+      const reasons = changedReasons(oldServices[name], service);
+      if (reasons.length) {
+        result.changed.push({ service: name, reasons, container: containers[0].name, state: containers[0].state });
+        for (const container of containers) if (container.state === 'running') result.restarted.push({ service: name, container: container.name });
+      }
     }
-    // 检测需要重建的变更(镜像/环境/卷/端口/命令变化)
-    const running = [...(project.containers || [])].find((c) => {
-      const match = /^[^-_]+[-_](.+)[-_]\d+$/.exec(c.name);
-      return match && match[1] === name;
-    });
-    if (!running) { result.added.push({ service: name }); continue; }
-    const sig = buildServiceSignature(service);
-    if (sig.imageChanged || sig.envChanged || sig.portsChanged || sig.volumesChanged || sig.commandChanged) {
-      result.changed.push({ service: name, reasons: sig.reasons, container: running.name, state: running.state });
-      if (running.state === 'running') result.restarted.push({ service: name, container: running.name });
-    }
-    // 端口冲突检测
-    for (const raw of normalizeList(service.ports || [])) {
-      const entry = String(raw);
-      if (/^\d+:\d+$/.test(entry)) result.portConflicts.push(entry);
+    if (Array.isArray(occupiedPorts)) {
+      for (const raw of normalizeList(service?.ports)) {
+        const desired = parsePublishedPort(raw);
+        if (!desired) continue;
+        for (const occupied of occupiedPorts) {
+          if (Number(occupied.port) !== desired.port || String(occupied.protocol || 'tcp').toLowerCase() !== desired.protocol) continue;
+          if (!addressesConflict(occupied.ip, desired.ip)) continue;
+          result.portConflicts.push({ service: name, port: desired.port, ip: desired.ip, protocol: desired.protocol, holder: occupied.name || '其他容器' });
+        }
+      }
     }
   }
   return result;
 }
 
-function buildServiceSignature(service) {
-  const reasons = [];
-  const imageChanged = typeof service.image === 'string' && /:/.test(service.image);
-  const envChanged = !!service.environment && (Array.isArray(service.environment) || typeof service.environment === 'object');
-  const portsChanged = !!service.ports && Array.isArray(service.ports) && service.ports.length > 0;
-  const volumesChanged = !!service.volumes && Array.isArray(service.volumes) && service.volumes.length > 0;
-  const commandChanged = !!service.command || !!service.entrypoint;
-  if (imageChanged) reasons.push('镜像');
-  if (envChanged) reasons.push('环境变量');
-  if (portsChanged) reasons.push('端口');
-  if (volumesChanged) reasons.push('卷');
-  if (commandChanged) reasons.push('命令/入口');
-  return { imageChanged, envChanged, portsChanged, volumesChanged, commandChanged, reasons };
+/** Collect external published ports; failure is represented as unknown, not as no conflict. */
+export async function createComposeChangePreview(newContent, project, currentContent, docker) {
+  let occupiedPorts = null;
+  try {
+    const containers = await docker.listContainers({ all: true });
+    const ownIds = new Set((project.containers || []).map((item) => item.id).filter(Boolean));
+    const projectName = String(project.projectName || '');
+    const workingDir = String(project.workingDir || '');
+    occupiedPorts = [];
+    for (const container of containers) {
+      if (ownIds.has(container.Id)) continue;
+      const labels = container.Labels || {};
+      if (projectName && labels['com.docker.compose.project'] === projectName &&
+        (!workingDir || labels['com.docker.compose.project.working_dir'] === workingDir)) continue;
+      for (const port of container.Ports || []) {
+        if (port.PublicPort) occupiedPorts.push({
+          port: Number(port.PublicPort), ip: port.IP || '0.0.0.0', protocol: String(port.Type || 'tcp').toLowerCase(),
+          name: (container.Names?.[0] || '').replace(/^\//, '') || container.Id?.slice(0, 12) || '其他容器',
+        });
+      }
+    }
+  } catch { /* Keep null: port occupancy is unknown when Docker is unreachable. */ }
+  return previewComposeChange(newContent, project, { currentContent, occupiedPorts, portConflictsKnown: Array.isArray(occupiedPorts) });
 }

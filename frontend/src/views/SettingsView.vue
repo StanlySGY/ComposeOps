@@ -533,7 +533,7 @@ async function saveNotifications() {
     ok('通知配置已保存');
   } catch (e) { fail(e); } finally { savingNotifications.value = false; }
 }
-async function testNotifications() { if (testingNotifications.value) return; testingNotifications.value = true; try { await api.testNotifications(notifications.value); ok('测试通知已发送'); } catch (e) { fail(e); } finally { testingNotifications.value = false; } }
+async function testNotifications() { if (testingNotifications.value) return; testingNotifications.value = true; try { const result = await api.testNotifications(notifications.value); if (result?.skipped) { ok(result.message || '通知未发送：请先启用一个通知渠道。'); return; } ok('测试通知已发送'); } catch (e) { fail(e); } finally { testingNotifications.value = false; } }
 async function saveUpdates() { if (savingUpdates.value) return; try { if (!Number.isInteger(Number(updates.value.intervalHours)) || Number(updates.value.intervalHours) < 1 || Number(updates.value.intervalHours) > 720) throw new Error('镜像检查间隔必须是 1–720 小时的整数'); savingUpdates.value = true; updates.value = await api.saveUpdateSettings(updates.value); ok('更新策略已保存'); } catch (e) { fail(e); } finally { savingUpdates.value = false; } }
 async function checkUpdates() { checkingUpdates.value = true; try { updateResults.value = (await api.checkUpdates()).results; updates.value.lastCheck = Date.now(); updates.value.lastResults = updateResults.value; ok('镜像检查完成'); } catch (e) { fail(e); } finally { checkingUpdates.value = false; } }
 async function loadUsage() { try { usage.value = await api.getStorageDf(); } catch (e) { fail(e); } }

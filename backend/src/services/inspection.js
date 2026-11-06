@@ -488,7 +488,7 @@ export function getInspectionOverview(limit = 20) {
   const reports = listInspections(limit);
   return {
     schedule: getInspectionSchedule(),
-    latest: reports[0] || null,
+    latest: reports[0] ? { ...reports[0], counts: countLevels(reports[0].findings) } : null,
     reports: reports.map((item) => ({ id: item.id, source: item.source, score: item.score, grade: item.grade, summary: item.summary, createdAt: item.createdAt, durationMs: item.durationMs, counts: countLevels(item.findings) })),
   };
 }
