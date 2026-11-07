@@ -42,13 +42,13 @@ test('Docker 存储固定指定节点，全部节点汇总保留各节点副本'
   assert.deepEqual(all.unavailableHosts, []);
 });
 
-test('挂起节点在三秒后取消请求，返回显式不完整汇总', async t => {
+test('挂起节点在期限内取消请求，返回显式不完整汇总', async t => {
   let closed = false;
   const slow = await fakeHost(t, 'slow', (req) => req.on('close', () => { closed = true; }));
   const fast = await fakeHost(t, 'fast', (_req, res) => res.end(JSON.stringify(snapshot(50))));
   const start = Date.now();
-  const all = await getDockerUsage('all');
-  assert.ok(Date.now() - start < 5000);
+  const all = await getDockerUsage('all', { timeoutMs: 100 });
+  assert.ok(Date.now() - start < 2000);
   assert.deepEqual(all.unavailableHosts, [slow.id]);
   assert.equal(all.images.total, 50);
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -65,6 +65,7 @@ test('非法节点 API 返回 404，失联节点返回 503，不伪报零用量'
   const failed = await fakeHost(t, 'offline', (_req, res) => { res.statusCode = 500; res.end('{"message":"offline"}'); });
   const result = await app.inject({ url: `/api/v1/personal/maintenance/usage?hostId=${failed.id}`, headers: { cookie } });
   assert.equal(result.statusCode, 503);
+  assert.equal(result.json().error, 'host_unavailable');
 });
 
 test('ping 成功但容器列表失败时统计为未知', async t => {

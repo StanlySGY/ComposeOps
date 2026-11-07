@@ -10,14 +10,14 @@ function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
 }
 
-export async function getDockerUsage(hostId = getActiveHostId()) {
+export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 15000 } = {}) {
   hostId = hostId || getActiveHostId();
   // Resolve before collecting: an unknown explicit node is a 404, not an empty total.
   const selected = (hostId === 'all' ? listHosts().map(host => host.id) : [hostId])
     .map(id => ({ id, docker: getDockerForHost(id) }));
   const snapshots = await Promise.all(selected.map(async ({ id, docker }) => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const data = await docker.df({ abortSignal: controller.signal });
       return { id, data };
