@@ -8,7 +8,7 @@
         role="status"
         :aria-live="toast.type === 'error' ? 'assertive' : 'polite'"
         aria-atomic="true"
-        @mouseenter="toasts.pause(toast.id, 'hover')"
+        @mouseenter="pauseHover(toast.id)"
         @mouseleave="toasts.resume(toast.id, 'hover')"
         @focusin="toasts.pause(toast.id, 'focus')"
         @focusout="onFocusOut($event, toast.id)"
@@ -54,6 +54,10 @@ let previousFocus = null;
 let narrowViewport;
 function rememberFocus(event) {
   if (!event.target.closest?.('.toast-container')) previousFocus = event.target;
+}
+function pauseHover(id) {
+  // 触屏浏览器会合成 mouseenter，不能让短暂提示因此永远遮挡后续操作。
+  if (window.matchMedia?.('(hover: hover)').matches) toasts.pause(id, 'hover');
 }
 function onFocusOut(event, id) {
   if (!event.currentTarget.contains(event.relatedTarget)) toasts.resume(id, 'focus');

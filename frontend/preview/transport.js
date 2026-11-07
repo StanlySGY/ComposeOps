@@ -6,6 +6,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const unsupported = () => json({ message: '此操作未在离线预览中模拟，请在自己的部署中使用。没有执行任何真实操作。' }, 501);
 const aiConfig = () => ({ channels, failoverEnabled: true, apiKey: '••••demo', model: channels[0]?.model || '', baseUrl: channels[0]?.baseUrl || '', systemPrompt: '离线示例：按实际应用的审批流程演示排障。' });
+const eventRecords = [{ id: 1, eventType: 'alert', source: 'alert-monitor', title: alerts[0].title, detail: alerts[0].detail, severity: 'warning', status: 'open', assetName: 'knowledge-base', createdAt: at, payload: { projectId: 'knowledge-base', to: '/logs?projectId=knowledge-base&containerId=demo-wiki-api&from=events' } }];
 const cronJobs = [];
 const cronTypes = {
   'db-backup': { label: '数据库自动备份', description: '对纳管项目中的数据库执行备份' },
@@ -103,7 +104,8 @@ export async function previewFetch(input, options = {}) {
     '/ai/history': { history: histories.get(Number(url.searchParams.get('sessionId'))) || [], hasMore: false },
     '/ai/agent/memories': { memories: [] },
     '/ai/agent/executions': { plans: [], executions: [] },
-    '/ai/agent/usage': { totalTokens: 0, models: [], daily: [] },
+    '/ai/agent/usage': { days: 30, totals: { calls: 0, sessions: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, models: [], daily: [] },
+    '/ai/agent/audit-events': { events: [] },
     // The offline preview never starts real Agent background work; expose a truthful empty task center.
     '/ai/agent/tasks': { tasks: [] },
     '/ai/agent/feedback': { feedback: [] },
@@ -115,13 +117,20 @@ export async function previewFetch(input, options = {}) {
     '/metrics/alerts': { alerts: [] }, '/metrics/historical': { data: [], metrics: [] },
     '/system/mcp': { enabled: false, mode: 'readonly', tokenConfigured: false, tools: [], endpoints: {} },
     '/projects/mount-plan': { projects, summary: { total: 4, managed: 3, operable: 3, unmanaged: 1 }, mounts: [], pendingProjects: [], unsupportedProjects: [], parentSuggestions: [] },
-    '/events/events': { events: alerts, total: alerts.length }, '/events/events/stats': { total: 1, unread: 1, byType: {}, byPriority: {} },
+    '/events/events': { events: eventRecords.filter(event => ['eventType', 'status', 'severity'].every(key => !url.searchParams.get(key) || event[key] === url.searchParams.get(key))) },
+    '/events/events/stats': { stats: { total: eventRecords.length, open: eventRecords.filter(event => event.status === 'open').length, byType: { alert: eventRecords.length }, bySeverity: { warning: eventRecords.length }, byStatus: Object.fromEntries(['open', 'acknowledged', 'resolved', 'closed'].map(status => [status, eventRecords.filter(event => event.status === status).length])) } },
     '/workflows/definitions': { definitions: [] }, '/workflows/instances': { instances: [] },
     '/cmdb/assets': { assets: [], total: 0 }, '/cmdb/topology': { nodes: [], edges: [] },
     '/cost-analysis/report': costReport, '/cost-analysis/trends': costReport.trends,
     '/cost-analysis/suggestions': { suggestions: [] },
     '/marketplace/stats': { totalBuiltin: 3, totalCommunity: 0, totalCustom: 1, totalFavorites: marketplaceTemplates.filter(t => t.favorited).length, categories: ['Web', 'Database', 'DevOps', 'Custom'], communityAvailable: false },
   };
+  if (path.startsWith('/events/events/') && method === 'PATCH') {
+    const event = eventRecords.find(item => String(item.id) === path.split('/').pop());
+    if (!event) return json({ message: '示例事件不存在' }, 404);
+    if (['open', 'acknowledged', 'resolved', 'closed'].includes(body.status)) event.status = body.status;
+    return json({ event });
+  }
   if (path === '/cron/preview' && method === 'GET') {
     try { return json(previewSchedule(url.searchParams.get('cron'))); }
     catch (error) { return json({ message: error.message }, 400); }

@@ -8,12 +8,13 @@ import { useToastStore } from '../src/stores/toast.js';
 let wrapper, store, launcher;
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal('matchMedia', vi.fn(query => ({ matches: query === '(hover: hover)', addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   const pinia = createPinia(); setActivePinia(pinia); store = useToastStore();
   launcher = document.createElement('button'); document.body.append(launcher); launcher.focus();
   wrapper = mount(ToastContainer, { attachTo: document.body, global: { plugins: [pinia] } });
 });
-afterEach(() => { wrapper.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { wrapper.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it('进度条随悬停和焦点暂停，移开鼠标不会让焦点中的消息消失', async () => {
   store.info('可读消息', 1000); await nextTick();
@@ -60,6 +61,14 @@ it('触摸按住提示时暂停，取消手势会释放暂停', async () => {
   vi.advanceTimersByTime(2000);
   expect(store.visible).toHaveLength(1);
   await wrapper.find('.toast-card').trigger('pointercancel');
+  vi.advanceTimersByTime(1000); await nextTick();
+  expect(store.visible).toHaveLength(0);
+});
+
+it('触屏合成悬停不会永久保留提示或挡住下一步操作', async () => {
+  window.matchMedia.mockReturnValue({ matches: false });
+  store.success('已解决', 1000); await nextTick();
+  await wrapper.find('.toast-card').trigger('mouseenter');
   vi.advanceTimersByTime(1000); await nextTick();
   expect(store.visible).toHaveLength(0);
 });
