@@ -297,7 +297,7 @@ const hostsStore = useHostsStore();
 // 编辑器有未保存改动时不响应下拉刷新,否则本地内容会被远端版本覆盖。
 usePullRefresh(async () => {
   await reloadProjects();
-  if (projectId.value) await load();
+  if (projectId.value && !dirty.value && !saving.value && !previewLoading.value) await load({ background: true });
 }, { keepAlive: true, refreshOnActivate: true, enabled: () => !dirty.value && !saving.value && !previewLoading.value && !hostStale.value });
 onMounted(async () => {
   window.addEventListener('beforeunload', beforeUnload);
@@ -709,18 +709,30 @@ function sameContext(snapshot) {
 function sameDraft(snapshot) {
   return sameContext(snapshot) && snapshot.content === content.value && snapshot.original === original.value;
 }
-async function load() {
+async function load({ background = false } = {}) {
   if (!projectId.value || hostStale.value) return;
   const requestedProjectId = projectId.value;
   const requestedFileIndex = fileIndex.value;
+  const previousContent = content.value;
+  const previousOriginal = original.value;
   const version = ++configVersion;
-  savedPendingApply.value = false;
-  loadingConfig.value = true;
-  error.value = ''; message.value = ''; semanticIssues.value = []; closePreview();
-  filePath.value = ''; original.value = ''; content.value = ''; editor?.setValue('');
+  if (!background) {
+    savedPendingApply.value = false;
+    loadingConfig.value = true;
+    error.value = ''; message.value = ''; semanticIssues.value = []; closePreview();
+    filePath.value = ''; original.value = ''; content.value = ''; editor?.setValue('');
+  }
   try {
     const data = await api.getComposeFile(requestedProjectId, requestedFileIndex);
     if (version !== configVersion || hostStale.value) return;
+    if (background) {
+      // 保存广播也会回到本页。内容未变化时保留下一步入口、光标和视图；
+      // 请求期间产生的新草稿或保存预览，不能被迟到的刷新覆盖。
+      if (content.value !== previousContent || original.value !== previousOriginal || saving.value || previewLoading.value) return;
+      if (data.content === original.value && data.path === filePath.value) return;
+      savedPendingApply.value = false;
+      error.value = ''; message.value = ''; semanticIssues.value = []; closePreview();
+    }
     filePath.value = data.path; original.value = content.value = data.content; editor?.setValue(data.content);
   } catch (e) {
     if (version === configVersion) error.value = e.message;

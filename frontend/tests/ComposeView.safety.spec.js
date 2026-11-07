@@ -91,6 +91,34 @@ describe('Compose 草稿与保存事务', () => {
     await view().get('select[aria-label="选择 Compose 配置文件"]').setValue('1'); await flushPromises();
     expect(view().text()).not.toContain('保存文件不会自动更新容器');
   });
+  it('保存广播刷新到相同内容时保留返回项目入口', async () => {
+    await open(); await edit();
+    await button('保存').trigger('click'); await flushPromises();
+    mocks.api.getComposeFile.mockResolvedValue({ path: '/one/0.yml', content: draft });
+    window.dispatchEvent(new CustomEvent('composeops:data-changed'));
+    await vi.waitFor(() => expect(mocks.api.getComposeFile).toHaveBeenCalledTimes(2));
+    await flushPromises();
+    expect(view().text()).toContain('保存文件不会自动更新容器');
+    expect(view().get('a.btn-secondary[href*="focus=one"]').text()).toContain('返回项目');
+    expect(editor().getValue()).toBe(draft);
+  });
+  it('刷新途中输入的草稿不会被迟到的文件响应覆盖', async () => {
+    await open();
+    const response = deferred(); mocks.api.getComposeFile.mockReturnValueOnce(response.promise);
+    window.dispatchEvent(new CustomEvent('composeops:refresh')); await flushPromises();
+    await edit(latestDraft);
+    response.resolve({ path: '/one/0.yml', content: draft }); await flushPromises();
+    expect(editor().getValue()).toBe(latestDraft);
+    expect(button('保存').attributes('disabled')).toBeUndefined();
+  });
+  it('刷新检测到外部文件变化时更新内容并撤销旧保存提示', async () => {
+    await open(); await edit();
+    await button('保存').trigger('click'); await flushPromises();
+    mocks.api.getComposeFile.mockResolvedValue({ path: '/one/0.yml', content: latestDraft });
+    window.dispatchEvent(new CustomEvent('composeops:refresh')); await flushPromises();
+    expect(editor().getValue()).toBe(latestDraft);
+    expect(view().text()).not.toContain('保存文件不会自动更新容器');
+  });
   it('切换项目取消时保留选择与草稿，确认后才加载新项目', async () => {
     await open(); await edit();
     await view().get('select[aria-label="选择 Compose 项目"]').setValue('two');
