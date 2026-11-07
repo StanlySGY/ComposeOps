@@ -41,9 +41,9 @@ describe('应用市场表单可访问性', () => {
   it('搜索和筛选控件都有明确的可访问名称', async () => {
     await start();
     expect(wrapper.get('input[aria-label="搜索应用模板"]').exists()).toBe(true);
-    expect(wrapper.get('select[aria-label="筛选模板来源"]').exists()).toBe(true);
+    expect(wrapper.get('[role="group"][aria-label="筛选模板来源"]').exists()).toBe(true);
     expect(wrapper.get('select[aria-label="筛选模板分类"]').exists()).toBe(true);
-    expect(wrapper.get('input[type="checkbox"]').element.closest('label').textContent).toContain('仅收藏');
+    expect(wrapper.get('.favorites-filter').attributes('aria-pressed')).toBe('false');
   });
 
   it('统计接口失败时说明数据不可用，并提供可访问的重试入口', async () => {
@@ -53,13 +53,13 @@ describe('应用市场表单可访问性', () => {
 
     expect(wrapper.get('[role="alert"]').text()).toContain('应用市场统计加载失败');
     expect(wrapper.get('[role="alert"]').text()).toContain('stats service offline');
-    expect(wrapper.find('.stats-grid').exists()).toBe(false);
+    expect(wrapper.find('.scope-chip span').exists()).toBe(false);
     await wrapper.get('[role="alert"] button').trigger('click');
     await flushPromises();
 
     expect(mocks.api.getMarketplaceStats).toHaveBeenCalledTimes(2);
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(wrapper.find('.stats-grid').exists()).toBe(true);
+    expect(wrapper.find('.scope-chip span').exists()).toBe(true);
   });
 
   it('统计刷新失败时保留上次成功数据并明确提示可能过期', async () => {
@@ -72,7 +72,7 @@ describe('应用市场表单可访问性', () => {
 
     expect(wrapper.get('[role="alert"]').text()).toContain('temporary stats failure');
     expect(wrapper.get('[role="alert"]').text()).toContain('上次成功读取的数据');
-    expect(wrapper.find('.stats-grid').exists()).toBe(true);
+    expect(wrapper.find('.scope-chip span').exists()).toBe(true);
   });
 
   it('收藏按钮公布模板名称和当前按下状态', async () => {
@@ -103,7 +103,7 @@ describe('应用市场表单可访问性', () => {
 
     wrapper = mount(MarketplaceView, { attachTo: document.body, global: { stubs: { ConfirmDialog: true, EmptyState: { template: '<div><slot /></div>', props: ['title', 'description', 'icon'] } } } });
     await vi.waitFor(() => expect(mocks.api.searchMarketplaceTemplates).toHaveBeenCalledTimes(1));
-    await wrapper.get('select[aria-label="筛选模板来源"]').setValue('custom');
+    await wrapper.findAll('.source-filters button').find(button => button.text().includes('自定义模板')).trigger('click');
     await flushPromises();
     expect(wrapper.text()).toContain('latest template');
 
@@ -112,6 +112,22 @@ describe('应用市场表单可访问性', () => {
 
     expect(wrapper.text()).toContain('latest template');
     expect(wrapper.text()).not.toContain('stale template');
+  });
+
+  it('输入后的等待窗口隔离旧结果，清空搜索取消尚未发送的请求', async () => {
+    let resolveOld;
+    mocks.api.searchMarketplaceTemplates.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+    await start();
+    await wrapper.get('[aria-label="搜索应用模板"]').setValue('redis');
+    resolveOld({ results: [{ ...deployable, name: '过期模板' }] });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('过期模板');
+    await wrapper.get('[aria-label="清空模板搜索"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[aria-label="搜索应用模板"]').element.value).toBe('');
+    expect(mocks.api.searchMarketplaceTemplates).toHaveBeenCalledTimes(2);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    expect(mocks.api.searchMarketplaceTemplates).toHaveBeenCalledTimes(2);
   });
 
   it('创建与 AI 弹窗提供对话框语义、可见标签、初始焦点、焦点循环和 Escape 关闭', async () => {

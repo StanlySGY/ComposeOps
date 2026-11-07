@@ -15,53 +15,39 @@
       </div>
     </header>
 
-    <!-- 搜索和筛选 -->
-    <section class="filter-bar">
-      <div class="search-box">
-        <input
-          v-model="searchQuery"
-          type="text"
-          aria-label="搜索应用模板"
-          placeholder="搜索模板..."
-          class="input search-input"
-          @input="handleSearch"
-        />
-      </div>
-      <div class="filters">
-        <select v-model="selectedSource" @change="loadTemplates" class="input filter-select" aria-label="筛选模板来源">
-          <option value="all">全部来源</option>
-          <option value="builtin">内置模板</option>
-          <option value="community" :disabled="!stats.communityAvailable">社区模板(未接入)</option>
-          <option value="custom">自定义模板</option>
-        </select>
+    <section class="market-browser" aria-label="查找应用模板">
+      <div class="filter-bar">
+        <div class="search-box">
+          <Search class="search-icon" aria-hidden="true" />
+          <input v-model="searchQuery" type="text" aria-label="搜索应用模板" placeholder="搜索应用名称或用途…" class="input search-input" @input="handleSearch" />
+          <button v-if="searchQuery" class="search-clear" aria-label="清空模板搜索" @click="clearSearch"><X class="h-4 w-4" /></button>
+        </div>
         <select v-model="selectedCategory" @change="loadTemplates" class="input filter-select" aria-label="筛选模板分类">
           <option value="all">全部分类</option>
-          <option v-for="cat in stats.categories" :key="cat" :value="cat">{{ cat }}</option>
+          <option v-for="cat in stats.categories" :key="cat" :value="cat">{{ categoryLabel(cat) }}</option>
         </select>
-        <label class="input favorites-toggle">
-          <input type="checkbox" v-model="onlyFavorites" @change="loadTemplates" />
-          <span>仅收藏</span>
-        </label>
+      </div>
+      <div class="market-scope-row">
+        <div class="source-filters" role="group" aria-label="筛选模板来源">
+          <button class="scope-chip" :aria-pressed="selectedSource === 'all'" @click="filterBySource('all')">全部模板</button>
+          <button class="scope-chip" :aria-pressed="selectedSource === 'builtin'" @click="filterBySource('builtin')">内置模板 <span v-if="statsLoaded">{{ stats.totalBuiltin }}</span></button>
+          <button v-if="stats.communityAvailable" class="scope-chip" :aria-pressed="selectedSource === 'community'" @click="filterBySource('community')">社区模板 <span v-if="statsLoaded">{{ stats.totalCommunity }}</span></button>
+          <button class="scope-chip" :aria-pressed="selectedSource === 'custom'" @click="filterBySource('custom')">自定义模板 <span v-if="statsLoaded">{{ stats.totalCustom }}</span></button>
+        </div>
+        <button class="scope-chip favorites-filter" :aria-pressed="onlyFavorites" @click="filterFavorites"><Star class="h-3.5 w-3.5" :fill="onlyFavorites ? 'currentColor' : 'none'" />我的收藏 <span v-if="statsLoaded">{{ stats.totalFavorites }}</span></button>
       </div>
     </section>
-
-    <p v-if="statsLoading && !statsLoaded" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载应用市场统计</p>
-    <p v-if="statsError" class="mx-4 mb-3 rounded-md border border-status-error/50 bg-status-error/15 px-3 py-2 text-xs text-status-error sm:mx-0" role="alert">
+    <p v-if="statsLoading && !statsLoaded" class="sr-only" role="status">正在加载应用市场统计</p>
+    <p v-if="statsError" class="alert-error" role="alert">
       应用市场统计加载失败：{{ statsError }}<span v-if="statsLoaded">，以下显示的是上次成功读取的数据。</span><span v-else>，统计数据暂不可用。</span>
       <button type="button" class="ml-2 underline underline-offset-2" @click="loadStats">重试统计</button>
     </p>
-    <p v-if="statsLoaded && !stats.communityAvailable" class="mx-4 mb-3 rounded-md border border-status-warn/50 bg-status-warn/15 px-3 py-2 text-xs text-status-warn sm:mx-0">{{ stats.communityMessage || '社区模板源尚未接入,当前仅提供内置和自定义模板。' }}</p>
-
-    <!-- 统计卡片 -->
-    <section v-if="statsLoaded" class="stats-grid" :aria-busy="statsLoading">
-      <MetricTile interactive title="内置模板" :aria-pressed="selectedSource === 'builtin'" :active="selectedSource === 'builtin'" @click="filterBySource('builtin')" :value="stats.totalBuiltin" />
-      <MetricTile interactive title="社区模板" :sub="stats.communityAvailable ? '' : '未接入'" :disabled="!stats.communityAvailable" :aria-pressed="selectedSource === 'community'" @click="filterBySource('community')" :value="stats.totalCommunity" />
-      <MetricTile interactive title="自定义模板" :aria-pressed="selectedSource === 'custom'" :active="selectedSource === 'custom'" @click="filterBySource('custom')" :value="stats.totalCustom" />
-      <MetricTile interactive title="我的收藏" :aria-pressed="onlyFavorites" @click="filterFavorites" :value="stats.totalFavorites" :active="onlyFavorites" />
-    </section>
-
-    <div class="mb-4 flex items-center justify-between gap-3 text-xs text-surface-400"><span>{{ loading ? '正在查找模板…' : `找到 ${filteredTemplates.length} 个模板` }}</span><button v-if="hasFilters" class="btn-ghost" @click="clearFilters">重置筛选</button></div>
-    <Skeleton v-if="loading" variant="cards" :rows="4" label="正在加载应用模板" />
+    <div class="market-results" role="status" aria-live="polite">
+      <span>{{ loading ? '正在查找模板…' : `找到 ${filteredTemplates.length} 个模板` }}<span v-if="selectedCategory !== 'all'"> · {{ categoryLabel(selectedCategory) }}</span></span>
+      <button v-if="hasFilters" class="btn-ghost" @click="clearFilters">重置筛选</button>
+      <span v-else-if="statsLoaded && !stats.communityAvailable" class="market-source-note">内置与自定义模板</span>
+    </div>
+    <Skeleton v-if="loading && !filteredTemplates.length" variant="cards" :rows="4" label="正在加载应用模板" />
 
     <div v-else-if="error" class="error-state" role="alert">
       <p>{{ error }}</p>
@@ -86,7 +72,8 @@
         :class="{ featured: template.featured }"
       >
         <div class="card-header">
-          <h3>{{ template.name }}<span v-if="template.featured" class="featured-badge">精选</span></h3>
+          <span class="template-avatar" :data-category="template.category"><component :is="categoryIcon(template.category)" class="h-6 w-6" aria-hidden="true" /></span>
+          <div class="template-heading"><h2>{{ template.name }}</h2><span class="template-kind">{{ categoryLabel(template.category) }} · {{ getSourceLabel(template.id) }}</span></div>
           <button
             @click="toggleFavorite(template.id)"
             :disabled="favoritePending.has(template.id)"
@@ -96,14 +83,11 @@
             :aria-label="template.favorited ? `取消收藏：${template.name}` : `收藏：${template.name}`"
             :aria-pressed="Boolean(template.favorited)"
           >
-            ★
+            <Star class="h-5 w-5" :fill="template.favorited ? 'currentColor' : 'none'" />
           </button>
         </div>
         <div class="card-body">
-          <div class="meta">
-            <span class="action-label category-badge">{{ template.category }}</span>
-            <span class="action-label source-badge">{{ getSourceLabel(template.id) }}</span>
-          </div>
+          <span v-if="template.featured" class="featured-badge">精选模板</span>
           <p class="description">{{ template.description || '暂无描述' }}</p>
           <div v-if="template.author" class="author">作者: {{ template.author }}</div>
           <div v-if="template.downloads" class="stats-row">
@@ -126,7 +110,7 @@
           <button
             v-if="isCustomTemplate(template)"
             @click="deleteTemplate(template.id)"
-            class="btn-danger btn-delete"
+            class="btn-ghost btn-delete"
           >
             删除
           </button>
@@ -244,7 +228,6 @@
 </template>
 
 <script setup>
-import MetricTile from '../components/common/MetricTile.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -254,7 +237,7 @@ import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
-import { Bot, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
+import { Bot, Box, Database, Globe, Wrench, Search, Star, X, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
 
 const toast = useToastStore();
 const { openAgent, updateAgentContext } = useAgentConsole();
@@ -276,13 +259,11 @@ const onlyFavorites = ref(false);
 const favoritePending = ref(new Set());
 const hasFilters = computed(() => searchQuery.value || selectedSource.value !== 'all' || selectedCategory.value !== 'all' || onlyFavorites.value);
 function filterBySource(source) {
-  selectedSource.value = selectedSource.value === source ? 'all' : source;
-  onlyFavorites.value = false;
+  selectedSource.value = source;
   void loadTemplates();
 }
 function filterFavorites() {
   onlyFavorites.value = !onlyFavorites.value;
-  selectedSource.value = 'all';
   void loadTemplates();
 }
 
@@ -325,6 +306,7 @@ async function loadStats() {
 let templatesRequestId = 0;
 async function loadTemplates() {
   if (!active) return;
+  clearTimeout(searchTimeout);
   const requestId = ++templatesRequestId;
   loading.value = true;
   error.value = '';
@@ -356,8 +338,12 @@ function clearFilters() {
 }
 
 let searchTimeout = null;
-function handleSearch() {
+function handleSearch(event) {
+  if (event?.isComposing) return;
   clearTimeout(searchTimeout);
+  templatesRequestId++;
+  error.value = '';
+  loading.value = true;
   searchTimeout = setTimeout(() => loadTemplates(), 300);
 }
 
@@ -492,6 +478,16 @@ function closeModal() {
   formData.value = { name: '', category: '', description: '', defaultCompose: '' };
 }
 
+function clearSearch() {
+  searchQuery.value = '';
+  void loadTemplates();
+}
+function categoryLabel(category) {
+  return { Web: '网站与代理', Database: '数据库与缓存', DevOps: '运维工具', Custom: '自定义', Monitoring: '监控' }[category] || category || '未分类';
+}
+function categoryIcon(category) {
+  return { Web: Globe, Database, DevOps: Wrench, Monitoring: Wrench }[category] || Box;
+}
 function getSourceLabel(id) {
   if (typeof id === 'string' && id.startsWith('custom-')) return '自定义';
   if (typeof id === 'string' && id.startsWith('community-')) return '社区';
@@ -618,26 +614,26 @@ onBeforeUnmount(stopPendingReads);
 
 .page-actions-market { @apply flex items-center gap-3; }
 
-.filter-bar { @apply mb-6 flex flex-wrap gap-3; }
-.search-box { @apply min-w-[200px] flex-1; }
-.search-input { @apply w-full; }
-.filters { @apply flex flex-wrap gap-3; }
-.filter-select { @apply cursor-pointer; }
-.favorites-toggle { @apply flex cursor-pointer items-center gap-2; }
-.favorites-toggle input { cursor: pointer; }
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
+.market-browser { @apply mt-5 mb-4 rounded-xl border border-surface-800 bg-surface-900/50 p-4; }
+.filter-bar { @apply flex flex-wrap gap-3; }
+.search-box { @apply relative min-w-0 flex-1; min-width: min(100%, 240px); }
+.search-input { @apply w-full pl-10 pr-10; min-height: 44px; }
+.search-icon { @apply pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-surface-400; }
+.search-clear { @apply absolute right-0 top-0 grid h-11 w-11 place-items-center text-surface-400 hover:text-surface-100; }
+.filter-select { @apply cursor-pointer; min-height: 44px; }
+.market-scope-row { @apply mt-3 flex flex-wrap items-center justify-between gap-2; }
+.source-filters { @apply flex flex-wrap gap-1; }
+.scope-chip { @apply inline-flex min-h-11 items-center gap-2 rounded-lg border border-transparent px-3 text-sm text-surface-400 transition-colors hover:bg-surface-800 hover:text-surface-100; }
+.scope-chip[aria-pressed="true"] { @apply border-emerald-400/25 bg-emerald-400/10 text-emerald-300; }
+.scope-chip span { @apply rounded-md bg-surface-950/50 px-1.5 text-xs tabular-nums; }
+.market-results { @apply mb-4 flex min-h-10 items-center justify-between gap-3 text-xs text-surface-400; }
+.market-source-note { @apply text-surface-500; }
 .error-state { @apply grid min-h-[40vh] place-items-center text-center text-surface-400; }
 
 .templates-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .template-card {
@@ -650,16 +646,22 @@ onBeforeUnmount(stopPendingReads);
 
 /* 精选模板用小徽章标注,不再整卡高亮边框(避免与收藏态混淆) */
 .featured-badge {
-  @apply ml-2 inline-block rounded-full border border-accent/40 bg-accent/10 px-1.5 py-px align-middle text-[11px] font-medium text-status-info;
+  @apply inline-block w-fit rounded-full border border-accent/40 bg-accent/10 px-1.5 py-px align-middle text-[11px] font-medium text-status-info;
 }
 
 .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
-.card-header h3 { @apply m-0 flex-1 text-lg font-semibold text-surface-50; }
+.template-heading { @apply min-w-0 flex-1; }
+.template-heading h2 { @apply m-0 break-words text-base font-semibold leading-6 text-surface-50; }
+.template-kind { @apply mt-1 block text-xs text-surface-400; }
+.template-avatar { @apply grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300; }
+.template-avatar[data-category="Database"] { @apply border-sky-400/20 bg-sky-400/10 text-sky-300; }
+.template-avatar[data-category="DevOps"] { @apply border-violet-400/20 bg-violet-400/10 text-violet-300; }
+.template-avatar[data-category="Custom"] { @apply border-amber-400/20 bg-amber-400/10 text-amber-300; }
 
-.favorite-btn { min-height: 44px; min-width: 44px; @apply px-2 py-1 text-xl text-surface-400 transition-colors hover:text-status-warn; background: transparent; border: none; cursor: pointer; }
+.favorite-btn { min-height: 44px; min-width: 44px; @apply grid place-items-center rounded-lg px-2 py-1 text-xl text-surface-400 transition-colors hover:text-status-warn; background: transparent; border: none; cursor: pointer; }
 .favorite-btn.active { @apply text-status-warn; }
 
-.card-body { display: grid; gap: 0.75rem; }
+.card-body { display: flex; flex-direction: column; gap: 0.75rem; }
 .meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .description { @apply m-0 text-sm leading-6 text-surface-400; }
@@ -668,7 +670,7 @@ onBeforeUnmount(stopPendingReads);
 
 .card-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .card-actions .btn-secondary,
-.card-actions .btn-danger { @apply min-w-fit flex-1; }
+.card-actions .btn-ghost { @apply min-w-fit flex-1; }
 
 .btn-deploy {
   border-color: color-mix(in srgb, var(--market-accent-2) 35%, transparent) !important;
@@ -694,4 +696,17 @@ onBeforeUnmount(stopPendingReads);
 .compose-preview h3 { @apply mb-3 mt-0 text-sm font-medium text-surface-200; }
 .compose-preview pre { @apply m-0 overflow-x-auto rounded-lg border border-surface-800 bg-surface-950/70 p-4; }
 .compose-preview code { @apply font-mono text-[13px] leading-6 text-surface-200; }
+.template-card:focus-within { @apply border-emerald-400/50; }
+.btn-delete { @apply text-surface-400 hover:text-status-error; }
+@media (max-width: 639px) {
+  .page-actions-market { @apply gap-2; }
+  .market-browser { @apply p-3; }
+  .filter-select { @apply w-full; }
+  .market-source-note { display: none; }
+  .template-card { @apply p-4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .template-card { transition: none; }
+  .template-card:hover { transform: none; }
+}
 </style>
