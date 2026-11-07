@@ -19,3 +19,5 @@
 
 ![桌面](assets/2026-11-market-catalog-desktop.png)
 ![手机](assets/2026-11-market-catalog-mobile.png)
+
+真实镜像验收补充：内置蓝图还包含 Network / Tools / Media / AI 分类，预览样例未覆盖。补全对应中文分类、卡片图标与色彩，并统一详情页分类名称；测试样例改用真实的 Network 值。应用市场 12 项单测、lint 与生产构建通过。

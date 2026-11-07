@@ -172,7 +172,7 @@
     <!-- 查看模板模态框 -->
     <BaseModal :show="!!viewingTemplate" :title="viewingTemplate?.name || '模板详情'" @close="viewingTemplate = null" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
           <div class="template-meta">
-            <span class="action-label category-badge">{{ viewingTemplate.category }}</span>
+            <span class="action-label category-badge">{{ categoryLabel(viewingTemplate.category) }}</span>
             <span class="action-label source-badge">{{ getSourceLabel(viewingTemplate.id) }}</span>
           </div>
           <p class="template-description">{{ viewingTemplate.description || '暂无描述' }}</p>
@@ -237,7 +237,7 @@ import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
-import { Bot, Box, Database, Globe, Wrench, Search, Star, X, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
+import { Bot, Box, Database, FolderOpen, Globe, Wrench, Search, Star, X, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
 
 const toast = useToastStore();
 const { openAgent, updateAgentContext } = useAgentConsole();
@@ -483,10 +483,10 @@ function clearSearch() {
   void loadTemplates();
 }
 function categoryLabel(category) {
-  return { Web: '网站与代理', Database: '数据库与缓存', DevOps: '运维工具', Custom: '自定义', Monitoring: '监控' }[category] || category || '未分类';
+  return { Web: '网站与代理', Network: '网络与代理', Database: '数据库与缓存', DevOps: '运维工具', Tools: '实用工具', Media: '媒体与文件', AI: '智能应用', Custom: '自定义', Monitoring: '监控' }[category] || category || '未分类';
 }
 function categoryIcon(category) {
-  return { Web: Globe, Database, DevOps: Wrench, Monitoring: Wrench }[category] || Box;
+  return { Web: Globe, Network: Globe, Database, DevOps: Wrench, Tools: Wrench, Media: FolderOpen, AI: Bot, Monitoring: Wrench }[category] || Box;
 }
 function getSourceLabel(id) {
   if (typeof id === 'string' && id.startsWith('custom-')) return '自定义';
@@ -655,8 +655,9 @@ onBeforeUnmount(stopPendingReads);
 .template-kind { @apply mt-1 block text-xs text-surface-400; }
 .template-avatar { @apply grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300; }
 .template-avatar[data-category="Database"] { @apply border-sky-400/20 bg-sky-400/10 text-sky-300; }
-.template-avatar[data-category="DevOps"] { @apply border-violet-400/20 bg-violet-400/10 text-violet-300; }
-.template-avatar[data-category="Custom"] { @apply border-amber-400/20 bg-amber-400/10 text-amber-300; }
+.template-avatar[data-category="DevOps"], .template-avatar[data-category="Tools"], .template-avatar[data-category="Monitoring"] { @apply border-violet-400/20 bg-violet-400/10 text-violet-300; }
+.template-avatar[data-category="Custom"], .template-avatar[data-category="Media"] { @apply border-amber-400/20 bg-amber-400/10 text-amber-300; }
+.template-avatar[data-category="AI"] { @apply border-rose-400/20 bg-rose-400/10 text-rose-300; }
 
 .favorite-btn { min-height: 44px; min-width: 44px; @apply grid place-items-center rounded-lg px-2 py-1 text-xl text-surface-400 transition-colors hover:text-status-warn; background: transparent; border: none; cursor: pointer; }
 .favorite-btn.active { @apply text-status-warn; }

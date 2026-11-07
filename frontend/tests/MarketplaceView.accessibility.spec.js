@@ -19,8 +19,8 @@ vi.mock('../src/composables/useAgentConsole.js', () => ({ useAgentConsole: () =>
 vi.mock('../src/composables/usePullRefresh.js', () => ({ usePullRefresh: vi.fn() }));
 
 let wrapper;
-const stats = { totalBuiltin: 1, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: ['Web'], communityAvailable: false, communityMessage: '' };
-const deployable = { id: 'builtin-nginx', name: 'nginx', category: 'Web', description: 'Web server', defaultCompose: 'services: {}', envSchema: [{ key: 'PORT', label: 'HTTP 端口', type: 'text', default: '8080' }] };
+const stats = { totalBuiltin: 1, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: ['Network'], communityAvailable: false, communityMessage: '' };
+const deployable = { id: 'builtin-nginx', name: 'nginx', category: 'Network', description: 'Web server', defaultCompose: 'services: {}', envSchema: [{ key: 'PORT', label: 'HTTP 端口', type: 'text', default: '8080' }] };
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ fullPath: '/marketplace' }) }));
 beforeEach(() => {
@@ -43,6 +43,7 @@ describe('应用市场表单可访问性', () => {
     expect(wrapper.get('input[aria-label="搜索应用模板"]').exists()).toBe(true);
     expect(wrapper.get('[role="group"][aria-label="筛选模板来源"]').exists()).toBe(true);
     expect(wrapper.get('select[aria-label="筛选模板分类"]').exists()).toBe(true);
+    expect(wrapper.get('option[value="Network"]').text()).toBe('网络与代理');
     expect(wrapper.get('.favorites-filter').attributes('aria-pressed')).toBe('false');
   });
 
