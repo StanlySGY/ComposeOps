@@ -41,9 +41,18 @@ try {
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined), headless: true, args: ['--no-sandbox'] });
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport });
-    const divider = cookie.indexOf('=');
-    await context.addCookies([{ name: cookie.slice(0, divider), value: cookie.slice(divider+1), url: base }]);
     const page = await context.newPage(); const errors=[]; page.on('pageerror', e => errors.push(e.message));
+    await page.goto(base);
+    const passwordInput = page.getByLabel('管理员密码', { exact: true });
+    await expect(passwordInput).toBeVisible();
+    await page.screenshot({ path: '/tmp/composeops-polish-login-'+viewport.width+'.png', animations: 'disabled' });
+    await passwordInput.fill(password);
+    await page.getByRole('button', { name: '显示密码', exact: true }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+    await page.getByRole('button', { name: '隐藏密码', exact: true }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+    await page.getByRole('button', { name: '安全登录', exact: true }).click();
+    await expect(passwordInput).toHaveCount(0);
     const heartbeatFrames = [];
     page.on('websocket', socket => {
       if (/\/ws\/(logs|aggregated-logs)/.test(socket.url())) socket.on('framereceived', event => {
@@ -125,6 +134,8 @@ try {
     await card.getByRole('button', { name: '应用配置 / 启动', exact: true }).click();
     await page.getByRole('dialog', { name: '应用配置', exact: true }).getByRole('button', { name: '应用配置', exact: true }).click();
     await expect(page.getByText('命令执行成功', { exact: true })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('已核对：当前容器全部运行', { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('region', { name: '执行后状态核对' })).toContainText('未配置健康检查');
     assert.equal(docker(['inspect', containerName, '--format', '{{.State.Status}}']), 'running');
     assert.equal(docker(['inspect', containerName, '--format', '{{index .Config.Labels "com.docker.compose.project"}}']), projectName, 'apply must keep the original project identity');
     const sameRoot = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project.working_dir=' + root]).split('\n').filter(Boolean);
@@ -141,7 +152,7 @@ try {
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: '/tmp/composeops-workspace-real-'+viewport.width+'.png' });
-    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: note persistence, logs'+(viewport.width === 1440 ? ', heartbeat, 360 offline lines recovered in both aggregate/single modes, deduplication, fresh Docker log after reconnect' : '')+', config review/save, navigation guard, apply, running state, terminal, cancel stop');
+    console.log('PASS real backend '+(workspaceMode ? 'workspace ' : 'direct ')+viewport.width+'px: login and password visibility, note persistence, logs'+(viewport.width === 1440 ? ', heartbeat, 360 offline lines recovered in both aggregate/single modes, deduplication, fresh Docker log after reconnect' : '')+', config review/save, navigation guard, apply, running state verification, terminal, cancel stop');
     await context.close();
   }
 } finally {

@@ -18,12 +18,12 @@
     </div>
     <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="4" label="总览数据加载中" />
     <template v-else>
+      <EnvironmentBrief :projects="store.projects" :incomplete="!!loadError" />
       <div class="metric-grid">
         <MetricTile title="项目总数" aria-label="查看全部项目" :value="projectCount" :sub="`健康 ${healthyProjects}`" :icon="Boxes" to="/services" />
         <MetricTile title="容器总数" aria-label="查看容器状态" :value="containerCount" :sub="`运行 ${runningContainers}`" :icon="Container" tone="text-status-ok" to="/services" />
         <MetricTile title="环境 CPU" aria-label="查看 CPU 实时监控" :value="cpu == null ? '—' : `${cpu}%`" :sub="cpuState" :icon="Cpu" :tone="cpuTone" :trend="monitorTrends.cpu" to="/monitor" />
         <MetricTile title="环境内存" aria-label="查看内存实时监控" :value="memory == null ? '—' : `${memory}%`" :sub="memoryState" :icon="MemoryStick" :tone="memoryTone" :trend="monitorTrends.mem" to="/monitor" />
-        <MetricTile title="巡检评分" :value="inspectionScore" :sub="inspectionSummary" :icon="ShieldCheck" :tone="inspectionTone" to="/inspection" />
       </div>
 
       <div class="overview-columns">
@@ -69,7 +69,7 @@
         <div class="overview-secondary">
           <router-link to="/inspection" class="section-panel overview-inspection" aria-label="查看巡检报告">
             <div class="overview-section-heading"><h2><ShieldCheck class="h-4 w-4 text-surface-400" />最近巡检</h2><ArrowUpRight class="h-4 w-4 text-surface-400" /></div>
-            <div class="overview-score"><strong :class="inspectionTone">{{ inspectionScore }}</strong><span>/ 100<small>巡检评分</small></span></div>
+            <div class="overview-score"><div class="overview-score-ring" :class="inspectionTone"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="score-track" cx="50" cy="50" r="44" /><circle class="score-fill" cx="50" cy="50" r="44" pathLength="100" :stroke-dasharray="`${Math.max(0, Math.min(100, Number(inspectionScore) || 0))} 100`" /></svg><strong>{{ inspectionScore }}</strong></div><span>/ 100<small>巡检评分</small></span></div>
             <p class="overview-inspection-summary">{{ inspectionSummary }}</p>
             <span class="overview-text-link">查看报告与建议<ArrowRight class="h-3.5 w-3.5" /></span>
           </router-link>
@@ -93,6 +93,7 @@ import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import MetricTile from '../components/common/MetricTile.vue';
+import EnvironmentBrief from '../components/dashboard/EnvironmentBrief.vue';
 import { monitorTrends, pushMonitorTrend } from '../lib/monitor-trends.js';
 
 import { projectAttention, projectLogTarget } from '../lib/project-health.js';
@@ -264,6 +265,8 @@ onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListe
 </script>
 
 <style scoped>
+.dashboard-view > .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { .dashboard-view > .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .overview-eyebrow { margin-bottom: 8px; color: var(--color-surface-500); font-size: 11px; letter-spacing: .08em; }
 .overview-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .overview-metric { display: flex; min-width: 0; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--line-subtle); border-radius: 12px; background: var(--panel-surface); transition: border-color 160ms, background-color 160ms; }
@@ -322,14 +325,20 @@ onBeforeUnmount(() => { disposed = true; requestId += 1; window.removeEventListe
 .overview-score > span { color: var(--color-surface-400); font-size: 12px; }
 .overview-score small { display: block; margin-top: 4px; font-size: 11px; }
 .overview-inspection-summary { margin-bottom: 10px; color: var(--color-surface-300); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
-.overview-shortcuts .overview-section-heading { margin-bottom: 10px; }
-.overview-shortcut { display: flex; gap: 12px; align-items: center; margin-inline: -8px; padding: 12px 8px; border-radius: 8px; transition: background-color 140ms; }
+.overview-shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.overview-shortcuts .overview-section-heading { grid-column: 1 / -1; margin-bottom: 10px; }
+.overview-shortcut { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin-inline: -6px; padding: 12px 6px; border-radius: 8px; transition: background-color 140ms; }
 .overview-shortcut:hover { background: var(--panel-raised); }
 .overview-shortcut-icon { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; color: var(--color-link); background: rgba(96, 165, 250, .07); border-radius: 8px; }
 .overview-shortcut > span:nth-child(2) { min-width: 0; }
 .overview-shortcut strong { display: block; color: var(--color-surface-200); font-weight: 500; font-size: 12px; }
 .overview-shortcut small { display: block; margin-top: 4px; font-size: 11px; color: var(--color-surface-500); }
-.overview-shortcut > svg { margin-left: auto; flex-shrink: 0; color: var(--color-surface-500); }
+.overview-shortcut > svg { display: none; }
+.overview-shortcut > span:nth-child(2) { flex-basis: 100%; }
+.overview-score-ring { position: relative; display: grid; place-items: center; width: 94px; height: 94px; }
+.overview-score-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.overview-score-ring circle { fill: none; stroke-width: 4; }.score-track { stroke: var(--line-subtle); }.score-fill { stroke: currentColor; stroke-linecap: round; }
+.overview-score-ring strong { font-size: 30px; }
 @media (min-width: 1800px) { .overview-columns { grid-template-columns: minmax(0, 1fr) 360px; } }
 @media (max-width: 1199px) {
   .overview-columns { grid-template-columns: minmax(0, 1fr); }

@@ -48,10 +48,11 @@
           <span class="login-lock-icon grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-surface-700/70 bg-surface-950/70 text-surface-300"><ShieldCheck class="h-5 w-5" /></span>
         </div>
         <form class="space-y-5" @submit.prevent="submit">
-          <label class="block">
-            <span class="mb-1.5 block text-xs font-medium text-surface-300">管理员密码</span>
-            <input v-model="password" class="input w-full" type="password" :autocomplete="auth.setupRequired ? 'new-password' : 'current-password'" :aria-invalid="!!error" :aria-describedby="error ? 'login-error' : undefined" required minlength="10" autofocus placeholder="至少 10 个字符" />
-          </label>
+          <div>
+            <label for="admin-password" class="mb-1.5 block text-xs font-medium text-surface-300">管理员密码</label>
+            <div class="password-field"><input id="admin-password" v-model="password" class="input w-full" :type="showPassword ? 'text' : 'password'" :autocomplete="auth.setupRequired ? 'new-password' : 'current-password'" :aria-invalid="!!error" :aria-describedby="error ? 'login-error' : capsLock ? 'caps-lock-hint' : undefined" required minlength="10" autofocus :placeholder="auth.setupRequired ? '至少 10 个字符' : '输入管理员密码'" @keydown="updateCapsLock" @keyup="updateCapsLock" @blur="capsLock = false" /><button type="button" class="password-visibility" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :aria-pressed="showPassword" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" /><Eye v-else :size="17" /></button></div>
+            <p v-if="capsLock" id="caps-lock-hint" class="mt-2 flex items-center gap-1.5 text-xs text-status-warn" role="status"><ArrowUp :size="13" />大写锁定已开启</p>
+          </div>
           <label v-if="auth.setupRequired" class="block">
             <span class="mb-1.5 block text-xs font-medium text-surface-300">确认密码</span>
             <input v-model="confirm" class="input w-full" type="password" autocomplete="new-password" required minlength="10" aria-label="再次输入管理员密码" placeholder="再次输入管理员密码" />
@@ -77,7 +78,7 @@
 
 <script setup>
 import { ref } from 'vue';
-import { Boxes, LogIn, ShieldCheck, Activity, FileCode2, ScrollText } from 'lucide-vue-next';
+import { ArrowUp, Boxes, Eye, EyeOff, LogIn, ShieldCheck, Activity, FileCode2, ScrollText } from 'lucide-vue-next';
 import { useAuthStore } from '../stores/auth.js';
 
 const auth = useAuthStore();
@@ -91,6 +92,9 @@ const confirm = ref('');
 const setupToken = ref('');
 const loading = ref(false);
 const error = ref('');
+const showPassword = ref(false);
+const capsLock = ref(false);
+function updateCapsLock(event) { capsLock.value = event.getModifierState?.('CapsLock') || false; }
 
 async function submit() {
   error.value = '';
@@ -149,11 +153,12 @@ async function submit() {
 }
 
 .login-brand-mark-small { width: 36px; height: 36px; border-radius: 10px; }
-.login-headline-accent { color: #93c5fd; }
+.login-headline-accent { display: block; color: #93c5fd; }
 .login-feature { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025); }
 .login-card { box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035); }
 .login-lock-icon { color: #93c5fd; }
 .login-loading-mark { width: 15px; height: 15px; }
+.password-field { position: relative; }.password-field input { padding-right: 48px; min-height: 46px; }.password-visibility { position: absolute; right: 3px; top: 3px; bottom: 3px; width: 40px; display: grid; place-items: center; border-radius: 7px; color: var(--color-surface-400); }.password-visibility:hover { color: var(--color-surface-100); background: var(--panel-raised); }
 
 @media (prefers-reduced-motion: reduce) {
   .login-page *, .login-page *::before, .login-page *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

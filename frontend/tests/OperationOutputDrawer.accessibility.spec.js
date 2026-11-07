@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils';
 import OperationOutputDrawer from '../src/components/services/OperationOutputDrawer.vue';
 
 vi.mock('../src/composables/useEscapeKey.js', () => ({ useEscapeKey: vi.fn() }));
+vi.mock('../src/api/client.js', () => ({ api: { getProjects: vi.fn().mockResolvedValue({ projects: [] }) } }));
 let wrapper;
 afterEach(() => {
   wrapper?.unmount();
@@ -11,6 +12,16 @@ afterEach(() => {
 });
 
 describe('操作输出抽屉可访问性', () => {
+  it('切到其他节点后禁用项目操作，明确解释状态不可复用', () => {
+    wrapper = mount(OperationOutputDrawer, { props: { projectId: 'p', action: 'restart', exitCode: 1, contextValid: false } });
+    expect(wrapper.text()).toContain('当前节点已切换');
+    expect(wrapper.text()).toContain('请切回操作所属节点');
+    const diagnose = wrapper.findAll('button').find(button => button.text() === '一键 AI 诊断');
+    const inspect = wrapper.findAll('button').find(button => button.text() === '查看项目状态');
+    expect(diagnose.attributes('disabled')).toBeDefined();
+    expect(inspect.attributes('disabled')).toBeDefined();
+    expect(wrapper.findAll('button').some(button => button.text() === '查看日志')).toBe(false);
+  });
   it('未收到退出码时不把断流误报为成功', () => {
     wrapper = mount(OperationOutputDrawer, { props: { projectId: 'p', text: 'Starting service...', running: false, exitCode: null } });
     expect(wrapper.get('[data-state="unknown"]').text()).toContain('尚未确认执行结果');

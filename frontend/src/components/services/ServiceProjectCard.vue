@@ -4,6 +4,7 @@
       <input type="checkbox" class="accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @change="$emit('toggle-select')" />
       <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" :aria-pressed="!!project.favorite" :disabled="favoriteSaving" @click="toggleFavorite(project)"><Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-status-warn' : ''" /></button>
       <button class="service-project-card__toggle" :aria-expanded="expanded" :aria-controls="`project-detail-${project.id}`" @click="$emit('toggle-expand')">
+        <span class="project-avatar" aria-hidden="true"><Boxes :size="19" /></span>
         <span class="project-identity"><strong>{{ project.projectName }}</strong><span>{{ project.note || project.owner || 'Compose 项目' }}</span></span>
         <span class="project-health-summary"><StatusBadge :status="project.status" :health="attention && project.status === 'running' ? 'unhealthy' : ''" /><span class="project-container-count">{{ runningCount }}/{{ project.containers.length }} 容器运行</span></span>
         <span class="project-mode">{{ project.managed ? (project.editable ? 'Compose' : '容器模式') : '未纳管' }}</span>
@@ -74,7 +75,7 @@
 
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
-import { AlertTriangle, Bot, Box, ChevronDown, Database, Download, FileCode2, FolderCog, FolderOpen, GitBranch, History, KeyRound, ListTree, LoaderCircle, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
+import { AlertTriangle, Bot, Box, Boxes, ChevronDown, Database, Download, FileCode2, FolderCog, FolderOpen, GitBranch, History, KeyRound, ListTree, LoaderCircle, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
 import ImageUpdatePanel from './ImageUpdatePanel.vue';
 import StatusBadge from '../common/StatusBadge.vue';
 import SparklineChart from '../common/SparklineChart.vue';
@@ -285,7 +286,11 @@ function containerStateHint(container) {
 </script>
 
 <style scoped>
-.service-project-card { border-radius: 11px; }
+.service-project-card { border-radius: 13px; }
+.service-project-card.is-expanded { border-color: color-mix(in srgb, var(--color-link) 26%, var(--line-subtle)); }
+.project-avatar { display: grid; place-items: center; width: 38px; height: 40px; flex-shrink: 0; color: var(--color-link); border: 1px solid rgba(147,186,255,.14); border-radius: 10px; background: linear-gradient(140deg, rgba(147,186,255,.1), rgba(147,186,255,.025)); }
+.project-quick-actions { background: rgba(0,0,0,.08); padding-inline: 18px; }
+.project-quick-actions a { transition: color 140ms, background-color 140ms; }
 .service-project-card__header { display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 78px; }
 .service-project-card__toggle { display: flex; flex: 1; align-self: stretch; align-items: center; min-width: 0; gap: 18px; padding: 8px 6px; text-align: left; background: transparent !important; }
 .project-identity { min-width: 0; flex: 1; }
@@ -318,6 +323,7 @@ a.container-action:hover { background: var(--panel-raised); color: var(--color-s
 @media (max-width: 639px) {
   .service-project-card__header { min-height: 76px; padding-inline: 8px; gap: 2px; }
   .service-project-card__toggle { gap: 8px; }
+  .project-avatar { display: none; }
   .project-identity strong { font-size: 13px; }
   .project-health-summary { flex-direction: column; align-items: flex-end; }
   .project-mode { display: none; }

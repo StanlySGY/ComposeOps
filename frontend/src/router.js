@@ -1,4 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
+import { useHostsStore } from './stores/hosts.js';
+import { useToastStore } from './stores/toast.js';
 
 const routes = [
   { path: '/', redirect: '/dashboard' },
@@ -59,8 +61,6 @@ export function preloadRouteChunks() {
 // Container alert links may target another node. Switch before loading the destination.
 router.beforeEach(async (to) => {
   if (!to.query.hostId || !['/logs', '/services', '/shell', '/agent', '/resources'].includes(to.path)) return;
-  const { useHostsStore } = await import('./stores/hosts.js');
-  const { useToastStore } = await import('./stores/toast.js');
   const store = useHostsStore();
   await store.load(true);
   const id = String(to.query.hostId);

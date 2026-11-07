@@ -10,6 +10,10 @@
       </div>
     </div>
     <p v-if="store.error" class="alert-error" role="alert">{{ store.error }}</p>
+    <button v-if="output.action && !output.open" class="operation-receipt" :data-state="output.running ? 'running' : output.failureReason || (output.exitCode != null && output.exitCode !== 0) ? 'failed' : 'done'" @click="output.open = true">
+      <RefreshCw v-if="output.running" class="h-4 w-4 animate-spin" /><History v-else class="h-4 w-4" />
+      <span><strong>{{ actionLabel(output.action) }} · {{ output.name }}</strong><small>{{ output.running ? '操作进行中，可重新打开查看输出' : '上次操作记录 · 查看结果与状态核对' }}</small></span><span class="receipt-open">查看输出<ChevronRight :size="14" /></span>
+    </button>
     <div v-if="store.projects.length" class="service-overview-strip">
       <span class="service-live-count"><span class="status-dot bg-status-ok"></span>{{ runningContainerCount }} / {{ containerCount }} 容器运行中</span>
       <button :aria-expanded="!metricsCollapsed" @click="toggleMetricsCollapsed"><Gauge :size="14" />项目指标<ChevronDown :size="13" :class="{ 'rotate-180': !metricsCollapsed }" /></button>
@@ -77,7 +81,7 @@
         @toggle-expand="toggleExpanded(project.id)" @toggle-select="toggleSelection(project.id)" @refresh="refresh" @note-saved="project.note = $event" @activity="activityProject = project" @env="envProject = project" @upgrade="upgradeProject = project" @db-dump="dbDumpProject = project" @action="(action) => run(project, action)"
       />
     </div>
-    <OperationOutputDrawer v-if="output.open" :label="actionLabel(output.action)" :name="output.name" :text="output.text" :project-id="output.projectId" :exit-code="output.exitCode" :failure-reason="output.failureReason" :running="output.running" :batch-tasks="batchTasks" :batch-progress="batchProgress" :completed-count="completedBatchTasks" @close="output.open = false" @diagnose="openDiagnosisForOutput" @inspect="inspectOutputProject" />
+    <OperationOutputDrawer v-if="output.open" :label="actionLabel(output.action)" :action="output.action" :context-valid="output.hostId === hosts.activeHostId" :name="output.name" :text="output.text" :project-id="output.projectId" :exit-code="output.exitCode" :failure-reason="output.failureReason" :running="output.running" :batch-tasks="batchTasks" :batch-progress="batchProgress" :completed-count="completedBatchTasks" @close="output.open = false" @diagnose="openDiagnosisForOutput" @inspect="inspectOutputProject" @logs="openOutputTool('logs')" @review="openOutputTool('compose')" />
     <ProjectEnvModal v-if="envProject" :project="envProject" @close="closeEnv" @refresh="refresh" @apply="handleEnvApply" />
     <AIDiagnosisModal v-if="diagnosis" :open="!!diagnosis" :project-id="diagnosis.projectId" :project-name="diagnosis.projectName" :container-id="diagnosis.containerId" :raw-logs="diagnosis.rawLogs" :env-keys="diagnosis.envKeys" :failed-command="diagnosis.failedCommand" :exit-code="diagnosis.exitCode" :env-editable="diagnosis.envEditable" @close="diagnosis = null" />
     <ProjectActivityDrawer v-if="activityProject" :project="activityProject" @close="activityProject = null" @restored="handleRestored" />
@@ -111,8 +115,12 @@ import Skeleton from '../components/common/Skeleton.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import { applyOperationFrame, operationSucceeded } from '../lib/operation-feedback.js';
 import { useServiceFilters } from '../composables/useServiceFilters.js';
+import { useHostsStore } from '../stores/hosts.js';
+import { projectToolLocation } from '../lib/project-navigation.js';
+import { ChevronRight, History } from 'lucide-vue-next';
 
 const store = useServicesStore();
+const hosts = useHostsStore();
 const route = useRoute();
 const router = useRouter();
 const { openAgent, updateAgentContext } = useAgentConsole();
@@ -193,7 +201,8 @@ function askAgentReviewInspection() {
 }
 let jobPollTimer; let activeJobId = ''; let jobPollInFlight = false;
 let controlController = null;
-const output = reactive({ open: false, text: '', action: '', name: '', projectId: '', exitCode: null, failureReason: '', resultConfirmed: false, running: false });
+const output = reactive({ open: false, text: '', action: '', name: '', projectId: '', hostId: '', exitCode: null, failureReason: '', resultConfirmed: false, running: false });
+watch(() => output.running, (running) => { if (running) output.hostId = hosts.activeHostId; }, { flush: 'sync' });
 const batchConfirmation = reactive({ show: false, action: '', projects: [] });
 const batchConfirmationMessage = computed(() => {
   const names = batchConfirmation.projects.map(project => project.projectName).join('、');
@@ -282,6 +291,7 @@ async function run(project, action) {
 async function handleEnvApply({ project }) {
   if (busy.value) return;
   envProject.value = null;
+  batchTasks.value = [];
   output.open = true; output.text = ''; output.action = 'env.apply'; output.name = project.projectName; output.projectId = project.id; output.exitCode = null; output.failureReason = ''; output.resultConfirmed = false; output.running = true;
   busy.value = true;
   controlController?.abort();
@@ -300,6 +310,7 @@ async function handleEnvApply({ project }) {
 async function handleUpgrade({ project, services }) {
   if (busy.value) return;
   upgradeProject.value = null;
+  batchTasks.value = [];
   output.open = true; output.text = ''; output.action = 'images.upgrade'; output.name = project.projectName; output.projectId = project.id; output.exitCode = null; output.failureReason = ''; output.resultConfirmed = false; output.running = true;
   busy.value = true;
   controlController?.abort();
@@ -316,6 +327,7 @@ async function handleUpgrade({ project, services }) {
   } finally { controlController = null; busy.value = false; output.running = false; }
 }
 function openDiagnosisForOutput() {
+  if (output.hostId !== hosts.activeHostId) return;
   const project = store.projects.find((p) => p.id === output.projectId);
   if (!project) return;
   diagnosis.value = {
@@ -330,6 +342,7 @@ function openDiagnosisForOutput() {
   };
 }
 function inspectOutputProject() {
+  if (output.hostId !== hosts.activeHostId) return;
   const projectId = String(output.projectId || '');
   if (!projectId) return;
   output.open = false;
@@ -337,6 +350,14 @@ function inspectOutputProject() {
   const query = { ...route.query, focus: projectId };
   delete query.job;
   router.replace({ path: '/services', query });
+}
+function openOutputTool(name) {
+  if (output.hostId !== hosts.activeHostId) return;
+  const project = store.projects.find(item => item.id === output.projectId);
+  if (!project || (name === 'compose' && !project.editable)) return;
+  const container = project.containers.find(item => item.state !== 'running' || item.health === 'unhealthy');
+  output.open = false;
+  router.push(projectToolLocation(name, project, container?.id, { from: 'services', returnTo: route.fullPath }));
 }
 async function runBatch(action) {
   const projects = selectedProjects.value;
@@ -522,6 +543,7 @@ function handleRestored() {
   useToastStore().success('配置版本已成功回滚并生效');
 }
 function pausePage() {
+  output.open = false;
   activeJobId = '';
   clearTimeout(jobPollTimer);
   controlController?.abort();
@@ -545,6 +567,10 @@ onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); }
 </script>
 
 <style scoped>
+.operation-receipt { display: flex; gap: 12px; align-items: center; text-align: left; padding: 13px 16px; border: 1px solid var(--line-subtle); border-radius: 10px; background: var(--panel-surface); transition: border-color 150ms, background-color 150ms; }
+.operation-receipt:hover { border-color: var(--line-hover); background: var(--panel-raised); }.operation-receipt > svg { flex-shrink: 0; color: var(--color-link); }.operation-receipt strong { display: block; font-size: 12px; font-weight: 500; }.operation-receipt small { display: block; margin-top: 4px; font-size: 11px; color: var(--color-surface-400); }.receipt-open { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-link); white-space: nowrap; }
+.operation-receipt[data-state="failed"] { border-color: rgba(253,164,175,.25); }
+@media (prefers-reduced-motion: reduce) { .operation-receipt { transition: none; } }
 .service-overview-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; color: var(--color-surface-400); font-size: 12px; }
 .service-live-count { display: inline-flex; align-items: center; gap: 7px; }
 .service-overview-strip button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; border-radius: 6px; padding: 4px 7px; }
