@@ -27,27 +27,31 @@ export async function prepareProjectAction(project, action) {
       mode: 'compose',
       // options.timeoutMs:后台任务(compose background=true)需要放宽超时,前台保持 5 分钟默认。
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
-        return withProjectOperationLock(project.id, () => new Promise((resolve, reject) => {
-          const child = spawnCompose({ ...project, composeFiles: safeFiles }, action);
-          let hostChanged = false;
-          const unsubscribe = onActiveHostChange(() => {
-            try { assertProjectHostUnchanged(project); } catch { hostChanged = true; child.kill('SIGKILL'); }
+        return withProjectOperationLock(project.id, async () => {
+          await options.beforeRun?.();
+          assertProjectHostUnchanged(project);
+          return new Promise((resolve, reject) => {
+            const child = spawnCompose({ ...project, composeFiles: safeFiles }, action);
+            let hostChanged = false;
+            const unsubscribe = onActiveHostChange(() => {
+              try { assertProjectHostUnchanged(project); } catch { hostChanged = true; child.kill('SIGKILL'); }
+            });
+            onChild(child);
+            child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
+            child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
+            const timer = setTimeout(() => {
+              child.kill('SIGTERM');
+              setTimeout(() => child.kill('SIGKILL'), 5000).unref?.();
+            }, options.timeoutMs || 300000);
+            child.on('error', (error) => { unsubscribe(); clearTimeout(timer); reject(error); });
+            child.on('close', (code, signal) => {
+              unsubscribe();
+              clearTimeout(timer);
+              if (hostChanged) return reject(Object.assign(new Error('宿主已变更，操作已中止'), { statusCode: 409 }));
+              resolve(signal ? 124 : code ?? 1);
+            });
           });
-          onChild(child);
-          child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
-          child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
-          const timer = setTimeout(() => {
-            child.kill('SIGTERM');
-            setTimeout(() => child.kill('SIGKILL'), 5000).unref?.();
-          }, options.timeoutMs || 300000);
-          child.on('error', (error) => { unsubscribe(); clearTimeout(timer); reject(error); });
-          child.on('close', (code, signal) => {
-            unsubscribe();
-            clearTimeout(timer);
-            if (hostChanged) return reject(Object.assign(new Error('宿主已变更，操作已中止'), { statusCode: 409 }));
-            resolve(signal ? 124 : code ?? 1);
-          });
-        })).finally(invalidateScanCache);
+        }).finally(invalidateScanCache);
       },
     };
   }
@@ -58,6 +62,7 @@ export async function prepareProjectAction(project, action) {
       mode: 'workspace',
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
         return withProjectOperationLock(project.id, async () => {
+          await options.beforeRun?.();
           assertProjectHostUnchanged(project);
           let handle;
           let changed = false;

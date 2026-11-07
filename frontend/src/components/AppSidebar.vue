@@ -1,6 +1,6 @@
 <template>
   <aside class="app-sidebar fixed md:static bottom-0 left-0 right-0 z-40 h-16 md:h-auto md:pt-16 md:w-[216px] shrink-0 flex flex-col">
-    <nav class="hidden md:flex md:flex-col flex-1 md:px-3 md:py-4 overflow-y-auto">
+    <nav class="hidden md:flex md:flex-col flex-1 md:px-3 md:py-4 overflow-y-auto" aria-label="桌面主导航">
       <div class="hidden md:block px-2 pb-1 pt-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-400">运行</div>
       <router-link
         v-for="item in primaryItems"
@@ -34,7 +34,7 @@
         <component :is="item.icon" class="h-[18px] w-[18px] shrink-0" />
         <span class="max-w-full truncate">{{ item.label }}</span>
       </router-link>
-      <button ref="moreTriggerRef" class="nav-link flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] text-surface-400" :class="{ 'nav-link-active': moreOpen }" aria-label="更多功能" :aria-expanded="moreOpen" :aria-controls="moreOpen ? 'mobile-more-dialog' : undefined" @click="moreOpen = true">
+      <button ref="moreTriggerRef" class="nav-link flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] text-surface-400" :class="{ 'nav-link-active': moreOpen || moreActive }" aria-label="更多功能" :aria-expanded="moreOpen" :aria-controls="moreOpen ? 'mobile-more-dialog' : undefined" @click="moreOpen = true">
         <Menu class="h-[18px] w-[18px]" />
         <span>更多</span>
       </button>
@@ -49,10 +49,12 @@
       <section ref="moreDialogRef" id="mobile-more-dialog" class="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-2xl border-t border-surface-700 bg-surface-950 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="mobile-more-dialog-title" tabindex="-1" @keydown="trapMoreDialogTab">
         <button class="btn-secondary mb-3 w-full" @click="moreOpen = false; openGuide()"><CircleHelp class="h-4 w-4" />入门指南</button>
         <div class="mb-3 flex items-center justify-between"><div><h2 id="mobile-more-dialog-title" class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" aria-label="关闭更多功能" @click="moreOpen = false">×</button></div>
-        <div v-for="group in mobileGroups" :key="group.label" class="mb-4 last:mb-0">
+        <label class="search-field mb-4"><Search class="h-4 w-4 shrink-0" /><input v-model="navigationQuery" type="search" aria-label="查找功能" placeholder="查找配置、终端、备份…" /></label>
+        <p v-if="!filteredMobileGroups.length" class="py-8 text-center text-sm text-surface-400" role="status">没有匹配的功能，试试其他关键词</p>
+        <div v-for="group in filteredMobileGroups" :key="group.label" class="mb-4 last:mb-0">
           <h3 class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-400">{{ group.label }}</h3>
           <div class="grid grid-cols-2 gap-2">
-            <router-link v-for="item in group.items" :key="item.to" :to="item.to" class="flex min-h-14 items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-2.5 text-sm text-surface-300 transition hover:border-surface-600 hover:bg-surface-800" @click="moreOpen = false">
+            <router-link v-for="item in group.items" :key="item.to" :to="item.to" class="flex min-h-14 items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-2.5 text-sm text-surface-300 transition hover:border-surface-600 hover:bg-surface-800" active-class="mobile-destination-active" @click="moreOpen = false">
               <component :is="item.icon" class="h-4 w-4 shrink-0 text-status-info" /><span>{{ item.label }}</span>
             </router-link>
           </div>
@@ -63,10 +65,10 @@
 </template>
 
 <script setup>
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { ChevronDown, CircleHelp, Boxes, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
+import { ChevronDown, CircleHelp, Boxes, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, ServerCog, Database, BellRing, History, Search } from 'lucide-vue-next';
 const primaryItems = [
   { to: '/dashboard', icon: Activity, label: '总览' },
   { to: '/services', icon: Boxes, label: '服务' },
@@ -129,7 +131,14 @@ watch(() => route.path, (value) => {
 }, { immediate: true });
 const moreOpen = ref(false);
 const mobileItems = [primaryItems[0], primaryItems[1], primaryItems[3], primaryItems[4]];
-const mobileGroups = navGroups;
+const mobileGroups = [{ label: '运行', items: primaryItems.filter(item => !mobileItems.includes(item)) }, ...navGroups];
+const moreActive = computed(() => !mobileItems.some(item => item.to === route.path));
+const navigationQuery = ref('');
+const searchAliases = { '/compose': 'compose yaml 编辑', '/resources': '备份 数据卷 镜像 磁盘', '/shell': 'shell 命令', '/agent/history': '执行 记录', '/settings': 'ai 模型 密钥 节点' };
+const filteredMobileGroups = computed(() => {
+  const query = navigationQuery.value.trim().toLocaleLowerCase();
+  return mobileGroups.map(group => ({ ...group, items: group.items.filter(item => `${group.label} ${item.label} ${item.to} ${searchAliases[item.to] || ''}`.toLocaleLowerCase().includes(query)) })).filter(group => group.items.length);
+});
 const moreTriggerRef = ref(null);
 const moreDialogRef = ref(null);
 let previousMoreFocus = null;
@@ -143,6 +152,7 @@ function getMoreFocusableElements() {
 
 watch(moreOpen, async (isOpen) => {
   if (isOpen) {
+    navigationQuery.value = '';
     previousMoreFocus = document.activeElement || moreTriggerRef.value;
     await nextTick();
     if (!moreOpen.value || !moreDialogRef.value) return;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, bumpHostEpoch, invalidateSwr } from '../src/api/client.js';
+import { api, bumpHostEpoch, invalidateSwr, streamComposeControl } from '../src/api/client.js';
 
 const response = (name) => new Response(JSON.stringify({ projects: [{ id: name }] }), { headers: { 'content-type': 'application/json' } });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -55,6 +55,23 @@ describe('API 缓存刷新', () => {
     fetchMock.mockResolvedValueOnce(response('fresh'));
     expect((await api.getProjects()).projects[0].id).toBe('fresh');
   });
+  it.each(['complete', 'interrupted'])('Compose %s 后不复用执行期间的旧容器缓存', async (outcome) => {
+    let controller;
+    const body = new ReadableStream({ start(value) { controller = value; } });
+    fetchMock.mockResolvedValueOnce(new Response(body));
+    const operation = streamComposeControl('project', 'up', () => {});
+    const result = operation.catch(error => error);
+    await Promise.resolve();
+    // A background refresh runs while Compose is replacing its container.
+    fetchMock.mockResolvedValueOnce(response('old-container'));
+    await api.getProjects();
+    if (outcome === 'complete') controller.close();
+    else controller.error(new Error('connection lost'));
+    await result;
+    fetchMock.mockResolvedValueOnce(response('replacement-container'));
+    expect((await api.getProjects()).projects[0].id).toBe('replacement-container');
+  });
+
   it('切节点后新请求不会复用旧节点的在途数据', async () => {
     const slow = deferred();
     fetchMock.mockReturnValueOnce(slow.promise);

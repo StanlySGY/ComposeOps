@@ -80,11 +80,11 @@
     </section>
 
     <!-- 新建/编辑弹窗 -->
-    <BaseModal :show="showEditor" :title="editingId ? '编辑工作流' : '新建工作流'" size-class="sm:max-w-2xl" body-class="space-y-3 p-5 pt-0" @close="showEditor = false">
-      <div class="space-y-3">
+    <BaseModal :show="showEditor" :title="editingId ? '编辑工作流' : '新建工作流'" :close-disabled="saving" size-class="sm:max-w-2xl flex max-h-[90dvh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto space-y-3 p-5 pt-0" @close="showEditor = false">
+      <fieldset ref="editorBodyRef" :disabled="saving" :aria-busy="saving" class="min-w-0 space-y-3">
           <div>
             <label class="form-label" for="workflow-name">名称</label>
-            <input id="workflow-name" v-model="form.name" class="input" placeholder="如:故障自动处理" />
+            <input id="workflow-name" v-model="form.name" v-bind="fieldErrorProps('workflow-name')" class="input" placeholder="如:故障自动处理" />
           </div>
           <div>
             <label class="form-label" for="workflow-description">描述</label>
@@ -99,14 +99,14 @@
             </select>
           </div>
           <div v-if="form.triggerType === 'event'" class="grid gap-2 rounded-lg border border-surface-800 bg-surface-950/40 p-3 sm:grid-cols-2">
-            <label class="form-grid-label sm:col-span-2"><span>事件类型(必填，逗号分隔)</span><input v-model="form.triggerConfig.eventTypes" class="input" placeholder="container, alert, gitops" /></label>
+            <label class="form-grid-label sm:col-span-2"><span>事件类型(必填，逗号分隔)</span><input id="workflow-event-types" v-model="form.triggerConfig.eventTypes" v-bind="fieldErrorProps('workflow-event-types')" class="input" placeholder="container, alert, gitops" /></label>
             <label class="form-grid-label"><span>来源(可选)</span><input v-model="form.triggerConfig.sources" class="input" placeholder="docker, alert" /></label>
             <label class="form-grid-label"><span>动作(可选)</span><input v-model="form.triggerConfig.actions" class="input" placeholder="die, health_status: unhealthy" /></label>
             <label class="form-grid-label sm:col-span-2"><span>项目 ID(可选，限制到一个纳管项目)</span><input v-model="form.triggerConfig.projectId" class="input" aria-label="不填则匹配所选事件类型的所有纳管项目" placeholder="不填则匹配所选事件类型的所有纳管项目" /></label>
             <p class="sm:col-span-2 text-xs text-surface-400">事件必须显式选择类型。工作流自身事件不会再次触发工作流；Docker、告警和统一事件中心事件均经过去重。</p>
           </div>
           <div v-else-if="form.triggerType === 'cron'" class="grid gap-2 rounded-lg border border-surface-800 bg-surface-950/40 p-3 sm:grid-cols-2">
-            <label class="form-grid-label"><span>Cron 表达式(必填)</span><input v-model="form.triggerConfig.cron" class="input font-mono" placeholder="*/5 * * * *" /></label>
+            <label class="form-grid-label"><span>Cron 表达式(必填)</span><input id="workflow-cron" v-model="form.triggerConfig.cron" v-bind="fieldErrorProps('workflow-cron')" class="input font-mono" placeholder="*/5 * * * *" /></label>
             <label class="form-grid-label"><span>项目 ID(可选)</span><select v-model="form.triggerConfig.projectId" class="input"><option value="">使用工作流运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
             <p class="sm:col-span-2 text-xs text-surface-400">按服务端本地时区解析；同一分钟最多触发一次，重复 tick 和重启由 SQLite 幂等键去重。</p>
           </div>
@@ -114,9 +114,9 @@
             <label class="form-label">节点编排</label>
             <div class="space-y-2">
               <div v-for="(node, i) in form.nodes" :key="i" class="rounded-lg border border-surface-800 bg-surface-900/60 p-3">
-                <div class="flex items-center gap-2">
+                <div class="grid grid-cols-[auto_minmax(0,1fr)_5.5rem_1.75rem] items-center gap-2">
                   <span class="count-badge shrink-0 text-surface-400">{{ nodeLabel(node.type) }}</span>
-                  <input v-model="node.id" class="input input-sm" :aria-label="`第 ${i + 1} 个节点 ID`" placeholder="节点 ID" />
+                  <input :id="`workflow-node-${i}-id`" v-model="node.id" v-bind="fieldErrorProps(`workflow-node-${i}-id`)" class="input input-sm" :aria-label="`第 ${i + 1} 个节点 ID`" placeholder="节点 ID" />
                   <select v-model="node.type" class="input input-sm" :aria-label="`第 ${i + 1} 个节点类型`" @change="normalizeNode(node)">
                     <option value="trigger">触发</option>
                     <option value="condition">条件</option>
@@ -125,22 +125,22 @@
                     <option value="action">执行</option>
                     <option value="verify">验证</option>
                   </select>
-                  <button class="icon-btn shrink-0" title="删除节点" :aria-label="`删除节点 ${i + 1}`" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
+                  <button class="icon-btn h-7! w-7!" title="删除节点" :aria-label="`删除节点 ${i + 1}`" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
                 </div>
                 <div class="mt-2 grid gap-2 sm:grid-cols-3">
                   <label class="form-grid-label sm:col-span-3"><span>下一节点(可选)</span><input v-model="node.next" class="input input-sm" list="workflow-node-ids" aria-label="留空按列表顺序执行" placeholder="留空按列表顺序执行" /></label>
                   <template v-if="node.type === 'condition'">
-                    <label class="form-grid-label sm:col-span-3"><span>条件表达式</span><input v-model="node.config.expression" class="input input-sm" aria-label="如: context.verified == true" placeholder="如: context.verified == true" /></label>
-                    <label class="form-grid-label"><span>满足时跳转</span><input v-model="node.onTrue" class="input input-sm" list="workflow-node-ids" aria-label="节点 ID" placeholder="节点 ID" /></label>
-                    <label class="form-grid-label"><span>不满足时跳转</span><input v-model="node.onFalse" class="input input-sm" list="workflow-node-ids" aria-label="节点 ID" placeholder="节点 ID" /></label>
+                    <label class="form-grid-label sm:col-span-3"><span>条件表达式</span><input :id="`workflow-node-${i}-expression`" v-model="node.config.expression" v-bind="fieldErrorProps(`workflow-node-${i}-expression`)" class="input input-sm" placeholder="如: context.verified == true" /></label>
+                    <label class="form-grid-label"><span>满足时跳转</span><input v-model="node.onTrue" class="input input-sm" list="workflow-node-ids" placeholder="节点 ID" /></label>
+                    <label class="form-grid-label"><span>不满足时跳转</span><input v-model="node.onFalse" class="input input-sm" list="workflow-node-ids" placeholder="节点 ID" /></label>
                   </template>
                   <template v-else-if="node.type === 'agent'">
                     <label class="form-grid-label sm:col-span-3"><span>分析提示词</span><textarea v-model="node.config.prompt" class="input input-sm" rows="2" aria-label="请分析当前运维上下文并给出建议" placeholder="请分析当前运维上下文并给出建议" /></label>
                     <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input input-sm"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
                   </template>
                   <template v-else-if="node.type === 'action'">
-                    <label class="form-grid-label"><span>操作</span><select v-model="node.config.action" class="input input-sm"><option value="">选择操作</option><option value="up">启动</option><option value="stop">停止</option><option value="restart">重启</option><option value="pull">拉取镜像</option></select></label>
-                    <label class="form-grid-label sm:col-span-2"><span>项目</span><select v-model="node.config.projectId" class="input input-sm"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                    <label class="form-grid-label"><span>操作</span><select :id="`workflow-node-${i}-action`" v-model="node.config.action" v-bind="fieldErrorProps(`workflow-node-${i}-action`)" class="input input-sm"><option value="">选择操作</option><option value="up">启动</option><option value="stop">停止</option><option value="restart">重启</option><option value="pull">拉取镜像</option></select></label>
+                    <label class="form-grid-label sm:col-span-2"><span>项目</span><select :id="`workflow-node-${i}-project`" v-model="node.config.projectId" v-bind="fieldErrorProps(`workflow-node-${i}-project`)" class="input input-sm"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
                   </template>
                   <template v-else-if="node.type === 'verify'">
                     <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input input-sm"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
@@ -151,10 +151,15 @@
             <datalist id="workflow-node-ids"><option v-for="node in form.nodes" :key="node.id" :value="node.id" /></datalist>
             <button class="btn-secondary mt-2 btn-sm" @click="addNode"><Plus class="w-3.5 h-3.5" />添加节点</button>
           </div>
-        </div>
+        </fieldset>
         <template #footer>
-          <button class="btn-secondary" @click="showEditor = false">取消</button>
-          <button class="btn-primary" @click="save">保存</button>
+          <div class="w-full space-y-2">
+            <p v-if="editorError" id="workflow-editor-error" ref="editorErrorRef" role="alert" tabindex="-1" class="rounded-lg border border-status-error/20 bg-status-error/10 px-3 py-2 text-xs text-status-error">{{ editorError }}</p>
+            <div class="flex justify-end gap-2">
+              <button class="btn-secondary" :disabled="saving" @click="showEditor = false">取消</button>
+              <button class="btn-primary" :disabled="saving" @click="save"><LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" />{{ saving ? '保存中…' : '保存' }}</button>
+            </div>
+          </div>
         </template>
     </BaseModal>
     <ConfirmDialog :show="!!deleteTarget" title="删除工作流" :message="`确认删除工作流「${deleteTarget?.name}」?该操作不可恢复。`" tone="danger" confirm-text="删除" @confirm="confirmRemove" @cancel="deleteTarget = null" />
@@ -163,10 +168,10 @@
 
 <script setup>
 import EmptyState from '../components/common/EmptyState.vue';
-import { onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { storeToRefs } from 'pinia';
-import { Pencil, Play, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next';
+import { LoaderCircle, Pencil, Play, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next';
 import { useWorkflowStore } from '../stores/workflow.js';
 import { useToastStore } from '../stores/toast.js';
 import { api } from '../api/client.js';
@@ -177,6 +182,11 @@ const store = useWorkflowStore();
 const toast = useToastStore();
 const showEditor = ref(false);
 const editingId = ref('');
+const saving = ref(false);
+const editorError = ref('');
+const editorErrorField = ref('');
+const editorBodyRef = ref(null);
+const editorErrorRef = ref(null);
 const form = reactive({ name: '', description: '', triggerType: 'manual', triggerConfig: {}, nodes: [] });
 const projects = ref([]);
 
@@ -220,6 +230,7 @@ function cloneNode(node) {
 }
 
 function openCreate() {
+  editorError.value = ''; editorErrorField.value = '';
   editingId.value = '';
   form.name = '';
   form.description = '';
@@ -233,6 +244,7 @@ function openCreate() {
   showEditor.value = true;
 }
 function openEdit(def) {
+  editorError.value = ''; editorErrorField.value = '';
   editingId.value = def.id;
   form.name = def.name;
   form.description = def.description;
@@ -245,28 +257,43 @@ function addNode() {
   form.nodes.push({ id: `node-${form.nodes.length + 1}`, type: 'action', config: { action: 'restart', projectId: '' } });
 }
 async function save() {
-  if (!form.name.trim()) { toast.error('请填写工作流名称'); return; }
+  if (saving.value) return;
+  editorError.value = ''; editorErrorField.value = '';
+  if (!form.name.trim()) return reportEditorError('请填写工作流名称', 'workflow-name');
+  if (form.triggerType === 'event' && !String(form.triggerConfig.eventTypes || '').trim()) return reportEditorError('事件触发必须选择至少一种事件类型', 'workflow-event-types');
+  if (form.triggerType === 'cron' && !String(form.triggerConfig.cron || '').trim()) return reportEditorError('请填写 Cron 表达式', 'workflow-cron');
   const ids = new Set();
-  for (const node of form.nodes) {
+  for (const [i, node] of form.nodes.entries()) {
     normalizeNode(node);
-    if (!node.id?.trim()) { toast.error('每个节点都需要填写 ID'); return; }
-    if (ids.has(node.id)) { toast.error(`节点 ID 重复：${node.id}`); return; }
+    if (!node.id?.trim()) return reportEditorError('每个节点都需要填写 ID', `workflow-node-${i}-id`);
+    if (ids.has(node.id)) return reportEditorError(`节点 ID 重复：${node.id}`, `workflow-node-${i}-id`);
     ids.add(node.id);
-    if (node.type === 'condition' && !node.config.expression?.trim()) { toast.error(`条件节点「${node.id}」需要表达式`); return; }
-    if (node.type === 'action' && (!node.config.action || !node.config.projectId)) { toast.error(`执行节点「${node.id}」需要选择操作和项目`); return; }
+    if (node.type === 'condition' && !node.config.expression?.trim()) return reportEditorError(`条件节点「${node.id}」需要表达式`, `workflow-node-${i}-expression`);
+    if (node.type === 'action' && (!node.config.action || !node.config.projectId)) return reportEditorError(`执行节点「${node.id}」需要选择操作和项目`, `workflow-node-${i}-${!node.config.action ? 'action' : 'project'}`);
   }
-  normalizeTriggerConfig();
-  if (form.triggerType === 'event' && !String(form.triggerConfig.eventTypes || '').trim()) { toast.error('事件触发必须选择至少一种事件类型'); return; }
-  if (form.triggerType === 'cron' && !String(form.triggerConfig.cron || '').trim()) { toast.error('请填写 Cron 表达式'); return; }
   const payload = { ...form, triggerConfig: { ...form.triggerConfig }, nodes: form.nodes.map((node) => ({ ...node, config: { ...node.config } })) };
+  saving.value = true;
   try {
     if (editingId.value) await store.update(editingId.value, payload);
     else await store.create(payload);
     toast.success('工作流已保存');
     showEditor.value = false;
   } catch (e) {
-    toast.error(e);
+    await reportEditorError(e.message || '保存失败，请重试');
+  } finally {
+    saving.value = false;
   }
+}
+function fieldErrorProps(id) {
+  return editorErrorField.value === id ? { 'aria-invalid': 'true', 'aria-describedby': 'workflow-editor-error' } : {};
+}
+async function reportEditorError(message, field = '') {
+  editorError.value = message;
+  editorErrorField.value = field;
+  await nextTick();
+  const target = field ? editorBodyRef.value?.querySelector(`#${field}`) : editorErrorRef.value;
+  target?.focus({ preventScroll: true });
+  target?.scrollIntoView?.({ block: 'nearest' });
 }
 const deleteTarget = ref(null);
 async function confirmRemove() {
@@ -325,3 +352,11 @@ let activatedOnce = false;
 onActivated(() => { if (activatedOnce) void load(); activatedOnce = true; });
 
 </script>
+
+<style scoped>
+@reference '../style.css';
+.form-label { @apply mb-1 block text-xs font-medium text-surface-400; }
+.form-grid-label { @apply flex min-w-0 flex-col gap-1 text-xs text-surface-400; }
+.input { @apply w-full min-w-0; }
+.input[aria-invalid='true'] { @apply border-status-error/60 ring-1 ring-rose-500/20; }
+</style>

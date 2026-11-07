@@ -1,22 +1,29 @@
 <template>
-  <div v-if="!auth.ready" class="h-dvh grid place-items-center text-surface-400">
-    <div class="flex flex-col items-center gap-3">
-      <span class="loading-mark"></span>
-      <span class="text-sm">正在连接 ComposeOps...</span>
+  <main v-if="!auth.ready || auth.connectionError" class="h-dvh grid place-items-center px-6 text-surface-400" aria-live="polite" :aria-busy="auth.checking">
+    <div class="flex max-w-md flex-col items-center gap-4 text-center">
+      <span v-if="auth.checking" class="loading-mark" aria-hidden="true"></span>
+      <WifiOff v-else class="h-8 w-8 text-status-warn" aria-hidden="true" />
+      <h1 class="text-lg font-semibold text-surface-100">{{ auth.connectionError ? '暂时无法连接 ComposeOps' : '正在连接 ComposeOps…' }}</h1>
+      <template v-if="auth.connectionError">
+        <p class="text-sm leading-6" role="alert">{{ auth.connectionError }}</p>
+        <button class="btn-primary" :disabled="auth.checking" @click="auth.check"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': auth.checking }" />{{ auth.checking ? '正在重试…' : '重新连接' }}</button>
+      </template>
     </div>
-  </div>
+  </main>
   <LoginView v-else-if="!auth.authenticated" />
   <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden relative">
+    <button class="skip-link" @click="focusMainContent">跳到主要内容</button>
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
     <div class="flex min-h-0 flex-1 overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
       <AppSidebar />
-      <main class="app-main flex-1 min-w-0 overflow-auto" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
+      <div class="app-workspace flex min-w-0 min-h-0 flex-1 flex-col">
+      <WorkspaceNavigation />
+      <main id="main-content" class="app-main flex-1 min-h-0 min-w-0 overflow-auto" tabindex="-1" @scroll.passive="onMainScroll" @touchstart.passive="onPullStart" @touchmove.passive="onPullMove" @touchend.passive="onPullEnd">
         <div class="pull-indicator" :style="{ transform: 'translateY(' + pullY + 'px)', opacity: pullY > 0 ? 1 : 0 }">
           <span v-if="refreshing" class="loading-mark"></span>
           <RefreshCw v-else class="w-4 h-4" :class="{ 'rotate-180': pullY >= pullThreshold }" />
         </div>
         <div class="content-outer mx-auto h-full min-h-full w-full">
-          <ReturnLink v-if="!['logs', 'compose'].includes(route.name)" />
           <div v-if="['ops-center', 'ops-tickets', 'maintenance-plan', 'workflows', 'cron'].includes(route.name)" class="route-prefix px-4 pt-4 sm:px-6"><TaskNavigation /></div>
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in" @after-enter="restoreRouteScroll">
@@ -27,6 +34,7 @@
           </router-view>
         </div>
       </main>
+      </div>
     </div>
     <div v-if="runtimeError" class="runtime-error-bar">
       <span class="min-w-0 flex-1 truncate">{{ runtimeError }}</span>
@@ -44,11 +52,11 @@
 import { onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import TaskNavigation from './components/common/TaskNavigation.vue';
-import ReturnLink from './components/common/ReturnLink.vue';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
+import WorkspaceNavigation from './components/WorkspaceNavigation.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
-import { RefreshCw } from 'lucide-vue-next';
+import { RefreshCw, WifiOff } from 'lucide-vue-next';
 import CheatSheetModal from './components/common/CheatSheetModal.vue';
 import AgentDrawer from './components/AgentDrawer.vue';
 import OnboardingGuide from './components/common/OnboardingGuide.vue';
@@ -79,6 +87,7 @@ const toast = useToastStore();
 usePullRefresh(() => auth.authenticated && servicesStore.refresh(true));
 const { openAgent, startPageTracking, stopPageTracking } = useAgentConsole();
 const cheatSheet = ref(false);
+function focusMainContent() { document.getElementById('main-content')?.focus({ preventScroll: true }); }
 /* ---- 下拉刷新(移动端触屏)与头部大标题收缩 ---- */
 const pullY = ref(0);
 const refreshing = ref(false);

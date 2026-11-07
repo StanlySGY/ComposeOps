@@ -1,5 +1,6 @@
 <template>
   <div class="service-editor">
+    <p v-if="formError" class="alert-error mb-3" role="alert">{{ formError }}</p>
     <div class="space-y-4">
       <!-- 基础信息 -->
       <div class="form-group">
@@ -40,8 +41,9 @@
       <div class="form-section">
         <div class="flex items-center justify-between mb-2">
           <label class="form-label mb-0">端口映射</label>
-          <button class="btn-ghost text-xs" @click="addPort"><Plus class="w-3 h-3" />添加</button>
+          <button v-if="!complexPorts" class="btn-ghost text-xs" @click="addPort"><Plus class="w-3 h-3" />添加</button>
         </div>
+        <p v-if="complexPorts" class="text-muted text-xs leading-5">包含高级端口配置，请在代码视图中编辑。本次保存会完整保留这些配置。</p>
         <div v-for="(port, idx) in service.ports" :key="idx" class="flex items-center gap-2 mb-2">
           <input
             v-model="port.host"
@@ -66,8 +68,9 @@
       <div class="form-section">
         <div class="flex items-center justify-between mb-2">
           <label class="form-label mb-0">卷挂载</label>
-          <button class="btn-ghost text-xs" @click="addVolume"><Plus class="w-3 h-3" />添加</button>
+          <button v-if="!complexVolumes" class="btn-ghost text-xs" @click="addVolume"><Plus class="w-3 h-3" />添加</button>
         </div>
+        <p v-if="complexVolumes" class="text-muted text-xs leading-5">包含高级卷配置，请在代码视图中编辑。本次保存会完整保留这些配置。</p>
         <div v-for="(vol, idx) in service.volumes" :key="idx" class="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center">
           <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
             <span class="text-xs text-surface-400 sm:hidden">宿主机路径或命名卷</span>
@@ -143,7 +146,7 @@
       <div class="form-group">
         <label class="form-label" for="compose-service-restart">重启策略</label>
         <select id="compose-service-restart" v-model="service.restart" class="input">
-          <option value="">不重启</option>
+          <option value="">未设置（使用默认行为）</option>
           <option value="no">no</option>
           <option value="always">always</option>
           <option value="on-failure">on-failure</option>
@@ -172,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Plus, Trash2 } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -188,72 +191,63 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'close', 'save']);
 
-const service = ref({
-  name: '',
-  image: '',
-  container_name: '',
-  ports: [],
-  volumes: [],
-  environment: [],
-  restart: 'unless-stopped',
-  depends_on: [],
-  networks: [],
-});
-
+const service = ref({});
 const dependsOnInput = ref('');
 const networksInput = ref('');
+const formError = ref('');
+const complexPorts = computed(() => (props.modelValue?.ports || []).some(value => typeof value === 'object' || String(value).includes('${')));
+const complexVolumes = computed(() => (props.modelValue?.volumes || []).some(value => typeof value === 'object' || String(value).includes('${') || /^[a-z]:/i.test(String(value))));
+const clone = value => JSON.parse(JSON.stringify(value));
+let originalService = {};
+let initialForm = {};
+let initialDependsOn = '';
+let initialNetworks = '';
+const listNames = value => Array.isArray(value) ? value : Object.keys(value || {});
 
-// 从父组件接收的服务数据初始化
-watch(() => props.modelValue, (val) => {
-  if (val) {
-    service.value = {
-      name: val.name || '',
-      image: val.image || '',
-      container_name: val.container_name || '',
-      ports: parsePortsToArray(val.ports || []),
-      volumes: parseVolumesToArray(val.volumes || []),
-      environment: parseEnvToArray(val.environment || []),
-      restart: val.restart || 'unless-stopped',
-      depends_on: val.depends_on || [],
-      networks: val.networks || [],
-    };
-    dependsOnInput.value = Array.isArray(val.depends_on) ? val.depends_on.join(', ') : '';
-    networksInput.value = Array.isArray(val.networks) ? val.networks.join(', ') : '';
+watch(() => props.modelValue, (value) => {
+  const val = value || {};
+  originalService = clone(val);
+  delete originalService.name;
+  formError.value = '';
+  service.value = {
+    name: val.name || '', image: val.image || '', container_name: val.container_name || '',
+    ports: complexPorts.value ? [] : (val.ports || []).map(port => {
+      const text = String(port);
+      const colon = text.lastIndexOf(':');
+      return colon < 0 ? { host: '', container: text } : { host: text.slice(0, colon), container: text.slice(colon + 1) };
+    }),
+    volumes: complexVolumes.value ? [] : (val.volumes || []).map(volume => {
+      const text = String(volume);
+      const colon = text.indexOf(':');
+      return colon < 0 ? { host: '', container: text } : { host: text.slice(0, colon), container: text.slice(colon + 1) };
+    }),
+    environment: parseEnvToArray(val.environment || []),
+    restart: val.restart ?? (props.isNew ? 'unless-stopped' : ''),
+  };
+  for (const key of ['ports', 'volumes']) {
+    service.value[key] = service.value[key].map((row, index) => ({ ...row, raw: val[key][index], originalHost: row.host, originalContainer: row.container }));
   }
+  dependsOnInput.value = listNames(val.depends_on).join(', ');
+  networksInput.value = listNames(val.networks).join(', ');
+  initialForm = clone(service.value);
+  initialDependsOn = dependsOnInput.value;
+  initialNetworks = networksInput.value;
 }, { immediate: true });
-
-function parsePortsToArray(ports) {
-  return ports.map((p) => {
-    if (typeof p === 'string') {
-      const [host, container] = p.split(':');
-      return { host, container: container || host };
-    }
-    return { host: String(p), container: String(p) };
-  });
-}
-
-function parseVolumesToArray(volumes) {
-  return volumes.map((v) => {
-    if (typeof v === 'string') {
-      const [host, container] = v.split(':');
-      return { host, container: container || host };
-    }
-    return v;
-  });
-}
 
 function parseEnvToArray(environment) {
   if (Array.isArray(environment)) {
-    return environment.map((e) => {
-      if (typeof e === 'string') {
-        const [key, ...valueParts] = e.split('=');
-        return { key, value: valueParts.join('=') };
-      }
-      return e;
+    return environment.map(raw => {
+      const text = String(raw);
+      const equals = text.indexOf('=');
+      const key = equals < 0 ? text : text.slice(0, equals);
+      const value = equals < 0 ? '' : text.slice(equals + 1);
+      return { key, value, originalKey: key, originalValue: value, raw };
     });
   }
-  // 如果是对象形式
-  return Object.entries(environment).map(([key, value]) => ({ key, value: String(value) }));
+  return Object.entries(environment).map(([key, raw]) => {
+    const value = raw == null ? '' : String(raw);
+    return { key, value, originalKey: key, originalValue: value, raw };
+  });
 }
 
 function addPort() {
@@ -281,59 +275,53 @@ function removeEnv(idx) {
 }
 
 function save() {
-  // 转换为 compose 格式
-  const composeService = {
-    image: service.value.image,
-  };
-
-  if (service.value.container_name) {
-    composeService.container_name = service.value.container_name;
+  formError.value = '';
+  const name = service.value.name.trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
+    formError.value = '请输入有效的服务名称（字母、数字、点、下划线或连字符）';
+    return;
   }
-
-  // 端口
-  const ports = service.value.ports
-    .filter((p) => p.host && p.container)
-    .map((p) => `${p.host}:${p.container}`);
-  if (ports.length) {
-    composeService.ports = ports;
+  if (props.isNew && !service.value.image.trim()) {
+    formError.value = '请填写镜像名称';
+    return;
   }
-
-  // 卷
-  const volumes = service.value.volumes
-    .filter((v) => v.host && v.container)
-    .map((v) => `${v.host}:${v.container}`);
-  if (volumes.length) {
-    composeService.volumes = volumes;
+  // 从完整原始配置开始，只替换表单中实际改动的字段。
+  const composeService = clone(originalService);
+  const changed = key => props.isNew || JSON.stringify(service.value[key]) !== JSON.stringify(initialForm[key]);
+  const assign = (key, value, present) => { if (present) composeService[key] = value; else delete composeService[key]; };
+  for (const key of ['image', 'container_name', 'restart']) {
+    if (changed(key)) assign(key, service.value[key], !!service.value[key]);
   }
-
-  // 环境变量
-  const environment = service.value.environment
-    .filter((e) => e.key)
-    .map((e) => `${e.key}=${e.value || ''}`);
-  if (environment.length) {
-    composeService.environment = environment;
+  for (const key of ['ports', 'volumes']) {
+    if (!changed(key)) continue;
+    if (service.value[key].some(row => row.host && !row.container)) {
+      formError.value = key === 'ports' ? '请补全容器端口' : '请补全容器挂载路径';
+      return;
+    }
+    const rows = service.value[key].filter(row => row.container).map(row => row.host === row.originalHost && row.container === row.originalContainer
+      ? row.raw : row.host ? `${row.host}:${row.container}` : row.container);
+    assign(key, rows, rows.length > 0);
   }
-
-  // 重启策略
-  if (service.value.restart) {
-    composeService.restart = service.value.restart;
+  if (changed('environment')) {
+    const rows = service.value.environment.filter(row => row.key);
+    const unchanged = row => row.key === row.originalKey && row.value === row.originalValue;
+    const environment = originalService.environment && !Array.isArray(originalService.environment)
+      ? Object.fromEntries(rows.map(row => [row.key, unchanged(row) ? row.raw : row.value]))
+      : rows.map(row => unchanged(row) ? row.raw : `${row.key}=${row.value ?? ''}`);
+    assign('environment', environment, rows.length > 0);
   }
-
-  // 依赖
-  if (dependsOnInput.value.trim()) {
-    composeService.depends_on = dependsOnInput.value.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const [key, input, initial] of [['depends_on', dependsOnInput.value, initialDependsOn], ['networks', networksInput.value, initialNetworks]]) {
+    if (!props.isNew && input === initial) continue;
+    const names = [...new Set(input.split(',').map(name => name.trim()).filter(Boolean))];
+    const previous = originalService[key];
+    const value = previous && !Array.isArray(previous)
+      ? Object.fromEntries(names.map(name => [name, Object.hasOwn(previous, name) ? previous[name] : key === 'depends_on' ? { condition: 'service_started' } : null]))
+      : names;
+    assign(key, value, names.length > 0);
   }
-
-  // 网络
-  if (networksInput.value.trim()) {
-    composeService.networks = networksInput.value.split(',').map((s) => s.trim()).filter(Boolean);
-  }
-
-  emit('save', {
-    name: service.value.name,
-    service: composeService,
-  });
+  emit('save', { name, service: composeService });
 }
+
 </script>
 
 <style scoped>

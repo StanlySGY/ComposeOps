@@ -6,6 +6,7 @@ import { getProjectDocker } from '../services/docker-hosts.js';
 import { aggregateProjectLogs } from '../services/log-aggregator.js';
 import { subscribeEvents } from '../services/events.js';
 import { followContainerLogs } from '../services/docker-log-stream.js';
+import { parseLogResume } from '../lib/log-resume.js';
 import { subscribeContainerEvents, getContainersSnapshot } from '../services/container-events.js';
 
 /** Web Shell 会话上限与超时(防连接泄漏 / 占坑不操作)。 */
@@ -89,13 +90,15 @@ export default async function wsRoutes(fastify) {
     const { projectId, containerId, tail = 200 } = request.query;
     try {
       if (!projectId || !containerId) throw new Error('缺少项目或容器');
+      const resume = parseLogResume(request.query.resume);
       const match = await findProjectContainer(projectId, containerId);
       if (controller.signal.aborted) return;
       if (match.project && !match.project.managed) throw new Error('项目尚未加入管理');
       if (!match.container) throw new Error('项目中未找到该容器');
       await followContainerLogs({
-        container: getProjectDocker(match.project).getContainer(match.container.id), tail, signal: controller.signal,
-        onLine: line => safeSend(socket, line),
+        container: getProjectDocker(match.project).getContainer(match.container.id), tail,
+        since: resume[match.container.id], signal: controller.signal,
+        onLine: line => safeSend(socket, { ...line, containerId: match.container.id, containerName: match.container.name }),
         onError: error => safeSend(socket, { type: 'error', data: error.message }),
         onEnd: () => {
           safeSend(socket, { type: 'end', data: '日志流已结束' });
@@ -117,6 +120,7 @@ export default async function wsRoutes(fastify) {
     const { projectId, containers, tail = 200 } = request.query;
     try {
       if (!projectId) throw new Error('缺少项目');
+      const resume = parseLogResume(request.query.resume);
       const { findProject } = await import('../services/scanner.js');
       const project = await findProject(String(projectId));
       if (controller.signal.aborted) return;
@@ -124,7 +128,7 @@ export default async function wsRoutes(fastify) {
       if (!project.managed) throw new Error('项目尚未加入管理');
       const ids = String(containers || '').split(',').map(item => item.trim()).filter(Boolean);
       const aggregator = await aggregateProjectLogs({
-        project, containerIds: ids, tail, signal: controller.signal,
+        project, containerIds: ids, tail, resume, signal: controller.signal,
         onLine: line => safeSend(socket, { type: 'line', data: line }),
         onError: error => safeSend(socket, { type: 'error', data: `${error.containerName}: ${error.message}` }),
         onEnd: () => {
@@ -263,7 +267,15 @@ function safeSend(socket, payload) {
 /** 在任何异步初始化之前绑定断连,迟到的 Docker 流由同一 signal 回收。 */
 function socketAbortController(socket) {
   const controller = new AbortController();
-  socket.once('close', () => controller.abort());
+  // Application heartbeat detects half-open log streams even when no log is produced.
+  // It is intentionally scoped to logs; terminal input never enters this protocol.
+  const heartbeat = (data, isBinary) => {
+    if (isBinary || data.length > 64) return;
+    try { if (JSON.parse(data.toString()).type === 'ping') safeSend(socket, { type: 'pong' }); }
+    catch { /* Ignore unsupported control frames. */ }
+  };
+  socket.on('message', heartbeat);
+  socket.once('close', () => { socket.removeListener('message', heartbeat); controller.abort(); });
   if (socket.readyState !== WebSocket.OPEN) controller.abort();
   return controller;
 }

@@ -5,7 +5,7 @@ import { followContainerLogs } from './docker-log-stream.js';
  * 聚合日志:给单个项目同时订阅多个容器的实时输出,按行拆分并通过回调推送。
  * 每个容器用 demuxStream 拆分 stdout/stderr,并统一打上 containerName 与时间戳。
  */
-export async function aggregateProjectLogs({ project, containerIds = [], tail = 200, signal, onLine = () => {}, onError = () => {}, onEnd = () => {} }) {
+export async function aggregateProjectLogs({ project, containerIds = [], tail = 200, resume = {}, signal, onLine = () => {}, onError = () => {}, onEnd = () => {} }) {
   const docker = getProjectDocker(project);
   const targets = (project.containers || []).filter((container) => {
     if (!containerIds.length) return true;
@@ -37,7 +37,7 @@ export async function aggregateProjectLogs({ project, containerIds = [], tail = 
   await Promise.all(targets.map(async (container) => {
     try {
       const stream = await followContainerLogs({
-        container: docker.getContainer(container.id), tail, signal: controller.signal,
+        container: docker.getContainer(container.id), tail, since: Object.hasOwn(resume, container.id) ? resume[container.id] : undefined, signal: controller.signal,
         onLine: line => { if (!stopped) onLine({ containerId: container.id, containerName: container.name, ...line }); },
         onError: error => { if (!stopped) onError({ containerId: container.id, containerName: container.name, message: error.message }); },
         onEnd: () => { remaining -= 1; reportEnd(); },

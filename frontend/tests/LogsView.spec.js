@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { ref } from 'vue';
+import { KeepAlive, ref } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 const { api, channels } = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getPreferences: vi.fn(), streamProjectStats: vi.fn(() => new Promise(() => {})) }, channels: [] }));
 vi.mock('../src/api/client.js', () => ({ api, wsUrl: path => path, streamProjectStats: api.streamProjectStats }));
 vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket: (url, options) => {
   const connected = ref(false);
-  const channel = { url, options, connected, reconnecting: ref(false), connect: vi.fn(() => { connected.value = true; }), close: vi.fn(() => { connected.value = false; }) };
+  const channel = { url, options, connected, connecting: ref(false), offline: ref(false), reconnecting: ref(false), connect: vi.fn(() => { connected.value = true; }), close: vi.fn(() => { connected.value = false; }) };
   channels.push(channel);
   return channel;
 } }));
@@ -43,6 +43,41 @@ describe('日志页面生命周期与数据完整性', () => {
     await flushPromises();
   }
   const send = (data, aggregate = false) => channels[aggregate ? 1 : 0].options.onMessage({ data: JSON.stringify(data) });
+  it('暂停期间的已接收日志也参与续读去重，清屏会清除位置', async () => {
+    await start();
+    const first = { containerId: 'c', type: 'stdout', ts: '2026-11-06T12:00:00.123456789Z', data: 'before disconnect' };
+    channels[0].options.prepareUrl('/logs');
+    send(first);
+    await wrapper.get('button[title="暂停显示"]').trigger('click');
+    const second = { ...first, ts: '2026-11-06T12:00:01.123456789Z', data: 'paused line' };
+    send(second);
+    expect(channels[0].options.prepareUrl('/logs')).toContain('resume=');
+    send(first); send(second); send({ ...second, data: 'offline line' });
+    await wrapper.get('button[title="继续接收"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('.aggregate-line')).toHaveLength(3);
+    await wrapper.get('button[title="清屏"]').trigger('click');
+    expect(channels[0].options.prepareUrl('/logs')).toBe('/logs');
+  });
+  it('日志页缓存期间切换节点也清除旧来源，返回时不自动订阅旧容器', async () => {
+    router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/logs', name: 'logs', component: LogsView },
+      { path: '/services', name: 'services', component: { template: '<div>服务列表</div>' } },
+    ] });
+    await router.push('/logs?projectId=p&containerId=c');
+    wrapper = mount({ components: { KeepAlive }, template: '<router-view v-slot="{ Component }"><KeepAlive><component :is="Component" /></KeepAlive></router-view>' }, { global: { plugins: [router] } });
+    await flushPromises();
+    send({ containerId: 'c', type: 'stdout', ts: '2026-11-06T12:00:00Z', data: 'old host' });
+    await router.push('/services'); await flushPromises();
+    const loads = api.getProjects.mock.calls.length;
+    window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises();
+    expect(api.getProjects).toHaveBeenCalledTimes(loads);
+    await router.push('/logs'); await flushPromises();
+    expect(wrapper.text()).not.toContain('old host');
+    expect(wrapper.get('select[aria-label="选择日志项目"]').element.value).toBe('');
+    expect(channels[0].connect).toHaveBeenCalledOnce();
+    expect(channels[0].options.prepareUrl('/logs')).toBe('/logs');
+  });
 
   it('日志工具栏将来源过滤与流控制拆分成具名分组', async () => {
     await start();
@@ -52,6 +87,17 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(sourceGroup.get('input[aria-label="搜索和过滤实时日志"]').exists()).toBe(true);
     expect(streamGroup.get('button[aria-label="暂停显示"]').exists()).toBe(true);
     expect(streamGroup.get('button[aria-label="下载日志"]').exists()).toBe(true);
+  });
+
+  it('无匹配与断开状态有具体说明，不一直显示等待', async () => {
+    await start();
+    send({ type: 'stdout', data: 'service started' });
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('not-present');
+    expect(wrapper.text()).toContain('没有匹配的日志');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('');
+    await wrapper.get('button[title="清屏"]').trigger('click');
+    await wrapper.findAll('button').find(button => button.text() === '断开').trigger('click');
+    expect(wrapper.text()).toContain('日志已断开，点击「连接」继续查看');
   });
 
   it('离开日志模块再通过导航返回时保留项目、容器和筛选条件', async () => {
@@ -69,23 +115,19 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(wrapper.get('select[aria-label="按日志级别过滤"]').element.value).toBe('error');
   });
 
-  it('来自服务列表的日志页提供明确返回入口', async () => {
+  it('来自服务列表的来源参数供统一导航读取', async () => {
     await start('/logs?projectId=p&containerId=c&from=services');
-    const backButton = wrapper.findAll('button').find(button => button.text().includes('返回服务列表'));
-    expect(backButton).toBeTruthy();
-    await backButton.trigger('click');
-    await flushPromises();
-    expect(router.currentRoute.value.name).toBe('services');
+    expect(router.currentRoute.value.query.from).toBe('services');
+    expect(wrapper.findAll('button').some(button => button.text().includes('返回'))).toBe(false);
   });
 
-  it('通过通用日志导航重新进入时仍保留原始来源返回入口', async () => {
+  it('通过通用日志导航重新进入时保留日志上下文而不重写当前导航', async () => {
     await start('/logs?projectId=p&containerId=c&from=services');
     await router.push('/services');
     await flushPromises();
     await router.push('/logs');
     await flushPromises();
 
-    expect(wrapper.findAll('button').some(button => button.text().includes('返回服务列表'))).toBe(true);
     expect(router.currentRoute.value.query).toEqual({});
     expect(wrapper.get('select[aria-label="选择日志项目"]').element.value).toBe('p');
   });
@@ -148,6 +190,37 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(channels[1].connect).toHaveBeenCalledOnce();
     expect(channels[1].url()).toContain('tail=200');
   });
+  it('聚合容器的点击、全选与清空都会重建来源，旧行不会冒充新选择', async () => {
+    api.getProjects.mockResolvedValue({ projects: [{ id: 'p', projectName: '测试', managed: true, containers: [{ id: 'a', name: 'api' }, { id: 'b', name: 'web' }] }] });
+    await start('/logs?projectId=p');
+    send({ type: 'line', data: { containerId: 'b', data: 'previous source' } }, true);
+    await flushPromises();
+    await wrapper.findAll('.container-chip')[0].trigger('click');
+    expect(channels[1].url()).toContain('containers=a');
+    expect(channels[1].connect).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).not.toContain('previous source');
+    await wrapper.findAll('button').find(button => button.text() === '全选可见').trigger('click');
+    expect(channels[1].url()).toContain('containers=a%2Cb');
+    await wrapper.findAll('button').find(button => button.text() === '清空').trigger('click');
+    expect(channels[1].url()).toContain('containers=&');
+    expect(channels[1].connect).toHaveBeenCalledTimes(4);
+  });
+  it('恢复提示在筛选之外可见，暂停时恢复分隔行遵守待显示队列', async () => {
+    await start();
+    channels[0].options.onOpen({ resumed: false });
+    await wrapper.get('button[title="暂停显示"]').trigger('click');
+    channels[0].options.onError(new Error('temporary network'));
+    channels[0].options.onOpen({ resumed: true });
+    await flushPromises();
+    expect(wrapper.find('.alert-error').exists()).toBe(false);
+    expect(wrapper.text()).toContain('可能重复');
+    expect(wrapper.text()).toContain('1 条待显示');
+    expect(wrapper.find('.aggregate-line').exists()).toBe(false);
+    await wrapper.get('button[title="继续接收"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('以下为重新读取的日志');
+    expect(wrapper.text()).not.toContain('WARN 1');
+  });
 
   it('离开页面后迟到的初始化请求不会再建立连接', async () => {
     let resolve;
@@ -168,7 +241,7 @@ describe('日志页面生命周期与数据完整性', () => {
     await flushPromises();
     expect(wrapper.findAll('.aggregate-line')).toHaveLength(3);
 
-    await wrapper.get('input[placeholder="level:error | container:api"]').setValue('container:api level:error');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('container:api level:error');
     const rows = wrapper.findAll('.aggregate-line');
     expect(rows).toHaveLength(1);
     expect(rows[0].text()).toContain('ERROR boom');
@@ -179,7 +252,7 @@ describe('日志页面生命周期与数据完整性', () => {
     await start();
     send({ type: 'stdout', data: '第一行日志' });
     await flushPromises();
-    const searchInput = wrapper.get('input[placeholder="level:error | container:api"]');
+    const searchInput = wrapper.get('input[aria-label="搜索和过滤实时日志"]');
     await searchInput.setValue('第一行');
     expect(wrapper.findAll('.aggregate-line')).toHaveLength(1);
 
@@ -195,7 +268,7 @@ describe('日志页面生命周期与数据完整性', () => {
     expect(wrapper.findAll('.aggregate-line')).toHaveLength(0);
     await searchInput.setValue('不存在的关键字 container:');
     expect(wrapper.get('.alert-warning').text()).toContain('字段 container: 缺少取值');
-    expect(wrapper.text()).toContain('查询语法有误,已保留上一次结果');
+    expect(wrapper.text()).toContain('查询语法有误，已保留上一次结果');
   });
 
   it('分栏按容器名拆栏,每栏自带徽章与本栏计数', async () => {
@@ -227,13 +300,13 @@ describe('日志页面生命周期与数据完整性', () => {
     await wrapper.get('button[title="按容器分栏显示(快捷键 s)"]').trigger('click');
     expect(wrapper.findAll('.log-pane')).toHaveLength(2);
 
-    await wrapper.get('input[placeholder="level:error | container:api"]').setValue('level:error');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error');
     const panes = wrapper.findAll('.log-pane');
     expect(panes).toHaveLength(1);
     expect(panes[0].get('.container-badge').text()).toBe('api');
     expect(wrapper.text()).toContain('1 栏');
 
-    await wrapper.get('input[placeholder="level:error | container:api"]').setValue('level:error container:missing');
+    await wrapper.get('input[aria-label="搜索和过滤实时日志"]').setValue('level:error container:missing');
     expect(wrapper.findAll('.log-pane')).toHaveLength(0);
     expect(wrapper.text()).toContain('没有匹配当前查询的容器日志。');
   });

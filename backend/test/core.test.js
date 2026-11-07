@@ -9,7 +9,7 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const auth = await import('../src/lib/auth.js');
 const database = await import('../src/lib/db.js');
-const { composeArgs, resolveProjectFile, withComposeFileLock, assertComposeVersion } = await import('../src/services/compose-runner.js');
+const { composeArgs, composeProjectOptions, resolveProjectFile, withComposeFileLock, assertComposeVersion } = await import('../src/services/compose-runner.js');
 const { parseYaml, validateYaml } = await import('../src/lib/files.js');
 const { demuxStream } = await import('../src/lib/docker-streams.js');
 const { buildMountPlan, compactMountPaths, safeProjectMountPath, isWithinProjectPath, isWithinProjectPathReal } = await import('../src/services/mount-plan.js');
@@ -52,6 +52,16 @@ test('compose actions map to fixed argument lists', () => {
     () => assertProjectActionAllowed({ managed: true, mountEnabled: true, editable: true }, 'exec'),
     (error) => error.statusCode === 400 && /不支持/.test(error.message)
   );
+});
+
+test('Compose operations preserve discovered project identity across actions and temporary validation files', () => {
+  const project = { projectName: 'original-stack', workingDir: '/srv/different-directory', composeFiles: ['/srv/different-directory/compose.yml'] };
+  for (const action of ['up', 'restart', 'stop', 'pull', 'ps']) {
+    const args = composeArgs(project, action);
+    assert.deepEqual(args.slice(0, 5), ['compose', '--project-name', 'original-stack', '-f', project.composeFiles[0]]);
+  }
+  const temporary = ['/srv/different-directory/.validation.tmp', '/srv/different-directory/override.yml'];
+  assert.deepEqual(composeProjectOptions(project, temporary), ['--project-name', 'original-stack', '-f', temporary[0], '-f', temporary[1]]);
 });
 
 test('managed projects can control existing containers without Compose files', async () => {

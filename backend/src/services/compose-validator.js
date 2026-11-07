@@ -1,4 +1,5 @@
 import * as YAML from 'yaml';
+import { isDeepStrictEqual } from 'node:util';
 
 /**
  * Compose 语义校验(仅静态分析,不依赖宿主机文件系统):
@@ -92,54 +93,6 @@ function normalizeList(value) {
   return [value];
 }
 
-const RECREATE_FIELDS = [
-  ['image', '镜像'], ['build', '构建配置'], ['environment', '环境变量'], ['env_file', '环境文件'],
-  ['ports', '端口映射'], ['expose', '暴露端口'], ['volumes', '卷挂载'], ['tmpfs', '临时文件系统'],
-  ['command', '命令'], ['entrypoint', '入口'], ['user', '运行用户'], ['working_dir', '工作目录'],
-  ['hostname', '主机名'], ['domainname', '域名'], ['labels', '标签'], ['healthcheck', '健康检查'],
-  ['restart', '重启策略'], ['networks', '网络'], ['devices', '设备'], ['privileged', '特权模式'],
-  ['read_only', '只读根文件系统'], ['cap_add', 'Linux capabilities'], ['cap_drop', 'Linux capabilities'],
-  ['security_opt', '安全选项'], ['deploy', '部署配置'],
-];
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
-}
-
-function parseServices(content) {
-  if (typeof content !== 'string' || !content.trim()) return null;
-  try {
-    const doc = YAML.parse(content);
-    return doc?.services && typeof doc.services === 'object' ? doc.services : {};
-  } catch { return null; }
-}
-
-function containerService(container, projectName, knownServices) {
-  if (typeof container.service === 'string' && container.service.trim()) return container.service.trim();
-  const name = String(container.name || '');
-  const prefix = String(projectName || '');
-  if (prefix) {
-    for (const separator of ['-', '_']) {
-      const start = `${prefix}${separator}`;
-      if (!name.startsWith(start)) continue;
-      const suffix = name.slice(start.length).replace(/[-_]\d+$/, '');
-      if (suffix) return suffix;
-    }
-  }
-  return knownServices.find((service) => name === service ||
-    (name.startsWith(`${service}-`) && /-\d+$/.test(name)) ||
-    (name.startsWith(`${service}_`) && /_\d+$/.test(name))) || null;
-}
-
-function changedReasons(previous, next) {
-  if (!previous || !next) return [];
-  return RECREATE_FIELDS
-    .filter(([field]) => JSON.stringify(stableValue(previous[field])) !== JSON.stringify(stableValue(next[field])))
-    .map(([, label]) => label);
-}
-
 function parsePublishedPort(spec) {
   if (spec && typeof spec === 'object') {
     const published = Number(spec.published ?? spec.published_port);
@@ -160,47 +113,56 @@ function addressesConflict(left, right) {
   return wildcard(left) || wildcard(right) || String(left).toLowerCase() === String(right).toLowerCase();
 }
 
-/** Compare edited/current Compose services and only report host ports observed on other containers. */
-export function previewComposeChange(newContent, project, {
-  currentContent = '', occupiedPorts = null, portConflictsKnown = Array.isArray(occupiedPorts),
-} = {}) {
-  const result = {
-    added: [], removed: [], changed: [], restarted: [], portConflicts: [],
-    portConflictsKnown: !!portConflictsKnown, changeAnalysisKnown: false,
-  };
-  const newServices = parseServices(newContent);
-  if (!newServices) return result;
-  const oldServices = parseServices(currentContent);
-  result.changeAnalysisKnown = oldServices !== null;
-  const names = [...new Set([...Object.keys(newServices), ...Object.keys(oldServices || {})])];
-  const containersByService = new Map();
-  for (const container of project.containers || []) {
-    const service = containerService(container, project.projectName, names);
-    if (!service) continue;
-    if (!containersByService.has(service)) containersByService.set(service, []);
-    containersByService.get(service).push(container);
-    if (!Object.hasOwn(newServices, service)) result.removed.push({ service, container: container.name, state: container.state });
-  }
-  for (const [name, service] of Object.entries(newServices)) {
-    const containers = containersByService.get(name) || [];
-    if (!containers.length) result.added.push({ service: name });
-    else if (oldServices && Object.hasOwn(oldServices, name)) {
-      const reasons = changedReasons(oldServices[name], service);
-      if (reasons.length) {
-        result.changed.push({ service: name, reasons, container: containers[0].name, state: containers[0].state });
-        for (const container of containers) if (container.state === 'running') result.restarted.push({ service: name, container: container.name });
+export function previewComposeChange(newContent, project, options = null) {
+  const { currentContent: previousContent = null, occupiedPorts = null,
+    portConflictsKnown = Array.isArray(occupiedPorts) } = typeof options === 'string'
+      ? { currentContent: options } : (options || {});
+  const result = { added: [], removed: [], changed: [], restarted: [], portConflicts: [], basis: previousContent === null ? 'runtime-summary' : 'saved-file', portConflictsKnown: !!portConflictsKnown, changeAnalysisKnown: previousContent !== null };
+  const doc = YAML.parse(newContent);
+  const before = previousContent === null ? null : YAML.parse(previousContent);
+  const newServices = doc?.services || {};
+  const containers = project.containers || [];
+  const serviceName = (container) => {
+    if (container.service) return container.service;
+    for (const separator of ['-', '_']) {
+      const prefix = `${project.projectName}${separator}`;
+      if (project.projectName && container.name.startsWith(prefix)) {
+        return container.name.slice(prefix.length).replace(/[-_]\d+$/, '');
       }
     }
-    if (Array.isArray(occupiedPorts)) {
-      for (const raw of normalizeList(service?.ports)) {
-        const desired = parsePublishedPort(raw);
-        if (!desired) continue;
-        for (const occupied of occupiedPorts) {
-          if (Number(occupied.port) !== desired.port || String(occupied.protocol || 'tcp').toLowerCase() !== desired.protocol) continue;
-          if (!addressesConflict(occupied.ip, desired.ip)) continue;
-          result.portConflicts.push({ service: name, port: desired.port, ip: desired.ip, protocol: desired.protocol, holder: occupied.name || '其他容器' });
-        }
+    return /^[^-_]+[-_](.+)[-_]\d+$/.exec(container.name)?.[1] || container.name;
+  };
+  const currentServices = new Map(containers.map(container => [serviceName(container), container]));
+  const oldServices = previousContent === null
+    ? Object.fromEntries([...currentServices].map(([name, container]) => [name, { image: container.image }]))
+    : (before?.services || {});
+  const findContainer = (name) => containers.find(container => serviceName(container) === name
+    || container.name === oldServices[name]?.container_name || container.name === newServices[name]?.container_name);
+  const fieldLabels = { image: '镜像', environment: '环境变量', ports: '端口映射', volumes: '卷', command: '命令', entrypoint: '入口', build: '构建', networks: '网络', depends_on: '依赖', healthcheck: '健康检查', restart: '重启策略', deploy: '部署配置', labels: '标签', container_name: '容器名' };
+  for (const name of Object.keys(oldServices)) {
+    if (Object.hasOwn(newServices, name)) continue;
+    const container = findContainer(name);
+    result.removed.push({ service: name, container: container?.name || name, state: container?.state || 'unknown' });
+  }
+  for (const [name, service] of Object.entries(newServices)) {
+    for (const raw of normalizeList(service?.ports)) {
+      const desired = parsePublishedPort(raw);
+      if (!desired) continue;
+      for (const occupied of occupiedPorts || []) {
+        if (Number(occupied.port) !== desired.port || String(occupied.protocol || 'tcp').toLowerCase() !== desired.protocol || !addressesConflict(occupied.ip, desired.ip)) continue;
+        result.portConflicts.push({ service: name, port: desired.port, ip: desired.ip, protocol: desired.protocol, holder: occupied.name || '其他容器' });
       }
+    }
+    if (!Object.hasOwn(oldServices, name)) { result.added.push({ service: name }); continue; }
+    const previous = oldServices[name] || {};
+    const next = service || {};
+    const keys = previousContent === null ? (typeof previous.image === 'string' ? ['image'] : []) : [...new Set([...Object.keys(previous), ...Object.keys(next)])];
+    const reasons = keys.filter(key => !isDeepStrictEqual(previous[key], next[key])).map(key => fieldLabels[key] || key);
+    if (!reasons.length) continue;
+    const container = findContainer(name);
+    result.changed.push({ service: name, reasons, container: container?.name || name, state: container?.state || 'unknown' });
+    for (const instance of containers.filter(item => serviceName(item) === name || item.name === oldServices[name]?.container_name || item.name === newServices[name]?.container_name)) {
+      if (instance.state === 'running') result.restarted.push({ service: name, container: instance.name });
     }
   }
   return result;

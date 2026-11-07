@@ -1,5 +1,5 @@
 import { parseDocument } from 'yaml';
-import { at, projects, metrics, inspection, operations, alerts, storage, channels, preferences, backups, logs, compose, costReport } from './fixtures.js';
+import { at, projects, metrics, inspection, operations, alerts, storage, costReport, resources, marketplaceTemplates, channels, preferences, backups, logs, compose } from './fixtures.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -83,7 +83,7 @@ export async function previewFetch(input, options = {}) {
     '/metrics/retention-policy': { preview: { deleted30d: 0, compactedRows: 0, rawDays: 7, totalDays: 30 } },
     '/ops/alert-events': { events: alerts },
     '/ops/storage/df': storage,
-    '/ops/storage/resources': { counts: { danglingImages: 0, orphanVolumes: 0, unusedNetworks: 0 }, images: [], containers: [], volumes: [{ name: 'cache_data', driver: 'local', size: 1048576, usedBy: ['redis'], inUse: true }], networks: [] },
+    '/ops/storage/resources': { ...resources, checkedAt: Date.now() },
     '/ops/storage/volume-backups': { backups },
     '/ops/storage/volume-volumes': { volumes: [{ name: 'cache_data', driver: 'local' }] },
     '/ai/config': aiConfig(),
@@ -96,6 +96,8 @@ export async function previewFetch(input, options = {}) {
     '/ai/agent/tasks': { tasks: [] },
     '/ai/agent/feedback': { feedback: [] },
     '/jobs': { jobs: [...jobs.values()] },
+    '/ops-tickets': { tickets: [], stats: { open: 0, blocked: 0, review: 0, terminal: 0 } },
+    '/ops-tickets/worker/status': { running: false, mode: 'disabled' },
     '/cron': { jobs: [] }, '/cron/history': { history: [] },
     '/gitops': { repos: [] }, '/gitops/drift': { repos: [], summary: {} },
     '/metrics/alerts': { alerts: [] }, '/metrics/historical': { data: [], metrics: [] },
@@ -106,14 +108,26 @@ export async function previewFetch(input, options = {}) {
     '/cmdb/assets': { assets: [], total: 0 }, '/cmdb/topology': { nodes: [], edges: [] },
     '/cost-analysis/report': costReport, '/cost-analysis/trends': costReport.trends,
     '/cost-analysis/suggestions': { suggestions: [] },
-    '/marketplace/stats': { totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [], communityAvailable: false }, '/marketplace/templates/search': { results: [], templates: [], total: 0, categories: [] },
+    '/marketplace/stats': { totalBuiltin: 3, totalCommunity: 0, totalCustom: 1, totalFavorites: marketplaceTemplates.filter(t => t.favorited).length, categories: ['Web', 'Database', 'DevOps', 'Custom'], communityAvailable: false },
   };
+  if (path === '/marketplace/templates/search' && method === 'GET') {
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const source = url.searchParams.get('source');
+    const category = url.searchParams.get('category');
+    return json({ results: marketplaceTemplates.filter(t => (!q || `${t.name} ${t.description} ${t.category}`.toLowerCase().includes(q)) && (!source || source === 'all' || t.id.startsWith(source + '-')) && (!category || category === 'all' || t.category === category) && (url.searchParams.get('onlyFavorites') !== 'true' || t.favorited)) });
+  }
+  if (path.startsWith('/marketplace/favorites/') && ['POST', 'DELETE'].includes(method)) {
+    const template = marketplaceTemplates.find(t => t.id === path.split('/').pop());
+    if (!template) return json({ message: '示例模板不存在' }, 404);
+    template.favorited = method === 'POST';
+    return json({ ok: true });
+  }
   if (method === 'GET') {
     if (path in reads) return json(clone(reads[path]));
     if (path.startsWith('/jobs/') && jobs.has(pid)) return json(jobs.get(pid));
     if (project) {
       if (path === '/projects/' + pid) return json(project);
-      if (path.endsWith('/compose')) return json({ content: compose.get(pid), filePath: project.composeFiles[0], path: project.composeFiles[0], fileIndex: 0 });
+      if (path.endsWith('/compose')) return json({ hostId: 'local', content: compose.get(pid), filePath: project.composeFiles[0], path: project.composeFiles[0], fileIndex: 0 });
       if (path.endsWith('/backups')) return json({ backups: [] });
       if (path.endsWith('/activity')) return json({ activity: [], operations: [], backups: [] });
       if (path.endsWith('/updates')) return json({ results: [], updates: [], images: [], hasUpdate: false });
@@ -126,6 +140,17 @@ export async function previewFetch(input, options = {}) {
     if (path.endsWith('/compaction')) return json({ compactedBeforeId: 0, summary: '' });
   }
   if (path === '/cost-analysis/snapshot' && method === 'POST') { const snapshot = { ...costReport.summary, timestamp: Date.now() }; costReport.trends.push(snapshot); return json(snapshot); }
+  if (path.startsWith('/ops/storage/resources/') && method === 'DELETE') {
+    if (url.searchParams.get('expectedHostId') !== resources.hostId) return json({ error: 'resource_host_changed', message: '示例节点已切换，请刷新后重试' }, 409);
+    const [, , , , kind, rawId] = path.split('/');
+    const key = { image: 'images', volume: 'volumes', network: 'networks' }[kind];
+    const id = decodeURIComponent(rawId || '');
+    const row = resources[key]?.find(item => (kind === 'volume' ? item.name : item.id) === id);
+    if (!row) return json({ message: '示例资源不存在' }, 404);
+    if (row.inUse || row.builtin || (kind === 'volume' && !row.orphan) || (kind === 'network' && !row.unused)) return json({ message: '资源仍被引用，拒绝删除' }, 409);
+    resources[key] = resources[key].filter(item => item !== row);
+    return json({ ok: true, removed: true, kind, id });
+  }
   if (path === '/ai/agent/execute-stream' && method === 'POST') return agentStream(body, options.signal);
   if (path === '/ai/agent/approve' && method === 'POST') {
     const respond = pending.get(body.executionId);
@@ -169,7 +194,7 @@ export async function previewFetch(input, options = {}) {
     return json({ valid: !document.errors.length, issues: [...document.errors.map(error => ({ level: 'error', message: error.message })), { level: 'warn', message: '离线预览仅检查 YAML 语法，未运行 docker compose config。' }] });
   }
   if (project && path.endsWith('/compose') && method === 'PUT') { compose.set(pid, body.content); return json({ ok: true, content: body.content }); }
-  if (project && path.endsWith('/compose/preview')) return json({ preview: { added: [], removed: [], changed: [], unchanged: project.containers.map(c => ({ service: c.service })), warnings: ['仅保存演示内存，刷新后重置'] } });
+  if (project && path.endsWith('/compose/preview')) return json({ preview: { added: [], removed: [], changed: [], restarted: [], portConflicts: [], unchanged: project.containers.map(c => ({ service: c.service })), warnings: ['仅保存演示内存，刷新后重置'] } });
   if (project && path.endsWith('/preferences')) { Object.assign(project, body); return json(project); }
   if (path === '/personal/preferences' && method === 'PUT') { Object.assign(preferences, body); return json(preferences); }
   if (path.includes('/volume-backups/') && path.endsWith('/verify') && method === 'POST') { Object.assign(backups[0], { verifyStatus: 'verified', verifyAt: at.slice(0, -1), verifyFiles: 128 }); return json({ ok: true, status: 'verified', files: 128, durationMs: 100, message: '离线模拟校验完成', backup: backups[0] }); }
@@ -190,7 +215,10 @@ class PreviewSocket extends EventTarget {
     });
   }
   message(value) { if (this.readyState !== 1) return; const event = new MessageEvent('message', { data: JSON.stringify(clone(value)) }); this.onmessage?.(event); this.dispatchEvent(event); }
-  send() { /* No network transport. */ }
+  send(payload) {
+    // Mirror the read-only log heartbeat without opening a network transport.
+    if (/\/ws\/(logs|aggregated-logs)/.test(this.url) && payload === '{"type":"ping"}') this.message({ type: 'pong' });
+  }
   close() { if (this.readyState === 3) return; this.readyState = 3; sockets.delete(this); const event = new Event('close'); this.onclose?.(event); this.dispatchEvent(event); }
 }
 export function installPreviewTransport() {

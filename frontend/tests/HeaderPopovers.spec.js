@@ -74,6 +74,32 @@ async function start(component, stubs = {}) {
 }
 
 describe('顶部下拉控件的可访问性与焦点恢复', () => {
+  it('只记住成功打开的静态页面，取消导航不会污染最近记录', async () => {
+    await start(AppHeader);
+    const palette = wrapper.findComponent({ name: 'CommandPalette' });
+    palette.vm.$emit('execute', palette.props('commands').find(item => item.id === '/settings'));
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/settings');
+    expect(palette.props('recentIds')).toEqual(['/settings']);
+    router.beforeEach(() => false);
+    palette.vm.$emit('execute', palette.props('commands').find(item => item.id === '/services'));
+    await flushPromises();
+    expect(palette.props('recentIds')).toEqual(['/settings']);
+    palette.vm.$emit('clear-recent'); await flushPromises();
+    expect(palette.props('recentIds')).toEqual([]);
+    expect(localStorage.getItem('composeops:recent-pages')).toBeNull();
+  });
+  it('项目深链和执行操作不进入持久化的最近页面', async () => {
+    await start(AppHeader);
+    const palette = wrapper.findComponent({ name: 'CommandPalette' });
+    palette.vm.$emit('execute', { id: 'logs-private-project', to: '/services?focus=private-project' });
+    await flushPromises();
+    const run = vi.fn(); palette.vm.$emit('execute', { id: 'run-project-up', run });
+    await flushPromises();
+    expect(run).toHaveBeenCalledOnce();
+    expect(palette.props('recentIds')).toEqual([]);
+    expect(localStorage.getItem('composeops:recent-pages')).toBeNull();
+  });
   it('Docker 节点切换器公开展开状态和命名组，并在 Escape 后恢复焦点', async () => {
     await start(HostSwitcher);
     const trigger = document.querySelector('button[aria-label="切换 Docker 节点"]');

@@ -221,9 +221,9 @@ export function startMetricsCollection(intervalSeconds = 30) {
   }, safeIntervalSeconds * 1000);
   
   // 每小时清理一次过期数据;AI 会话/Agent 审计按天粒度顺带清理(每天最多跑一次)
-  const pruneIntervalId = setInterval(() => {
+  const pruneIntervalId = setInterval(async () => {
     try {
-      applyRetentionPolicy();
+      await applyRetentionPolicy();
     } catch (error) {
       console.error('清理过期指标失败:', error.message);
     }

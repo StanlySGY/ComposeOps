@@ -3,7 +3,7 @@ import { realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import docker from './docker.js';
-import { ACTIONS, assertComposeVersion, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
+import { ACTIONS, assertComposeVersion, composeProjectOptions, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
@@ -401,7 +401,7 @@ export async function saveWorkspaceCompose(project, fileIndex, content, reason =
     try {
       const checkFiles = [...files];
       checkFiles[index] = tempPath;
-      const check = await execInRunner(container, ['docker', 'compose', ...checkFiles.flatMap((file) => ['-f', file]), 'config', '--quiet']);
+      const check = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, checkFiles), 'config', '--quiet']);
       if (check.code !== 0) throw Object.assign(new Error(check.stderr.trim() || `docker compose config 退出码 ${check.code}`), { statusCode: 422 });
       await replaceComposeWithBackup({
         replace: async () => {
@@ -437,7 +437,7 @@ export async function runWorkspaceComposeArgs(project, args, onOutput = () => {}
   const { files } = projectPaths(project);
   if (!Array.isArray(args) || !args.length) throw Object.assign(new Error('无效的 Compose 参数'), { statusCode: 400 });
   return withRunner(project, async (container) => {
-    const result = await execInRunner(container, ['docker', 'compose', ...files.flatMap((file) => ['-f', file]), ...args], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs });
+    const result = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, files), ...args], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs });
     return result.code;
   });
 }
@@ -447,7 +447,7 @@ export async function runWorkspaceCompose(project, action, onOutput = () => {}, 
   const actionArgs = ACTIONS[action];
   if (!actionArgs) throw Object.assign(new Error('不支持的 Compose 操作'), { statusCode: 400 });
   return withRunner(project, async (container) => {
-    const result = await execInRunner(container, ['docker', 'compose', ...files.flatMap((file) => ['-f', file]), ...actionArgs], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs });
+    const result = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, files), ...actionArgs], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs });
     return result.code;
   });
 }

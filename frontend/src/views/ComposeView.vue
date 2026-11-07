@@ -1,17 +1,17 @@
 <template>
   <div class="page-shell page-shell-workspace">
+    <ProjectContextNav :project="project" :container-id="String(route.query.containerId || '')" :disabled="hostStale" />
     <div class="page-header">
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
       <div class="page-actions compose-toolbar-actions">
         <div class="compose-toolbar-group" role="group" aria-label="项目与配置文件">
-        <button class="btn-secondary" :title="returnTarget(route.query.from)?.label || '返回服务总览'" @click="router.push(returnTarget(route.query.from)?.path || '/services')"><ArrowLeft class="w-4 h-4" />返回</button>
-        <select v-model="projectId" class="input min-w-52" aria-label="选择 Compose 项目" @change="selectProject"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" @click="projectId = ''; selectProject()"><X class="w-4 h-4" /></button>
-        <select v-if="project?.composeFiles.length > 1" v-model.number="fileIndex" class="input" aria-label="选择 Compose 配置文件" @change="load"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
+        <select :value="projectId" class="input min-w-52" aria-label="选择 Compose 项目" :disabled="saving || previewLoading || hostStale" @change="selectProject($event.target.value); $event.target.value = projectId"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" :disabled="saving || previewLoading || hostStale" @click="selectProject('')"><X class="w-4 h-4" /></button>
+        <select v-if="project?.composeFiles.length > 1" :value="fileIndex" class="input" aria-label="选择 Compose 配置文件" :disabled="saving || previewLoading || hostStale" @change="selectFile($event)"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
         </div>
         <div class="compose-toolbar-group compose-toolbar-tools" role="group" aria-label="编辑与辅助工具">
         <button class="btn-secondary" :disabled="!content" @click="toggleEditorMode"><Layout class="w-4 h-4" />{{ editorMode === 'code' ? '可视化' : '代码' }}</button>
-        <button class="btn-secondary" :disabled="!content" @click="validateSemantics"><ShieldCheck class="w-4 h-4" />语义校验</button>
+        <button class="btn-secondary" :disabled="!content || saving || previewLoading || loadingConfig || hostStale" @click="validateSemantics()"><ShieldCheck class="w-4 h-4" />语义校验</button>
         <select v-model="templateId" class="input w-40" title="常用服务模板" aria-label="插入常用服务模板" @change="insertTemplate">
           <option value="">插入模板...</option>
           <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.label }} · {{ template.description }}</option>
@@ -20,15 +20,21 @@
         </select>
         <button class="btn-secondary" :disabled="!content" @click="formatYaml"><AlignLeft class="w-4 h-4" />格式化</button>
         <button class="btn-secondary" title="把 docker run 命令转换为 Compose 片段" @click="showConverter = true"><ArrowRightLeft class="w-4 h-4" />转换</button>
-        <button class="btn-secondary" :disabled="!projectId" @click="loadBackups"><History class="w-4 h-4" />备份</button>
+        <button class="btn-secondary" :disabled="!projectId || hostStale" @click="loadBackups"><History class="w-4 h-4" />备份</button>
         </div>
         <div class="compose-toolbar-group compose-toolbar-primary" role="group" aria-label="保存配置">
-        <button class="btn-primary" :disabled="saving || previewLoading || !dirty" @click="save"><Save class="w-4 h-4" />{{ saving || previewLoading ? '校验中...' : '保存' }}</button>
+        <button class="btn-primary" :disabled="saving || previewLoading || loadingConfig || hostStale || !filePath || !dirty" @click="save"><Save class="w-4 h-4" />{{ saving ? '保存中…' : previewLoading ? '校验中…' : '保存' }}</button>
         </div>
       </div>
     </div>
     <div v-if="filePath" class="text-muted font-mono truncate">{{ filePath }}<span v-if="dirty" class="text-status-warn ml-2">● 未保存</span></div>
+    <div v-if="hostStale" class="alert-warning flex flex-wrap items-center gap-3" role="alert"><span class="flex-1">节点已切换，当前草稿属于原节点。请先复制保留需要的内容，再重新载入。</span><button class="btn-secondary" @click="showHostChangedDialog = true">重新载入当前节点</button></div>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p><p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p>
+    <div v-if="savedPendingApply && !dirty && !hostStale" class="compose-saved-next" role="status">
+      <CircleCheck :size="18" class="text-status-ok shrink-0" />
+      <div class="min-w-0 flex-1"><strong>配置文件已保存</strong><p>保存文件不会自动更新容器。返回项目后选择「应用配置」，再查看状态或日志确认结果。</p></div>
+      <RouterLink class="btn-secondary" :to="projectReturnLocation(route.query.returnTo, projectId)">返回项目<ArrowRight :size="15" /></RouterLink>
+    </div>
     <div v-if="semanticIssues.length" class="card p-3 space-y-1.5 border border-status-warn/40">
       <div class="flex items-center gap-2 text-xs font-semibold text-status-warn"><ShieldAlert class="w-4 h-4" />语义校验 {{ semanticIssues.filter((i) => i.level === 'error').length }} 个错误 · {{ semanticIssues.filter((i) => i.level === 'warn').length }} 个警告</div>
       <p v-for="(issue, index) in semanticIssues" :key="index" class="flex items-start gap-2 text-xs" :class="issue.level === 'error' ? 'text-status-error' : issue.level === 'warn' ? 'text-status-warn' : 'text-surface-400'">
@@ -38,8 +44,8 @@
     </div>
     <EmptyState v-if="!projectId" icon="FileCode2" title="请先选择一个已挂载的项目" description="选择项目后即可查看与编辑 Compose 配置" class="flex-1" />
     <div v-else-if="editorMode === 'code'" class="card relative flex-1 min-h-[420px] overflow-hidden ring-1 ring-black/10">
-      <Skeleton v-if="!editorReady" class="skeleton-workspace" rows="10" label="编辑器加载中" />
-      <div ref="editorEl" class="absolute inset-0" :class="{ invisible: !editorReady }"></div>
+      <Skeleton v-if="!editorReady || loadingConfig" class="skeleton-workspace" :rows="10" label="配置加载中" />
+      <div ref="editorEl" class="absolute inset-0" :class="{ invisible: !editorReady || loadingConfig }"></div>
     </div>
     <div v-else class="card flex-1 min-h-[420px] overflow-auto">
       <div class="p-4 space-y-3">
@@ -96,22 +102,23 @@
 
     <BaseModal :show="showPreview && !!changePreview" title="保存前变更预览" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl" body-class="p-3 space-y-3 max-h-[70vh] overflow-auto" @close="closePreview">
       <template v-if="changePreview">
-        <div v-if="changePreview.added.length" class="rounded-lg border border-status-ok/40 bg-status-ok/15 p-2.5">
+        <p class="text-sm leading-6 text-surface-300">仅保存配置，不会重启服务。以下对比当前文件的已保存版本；多文件合并、环境变量展开后的实际影响，请在部署前预演。</p>
+        <div v-if="changePreview.added.length" class="rounded-lg border border-status-ok/40 bg-status-ok/20 p-2.5">
           <div class="text-xs font-semibold text-status-ok">新增服务 {{ changePreview.added.length }}</div>
           <div class="mt-1 flex flex-wrap gap-1.5"><span v-for="item in changePreview.added" :key="item.service" class="count-badge text-status-ok">{{ item.service }}</span></div>
         </div>
-        <div v-if="changePreview.changed.length" class="rounded-lg border border-status-warn/40 bg-status-warn/15 p-2.5">
-          <div class="text-xs font-semibold text-status-warn">配置变更,容器将被重建 {{ changePreview.changed.length }}</div>
+        <div v-if="changePreview.changed.length" class="rounded-lg border border-status-warn/40 bg-status-warn/20 p-2.5">
+          <div class="text-xs font-semibold text-status-warn">配置变更的服务 {{ changePreview.changed.length }}</div>
           <div class="mt-1 space-y-1">
             <p v-for="item in changePreview.changed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-400">· {{ item.reasons.join(', ') }} · {{ item.container }}</span></p>
           </div>
         </div>
         <div v-if="changePreview.restarted.length" class="rounded-lg border border-sky-900/40 bg-sky-950/20 p-2.5">
-          <div class="text-xs font-semibold text-sky-300">运行中容器将重启 {{ changePreview.restarted.length }}</div>
+          <div class="text-xs font-semibold text-sky-300">应用配置时可能受影响的运行容器 {{ changePreview.restarted.length }}</div>
           <div class="mt-1 flex flex-wrap gap-1.5"><span v-for="item in changePreview.restarted" :key="item.service" class="count-badge text-sky-300">{{ item.service }}</span></div>
         </div>
         <div v-if="changePreview.removed.length" class="rounded-lg border border-status-error/40 bg-status-error/15 p-2.5">
-          <div class="text-xs font-semibold text-status-error">将被移除的服务 {{ changePreview.removed.length }}</div>
+          <div class="text-xs font-semibold text-status-error">从当前文件移除的服务 {{ changePreview.removed.length }}</div>
           <div class="mt-1 space-y-1"><p v-for="item in changePreview.removed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-400">· {{ item.container }} ({{ item.state }})</span></p></div>
         </div>
         <div v-if="changePreview.portConflicts?.length" class="rounded-lg border border-status-error/50 bg-status-error/15 p-2.5">
@@ -152,11 +159,11 @@
     <ConfirmDialog
       :show="showLeaveDialog"
       title="配置尚未保存"
-      message="配置尚未保存,确认离开?"
+      message="当前配置有未保存的修改。切换项目或文件会丢弃这些修改，确认继续?"
       tone="warning"
-      confirm-text="离开"
+      confirm-text="继续"
       @confirm="confirmLeave"
-      @cancel="showLeaveDialog = false; leaveCallback = null"
+      @cancel="cancelLeave"
     />
 
     <ConfirmDialog
@@ -172,13 +179,14 @@
 </template>
 
 <script setup>
-import { returnTarget } from '../lib/deep-links.js';
 import { useHostsStore } from '../stores/hosts.js';
+import { projectReturnLocation } from '../lib/project-navigation.js';
+import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
-import { AlignLeft, ArrowLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
+import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
+import { ArrowRight, CircleCheck, AlignLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
 import DockerRunConverter from '../components/DockerRunConverter.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import { diffLines } from '../lib/diff.js';
@@ -254,6 +262,11 @@ const route = useRoute(); const router = useRouter();
 const editorEl = ref(null); const editorReady = ref(false); const projects = ref([]); const projectsLoaded = ref(false); const projectId = ref('');
 const fileIndex = ref(0); const filePath = ref(''); const content = ref(''); const original = ref('');
 const saving = ref(false); const error = ref(''); const message = ref(''); const backups = ref([]);
+const loadingConfig = ref(false);
+const hostStale = ref(false);
+const savedPendingApply = ref(false);
+let configVersion = 0;
+let pendingSave = null;
 const showBackups = ref(false); const comparison = ref(null); const showConverter = ref(false);
 const diffOld = computed(() => comparison.value ? diffLines(comparison.value.content, content.value).filter((row) => row.type !== 'add') : []);
 const diffNew = computed(() => comparison.value ? diffLines(comparison.value.content, content.value).filter((row) => row.type !== 'remove') : []);
@@ -285,22 +298,28 @@ const hostsStore = useHostsStore();
 usePullRefresh(async () => {
   await reloadProjects();
   if (projectId.value) await load();
-}, { keepAlive: true, refreshOnActivate: true, enabled: () => !dirty.value });
+}, { keepAlive: true, refreshOnActivate: true, enabled: () => !dirty.value && !saving.value && !previewLoading.value && !hostStale.value });
 onMounted(async () => {
-  await Promise.all([reloadProjects(), loadTemplates()]);
-  projectsLoaded.value = true;
-  await nextTick(); createEditor(); await syncProjectFromRoute();
   window.addEventListener('beforeunload', beforeUnload);
   window.addEventListener('composeops:host-changed', onHostChanged);
+  try {
+    await Promise.all([reloadProjects(), loadTemplates()]);
+    projectsLoaded.value = true;
+    await nextTick(); createEditor(); await syncProjectFromRoute();
+  } catch (e) { error.value = e.message; }
 });
-async function reloadProjects() { projects.value = (await api.getProjects()).projects.filter((p) => p.editable); }
+async function reloadProjects() { projects.value = (await api.getProjects(true)).projects.filter((p) => p.editable); }
 function resetLoadedConfig() {
+  configVersion += 1;
+  loadingConfig.value = false;
+  pendingSave = null;
   fileIndex.value = 0;
   filePath.value = '';
   content.value = '';
   original.value = '';
   error.value = '';
   message.value = '';
+  savedPendingApply.value = false;
   semanticIssues.value = [];
   changePreview.value = null;
   showPreview.value = false;
@@ -308,7 +327,7 @@ function resetLoadedConfig() {
   editor?.setValue('');
 }
 async function syncProjectFromRoute() {
-  if (!projectsLoaded.value) return;
+  if (!projectsLoaded.value || route.name !== 'compose' || hostStale.value) return;
   let requestedId = String(route.query.projectId || '');
   if (!requestedId && !dirty.value) {
     let remembered = null;
@@ -343,7 +362,7 @@ async function syncProjectFromRoute() {
   resetLoadedConfig();
   await load();
 }
-watch(() => route.query.projectId, () => { void syncProjectFromRoute(); });
+watch(() => [route.name, route.query.projectId], () => { void syncProjectFromRoute(); });
 async function loadTemplates() {
   try {
     const [favoriteResult, builtinResult] = await Promise.all([
@@ -369,29 +388,62 @@ async function loadTemplates() {
   }
 }
 function onHostChanged() {
+  configVersion += 1;
+  hostStale.value = true;
+  loadingConfig.value = false;
+  closePreview();
+  showBackups.value = false;
+  comparison.value = null;
+  pendingBackup.value = null;
+  showRestoreDialog.value = false;
   if (dirty.value) {
     showHostChangedDialog.value = true;
     return;
   }
-  void reloadProjects().then(() => { if (projectId.value && !projects.value.some((p) => p.id === projectId.value)) { projectId.value = ''; selectProject(); } });
+  void confirmHostChanged();
 }
-function confirmHostChanged() {
+async function confirmHostChanged() {
   showHostChangedDialog.value = false;
-  void reloadProjects().then(() => { if (projectId.value && !projects.value.some((p) => p.id === projectId.value)) { projectId.value = ''; selectProject(); } });
+  try {
+    await reloadProjects();
+    resetLoadedConfig();
+    projectId.value = '';
+    hostStale.value = false;
+    await syncProjectFromRoute();
+  } catch (e) { error.value = e.message; }
 }
 onBeforeUnmount(() => {
   disposeEditor();
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('composeops:host-changed', onHostChanged);
+  cancelLeave();
 });
-onBeforeRouteLeave((to, from, next) => {
-  if (!dirty.value) { next(); return; }
-  leaveCallback.value = next;
-  showLeaveDialog.value = true;
+function allowConfigSwitch() {
+  if (saving.value || previewLoading.value) {
+    toast.info('正在校验或保存配置，请稍后再切换');
+    return false;
+  }
+  if (!dirty.value) return true;
+  // 新的导航必须先结束旧导航，取消时也必须显式 resolve(false)。
+  leaveCallback.value?.(false);
+  return new Promise((resolve) => {
+    leaveCallback.value = resolve;
+    showLeaveDialog.value = true;
+  });
+}
+onBeforeRouteLeave(() => allowConfigSwitch());
+onBeforeRouteUpdate((to, from) => {
+  if (to.query.projectId !== from.query.projectId) return allowConfigSwitch();
 });
 function confirmLeave() {
   showLeaveDialog.value = false;
-  if (leaveCallback.value) { leaveCallback.value(); leaveCallback.value = null; }
+  leaveCallback.value?.(true);
+  leaveCallback.value = null;
+}
+function cancelLeave() {
+  showLeaveDialog.value = false;
+  leaveCallback.value?.(false);
+  leaveCallback.value = null;
 }
 function beforeUnload(event) { if (dirty.value) { event.preventDefault(); event.returnValue = ''; } }
 function disposeEditor() {
@@ -627,78 +679,124 @@ function findLineByContent(yamlContent, searchText, startLine = 0) {
 }
 function selectionKey() { return `composeops:compose-project:${hostsStore.activeHostId || 'local'}`; }
 function rememberSelection() { try { sessionStorage.setItem(selectionKey(), projectId.value); } catch { /* 选择不依赖存储可用性 */ } }
-async function selectProject() {
-  rememberSelection();
-  resetLoadedConfig();
+async function selectProject(nextProjectId) {
+  if (hostStale.value || saving.value || previewLoading.value) return;
   const query = { ...route.query };
-  if (projectId.value) query.projectId = projectId.value; else delete query.projectId;
-  await router.replace({ query });
-  await nextTick(); createEditor();
-  if (projectId.value) await load();
-}
-async function load() {
-  const requestedProjectId = projectId.value;
-  const requestedFileIndex = fileIndex.value;
-  error.value = ''; message.value = ''; semanticIssues.value = []; showPreview.value = false; changePreview.value = null;
-  try {
-    const data = await api.getComposeFile(requestedProjectId, requestedFileIndex);
-    if (projectId.value !== requestedProjectId || fileIndex.value !== requestedFileIndex || String(route.query.projectId || '') !== requestedProjectId) return;
-    filePath.value = data.path; original.value = content.value = data.content; editor?.setValue(data.content);
-  } catch (e) {
-    if (projectId.value === requestedProjectId && fileIndex.value === requestedFileIndex) error.value = e.message;
+  if (nextProjectId) query.projectId = nextProjectId; else delete query.projectId;
+  // 路由守卫确认后才提交选择，取消时原项目和草稿均保持不变。
+  const key = selectionKey();
+  let previous;
+  try { previous = sessionStorage.getItem(key); sessionStorage.setItem(key, nextProjectId); } catch { /* Optional browser storage. */ }
+  const failure = await router.replace({ query });
+  if (failure) {
+    try { if (previous == null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, previous); } catch { /* Optional browser storage. */ }
   }
 }
-async function validateSemantics() {
-  error.value = '';
-  if (!content.value.trim()) { semanticIssues.value = []; error.value = 'Compose 内容不能为空'; return false; }
+async function selectFile(event) {
+  const nextIndex = Number(event.target.value);
+  event.target.value = String(fileIndex.value);
+  if (hostStale.value || nextIndex === fileIndex.value || !await allowConfigSwitch()) return;
+  fileIndex.value = nextIndex;
+  await load();
+}
+function captureDraft() {
+  return { projectId: projectId.value, fileIndex: fileIndex.value, content: content.value, original: original.value, version: configVersion };
+}
+function sameContext(snapshot) {
+  return snapshot && !hostStale.value && snapshot.version === configVersion
+    && snapshot.projectId === projectId.value && snapshot.fileIndex === fileIndex.value;
+}
+function sameDraft(snapshot) {
+  return sameContext(snapshot) && snapshot.content === content.value && snapshot.original === original.value;
+}
+async function load() {
+  if (!projectId.value || hostStale.value) return;
+  const requestedProjectId = projectId.value;
+  const requestedFileIndex = fileIndex.value;
+  const version = ++configVersion;
+  savedPendingApply.value = false;
+  loadingConfig.value = true;
+  error.value = ''; message.value = ''; semanticIssues.value = []; closePreview();
+  filePath.value = ''; original.value = ''; content.value = ''; editor?.setValue('');
   try {
-    const result = await api.validateCompose(projectId.value, fileIndex.value, content.value);
+    const data = await api.getComposeFile(requestedProjectId, requestedFileIndex);
+    if (version !== configVersion || hostStale.value) return;
+    filePath.value = data.path; original.value = content.value = data.content; editor?.setValue(data.content);
+  } catch (e) {
+    if (version === configVersion) error.value = e.message;
+  } finally {
+    if (version === configVersion) loadingConfig.value = false;
+  }
+}
+async function validateSemantics(snapshot = captureDraft()) {
+  if (!sameDraft(snapshot) || loadingConfig.value || !filePath.value) return false;
+  error.value = '';
+  if (!snapshot.content.trim()) { semanticIssues.value = []; error.value = 'Compose 内容不能为空'; return false; }
+  try {
+    const result = await api.validateCompose(snapshot.projectId, snapshot.fileIndex, snapshot.content);
+    if (!sameDraft(snapshot)) {
+      if (sameContext(snapshot)) error.value = '校验期间配置已变化，请重新校验并保存';
+      return false;
+    }
     semanticIssues.value = result.issues || [];
     if (semanticIssues.value.some((issue) => issue.level === 'error')) {
       error.value = '语义校验未通过,请修复错误后再保存';
       return false;
     }
     return true;
-  } catch (e) { error.value = e.message; }
+  } catch (e) { if (sameContext(snapshot)) error.value = e.message; }
   return false;
 }
 async function save() {
-  // 防止键盘快捷键或快速重复点击并发触发多次预览/保存。
-  if (saving.value || previewLoading.value || !projectId.value || !dirty.value) return;
-  error.value = '';
-  if (!await validateSemantics()) return;
-  // 保存前展示变更预览(影响哪些容器会被重建/重启)
+  if (saving.value || previewLoading.value || loadingConfig.value || hostStale.value || !filePath.value || !projectId.value || !dirty.value) return;
+  const snapshot = captureDraft();
+  // 在第一个 await 之前锁定，快捷键连按也只发出一轮校验和预览。
   previewLoading.value = true;
+  closePreview();
+  error.value = '';
   try {
-    changePreview.value = await api.previewCompose(projectId.value, fileIndex.value, content.value);
-    if (!changePreview.value) {
+    if (!await validateSemantics(snapshot)) return;
+    const preview = await api.previewCompose(snapshot.projectId, snapshot.content, snapshot.fileIndex);
+    if (!sameDraft(snapshot)) {
+      if (sameContext(snapshot)) error.value = '预览期间配置已变化，请重新保存';
+      return;
+    }
+    if (!preview) {
       error.value = '变更预览未返回结果,未保存,请重试';
       return;
     }
-    const preview = changePreview.value || {};
+    changePreview.value = preview;
+    pendingSave = snapshot;
     const impactful = (preview.added || []).length + (preview.changed || []).length + (preview.restarted || []).length + (preview.removed || []).length + (preview.portConflicts || []).length + Number(preview.portConflictsKnown === false || preview.changeAnalysisKnown === false);
-    if (impactful) { showPreview.value = true; return; } // 有影响,等用户确认
+    if (impactful) { showPreview.value = true; return; }
   } catch (e) {
-    changePreview.value = null;
-    error.value = `变更预览失败,未保存: ${e.message}`;
+    closePreview();
+    if (sameContext(snapshot)) error.value = `变更预览失败,未保存: ${e.message}`;
     return;
-  }
-  finally { previewLoading.value = false; }
-  await confirmSave(); // 无影响时直接保存
+  } finally { previewLoading.value = false; }
+  await confirmSave();
 }
 async function confirmSave() {
-  // 预览弹窗中的确认按钮可能在 Vue 完成禁用渲染前被快速连点。
-  if (saving.value || !projectId.value || !dirty.value) return;
+  if (saving.value || !pendingSave) return;
+  const snapshot = pendingSave;
+  if (!sameDraft(snapshot)) {
+    closePreview();
+    error.value = '配置或节点已变化，请重新校验并预览后保存';
+    return;
+  }
   saving.value = true; error.value = '';
   try {
-    await api.saveComposeFile(projectId.value, fileIndex.value, content.value, original.value);
-    original.value = content.value; message.value = `已校验并保存 · ${new Date().toLocaleTimeString()}`;
-    showPreview.value = false; changePreview.value = null; semanticIssues.value = [];
-  }
-  catch (e) { error.value = e.message; }
+    await api.saveComposeFile(snapshot.projectId, snapshot.fileIndex, snapshot.content, snapshot.original);
+    if (!sameContext(snapshot)) return;
+    // 请求期间仍可编辑；只有服务器确认的快照成为基线，后来输入的内容继续标记未保存。
+    original.value = snapshot.content;
+    savedPendingApply.value = true;
+    message.value = dirty.value ? '已保存提交的版本；后续修改仍未保存' : `已校验并保存文件 · ${new Date().toLocaleTimeString()}`;
+    closePreview(); semanticIssues.value = [];
+  } catch (e) { if (sameContext(snapshot)) error.value = e.message; }
   finally { saving.value = false; }
 }
-function closePreview() { showPreview.value = false; changePreview.value = null; }
+function closePreview() { showPreview.value = false; changePreview.value = null; pendingSave = null; }
 function insertTemplate() {
   // 处理"前往模板市场"选项
   if (templateId.value === '__goto_marketplace__') {
@@ -749,7 +847,15 @@ function insertTemplate() {
   message.value = `已插入${sourceLabel}模板「${template.label}」,请按需修改`;
 }
 function formatYaml() { try { const next = YAML.stringify(YAML.parse(content.value), { indent: 2, lineWidth: 0 }); editor.setValue(next); } catch (e) { error.value = e.message; } }
-async function loadBackups() { backups.value = (await api.getBackups(projectId.value)).backups || []; showBackups.value = true; }
+async function loadBackups() {
+  if (hostStale.value) return;
+  const snapshot = captureDraft();
+  try {
+    const data = await api.getBackups(snapshot.projectId);
+    if (!sameContext(snapshot)) return;
+    backups.value = data.backups || []; showBackups.value = true;
+  } catch (e) { if (sameContext(snapshot)) error.value = e.message; }
+}
 async function previewBackup(backup) { comparison.value = await api.getBackup(projectId.value, backup.id); }
 async function restore(backup) {
   pendingBackup.value = backup;
@@ -757,6 +863,7 @@ async function restore(backup) {
 }
 async function confirmRestore() {
   const backup = pendingBackup.value;
+  if (!backup || hostStale.value) return;
   showRestoreDialog.value = false;
   try {
     await api.restoreBackup(projectId.value, backup.id);
@@ -829,6 +936,10 @@ function deleteService(serviceName) {
 
 function saveServiceFromEditor({ name, service }) {
   if (isNewService.value) {
+    if (visualServices.value.some(item => item.name === name)) {
+      toast.error(`服务 ${name} 已存在，请使用其他名称`);
+      return;
+    }
     visualServices.value.push({ name, ...service });
     message.value = `已添加服务 ${name}`;
   } else {
@@ -896,4 +1007,10 @@ watch(content, () => {
     justify-content: flex-end;
   }
 }
+</style>
+
+<style scoped>
+.compose-saved-next { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border: 1px solid #34d39940; border-radius: 10px; padding: 14px 16px; background: #10b98108; font-size: 12px; }
+.compose-saved-next strong { font-weight: 600; }
+.compose-saved-next p { color: var(--color-surface-400); margin-top: 4px; }
 </style>

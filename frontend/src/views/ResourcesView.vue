@@ -1,361 +1,324 @@
 <template>
-  <div class="page-shell page-shell-workspace">
+  <div class="page-shell resource-workspace">
     <div class="page-header">
-      <div><h1 class="page-title">存储资源</h1><p class="page-subtitle">批量清理悬空镜像、孤儿卷与闲置网络</p></div>
-      <div class="page-actions">
-        <button v-if="selected.length > 0" class="btn-danger" :disabled="busy" @click="batchRemove"><Trash2 class="w-4 h-4" />批量删除 ({{ selected.length }})</button>
-        <button class="btn-secondary" :disabled="loading" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
-      </div>
+      <div><h1 class="page-title">存储资源</h1><p class="page-subtitle">看清资源引用，再按需清理。未被引用的数据卷也可能保存着重要数据。</p></div>
+      <button class="btn-secondary" :disabled="loading || busy" title="刷新清单" @click="refresh"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />刷新清单</button>
     </div>
 
-    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
-
-    <!-- 批量删除进度:逐项删除可能较慢,实时显示已完成数与当前目标 -->
-    <section v-if="busy && batchProgress.total > 0" class="section-panel py-3" role="status" aria-live="polite" aria-atomic="true">
-      <div class="flex items-center justify-between gap-3 text-sm">
-        <span class="text-surface-200">正在批量删除 <b class="text-sky-300 tabular-nums">{{ batchProgress.done }}</b> / {{ batchProgress.total }}</span>
-        <span class="min-w-0 flex-1 truncate text-right font-mono text-xs text-surface-400">{{ batchProgress.current }}</span>
-      </div>
-      <div class="progress mt-2"><span :style="{ width: Math.round(batchProgress.done / batchProgress.total * 100) + '%' }"></span></div>
-    </section>
-
-    <section v-if="data" class="grid gap-3 sm:grid-cols-3" aria-label="可清理资源概况">
-      <MetricTile title="悬空镜像" :value="data.counts.danglingImages" :icon="Layers" sub="没有标签的镜像" />
-      <MetricTile title="孤儿卷" :value="data.counts.orphanVolumes" :icon="Database" sub="未被容器引用" />
-      <MetricTile title="闲置网络" :value="data.counts.unusedNetworks" :icon="Network" sub="没有容器接入" />
-    </section>
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="tabs-segment" role="tablist" aria-label="资源类型" @keydown="handleTablistKeydown($event, switchTab)">
-        <button v-for="tab in tabs" :id="`resource-tab-${tab.key}`" :key="tab.key" :data-tab="tab.key" :class="{ active: activeTab === tab.key }" role="tab" :aria-selected="activeTab === tab.key" :tabindex="activeTab === tab.key ? 0 : -1" aria-controls="resource-panel" :disabled="busy" @click="switchTab(tab.key)">{{ tab.label }}<span v-if="tab.countKey !== '__none__'" class="count-badge">{{ data?.counts?.[tab.countKey] ?? 0 }}</span></button>
-      </div>
-      <div v-if="activeTab !== 'backups'" class="flex min-w-0 flex-wrap items-center gap-2">
-        <input v-model="searchQuery" type="search" class="input input-sm w-48 max-w-full" aria-label="搜索存储资源" placeholder="搜索名称或标签…" />
-        <select v-model="filterStatus" class="input input-sm w-32" aria-label="按资源状态筛选"><option value="">全部状态</option><option v-for="status in statusOptions" :key="status.value" :value="status.value">{{ status.label }}</option></select>
-      </div>
+    <div v-if="error" class="alert-error flex items-center justify-between gap-3" role="alert"><span>{{ error }}</span><button class="btn-secondary shrink-0" :disabled="busy || loading" @click="refresh">重试</button></div>
+    <div v-if="failures.length" class="alert-error" role="alert">
+      <p class="font-medium">{{ failures.length }} 项删除未完成，请核对原因后重试</p>
+      <ul class="mt-2 space-y-1 text-xs"><li v-for="item in failures" :key="item.key" class="break-all">{{ item.primary }}：{{ item.message }}</li></ul>
     </div>
 
-    <Skeleton v-if="loading && !data && activeTab !== 'backups'" variant="table" :rows="6" label="资源清单加载中" />
+    <div v-if="data" class="resource-overview" aria-label="资源概览">
+      <MetricTile v-for="card in summaryCards" :key="card.key" interactive :title="card.label" :icon="card.icon" :value="card.free" :sub="`项未引用 / 共 ${card.total} 项`" :aria-description="card.note" :active="activeTab === card.key && filterStatus === 'deletable'" :disabled="busy" :aria-pressed="activeTab === card.key && filterStatus === 'deletable'" @click="showCandidates(card.key)" />
+    </div>
 
-    <section id="resource-panel" role="tabpanel" :aria-labelledby="`resource-tab-${activeTab}`" v-if="activeTab === 'backups'" class="section-panel flex-1 mt-4">
-      <VolumeBackupPanel :initial-project-id="String(route.query.projectId || '')" />
+    <div class="tabs-segment" role="tablist" aria-label="存储资源类型" @keydown="handleTabKeydown">
+      <button v-for="tab in tabs" :id="`resources-tab-${tab.key}`" :key="tab.key" role="tab" :data-tab="tab.key" :aria-controls="`resources-panel-${tab.key}`" :aria-selected="activeTab === tab.key" :tabindex="activeTab === tab.key ? 0 : -1" :disabled="busy" :class="{ active: activeTab === tab.key }" @click="switchTab(tab.key)">
+        {{ tab.label }}<span v-if="tab.key !== 'backups' && data" class="count-badge">{{ data[tab.key]?.length || 0 }}</span>
+      </button>
+    </div>
+
+    <section :id="`resources-panel-${activeTab}`" role="tabpanel" :aria-labelledby="`resources-tab-${activeTab}`" :aria-busy="loading || busy" tabindex="0" class="resource-panel">
+      <VolumeBackupPanel v-if="activeTab === 'backups'" :initial-project-id="String(route.query.projectId || '')" />
+      <template v-else>
+        <div class="resource-toolbar">
+          <label class="resource-search"><Search class="h-4 w-4 shrink-0 text-surface-400" /><input v-model="searchQuery" :disabled="busy" type="search" aria-label="搜索存储资源" placeholder="搜索名称、ID 或驱动…" /></label>
+          <select v-model="filterStatus" class="input resource-filter" :disabled="busy" aria-label="按资源状态筛选">
+            <option value="">全部状态</option><option value="deletable">未被引用</option>
+            <option v-for="status in statusOptions" :key="status.value" :value="status.value">{{ status.label }}</option>
+          </select>
+          <button v-if="hasFilters" class="btn-ghost" :disabled="busy" @click="clearFilters"><X class="h-3.5 w-3.5" />重置筛选</button>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2 px-4 pb-3 text-xs text-surface-400">
+          <span>显示 {{ filteredRows.length }} / {{ rows.length }} 项<span v-if="deletableRows.length"> · {{ deletableRows.length }} 项未被引用</span></span>
+          <span v-if="data">{{ data.hostName || data.hostId }} · {{ formatTime(data.checkedAt) }} 更新</span>
+        </div>
+
+        <div v-if="selected.length || busy" class="resource-selection" role="status" aria-live="polite">
+          <div class="min-w-0 flex-1"><p class="text-sm font-medium">{{ busy ? `正在删除 ${batchProgress.done} / ${batchProgress.total}` : `已选择 ${selected.length} 项` }}<span v-if="hiddenSelected && !busy" class="ml-2 text-xs text-status-warn">含 {{ hiddenSelected }} 项被筛选隐藏</span></p><p v-if="busy" class="mt-1 truncate text-xs text-surface-400">{{ batchProgress.current }}</p></div>
+          <button class="btn-ghost" :disabled="busy" @click="selected = []">取消选择</button>
+          <button class="btn-danger" :disabled="busy" @click="prepareRemoval(selectedRows)"><Trash2 class="h-4 w-4" />批量删除 ({{ selected.length }})</button>
+          <div v-if="busy" class="progress w-full"><span :style="{ width: `${batchProgress.total ? batchProgress.done / batchProgress.total * 100 : 0}%` }"></span></div>
+        </div>
+
+        <Skeleton v-if="loading && !data" variant="table" :rows="5" label="资源清单加载中" />
+        <EmptyState v-else-if="!filteredRows.length" :icon="hasFilters ? 'Search' : 'Boxes'" :title="hasFilters ? '没有匹配的资源' : `当前节点还没有${tabLabel}`" :description="hasFilters ? '试试其他关键词，或重置筛选查看全部资源。' : '创建服务后，这里会显示资源及其引用状态。'" :action-label="hasFilters ? '重置筛选' : '前往服务'" @action="hasFilters ? clearFilters() : router.push('/services')" />
+        <div v-else class="resource-table-wrap">
+          <table class="data-table resource-table">
+            <caption class="sr-only">{{ tabLabel }}资源清单</caption>
+            <thead><tr>
+              <th class="w-12"><label class="resource-check"><input type="checkbox" class="checkbox" :checked="allSelected" :indeterminate="someSelected" :disabled="busy || !deletableRows.length" aria-label="全选可删除资源" @change="toggleAll" /></label></th>
+              <th>{{ activeTab === 'volumes' ? '卷名' : tabLabel }}</th><th>引用状态</th><th>创建时间</th><th>{{ activeTab === 'networks' ? '驱动' : '大小' }}</th><th class="text-right">操作</th>
+            </tr></thead>
+            <tbody><tr v-for="row in filteredRows" :key="row.key" :class="{ 'is-selected': selected.includes(row.key) }">
+              <td class="resource-select-cell"><label v-if="row.deletable" class="resource-check"><input type="checkbox" class="checkbox" :checked="selected.includes(row.key)" :disabled="busy" :aria-label="`选择资源 ${row.primary}`" @change="toggleRow(row.key)" /></label><LockKeyhole v-else class="mx-auto h-3.5 w-3.5 text-surface-400" aria-hidden="true" /></td>
+              <td class="resource-name"><button class="resource-detail-link" :aria-label="`查看资源 ${row.primary}`" @click="detailRow = row">{{ row.primary }}</button><p class="mt-1 truncate text-[11px] text-surface-400" :title="row.secondary">{{ row.secondary }}</p></td>
+              <td class="resource-status"><StatusBadge :status="row.statusValue" :label="row.statusLabel" /></td>
+              <td class="resource-created text-xs text-surface-400" data-label="创建">{{ formatTime(row.createdAt) }}</td>
+              <td class="resource-size whitespace-nowrap font-mono text-xs" :data-label="activeTab === 'networks' ? '驱动' : '大小'">{{ activeTab === 'networks' ? row.driver : formatBytes(row.size) }}</td>
+              <td class="resource-actions text-right"><button v-if="row.deletable" class="btn-ghost btn-sm text-status-error" :disabled="busy || selected.length > 0 || loading" :aria-label="`删除资源 ${row.primary}`" @click="prepareRemoval([row])"><Trash2 class="h-3.5 w-3.5" />删除</button><span v-else class="text-xs text-surface-400">{{ row.undeletableReason }}</span></td>
+            </tr></tbody>
+          </table>
+        </div>
+        <p v-if="activeTab === 'volumes'" class="border-t border-surface-800 px-4 py-3 text-xs leading-5 text-surface-400">“未引用”仅表示没有容器挂载。删除数据卷会同时删除其中的数据，请先在“卷备份”中核对备份。</p>
+        <p v-if="data?.warnings?.length" class="alert-info m-4">{{ data.warnings.join('；') }}</p>
+      </template>
     </section>
 
-    <section id="resource-panel" role="tabpanel" :aria-labelledby="`resource-tab-${activeTab}`" v-if="data && activeTab !== 'backups'" class="section-panel flex-1 mt-4">
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th class="w-12">
-                <input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleAll" class="checkbox" aria-label="全选可删除资源" />
-              </th>
-              <th v-if="activeTab === 'images'">镜像</th>
-              <th v-else-if="activeTab === 'volumes'">卷名</th>
-              <th v-else>网络</th>
-              <th>状态</th>
-              <th>创建时间</th>
-              <th class="text-right">大小</th>
-              <th class="text-right min-w-24">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="!filteredRows.length">
-              <td :colspan="7" class="text-center text-muted py-6">
-                <EmptyState compact icon="CircleCheckBig" :title="searchQuery || filterStatus ? '未找到匹配资源' : `当前没有${tabLabel}可清理`" :description="searchQuery || filterStatus ? '清除筛选，查看当前节点的所有资源。' : '使用中的资源会受到保护，可刷新列表检查最新状态。'" :action-label="searchQuery || filterStatus ? '清除筛选' : '刷新列表'" @action="searchQuery || filterStatus ? (searchQuery = '', filterStatus = '') : refresh()" />
-              </td>
-            </tr>
-            <tr v-for="row in filteredRows" :key="row.key" class="hover:bg-surface-800/25">
-              <td class="text-center">
-                <input v-if="row.deletable" type="checkbox" :checked="selected.includes(row.key)" :aria-label="`选择资源 ${row.primary}`" @change="toggleRow(row.key)" class="checkbox" />
-              </td>
-              <td class="max-w-xs truncate font-mono tabular-nums" :title="row.title">{{ row.primary }}<span v-if="row.note" class="ml-2 text-muted text-xs">{{ row.note }}</span></td>
-              <td><StatusBadge :status="row.statusValue" :label="row.statusLabel" /></td>
-              <td class="text-muted text-sm">{{ row.createdAt ? formatTime(row.createdAt) : '—' }}</td>
-              <td class="text-right font-mono tabular-nums whitespace-nowrap">{{ formatBytes(row.size) }}</td>
-              <td class="text-right">
-                <button v-if="row.deletable" class="btn-secondary btn-sm" :disabled="busy" @click="confirmRemove(row)">删除</button>
-                <span v-else class="text-muted text-xs">{{ row.undeletableReason }}</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-    <ConfirmDialog :show="bulkDeleteOpen" title="批量删除资源" :message="`确认批量删除 ${selected.length} 项资源?删除后无法恢复。`" tone="danger" confirm-text="批量删除" @confirm="performBatchRemove" @cancel="bulkDeleteOpen = false" />
-    <ConfirmDialog :show="!!removeTarget" title="删除资源" :message="`确认删除 ${removeTarget?.primary || ''}?删除后无法恢复。`" tone="danger" confirm-text="删除" @confirm="performRemove" @cancel="removeTarget = null" />
+    <ConfirmDialog :show="!!removalPlan" :title="removalPlan?.rows.length > 1 ? '批量删除资源' : '删除资源'" :message="`确认从 ${removalPlan?.hostName || ''} 删除以下 ${removalPlan?.rows.length || 0} 项资源？删除后无法恢复。`" tone="danger" confirm-text="确认删除" size-class="sm:max-w-xl" @confirm="performRemoval" @cancel="removalPlan = null">
+      <p v-if="removalPlan?.kind === 'volume'" class="text-xs text-status-warn">这会永久删除卷中的数据。未被引用不代表数据不再需要。</p>
+      <ul class="my-3 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-surface-700 p-3" aria-label="待删除资源">
+        <li v-for="row in removalPlan?.rows || []" :key="row.key"><p class="break-all font-mono text-xs text-surface-200">{{ row.primary }}</p><p v-if="row.id !== row.primary" class="mt-0.5 break-all font-mono text-[10px] text-surface-400">{{ row.id }}</p></li>
+      </ul>
+    </ConfirmDialog>
+    <BaseModal :show="!!detailRow" title="资源详情" @close="detailRow = null">
+      <dl v-if="detailRow" class="space-y-4 text-sm">
+        <div v-for="[label, value] in detailFields" :key="label"><dt class="mb-1 text-xs text-surface-400">{{ label }}</dt><dd class="whitespace-pre-wrap break-all font-mono text-surface-200">{{ value }}</dd></div>
+      </dl>
+    </BaseModal>
   </div>
 </template>
 
 <script setup>
 import MetricTile from '../components/common/MetricTile.vue';
-import EmptyState from '../components/common/EmptyState.vue';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import { useToastStore } from '../stores/toast.js';
-import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
-import { useRoute } from 'vue-router';
-const route = useRoute();
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { Boxes, Database, LockKeyhole, Network, RefreshCw, Search, Trash2, X } from 'lucide-vue-next';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { RefreshCw, Trash2, Layers, Database, Network } from 'lucide-vue-next';
+import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 import { api } from '../api/client.js';
 import Skeleton from '../components/common/Skeleton.vue';
+import EmptyState from '../components/common/EmptyState.vue';
 import VolumeBackupPanel from '../components/resources/VolumeBackupPanel.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import BaseModal from '../components/common/BaseModal.vue';
 
+const route = useRoute();
+const router = useRouter();
+const tabs = [{ key: 'images', label: '镜像' }, { key: 'volumes', label: '卷' }, { key: 'networks', label: '网络' }, { key: 'backups', label: '卷备份' }];
+const validTab = (value) => tabs.some(tab => tab.key === value) ? value : 'images';
+const activeTab = ref(validTab(route.query.tab));
 const data = ref(null);
 const loading = ref(false);
 const error = ref('');
 const toast = useToastStore();
-const activeTab = ref(['images', 'volumes', 'networks', 'backups'].includes(route.query.tab) ? route.query.tab : 'images');
-watch(() => route.query.tab, value => { if (['images', 'volumes', 'networks', 'backups'].includes(value)) switchTab(value); });
+const failures = ref([]);
 const busy = ref(false);
 const selected = ref([]);
-const batchProgress = ref({ total: 0, done: 0, current: '' });
 const searchQuery = ref('');
 const filterStatus = ref('');
-const bulkDeleteOpen = ref(false);
-const removeTarget = ref(null);
-
-const tabs = [
-  { key: 'images', label: '镜像', countKey: 'images' },
-  { key: 'volumes', label: '卷', countKey: 'volumes' },
-  { key: 'networks', label: '网络', countKey: 'networks' },
-  { key: 'backups', label: '卷备份', countKey: '__none__' },
-];
-const tabLabel = computed(() => tabs.find((t) => t.key === activeTab.value)?.label || '');
-
-const statusOptions = computed(() => {
-  if (activeTab.value === 'images') {
-    return [
-      { value: 'dangling', label: '悬空' },
-      { value: 'inUse', label: '使用中' },
-      { value: 'unused', label: '未使用' },
-    ];
-  }
-  if (activeTab.value === 'volumes') {
-    return [
-      { value: 'orphan', label: '孤儿' },
-      { value: 'referenced', label: '被引用' },
-    ];
-  }
-  return [
-    { value: 'builtin', label: '内置' },
-    { value: 'unused', label: '闲置' },
-    { value: 'attached', label: '已接入' },
-  ];
-});
-
-const images = computed(() => data.value?.images || []);
-const volumes = computed(() => data.value?.volumes || []);
-const networks = computed(() => data.value?.networks || []);
-
+const removalPlan = ref(null);
+const detailRow = ref(null);
+const batchProgress = ref({ total: 0, done: 0, current: '' });
+let requestGeneration = 0;
+let contextGeneration = 0;
+let active = true;
+const tabLabel = computed(() => tabs.find(tab => tab.key === activeTab.value)?.label || '');
+const hasFilters = computed(() => !!(searchQuery.value || filterStatus.value));
+const summaryCards = computed(() => [
+  { key: 'images', label: '镜像', icon: Boxes, total: data.value?.images.length || 0, free: data.value?.images.filter(i => !i.inUse).length || 0, note: '核对标签与版本，清理不再需要的镜像' },
+  { key: 'volumes', label: '数据卷', icon: Database, total: data.value?.volumes.length || 0, free: data.value?.volumes.filter(v => v.orphan).length || 0, note: '保留数据有价值的卷，删除前先备份' },
+  { key: 'networks', label: '网络', icon: Network, total: data.value?.networks.length || 0, free: data.value?.networks.filter(n => n.unused).length || 0, note: '检查容器引用，保留 Docker 内置网络' },
+]);
+const statusOptions = computed(() => activeTab.value === 'images' ? [{ value: 'dangling', label: '悬空镜像' }, { value: 'inUse', label: '使用中' }, { value: 'unused', label: '未使用（有标签）' }] : activeTab.value === 'volumes' ? [{ value: 'referenced', label: '被引用' }] : [{ value: 'builtin', label: 'Docker 内置' }, { value: 'attached', label: '被引用' }]);
 const rows = computed(() => {
-  if (activeTab.value === 'images') {
-    return images.value.map((img) => ({
-      key: `image:${img.id}`,
-      primary: img.tags[0] || (img.id || '').slice(0, 12),
-      title: img.tags.join('\n') || img.id,
-      note: img.tags.length > 1 ? `+${img.tags.length - 1}` : '',
-      tone: img.dangling ? 'amber' : img.inUse ? 'sky' : 'green',
-
-      statusLabel: img.dangling ? '悬空' : img.inUse ? '使用中' : '未使用',
-      statusValue: img.dangling ? 'dangling' : img.inUse ? 'inUse' : 'unused',
-      size: img.size,
-      createdAt: img.created,
-      deletable: !img.inUse,
-      undeletableReason: img.inUse ? '被容器引用' : '',
-    })).sort((a, b) => (a.deletable === b.deletable ? b.size - a.size : a.deletable ? -1 : 1));
-  }
-  if (activeTab.value === 'volumes') {
-    return volumes.value.map((vol) => ({
-      key: `volume:${vol.name}`,
-      primary: vol.name,
-      title: `driver=${vol.driver} scope=${vol.scope}\nmountpoint=${vol.mountpoint}`,
-      tone: vol.orphan ? 'amber' : 'green',
-
-      statusLabel: vol.orphan ? '孤儿' : `被引用 ×${vol.refCount}`,
-      statusValue: vol.orphan ? 'orphan' : 'referenced',
-      size: vol.size,
-      createdAt: vol.createdAt,
-      deletable: vol.orphan,
-      undeletableReason: '被容器挂载',
-    })).sort((a, b) => (a.deletable === b.deletable ? b.size - a.size : a.deletable ? -1 : 1));
-  }
-  return networks.value.map((net) => ({
-    key: `network:${net.id}`,
-    primary: net.name,
-    title: `driver=${net.driver} scope=${net.scope}${net.internal ? ' internal' : ''}`,
-    tone: net.unused ? 'amber' : net.builtin ? 'slate' : 'green',
-
-    statusLabel: net.builtin ? '内置' : net.unused ? '闲置' : `接入 ${net.attached}`,
-    statusValue: net.builtin ? 'builtin' : net.unused ? 'unused' : 'attached',
-    size: 0,
-    createdAt: net.createdAt,
-    deletable: net.unused,
-    undeletableReason: net.builtin ? 'Docker 内置' : `被 ${net.attached} 个容器使用`,
-  })).sort((a, b) => Number(a.deletable) - Number(b.deletable));
+  let result;
+  if (activeTab.value === 'images') result = (data.value?.images || []).map(img => ({
+    key: `image:${img.id}`, id: img.id, primary: img.tags[0] || img.id.replace(/^sha256:/, '').slice(0, 12), secondary: img.tags.length > 1 ? `另有 ${img.tags.length - 1} 个标签 · ${img.id}` : img.id,
+    extra: img.tags.join('\n'), statusLabel: img.inUse ? `被 ${img.containers} 个容器引用` : img.dangling ? '悬空' : '未使用', statusValue: img.inUse ? 'inUse' : img.dangling ? 'dangling' : 'unused', size: img.size, createdAt: img.created, deletable: !img.inUse, undeletableReason: '被容器引用',
+  }));
+  else if (activeTab.value === 'volumes') result = (data.value?.volumes || []).map(vol => ({
+    key: `volume:${vol.name}`, id: vol.name, primary: vol.name, secondary: `${vol.driver} · ${vol.scope}`, extra: vol.mountpoint, statusLabel: vol.orphan ? '未引用' : `被 ${vol.refCount} 个容器引用`, statusValue: vol.orphan ? 'orphan' : 'referenced', size: vol.size, createdAt: vol.createdAt, deletable: vol.orphan, undeletableReason: '被容器挂载',
+  }));
+  else result = (data.value?.networks || []).map(net => ({
+    key: `network:${net.id}`, id: net.id, primary: net.name, secondary: `${net.driver} · ${net.scope}${net.internal ? ' · 内部网络' : ''}`, extra: net.id, driver: net.driver, statusLabel: net.builtin ? 'Docker 内置' : net.unused ? '闲置' : `被 ${net.attached} 个容器引用`, statusValue: net.builtin ? 'builtin' : net.unused ? 'unused' : 'attached', size: null, createdAt: net.createdAt, deletable: net.unused, undeletableReason: net.builtin ? '内置网络' : '被容器引用',
+  }));
+  return result.sort((a, b) => Number(b.deletable) - Number(a.deletable) || (b.size || 0) - (a.size || 0) || a.primary.localeCompare(b.primary));
 });
-
-const filteredRows = computed(() => {
-  let result = rows.value;
-  
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase();
-    result = result.filter(row => 
-      row.primary.toLowerCase().includes(query) || 
-      row.title.toLowerCase().includes(query)
-    );
+const filteredRows = computed(() => rows.value.filter(row => {
+  const query = searchQuery.value.trim().toLowerCase();
+  return (!query || `${row.primary} ${row.id} ${row.secondary} ${row.extra}`.toLowerCase().includes(query)) && (!filterStatus.value || (filterStatus.value === 'deletable' ? row.deletable : row.statusValue === filterStatus.value));
+}));
+const deletableRows = computed(() => filteredRows.value.filter(row => row.deletable));
+const selectedRows = computed(() => rows.value.filter(row => row.deletable && selected.value.includes(row.key)));
+const visibleSelected = computed(() => deletableRows.value.filter(row => selected.value.includes(row.key)).length);
+const allSelected = computed(() => deletableRows.value.length > 0 && visibleSelected.value === deletableRows.value.length);
+const someSelected = computed(() => visibleSelected.value > 0 && !allSelected.value);
+const hiddenSelected = computed(() => selectedRows.value.length - visibleSelected.value);
+const detailFields = computed(() => detailRow.value ? [['名称', detailRow.value.primary], ['资源 ID', detailRow.value.id], ['引用状态', detailRow.value.statusLabel], ['创建时间', formatTime(detailRow.value.createdAt)], ['标签 / 驱动 / 路径', detailRow.value.extra || detailRow.value.secondary]] : []);
+function clearFilters() { searchQuery.value = ''; filterStatus.value = ''; }
+function applyTab(key) {
+  if (key === activeTab.value) return;
+  if (busy.value) {
+    invalidateContext();
+    toast.info('资源类型已切换，剩余删除已停止；已发出的请求会继续完成。');
   }
-  
-  if (filterStatus.value) {
-    result = result.filter(row => row.statusValue === filterStatus.value);
-  }
-  
-  return result;
-});
-
-const deletableRows = computed(() => filteredRows.value.filter(r => r.deletable));
-const allSelected = computed(() => deletableRows.value.length > 0 && selected.value.length === deletableRows.value.length);
-const someSelected = computed(() => selected.value.length > 0 && selected.value.length < deletableRows.value.length);
-
-function switchTab(key) {
-  if (busy.value) return;
   activeTab.value = key;
   selected.value = [];
-  searchQuery.value = '';
-  filterStatus.value = '';
+  removalPlan.value = null;
+  detailRow.value = null;
+  clearFilters();
 }
-
+function switchTab(key) {
+  if (busy.value || key === activeTab.value) return;
+  applyTab(key);
+  void router.push({ query: { ...route.query, tab: key } });
+}
+function showCandidates(key) { switchTab(key); filterStatus.value = 'deletable'; }
+function handleTabKeydown(event) { if (!busy.value) handleTablistKeydown(event, switchTab); }
 function toggleAll() {
-  if (allSelected.value) {
-    selected.value = [];
-  } else {
-    selected.value = deletableRows.value.map(r => r.key);
-  }
+  if (busy.value) return;
+  const visibleKeys = new Set(deletableRows.value.map(row => row.key));
+  selected.value = allSelected.value ? selected.value.filter(key => !visibleKeys.has(key)) : [...new Set([...selected.value, ...visibleKeys])];
 }
-
 function toggleRow(key) {
-  const idx = selected.value.indexOf(key);
-  if (idx > -1) {
-    selected.value.splice(idx, 1);
-  } else {
-    selected.value.push(key);
-  }
+  if (!busy.value) selected.value = selected.value.includes(key) ? selected.value.filter(id => id !== key) : [...selected.value, key];
 }
-
-async function batchRemove() {
-  if (selected.value.length === 0) return;
-  bulkDeleteOpen.value = true;
+function prepareRemoval(targets) {
+  if (busy.value || loading.value || !data.value?.hostId || !targets.length) return;
+  removalPlan.value = { kind: { images: 'image', volumes: 'volume', networks: 'network' }[activeTab.value], hostId: data.value.hostId, hostName: data.value.hostName || data.value.hostId, generation: contextGeneration, rows: targets.filter(row => row.deletable).map(row => ({ ...row })) };
 }
-
-async function performBatchRemove() {
-  bulkDeleteOpen.value = false;
+async function performRemoval() {
+  const plan = removalPlan.value;
+  removalPlan.value = null;
+  if (!plan || busy.value || plan.generation !== contextGeneration) return;
   busy.value = true;
-  const kinds = { images: 'image', volumes: 'volume', networks: 'network' };
-  const errors = [];
-  let successCount = 0;
-  batchProgress.value = { total: selected.value.length, done: 0, current: '' };
-
-  for (const key of selected.value) {
-    const row = rows.value.find(r => r.key === key);
-    if (!row) continue;
-    batchProgress.value = { ...batchProgress.value, current: row.primary };
-
-    try {
-      const id = activeTab.value === 'images' ? rowRemaining(row) : row.primary;
-      await api.removeStorageResource(kinds[activeTab.value], id);
-      successCount++;
-    } catch (e) {
-      errors.push(`${row.primary}: ${e.message}`);
+  failures.value = [];
+  let succeeded = 0;
+  const failed = [];
+  batchProgress.value = { total: plan.rows.length, done: 0, current: '' };
+  try {
+    for (const row of plan.rows) {
+      if (!active || contextGeneration !== plan.generation) break;
+      batchProgress.value.current = row.primary;
+      try {
+        await api.removeStorageResource(plan.kind, row.id, plan.hostId);
+        succeeded++;
+        selected.value = selected.value.filter(key => key !== row.key);
+      } catch (e) {
+        if (!active || contextGeneration !== plan.generation) break;
+        if (e.code === 'resource_host_changed') {
+          onHostChanged();
+          toast.info(`已在 ${plan.hostName} 删除 ${succeeded} 项资源。节点已切换，剩余删除已停止，请重新选择。`);
+          break;
+        }
+        failed.push({ ...row, message: e.message });
+      }
+      batchProgress.value.done++;
     }
-    batchProgress.value = { ...batchProgress.value, done: batchProgress.value.done + 1 };
-  }
-
-  busy.value = false;
-  batchProgress.value = { total: 0, done: 0, current: '' };
-  selected.value = [];
-
-  // 刷新列表后给出批量结果摘要
-  await refresh();
-
-  if (errors.length > 0) {
-    error.value = `成功 ${successCount} 项,失败 ${errors.length} 项:\n${errors.join('\n')}`;
-  } else {
-    toast.success(`已成功删除 ${successCount} 项`);
-    error.value = '';
-  }
+    if (active && contextGeneration === plan.generation) {
+      selected.value = failed.map(row => row.key);
+      await refresh();
+      if (active && contextGeneration === plan.generation) {
+        failures.value = failed;
+        toast.info(`已删除 ${succeeded} 项资源${failed.length ? `，${failed.length} 项未完成` : ''}（${plan.hostName}）。`);
+      }
+    }
+  } finally { busy.value = false; }
 }
-
 async function refresh() {
-  if (loading.value) return;
+  if (!active) return;
+  const generation = ++requestGeneration;
   loading.value = true;
+  error.value = '';
   try {
-    data.value = await api.getStorageResources(true);
-    error.value = '';
-  } catch (e) {
-    error.value = e.message;
-  } finally {
-    loading.value = false;
-  }
+    const result = await api.getStorageResources(true);
+    if (!active || generation !== requestGeneration) return;
+    // Another tab/session may switch the shared active host without a local event.
+    // A matching resource name/ID on the new host must never inherit old intent.
+    if (data.value?.hostId && data.value.hostId !== result.hostId) {
+      invalidateContext();
+      failures.value = [];
+      toast.info('节点已切换，已清空原节点的选择和确认，请重新选择资源。');
+    }
+    data.value = result;
+    const available = new Set(rows.value.filter(row => row.deletable).map(row => row.key));
+    selected.value = selected.value.filter(key => available.has(key));
+  } catch (e) { if (active && generation === requestGeneration) error.value = e.message; }
+  finally { if (generation === requestGeneration) loading.value = false; }
 }
-
-async function confirmRemove(row) {
-  removeTarget.value = row;
+function invalidateContext() {
+  requestGeneration++;
+  contextGeneration++;
+  loading.value = false;
+  removalPlan.value = null;
+  detailRow.value = null;
+  selected.value = [];
 }
-
-async function performRemove() {
-  const row = removeTarget.value;
-  removeTarget.value = null;
-  if (row) await remove(row);
+function onHostChanged() {
+  invalidateContext();
+  data.value = null;
+  failures.value = [];
+  if (busy.value) toast.info('节点已切换，剩余删除已停止；已发出的请求会在原节点完成。');
+  if (active) void refresh();
 }
-
-async function remove(row) {
-  busy.value = true;
-  const kinds = { images: 'image', volumes: 'volume', networks: 'network' };
-  try {
-    await api.removeStorageResource(kinds[activeTab.value], row.primary ? (activeTab.value === 'images' ? rowRemaining(row) : row.primary) : '');
-    toast.success(`已删除 ${row.primary}`);
-  } catch (e) {
-    toast.error(e);
-  } finally {
-    busy.value = false;
-    await refresh();
-  }
-}
-
-/** 镜像删除键是 Id 而非显示名;从 key 还原。 */
-function rowRemaining(row) {
-  return row.key.split(':').slice(1).join(':');
-}
-
-function formatBytes(value = 0) {
-  if (!value) return '—';
+function formatBytes(value) {
+  if (value == null || value < 0) return '未统计';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let n = value, i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
 }
-
 function formatTime(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  if (!value || Number.isNaN(new Date(value).getTime())) return '—';
+  return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
-
-watch(activeTab, () => {
-  selected.value = [];
-});
-
+watch(() => route.query.tab, value => { if (active) applyTab(validTab(value)); });
 usePullRefresh(refresh, { keepAlive: true });
-onMounted(refresh);
+onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void refresh(); });
 let activatedOnce = false;
-onActivated(() => { if (activatedOnce) void refresh(); activatedOnce = true; });
-
-function onHostChanged() {
-  data.value = null;
-  selected.value = [];
-  void refresh();
-}
-onMounted(() => window.addEventListener('composeops:host-changed', onHostChanged));
-onBeforeUnmount(() => window.removeEventListener('composeops:host-changed', onHostChanged));
+onActivated(() => { active = true; applyTab(validTab(route.query.tab)); if (activatedOnce) void refresh(); activatedOnce = true; });
+onDeactivated(() => { active = false; invalidateContext(); if (busy.value) toast.info('已离开资源页，剩余删除已停止；已发出的请求会继续完成。'); });
+onBeforeUnmount(() => { active = false; invalidateContext(); window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>
+
+<style scoped>
+.resource-workspace { gap: 1.25rem; }
+.resource-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.resource-panel { min-width: 0; border: 1px solid var(--color-surface-800); border-radius: .75rem; background: var(--color-surface-900); overflow: clip; }
+.resource-toolbar { display: flex; flex-wrap: wrap; gap: .75rem; padding: 1rem; }
+.resource-search { display: flex; align-items: center; gap: .5rem; flex: 1 1 14rem; min-width: 0; padding: .625rem .75rem; border: 1px solid var(--color-surface-700); border-radius: .5rem; background: var(--color-surface-950); }
+.resource-search:focus-within { outline: 2px solid var(--color-emerald-500); outline-offset: 2px; }
+.resource-search input { min-width: 0; width: 100%; background: transparent; outline: none; font-size: .875rem; }
+.resource-filter { width: auto; min-width: 10rem; }
+.resource-selection { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; background: color-mix(in srgb, var(--color-emerald-500) 10%, transparent); border-block: 1px solid color-mix(in srgb, var(--color-emerald-500) 25%, transparent); }
+.resource-table-wrap { overflow-x: auto; }
+.resource-table { width: 100%; }
+.resource-table td { padding-block: .75rem; }
+.resource-table tr.is-selected { background: color-mix(in srgb, var(--color-emerald-500) 5%, transparent); }
+.resource-name { max-width: 23rem; }
+.resource-detail-link { text-align: left; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: .8125rem; color: var(--color-surface-200); }
+.resource-detail-link:hover { color: var(--color-emerald-300); text-decoration: underline; }
+.resource-check { display: flex; min-width: 36px; min-height: 36px; align-items: center; justify-content: center; cursor: pointer; }
+@media (max-width: 640px) {
+  .resource-workspace { gap: .75rem; }
+  .resource-workspace > .page-header { position: relative; padding-right: 3.25rem; }
+  .resource-workspace > .page-header > button { position: absolute; right: 0; top: 0; width: 44px; height: 44px; padding: 0; font-size: 0; gap: 0; }
+  .resource-overview { gap: .5rem; }
+  .resource-overview :deep(.metric-tile) { padding: .75rem; }
+  .resource-overview :deep(.metric-icon) { display: none; }
+  .resource-toolbar { gap: .5rem; }
+  .resource-filter { flex: 1; }
+  .resource-selection > div:first-child { flex-basis: 100%; }
+  .resource-table, .resource-table tbody { display: block; min-width: 0; }
+  .resource-table thead { display: block; }
+  .resource-table thead tr { display: flex; align-items: center; padding-left: .5rem; }
+  .resource-table thead th:not(:first-child) { display: none; }
+  .resource-table thead tr::after { content: '选择当前筛选内的可删除资源'; font-size: .75rem; color: var(--color-surface-500); }
+  .resource-table tbody tr { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: .5rem; padding: 1rem .75rem; border-top: 1px solid var(--color-surface-800); }
+  .resource-table tbody td { height: auto; padding: 0; border: 0; }
+  .resource-select-cell { grid-row: 1; }
+  .resource-name { grid-column: 2 / 4; max-width: none; }
+  .resource-status { grid-column: 2; grid-row: 2; }
+  .resource-size { grid-column: 3; grid-row: 2; text-align: right; }
+  .resource-created { grid-column: 2; grid-row: 3; }
+  .resource-created::before { content: attr(data-label) ' '; }
+  .resource-actions { grid-column: 3; grid-row: 3; }
+  .resource-actions button, .resource-check { min-height: 44px; }
+}
+</style>

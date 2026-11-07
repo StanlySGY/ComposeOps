@@ -6,11 +6,11 @@ test('折叠服务卡快捷入口与返回来源连续可用', async ({ page }) 
   await expect(actions).toBeVisible();
   await actions.getByRole('link', { name: '聚合日志' }).click();
   await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await page.getByRole('button', { name: '返回服务总览' }).click();
   await expect(actions).toBeVisible();
   await actions.getByRole('link', { name: 'AI 诊断' }).click();
-  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
-  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await expect(page.getByRole('button', { name: '返回服务总览' })).toBeVisible();
+  await page.getByRole('button', { name: '返回服务总览' }).click();
   await expect(actions).toBeVisible();
 });
 

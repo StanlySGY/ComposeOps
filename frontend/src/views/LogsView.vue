@@ -1,32 +1,33 @@
 <template>
-  <div class="page-shell page-shell-workspace logs-view">
+  <div class="page-shell page-shell-workspace logs-view" :class="{ 'show-options': optionsOpen || !projectId }">
+    <ProjectContextNav :project="selectedProject" :container-id="containerId" />
     <div class="page-header">
       <div class="flex min-w-0 items-center gap-3">
-        <button v-if="returnTarget" class="btn-secondary shrink-0" @click="goBackToSource"><ArrowLeft class="h-4 w-4" />{{ returnTarget.label }}</button>
-        <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
+        <div class="min-w-0"><h1 class="page-title">实时日志</h1><p class="page-subtitle log-subtitle">{{ projectName ? `${projectName}${activeContainerName ? ` / ${activeContainerName}` : ' / 聚合日志'}` : '多容器聚合、着色分流与即时过滤' }}</p></div>
       </div>
-      <div class="page-actions logs-toolbar-actions">
+      <button v-if="projectId" class="btn-secondary logs-options-toggle" :aria-expanded="optionsOpen" aria-controls="log-toolbar" @click="optionsOpen = !optionsOpen"><SlidersHorizontal :size="15" />{{ optionsOpen ? '收起选项' : '日志选项' }}</button>
+      <div id="log-toolbar" class="page-actions logs-toolbar-actions">
         <div class="logs-toolbar-group" role="group" aria-label="日志来源与过滤">
-        <select v-model="projectId" class="input" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button class="btn-secondary" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
-        <select v-model="levelFilter" class="input w-28" title="级别过滤" aria-label="按日志级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
-        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" aria-label="搜索和过滤实时日志" placeholder="level:error | container:api" /></label>
-        <button class="icon-btn" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
+        <select v-model="projectId" class="input log-option" aria-label="选择日志项目" @change="onProjectChange"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <button class="btn-secondary log-option" :class="{ 'btn-primary': aggregateMode }" :aria-pressed="aggregateMode" :disabled="!projectId" :title="aggregateMode ? '当前为聚合模式,点击切换为单容器' : '聚合所有选中容器'" @click="toggleAggregate"><Layers class="w-4 h-4" />{{ aggregateMode ? '聚合中' : '聚合' }}</button>
+        <select v-model="levelFilter" class="input w-28 log-option" title="级别过滤" aria-label="按日志级别过滤"><option value="">全部</option><option value="error">ERROR{{ levelCounts.error ? ` (${levelCounts.error})` : '' }}</option><option value="warn">WARN{{ levelCounts.warn ? ` (${levelCounts.warn})` : '' }}</option></select>
+        <label class="search-field w-52" title="字段查询:level:error / container:api / stream:stderr / after:09:30 / “短语” / /正则/ / !取反;空格=与,| = 或"><Search class="h-4 w-4" /><input ref="searchEl" v-model="search" aria-label="搜索和过滤实时日志" placeholder="搜索日志，支持 level:error 等条件" /></label>
+        <button class="icon-btn log-option" :class="{ 'icon-btn-on': syntaxOpen }" title="查询语法" aria-label="查询语法" @click="syntaxOpen = true"><Braces class="w-4 h-4" /></button>
         </div>
         <div class="logs-toolbar-group logs-stream-actions" role="group" aria-label="日志流操作">
-        <button class="icon-btn" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
-        <button v-if="!connected && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
-        <button v-else class="btn-danger" @click="disconnect"><Square class="w-4 h-4" />断开</button>
-        <button class="icon-btn" :title="paused ? '继续接收' : '暂停显示'" :aria-label="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /></button>
-        <button class="icon-btn" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
-        <button class="icon-btn" title="清屏" aria-label="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
+        <button class="icon-btn log-option" :class="{ 'icon-btn-on': splitMode }" :disabled="!aggregateMode" :title="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" :aria-label="splitMode ? '合并为单列(快捷键 s)' : '按容器分栏显示(快捷键 s)'" @click="toggleSplit"><Columns2 class="w-4 h-4" /></button>
+        <button v-if="!connected && !connecting && !reconnecting" class="btn-primary" :disabled="!canConnect" @click="connect"><Play class="w-4 h-4" />连接</button>
+        <button v-else class="btn-secondary log-disconnect" @click="disconnect"><Square class="w-4 h-4" />断开</button>
+        <button class="btn-secondary log-pause" :aria-pressed="paused" :title="paused ? '继续接收' : '暂停显示'" :aria-label="paused ? '继续接收' : '暂停显示'" @click="togglePause"><Play v-if="paused" class="w-4 h-4" /><Pause v-else class="w-4 h-4" /><span>{{ paused ? '继续' : '暂停' }}</span></button>
+        <button class="icon-btn log-option" title="下载日志" aria-label="下载日志" :disabled="!filtered.length" @click="download"><Download class="w-4 h-4" /></button>
+        <button class="icon-btn log-option" title="清屏" aria-label="清屏" @click="clearLines"><Trash2 class="w-4 h-4" /></button>
         <button v-if="hasErrors" class="btn-primary" @click="diagnosis = true"><Sparkles class="w-4 h-4" />AI 诊断</button>
         </div>
       </div>
     </div>
 
     <!-- 容器选择条(借鉴 Dozzle:模糊匹配容器名 + 名称旁直接挂实时 CPU/内存) -->
-    <div v-if="containers.length" class="container-picker">
+    <div v-if="containers.length" class="container-picker log-option">
       <div class="flex flex-wrap items-center gap-2">
         <label class="search-field w-44"><Filter class="h-4 w-4" /><input v-model="containerQuery" aria-label="过滤容器列表" :placeholder="aggregateMode ? '过滤容器(可多选)' : '过滤容器(支持缩写)'" /></label>
         <span class="text-[11px] text-muted">{{ aggregateMode ? (selectedContainers.length ? `已选 ${selectedContainers.length} 个容器` : '未选择时聚合全部容器') : '点击容器切换日志源' }}</span>
@@ -54,17 +55,21 @@
     </div>
 
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="offline || reconnecting" class="log-reconnect-notice" role="status">{{ offline ? '网络已离线，恢复联网后自动重连。' : '连接中断，正在自动重试。' }}已显示的日志会保留。<button v-if="!offline" class="filter-reset" @click="retryConnection">立即重试</button></p>
+    <p v-else-if="recoveryNotice" class="log-reconnect-notice" role="status">{{ recoveryNotice }}<button class="filter-reset" aria-label="关闭日志恢复提示" @click="recoveryNotice = ''">关闭</button></p>
     <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
+    <div v-if="levelFilter" class="filter-summary" role="group" aria-label="当前日志级别筛选"><span>仅显示 {{ levelFilter.toUpperCase() }}</span><button class="filter-reset" @click="levelFilter = ''">清除级别筛选</button></div>
     <p v-if="pausedDropped" class="text-xs text-status-warn" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
-    <div class="flex flex-wrap items-center gap-3 text-muted">
-      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-status-ok' : reconnecting ? 'text-status-warn' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-status-ok' : reconnecting ? 'bg-status-warn animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
+    <div class="log-status-strip flex flex-wrap items-center gap-3 text-muted">
+      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-status-ok' : reconnecting ? 'text-status-warn' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-status-ok' : reconnecting ? 'bg-status-warn animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : offline ? '网络离线' : reconnecting ? '重连中…' : connecting ? '连接中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
+      <span v-if="lines.length >= MAX_LINES" title="更早的日志会随新日志到达移出本地缓冲区">仅保留最近 {{ MAX_LINES }} 条</span>
       <span v-if="splitMode" class="text-surface-400">{{ panes.length }} 栏</span>
       <span v-if="levelCounts.error" class="text-status-error">ERROR {{ levelCounts.error }}</span>
       <span v-if="levelCounts.warn" class="text-status-warn">WARN {{ levelCounts.warn }}</span>
       <span v-if="paused" class="text-status-warn">已暂停 · {{ pending.length }} 条待显示</span>
-      <span v-if="sawError && !paused" class="text-status-error">当前保留 {{ retainedCount }} 行异常日志</span>
+      <span v-if="sawError && !paused" class="text-status-error log-retained">当前保留 {{ retainedCount }} 行异常日志</span>
       <label class="toggle-label ml-auto"><input v-model="autoScroll" type="checkbox" />自动滚动</label>
     </div>
 
@@ -82,6 +87,9 @@
         :paused="paused"
         :revision="revision"
         :resume-signal="resumeSignal"
+        :expanded-ids="expandedIds"
+        :retained-from="lines[0]?.id"
+        @toggle-json="toggleJson"
       />
       <p v-if="!panes.length" class="text-muted px-2 py-1">没有匹配当前查询的容器日志。</p>
     </div>
@@ -89,12 +97,15 @@
       v-else
       :lines="filtered"
       :fallback-name="activeContainerName"
-      :empty-text="queryError ? '查询语法有误,已保留上一次结果' : '等待日志…'"
+      :empty-text="emptyMessage"
       :auto-scroll="autoScroll"
       :connected="connected"
       :paused="paused"
       :revision="revision"
       :resume-signal="resumeSignal"
+      :expanded-ids="expandedIds"
+      :retained-from="lines[0]?.id"
+      @toggle-json="toggleJson"
     />
 
     <QuerySyntaxModal :open="syntaxOpen" @close="syntaxOpen = false" />
@@ -104,10 +115,11 @@
 
 <script setup>
 import { returnTarget as resolveReturnTarget } from '../lib/deep-links.js';
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import ProjectContextNav from '../components/services/ProjectContextNav.vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, shallowRef, triggerRef, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeft, Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, SlidersHorizontal, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import LogPane from '../components/logs/LogPane.vue';
@@ -115,6 +127,7 @@ import QuerySyntaxModal from '../components/logs/QuerySyntaxModal.vue';
 import { filterContainers } from '../lib/container-match.js';
 import { matchLogQuery, parseLogQuery } from '../lib/log-query.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
+import { createLogResume } from '../lib/log-resume.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -129,12 +142,22 @@ const levelFilter = ref('');
 // 分栏视图只在聚合流上有意义:每条日志都带 containerName,才能按容器拆栏。
 const splitMode = ref(false);
 const syntaxOpen = ref(false);
+const optionsOpen = ref(false);
 const queryError = ref('');
 const revision = ref(0);
 const resumeSignal = ref(0);
 const tail = ref(200);
-const lines = ref([]);
-const pending = ref([]);
+const lines = shallowRef([]);
+const pending = shallowRef([]);
+const expandedIds = ref(new Set());
+let flushFrame = 0;
+const recoveryNotice = ref('');
+let openedBefore = false;
+let logResume = createLogResume([]);
+function prepareLogUrl(url) {
+  logResume = createLogResume([...lines.value, ...pending.value]);
+  return url + logResume.query;
+}
 const search = ref('');
 const paused = ref(false);
 const pausedDropped = ref(0);
@@ -158,6 +181,9 @@ let statsController = null;
 const logSocket = useWebSocket(
   () => wsUrl(`/ws/logs?projectId=${encodeURIComponent(projectId.value)}&containerId=${encodeURIComponent(containerId.value)}&tail=${tail.value}`),
   {
+    watchNetwork: true,
+    heartbeatInterval: 15000,
+    prepareUrl: prepareLogUrl,
     onOpen: onStreamOpen,
     onMessage: (event) => ingest(event, false),
     onError: (err) => { error.value = err.message || '日志连接失败'; },
@@ -169,6 +195,9 @@ const aggSocket = useWebSocket(
     return wsUrl(`/ws/aggregated-logs?projectId=${encodeURIComponent(projectId.value)}&containers=${ids ? encodeURIComponent(ids) : ''}&tail=${tail.value}`);
   },
   {
+    watchNetwork: true,
+    heartbeatInterval: 15000,
+    prepareUrl: prepareLogUrl,
     onOpen: onStreamOpen,
     onMessage: (event) => ingest(event, true),
     onError: (err) => { error.value = err.message || '聚合日志连接失败'; },
@@ -176,13 +205,15 @@ const aggSocket = useWebSocket(
 );
 
 const connected = computed(() => logSocket.connected.value || aggSocket.connected.value);
+const connecting = computed(() => logSocket.connecting.value || aggSocket.connecting.value);
+const offline = computed(() => logSocket.offline.value || aggSocket.offline.value);
 const reconnecting = computed(() => logSocket.reconnecting.value || aggSocket.reconnecting.value);
 
+const selectedProject = computed(() => projects.value.find(p => p.id === projectId.value));
 const containers = computed(() => projects.value.find((p) => p.id === projectId.value)?.containers || []);
 const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
 const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
-const returnTarget = computed(() => resolveReturnTarget(logSourceRoute.value));
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
@@ -207,6 +238,18 @@ const filtered = computed(() => {
   return result;
 });
 
+const emptyMessage = computed(() => {
+  if (!projectId.value) return '选择项目和日志来源后开始查看。';
+  if (!canConnect.value) return '请选择容器，或开启聚合查看整个项目。';
+  if (queryError.value) return '查询语法有误，已保留上一次结果。';
+  if (lines.value.length && !filtered.value.length) return '没有匹配的日志，试试清除搜索或级别筛选。';
+  if (streamEnded.value) return '日志已结束，当前没有可显示的内容。';
+  if (offline.value) return '网络已离线，等待联网后恢复日志。';
+  if (connecting.value || reconnecting.value) return '正在连接日志源，请稍候…';
+  if (!connected.value && !reconnecting.value) return '日志已断开，点击「连接」继续查看。';
+  return '已连接，等待新的日志…';
+});
+
 /** 分栏:按 containerName 归组(聚合流的每一行都由服务端打上容器名),栏头顺序稳定。 */
 const panes = computed(() => {
   if (!splitMode.value) return [];
@@ -224,7 +267,7 @@ const panes = computed(() => {
 });
 
 // 只重读项目列表:日志流本身由 WebSocket 推,下拉刷新不主动断流重建连接。
-usePullRefresh(reloadProjects);
+usePullRefresh(reloadProjects, { keepAlive: true });
 onMounted(() => {
   window.addEventListener('composeops:host-changed', onHostChanged);
   window.addEventListener('keydown', onKeydown);
@@ -244,7 +287,13 @@ onDeactivated(() => {
   closeStats();
 });
 
-function onHostChanged() { if (disposed) return; disconnect(); closeStats(); clearLines(); projects.value = []; void reloadProjects(); }
+function onHostChanged() {
+  loadId += 1;
+  disconnect(); closeStats(); clearLines();
+  projects.value = []; projectId.value = ''; containerId.value = ''; selectedContainers.value = [];
+  recoveryNotice.value = '节点已切换，请重新选择项目和容器。';
+  if (!disposed) { syncRouteContext(); void reloadProjects(); }
+}
 async function reloadProjects() {
   const currentLoad = ++loadId;
   const [result, prefs] = await Promise.allSettled([api.getProjects(true), api.getPreferences()]);
@@ -276,6 +325,7 @@ watch(() => route.query.from, (source) => {
 });
 function syncRouteContext() {
   const query = {};
+  if (typeof route.query.returnTo === 'string') query.returnTo = route.query.returnTo;
   if (projectId.value) query.projectId = projectId.value;
   if (containerId.value) query.containerId = containerId.value;
   if (logSourceRoute.value) query.from = logSourceRoute.value;
@@ -283,13 +333,6 @@ function syncRouteContext() {
 }
 function onProjectChange() { containerId.value = ''; selectedContainers.value = []; containerQuery.value = ''; disconnect(); closeStats(); clearLines(); syncRouteContext(); }
 function onContainerChange() { disconnect(); clearLines(); syncRouteContext(); }
-function goBackToSource() {
-  if (!returnTarget.value) return;
-  const historyBack = window.history.state?.back;
-  const historyBackName = historyBack ? router.resolve(historyBack).name : null;
-  if (historyBackName === logSourceRoute.value) router.back();
-  else router.push(returnTarget.value.path);
-}
 function toggleAggregate() {
   aggregateMode.value = !aggregateMode.value;
   selectedContainers.value = [];
@@ -303,7 +346,6 @@ function pickContainer(container) {
     const index = selectedContainers.value.indexOf(container.id);
     if (index >= 0) selectedContainers.value.splice(index, 1);
     else selectedContainers.value.push(container.id);
-    if (connected.value) connect();
     return;
   }
   if (containerId.value === container.id) return;
@@ -311,23 +353,32 @@ function pickContainer(container) {
   onContainerChange();
 }
 function selectVisibleContainers() { selectedContainers.value = visibleContainers.value.map((c) => c.id); }
+watch(() => selectedContainers.value.join(','), () => {
+  if (!aggregateMode.value || disposed || !(connected.value || connecting.value || reconnecting.value)) return;
+  disconnect();
+  clearLines();
+  connect();
+});
 
 function connect() {
   if (disposed || !canConnect.value) return;
-  // 聚合模式改选容器:URL 是 getter,直接 connect 即可让 useWebSocket 换址重连,
-  // 先 close 会让日志整段断一下,肉眼可见地闪。
-  if (!(aggregateMode.value && aggSocket.connected.value)) disconnect();
   streamEnded.value = false;
   error.value = '';
   if (aggregateMode.value) aggSocket.connect();
   else logSocket.connect();
 }
+function retryConnection() { disconnect(); connect(); }
 
-/** 重连成功后插入分隔行,提示上方日志与下方日志之间可能存在缺口。 */
+/** 补读仍受 Docker 日志保留和前端缓存限制,不承诺无损历史。 */
 function onStreamOpen({ resumed } = {}) {
-  if (!resumed) return;
   error.value = '';
-  append({ id: ++sequence.value, type: 'stdout', level: 'warn', data: '—— 连接已恢复,期间日志可能有缺失 ——' });
+  if (resumed || openedBefore) {
+    recoveryNotice.value = logResume.query
+      ? '连接已恢复，正在从上次位置补读并去重；每容器最多补读 5000 条。超出上限、容器重建或日志轮转时可能有缺失。'
+      : '连接已恢复，缺少可用读取位置，已重新读取最近日志；可能重复或有缺失。';
+    queueLine({ id: ++sequence.value, type: 'stdout', level: 'info', data: '—— 连接已恢复 · 以下为重新读取的日志 ——' });
+  }
+  openedBefore = true;
 }
 
 function ingest(event, aggregate) {
@@ -339,30 +390,40 @@ function ingest(event, aggregate) {
     const line = aggregate ? (frame.type === 'line' ? frame.data : null)
       : (['stdout', 'stderr'].includes(frame.type) ? frame : null);
     if (!line || typeof line.data !== 'string') return;
-    pending.value.push({ ...line, id: ++sequence.value });
-    if (pending.value.length > MAX_LINES) {
-      const overflow = pending.value.length - MAX_LINES;
-      pending.value.splice(0, overflow);
-      pausedDropped.value += overflow;
-    }
-    flushPending();
+    if (!logResume.accept(line)) return;
+    queueLine({ ...line, id: ++sequence.value });
   } catch {
     // 非法 WebSocket 帧被丢弃,连接仍可继续接收后续日志。
   }
 }
-function flushPending() {
-  if (paused.value) return;
-  for (const item of pending.value.splice(0)) append(item);
+function queueLine(line) {
+  pending.value.push(line);
+  if (pending.value.length > MAX_LINES) {
+    const overflow = pending.value.length - MAX_LINES;
+    pending.value.splice(0, overflow);
+    if (paused.value) pausedDropped.value += overflow;
+  }
+  if (!flushFrame) flushFrame = requestAnimationFrame(() => { flushFrame = 0; flushPending(); });
 }
-function append(item) {
-  const level = item.level || classifyLevel(item.data);
-  item.level = level;
-  lines.value.push(item);
-  levelCounts.value[level] = (levelCounts.value[level] || 0) + 1;
-  if (level === 'error') { errorLines.value += 1; sawError.value = true; retainedCount.value += 1; }
-  if (lines.value.length > MAX_LINES) {
-    const removed = lines.value.splice(0, lines.value.length - MAX_LINES);
+function flushPending() {
+  if (paused.value) { triggerRef(pending); return; }
+  if (!pending.value.length) return;
+  const batch = pending.value;
+  pending.value = [];
+  appendBatch(batch);
+}
+function appendBatch(batch) {
+  for (const item of batch) {
+    const level = item.level || classifyLevel(item.data);
+    item.level = level;
+    levelCounts.value[level] = (levelCounts.value[level] || 0) + 1;
+    if (level === 'error') { errorLines.value += 1; sawError.value = true; retainedCount.value += 1; }
+  }
+  const combined = [...lines.value, ...batch];
+  if (combined.length > MAX_LINES) {
+    const removed = combined.splice(0, combined.length - MAX_LINES);
     for (const oldLine of removed) {
+      expandedIds.value.delete(oldLine.id);
       const oldLevel = oldLine.level || classifyLevel(oldLine.data);
       levelCounts.value[oldLevel] = Math.max(0, (levelCounts.value[oldLevel] || 0) - 1);
       if (oldLevel === 'error') {
@@ -371,11 +432,19 @@ function append(item) {
       }
     }
   }
+  lines.value = combined;
   bumpRevision();
 }
+function toggleJson(id, value) { if (value) expandedIds.value.add(id); else expandedIds.value.delete(id); }
 function clearLines() {
+  cancelAnimationFrame(flushFrame);
+  flushFrame = 0;
   lines.value = [];
   pending.value = [];
+  expandedIds.value.clear();
+  recoveryNotice.value = '';
+  openedBefore = false;
+  logResume = createLogResume([]);
   pausedDropped.value = 0;
   errorLines.value = 0;
   levelCounts.value = { error: 0, warn: 0, info: 0 };
@@ -389,7 +458,7 @@ function classifyLevel(text = '') {
   if (/(warn|deprecat)/i.test(t)) return 'warn';
   return 'info';
 }
-function togglePause() { paused.value = !paused.value; if (!paused.value) flushPending(); }
+function togglePause() { flushPending(); paused.value = !paused.value; if (!paused.value) flushPending(); }
 /** 虚拟滚动与跟随都在 LogPane 内部,这里只广播"有新行"和"回到底部"两个信号。 */
 function bumpRevision() { revision.value += 1; }
 function resumeScroll() { resumeSignal.value += 1; }
@@ -400,6 +469,9 @@ function toggleSplit() {
   resumeSignal.value += 1;
 }
 function disconnect() {
+  cancelAnimationFrame(flushFrame);
+  flushFrame = 0;
+  flushPending();
   logSocket.close();
   aggSocket.close();
 }
@@ -477,6 +549,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.logs-view > .page-header { display: flex; flex-wrap: wrap; }
+.log-reconnect-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--color-surface-700); border-radius: 8px; font-size: 12px; color: var(--color-surface-300); background: var(--panel-raised); }
+.logs-options-toggle { display: none; }
+.logs-view .page-header > :first-child { margin-bottom: 14px; }
+.logs-toolbar-actions { justify-content: space-between; width: 100%; max-width: none; }
+
 .logs-toolbar-actions {
   align-items: stretch;
 }
@@ -516,8 +594,21 @@ onBeforeUnmount(() => {
     flex: 1 1 8rem;
   }
 
-  .logs-stream-actions {
-    padding-top: .25rem;
-  }
+  .logs-view { gap: 10px; }
+  .logs-view > .page-header { flex-direction: row; align-items: center; }
+  .logs-view .page-header > :first-child { margin-bottom: 0; flex: 1; width: auto; }
+  .logs-options-toggle { display: inline-flex; margin-left: auto; min-height: 36px; font-size: 12px; }
+  .log-subtitle { display: none; }
+  .logs-view:not(.show-options) .log-option { display: none; }
+  .logs-toolbar-actions { gap: 8px; }
+  .logs-toolbar-group .search-field { flex: 1 0 100%; order: -1; min-height: 40px; }
+  .logs-stream-actions { padding: 0; gap: 6px; }
+  .logs-stream-actions .btn-secondary, .logs-stream-actions .btn-primary { min-height: 36px; padding: 6px 10px; font-size: 12px; }
+  .log-pause { order: -1; }
+  .log-status-strip { font-size: 11px; gap: 8px; }
+  .log-retained { display: none; }
+  .log-status-strip .toggle-label { font-size: 11px; }
+  .log-status-strip + .log-pane { min-height: 300px; }
+
 }
 </style>

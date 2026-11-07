@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { defineComponent, h, KeepAlive, ref } from 'vue';
 
 const getVolumeBackups = vi.hoisted(() => vi.fn());
 const getBackups = vi.hoisted(() => vi.fn());
@@ -53,6 +54,10 @@ function mountView() {
       },
     },
   });
+}
+
+function mountCachedView(visible) {
+  return mount(defineComponent({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(RollbackView) : h('div', '评审') }) }), { global: { stubs: { BaseModal: true, ConfirmDialog: true } } });
 }
 
 describe('回滚中心加载反馈与执行结果语义', () => {
@@ -126,4 +131,38 @@ describe('回滚中心加载反馈与执行结果语义', () => {
     expect(wrapper.get('[role="region"][aria-label="回滚执行输出"]').text()).toContain('[退出码 2]');
     expect(store.refresh).toHaveBeenCalledTimes(1); // 仅 onMounted 刷新，不把失败的回滚当成功刷新状态
   });
+});
+
+describe('缓存回滚生命周期', () => {
+  it('隐藏后迟到备份不能提交到页面，返回重读且保持项目选择', async () => {
+    const visible = ref(true);
+    let resolveOld;
+    getVolumeBackups.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
+    wrapper = mountCachedView(visible);
+    await flushPromises();
+    visible.value = false; await flushPromises();
+    resolveOld({ backups: [{ id: 'old', volume: 'STALE-VOLUME' }] }); await flushPromises();
+    visible.value = true; await flushPromises();
+    expect(getVolumeBackups).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).not.toContain('STALE-VOLUME');
+    await wrapper.get('select').setValue('b'); await flushPromises();
+    visible.value = false; await flushPromises();
+    window.dispatchEvent(new Event('composeops:refresh'));
+    const count = getVolumeBackups.mock.calls.length;
+    visible.value = true; await flushPromises();
+    expect(wrapper.get('select').element.value).toBe('b');
+    expect(getVolumeBackups).toHaveBeenCalledTimes(count);
+  });
+});
+
+it('首次项目刷新期间离开标签，回来后仍加载备份', async () => {
+  const visible = ref(true);
+  let resolveProjects;
+  store.refresh.mockReturnValueOnce(new Promise(resolve => { resolveProjects = resolve; }));
+  wrapper = mountCachedView(visible);
+  visible.value = false; await flushPromises();
+  resolveProjects(); await flushPromises();
+  expect(getVolumeBackups).not.toHaveBeenCalled();
+  visible.value = true; await flushPromises();
+  expect(getVolumeBackups).toHaveBeenCalledTimes(1);
 });

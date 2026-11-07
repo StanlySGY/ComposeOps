@@ -1,3 +1,5 @@
+import { getActiveHost } from '../services/docker-hosts.js';
+import { assertReviewedDeployment } from '../services/reviewed-deployment.js';
 import { findProject, scanProjects } from '../services/scanner.js';
 import { buildMountPlan } from '../services/mount-plan.js';
 import { readCompose, saveCompose } from '../services/compose-runner.js';
@@ -8,7 +10,7 @@ import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/proj
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
 import { readContainerStat } from '../services/stats.js';
 import { createComposeChangePreview, validateComposeSemantics } from '../services/compose-validator.js';
-import { getActivityDocker } from '../services/docker-hosts.js';
+import { getProjectDocker } from '../services/docker-hosts.js';
 import { listProjectDbContainers, runDbDump } from '../services/db-dumper.js';
 import { scanProjectWebPorts, buildWebUiLinks } from '../services/project-ports.js';
 import {
@@ -204,13 +206,18 @@ export default async function projectRoutes(fastify) {
       querystring: { type: 'object', properties: { fileIndex: fileIndexField } },
     },
   }, async (request, reply) => {
+    const host = getActiveHost();
     const project = await projectOr404(request.params.id, reply);
     if (!project) return;
     if (!requireEditable(project, reply)) return;
     try {
-      return project.mounted
-        ? await readCompose(project, request.query.fileIndex || 0)
-        : await readWorkspaceCompose(project, request.query.fileIndex || 0);
+      if (getActiveHost().id !== host.id) throw Object.assign(new Error('节点已变化，请重新读取配置'), { statusCode: 409 });
+      const pinned = { ...project, host };
+      const result = project.mounted
+        ? await readCompose(pinned, request.query.fileIndex || 0)
+        : await readWorkspaceCompose(pinned, request.query.fileIndex || 0);
+      if (getActiveHost().id !== host.id) throw Object.assign(new Error('节点已变化，请重新读取配置'), { statusCode: 409 });
+      return { ...result, hostId: host.id };
     } catch (error) {
       return reply.code(error.statusCode || 500).send({ error: 'compose_read_failed', message: error.message });
     }
@@ -254,11 +261,15 @@ export default async function projectRoutes(fastify) {
     if (typeof content !== 'string') {
       return reply.code(400).send({ error: 'invalid_content', message: '缺少预览内容' });
     }
-    const fileIndex = Number(request.body?.fileIndex) || 0;
-    const current = project.mounted ? await readCompose(project, fileIndex) : await readWorkspaceCompose(project, fileIndex);
-    let docker = null;
-    try { docker = getActivityDocker(); } catch { /* Preview will mark port occupancy as unknown. */ }
-    return { preview: await createComposeChangePreview(content, project, current.content, docker) };
+    try {
+      const fileIndex = Number(request.body?.fileIndex) || 0;
+      const current = project.mounted ? await readCompose(project, fileIndex) : await readWorkspaceCompose(project, fileIndex);
+      let docker = null;
+      try { docker = getProjectDocker(project); } catch { /* Report unknown occupancy. */ }
+      return { preview: await createComposeChangePreview(content, project, current.content, docker) };
+    } catch (error) {
+      return reply.code(error.statusCode || 422).send({ error: 'compose_preview_failed', message: error.message });
+    }
   });
 
   // content 不设 required:缺失时 saveCompose 自己抛错并归到 compose_save_failed,
@@ -552,14 +563,21 @@ export default async function projectRoutes(fastify) {
   fastify.post('/:id/actions', {
     schema: {
       params: idParams,
-      body: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', maxLength: 32 } } },
+      body: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', maxLength: 32 }, expectedHostId: { type: 'string', minLength: 1, maxLength: 128 }, expectedContent: { type: 'string', maxLength: CONTENT_MAX } } },
     },
   }, async (request, reply) => {
-    const project = await projectOr404(request.params.id, reply);
-    if (!project) return;
+    const host = getActiveHost();
+    const found = await projectOr404(request.params.id, reply);
+    if (!found) return;
+    const project = { ...found, host };
     const action = request.body?.action;
+    const review = request.body || {};
+    const checkReview = () => assertReviewedDeployment(project, action, review);
     let prepared;
-    try { prepared = await prepareProjectAction(project, action); }
+    try {
+      await checkReview();
+      prepared = await prepareProjectAction(project, action);
+    }
     catch (error) { return reply.code(error.statusCode || 400).send({ error: 'unsupported_action', message: error.message }); }
 
     reply.raw.writeHead(200, {
@@ -588,7 +606,11 @@ export default async function projectRoutes(fastify) {
       reply.raw.end();
     };
     let child;
-    prepared.run((type, text) => { output += text; send(type, text); }, (process) => { child = process; })
+    prepared.run((type, text) => { output += text; send(type, text); }, (process) => { child = process; }, { beforeRun: async () => {
+      if (reply.raw.destroyed) throw new Error('部署连接已关闭，本次未启动');
+      await checkReview();
+      if (reply.raw.destroyed) throw new Error('部署连接已关闭，本次未启动');
+    } })
       .then(finish)
       .catch((error) => { const text = `${error.message}\n`; output += text; send('stderr', text); finish(1); });
     reply.raw.on('close', () => {

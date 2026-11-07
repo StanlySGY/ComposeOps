@@ -1,5 +1,5 @@
 <template>
-  <nav v-if="target && target.path !== route.path" class="route-prefix px-4 pt-4 sm:px-6" aria-label="返回来源页面">
+  <nav v-if="target && target.path !== route.path && target.path !== excludePath" class="shrink-0" aria-label="返回来源页面">
     <button class="btn-ghost" @click="back"><ArrowLeft class="h-4 w-4" />{{ target.label }}</button>
   </nav>
 </template>
@@ -8,6 +8,7 @@ import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ArrowLeft } from 'lucide-vue-next';
 import { returnTarget } from '../../lib/deep-links.js';
+defineProps({ excludePath: String });
 const route = useRoute();
 const router = useRouter();
 const target = computed(() => returnTarget(route.query.from));

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     getMarketplaceStats: vi.fn(),
     searchMarketplaceTemplates: vi.fn(),
     toggleMarketplaceFavorite: vi.fn(),
+    createMarketplaceTemplate: vi.fn(),
   },
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
   openAgent: vi.fn(),
@@ -200,5 +201,52 @@ describe('应用市场表单可访问性', () => {
     await flushPromises();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     await vi.waitFor(() => expect(document.activeElement).toBe(deployTrigger.element));
+  });
+});
+
+describe('应用市场连续操作', () => {
+  it('收藏请求未返回时禁用同一模板的重复点击', async () => {
+    let resolve;
+    mocks.api.searchMarketplaceTemplates.mockResolvedValue({ results: [{ ...deployable, favorited: false }] });
+    mocks.api.toggleMarketplaceFavorite.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    await start();
+    const favorite = wrapper.get('.favorite-btn');
+    await favorite.trigger('click');
+    expect(favorite.element.disabled).toBe(true);
+    await favorite.trigger('click');
+    expect(mocks.api.toggleMarketplaceFavorite).toHaveBeenCalledTimes(1);
+    resolve(); await flushPromises();
+    expect(wrapper.get('.favorite-btn').element.disabled).toBe(false);
+  });
+  it('详情进入配置并返回时保留列表筛选，仅显示一个弹窗', async () => {
+    mocks.api.searchMarketplaceTemplates.mockResolvedValue({ results: [deployable] });
+    await start();
+    await wrapper.get('[aria-label="搜索应用模板"]').setValue('nginx');
+    await wrapper.get('.btn-view').trigger('click');
+    await new DOMWrapper(document.querySelector('[role="dialog"]')).get('footer .btn-primary').trigger('click');
+    await flushPromises();
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(new DOMWrapper(document.querySelector('[role="dialog"]')).get('.btn-cancel').text()).toBe('返回详情');
+    await new DOMWrapper(document.querySelector('[role="dialog"]')).get('.btn-cancel').trigger('click');
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    await flushPromises();
+    expect(document.querySelector('[role="dialog"]').getAttribute('aria-label')).toBe('nginx');
+    await new DOMWrapper(document.querySelector('[role="dialog"]')).get('footer .btn-secondary').trigger('click');
+    expect(wrapper.get('[aria-label="搜索应用模板"]').element.value).toBe('nginx');
+  });
+  it('创建模板在保存完成前防止重复提交', async () => {
+    let resolve;
+    mocks.api.createMarketplaceTemplate.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    await start();
+    await wrapper.findAll('button').find(b => b.text().includes('创建模板')).trigger('click');
+    await new DOMWrapper(document.querySelector('#market-template-name')).setValue('My app');
+    await new DOMWrapper(document.querySelector('#market-template-compose')).setValue('services: {}');
+    const save = new DOMWrapper(document.querySelector('.btn-save'));
+    await save.trigger('click');
+    expect(save.element.disabled).toBe(true);
+    await save.trigger('click');
+    expect(mocks.api.createMarketplaceTemplate).toHaveBeenCalledTimes(1);
+    resolve({}); await flushPromises();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });

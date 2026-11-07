@@ -4,7 +4,7 @@
     <span v-if="ts" class="line-ts">{{ shortTs }}</span>
     <template v-if="jsonState !== null">
       <pre class="json-block" :class="{ open: jsonOpen }">{{ jsonText }}</pre>
-      <button class="json-toggle" :aria-expanded="jsonOpen" :aria-label="`${jsonOpen ? '折叠' : '展开'} JSON 日志：${text.slice(0, 80)}`" @click="jsonOpen = !jsonOpen">{{ jsonOpen ? '折叠' : '展开' }}</button>
+      <button class="json-toggle" :aria-expanded="jsonOpen" :aria-label="`${jsonOpen ? '折叠' : '展开'} JSON 日志：${text.slice(0, 80)}`" @click="toggleJson">{{ jsonOpen ? '折叠' : '展开' }}</button>
     </template>
     <template v-else>
       <span v-if="levelBadge" class="level-badge" :class="levelBadgeClass">{{ levelBadge }}</span>
@@ -23,8 +23,15 @@ import { hashColor } from '../../lib/log-colors.js';
 const props = defineProps({
   line: { type: Object, required: true },
   fallbackName: { type: String, default: '' },
+  expanded: { type: Boolean, default: undefined },
 });
-const jsonOpen = ref(false);
+const emit = defineEmits(['toggle-json']);
+const localExpanded = ref(false);
+const jsonOpen = computed(() => props.expanded ?? localExpanded.value);
+function toggleJson() {
+  localExpanded.value = !jsonOpen.value;
+  emit('toggle-json', localExpanded.value);
+}
 
 const containerName = computed(() => props.line.containerName || props.fallbackName || '');
 const badgeClass = computed(() => hashColor(containerName.value));

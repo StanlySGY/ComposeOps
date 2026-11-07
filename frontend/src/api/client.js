@@ -124,7 +124,7 @@ export const api = {
   previewRetentionPolicy: () => request('/metrics/retention-policy'),
   listInspectionReports: (limit = 100) => request(`/ops/inspection/reports?limit=${limit}`),
   setHostGroup: (id, group) => request(`/hosts/${encodeURIComponent(id)}/group`, { method: 'PATCH', body: JSON.stringify({ group }) }),
-  getAuthStatus: () => request('/auth/status'),
+  getAuthStatus: (signal) => request('/auth/status', { signal }),
   // setupToken:服务端设置 SETUP_TOKEN 环境变量时,首次初始化必须携带该引导令牌
   setup: (password, setupToken = '') => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password, setupToken }) }),
   login: (password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
@@ -221,7 +221,7 @@ export const api = {
   verifyVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}/verify`, { method: 'POST' }),
   deleteVolumeBackup: (id) => request(`/ops/storage/volume-backups/${id}`, { method: 'DELETE' }),
   volumeBackupDownloadUrl: (id) => `/api/v1/ops/storage/volume-backups/${id}/download`,
-  removeStorageResource: (kind, id) => request(`/ops/storage/resources/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  removeStorageResource: (kind, id, hostId) => request(`/ops/storage/resources/${kind}/${encodeURIComponent(id)}${hostId ? `?expectedHostId=${encodeURIComponent(hostId)}` : ''}`, { method: 'DELETE' }),
   // app blueprints
   getBlueprints: () => request('/ops/blueprints'),
   streamBlueprintDeploy: (blueprintId, values, onFrame) => streamComposeControl(null, null, onFrame, '/ops/blueprints/deploy', { blueprintId, values }),
@@ -282,8 +282,8 @@ export const api = {
   getAgentAuditEvents: (limit = 100, filters = {}) => request(`/ai/agent/audit-events?${new URLSearchParams({ limit: String(limit), ...(filters.planId ? { planId: filters.planId } : {}), ...(filters.executionId ? { executionId: filters.executionId } : {}) })}`),
   // compose 语义校验 / 变更预览
   validateCompose: (projectId, fileIndex, content) => request(`/projects/${projectId}/compose/validate`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) }),
-  previewCompose: async (projectId, fileIndex, content) => {
-    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) });
+  previewCompose: async (projectId, content, fileIndex = 0) => {
+    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ content, fileIndex }) });
     return result?.preview || null;
   },
   // system
@@ -384,21 +384,28 @@ export async function streamComposeControl(projectId, action, onFrame, path = nu
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split('\n\n');
-    buf = parts.pop();
-    for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith('data:')) continue;
-      try {
-        onFrame(JSON.parse(line.slice(5).trim()));
-      } catch {
-        // 跳过无法解析的控制流帧,让连接继续接收后续事件。
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        try {
+          onFrame(JSON.parse(line.slice(5).trim()));
+        } catch {
+          // 跳过无法解析的控制流帧,让连接继续接收后续事件。
+        }
       }
     }
+  } finally {
+    // Polling during a long command can cache containers that are being replaced.
+    // Clear them again on completion or interruption before callers refresh.
+    invalidateSwr('/');
+    reader.releaseLock();
   }
 }
 

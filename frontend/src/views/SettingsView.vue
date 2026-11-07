@@ -55,11 +55,15 @@
 
     <section v-if="tab === 'personal'" class="settings-section">
       <h2 class="section-title">界面偏好</h2>
+      <p v-if="preferencesLoading" class="text-muted" role="status">正在读取界面偏好…</p>
+      <div v-if="preferencesError" class="alert-error flex items-center justify-between gap-3" role="alert"><span>{{ preferencesError }}</span><button class="btn-secondary" @click="loadPreferences">重试</button></div>
+      <fieldset class="space-y-4" :disabled="!preferencesReady || savingPreferences">
       <div class="ios-group">
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">自动刷新间隔（秒）</div><div class="ios-row-desc">服务、监控等页面的轮询周期,最小 3 秒。</div></div><div class="ios-row-control"><input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input max-w-24 text-center" aria-label="自动刷新间隔（秒）" /></div></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">日志默认行数</div><div class="ios-row-desc">打开日志页时默认拉取的行数,10–5000。</div></div><div class="ios-row-control"><input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input max-w-24 text-center" aria-label="日志默认行数" /></div></div>
       </div>
-      <button class="btn-primary self-start" :disabled="savingPreferences" @click="savePreferences"><Save class="w-4 h-4" />{{ savingPreferences ? '保存中…' : '保存偏好' }}</button>
+      <button class="btn-primary self-start" :disabled="!preferencesReady || savingPreferences" @click="savePreferences"><Save class="w-4 h-4" />{{ savingPreferences ? '保存中…' : '保存偏好' }}</button>
+      </fieldset>
       <h2 class="section-title">修改管理员密码</h2>
       <div class="ios-group">
         <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">当前密码</label><input v-model="password.currentPassword" type="password" class="input" aria-label="当前密码" autocomplete="current-password" /></div>
@@ -305,6 +309,9 @@ const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.quer
 const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const savingAi = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
 const mountPlan = ref(null); const mountLoading = ref(false); const highlightedProjectId = computed(() => String(route.query.projectId || ''));
 const hostEditor = ref(null); const savingHost = ref(false); const savingPreferences = ref(false); const changingPassword = ref(false); const savingNotifications = ref(false); const testingNotifications = ref(false); const savingUpdates = ref(false);
+const preferencesLoading = ref(true);
+const preferencesReady = ref(false);
+const preferencesError = ref('');
 const removeHostTarget = ref(null);
 const managementConfirm = ref(false);
 const removedProjectCount = computed(() => savedManagedProjectIds.value.filter((id) => !selectedProjectIds.value.includes(id)).length);
@@ -429,7 +436,19 @@ async function confirmRemoveHost() {
   } catch (e) { fail(e); }
 }
 
-async function loadSettings() { try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [prefs, notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getPreferences(), api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); preferences.value = prefs; void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } }
+async function loadPreferences() {
+  if (savingPreferences.value) return;
+  preferencesLoading.value = true;
+  preferencesReady.value = false;
+  preferencesError.value = '';
+  try {
+    preferences.value = await api.getPreferences();
+    preferencesReady.value = true;
+  } catch (cause) {
+    preferencesError.value = `读取偏好失败：${cause.message}`;
+  } finally { preferencesLoading.value = false; }
+}
+async function loadSettings() { void loadPreferences(); try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } }
 onMounted(loadSettings);
 // 下拉刷新只重读只读面板(磁盘占用、渠道健康、节点、告警事件),不动用户正在编辑的配置表单。
 usePullRefresh(async () => {
@@ -455,7 +474,7 @@ function searchProviderLabel(value) {
   return { builtin: '内置(GitHub + DuckDuckGo)', duckduckgo: 'DuckDuckGo', tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG(自托管)' }[value] || value;
 }
 async function savePreferences() {
-  if (savingPreferences.value) return;
+  if (savingPreferences.value || !preferencesReady.value) return;
   try {
     const { refreshInterval, logTail } = preferences.value;
     if (!Number.isInteger(refreshInterval) || refreshInterval < 3 || refreshInterval > 300) throw new Error('自动刷新间隔必须是 3–300 秒的整数');

@@ -143,6 +143,23 @@ test('routes: 市场状态字段保留且不存在模板返回 404', async () =>
   assert.equal(stats.json().communityAvailable, false);
   assert.equal(typeof stats.json().communityMessage, 'string');
 
+  const payload = { name: 'UI round trip', category: 'Custom', description: 'Create, edit, read and delete', defaultCompose: 'services:\n  web:\n    image: alpine:3.20\n', envSchema: [{ key: 'APP_PORT', label: '端口', type: 'number', default: '8080' }] };
+  const created = await app.inject({ method: 'POST', url: '/api/v1/marketplace/templates/custom', headers, payload });
+  assert.equal(created.statusCode, 200);
+  const template = created.json().template;
+  assert.ok(template.id.startsWith('custom-'));
+  assert.equal(template.defaultCompose, payload.defaultCompose);
+  assert.equal(template.envSchema[0].default, '8080');
+  const updated = await app.inject({ method: 'PATCH', url: `/api/v1/marketplace/templates/custom/${template.id}`, headers, payload: { name: 'Updated from UI' } });
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.json().template.id, template.id);
+  assert.equal(updated.json().template.name, 'Updated from UI');
+  assert.equal(updated.json().template.defaultCompose, payload.defaultCompose);
+  const found = await app.inject({ method: 'GET', url: '/api/v1/marketplace/templates/search?source=custom&q=Updated', headers });
+  assert.ok(found.json().results.some(item => item.id === template.id && item.name === 'Updated from UI'));
+  const deleted = await app.inject({ method: 'DELETE', url: `/api/v1/marketplace/templates/custom/${template.id}`, headers });
+  assert.equal(deleted.statusCode, 200);
+
   for (const method of ['PATCH', 'DELETE']) {
     const response = await app.inject({
       method,

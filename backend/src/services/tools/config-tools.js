@@ -8,7 +8,7 @@ import { assertCommandAllowed } from '../../lib/command-guard.js';
 import { callOpenAI, getAiConfig } from '../ai.js';
 import { readCompose, saveCompose } from '../compose-runner.js';
 import { createComposeChangePreview, validateComposeSemantics } from '../compose-validator.js';
-import { getActiveHost, getActiveHostType, getActivityDocker } from '../docker-hosts.js';
+import { getActiveHost, getActiveHostType, getActivityDocker, getProjectDocker } from '../docker-hosts.js';
 import { sshExec } from '../remote-shell.js';
 import { realpath } from 'node:fs/promises';
 import { applyProjectEnv, assertEnvAccess, readProjectEnv, saveProjectEnv } from '../project-env.js';
@@ -121,7 +121,7 @@ export function registerConfigTools(agent) {
       },
     })
     .registerTool('config.preview', {
-      description: '预览 Compose 配置变更对运行容器的影响(diff/重启范围)',
+      description: '对比所选 Compose 文件的已保存配置，预览服务字段变化及可能受影响的容器；实际部署影响需另行预演',
       category: 'config',
       requiredPermission: 'editable',
       confirmationRequired: false,
@@ -138,7 +138,7 @@ export function registerConfigTools(agent) {
       execute: async (params, context) => {
         const currentContent = await currentComposeContent(context.project, Number(params.fileIndex) || 0);
         const content = typeof params.content === 'string' && params.content ? params.content : currentContent;
-        const preview = await createComposeChangePreview(content, context.project, currentContent, getActivityDocker());
+        const preview = await createComposeChangePreview(content, context.project, currentContent, getProjectDocker(context.project));
         return { preview, contentLength: content.length };
       },
     })
@@ -194,7 +194,7 @@ export function registerConfigTools(agent) {
           path: params.path,
           action: params.action,
           diff: diffTexts(before, after),
-          preview: await createComposeChangePreview(after, context.project, before, getActivityDocker()),
+          preview: await createComposeChangePreview(after, context.project, before, getProjectDocker(context.project)),
           issues,
           requiresRestart: true,
         };

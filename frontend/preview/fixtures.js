@@ -18,7 +18,7 @@ export const metrics = {
   containers: projects.flatMap(p => p.containers.map((c, i) => ({ id: c.id, name: c.name, projectId: p.id, projectName: p.projectName, state: c.state, cpuPercent: i ? 7 : 2, memoryUsage: 180 * 1024 ** 2, memoryLimit: GB, memoryPercent: 18, networkRx: 1048576, networkTx: 524288, netIO: { rx: 1048576, tx: 524288 }, blockIO: { read: 0, write: 0 } }))),
   network: { rx: 1048576, tx: 524288 }, disk: [{ mount: '/', total: 128 * GB, used: 40 * GB, free: 88 * GB, percent: 31.25 }],
 };
-export const inspection = { latest: { id: 1, score: 82, grade: 'attention', summary: 'wiki-api 异常退出，建议检查数据库连接配置（示例）', createdAt: at, issues: [{ id: 'demo', level: 'warning', title: 'wiki-api 连接失败', message: '数据库主机名 db-old 无法解析' }], checks: [], stats: { warning: 1, critical: 0, passed: 8 } }, reports: [], schedule: { enabled: false }, trend: [] };
+export const inspection = { latest: { id: 1, score: 82, grade: 'attention', summary: 'wiki-api 异常退出，建议检查数据库连接配置（示例）', createdAt: at, findings: [{ id: 'demo', level: 'warning', title: 'wiki-api 连接失败', message: '数据库主机名 db-old 无法解析' }], checks: [], stats: { warning: 1, critical: 0, passed: 8 } }, reports: [], schedule: { enabled: false }, trend: [] };
 export const operations = [{ id: 1, action: 'compose.save', status: 'success', projectName: 'homepage', createdAt: at, detail: '示例配置保存' }];
 export const alerts = [{ id: 1, title: 'wiki-api 异常退出', detail: 'getaddrinfo ENOTFOUND db-old（预设日志）', target: 'knowledge-base', priority: 'warning', created_at: at, read: false, muted: false, type: 'exit', status: 'open' }];
 export const storage = { images: { count: 5, total: 2 * GB, reclaimable: 200 * 1024 ** 2 }, containers: { count: 5, total: 100 * 1024 ** 2, reclaimable: 0 }, volumes: { count: 2, total: 800 * 1024 ** 2, reclaimable: 0, orphans: 0 }, buildCache: { count: 0, total: 0, reclaimable: 0 }, total: 2.9 * GB, reclaimable: 200 * 1024 ** 2, disk: { free: 88 * GB, total: 128 * GB } };
@@ -41,3 +41,31 @@ export const costReport = {
   trends: [10, 14, 12, 23, 20, 16, 18].map((cpu, i) => ({ timestamp: Date.parse(at) - (6 - i) * 86400000, totalCPUPercent: cpu, totalMemoryMB: 2800 + i * 110 })),
   storage: Object.fromEntries(Object.entries(storage).filter(([, value]) => typeof value === 'object' && 'count' in value).map(([key, value]) => [key, { active: value.count, total: value.count, sizeMB: value.total / 1024 ** 2, reclaimableMB: value.reclaimable / 1024 ** 2 }])),
 };
+// Representative inventory; all IDs and names are fictional, and writes stay in memory.
+export const resources = {
+  hostId: 'local', hostName: '本机 · 示例', warnings: [],
+  images: [
+    { id: 'sha256:demo-wiki-current', tags: ['example/wiki-api:2.3'], size: 320 * 1024 ** 2, created: Date.parse(at), containers: 1, inUse: true, dangling: false },
+    { id: 'sha256:demo-wiki-previous', tags: ['example/wiki-api:2.2', 'example/wiki-api:previous'], size: 305 * 1024 ** 2, created: Date.parse(at) - 604800000, containers: 0, inUse: false, dangling: false },
+    { id: 'sha256:demo-nginx', tags: ['nginx:1.28-alpine'], size: 53 * 1024 ** 2, created: Date.parse(at), containers: 1, inUse: true, dangling: false },
+    { id: 'sha256:demo-build-cache', tags: [], size: 128 * 1024 ** 2, created: Date.parse(at) - 86400000, containers: 0, inUse: false, dangling: true },
+    { id: 'sha256:demo-worker', tags: ['example/worker:0.9'], size: 96 * 1024 ** 2, created: Date.parse(at) - 864000000, containers: 0, inUse: false, dangling: false },
+  ],
+  volumes: [
+    { name: 'cache_data', driver: 'local', scope: 'local', mountpoint: '/var/lib/docker/volumes/cache_data/_data', refCount: 1, orphan: false, size: null, createdAt: Date.parse(at) },
+    { name: 'knowledge-base_data', driver: 'local', scope: 'local', mountpoint: '/var/lib/docker/volumes/knowledge-base_data/_data', refCount: 1, orphan: false, size: null, createdAt: Date.parse(at) },
+    { name: 'sandbox_old-data', driver: 'local', scope: 'local', mountpoint: '/var/lib/docker/volumes/sandbox_old-data/_data', refCount: 0, orphan: true, size: null, createdAt: Date.parse(at) - 864000000 },
+  ],
+  networks: [
+    { id: 'demo-net-default', name: 'bridge', driver: 'bridge', scope: 'local', builtin: true, unused: false, attached: 0, createdAt: Date.parse(at) },
+    { id: 'demo-net-wiki', name: 'knowledge-base_default', driver: 'bridge', scope: 'local', builtin: false, unused: false, attached: 2, createdAt: Date.parse(at) },
+    { id: 'demo-net-sandbox', name: 'sandbox_previous', driver: 'bridge', scope: 'local', builtin: false, unused: true, attached: 0, createdAt: Date.parse(at) - 864000000 },
+  ],
+};
+
+export const marketplaceTemplates = [
+  { id: 'builtin-nginx', name: 'Nginx', category: 'Web', description: '轻量的 Web 服务与反向代理。通过端口变量适配你的本地环境。', featured: true, favorited: true, envSchema: [{ key: 'HTTP_PORT', label: 'HTTP 端口', default: '8080' }], defaultCompose: 'services:\n  nginx:\n    image: nginx:alpine\n    ports:\n      - "${HTTP_PORT}:80"\n    restart: unless-stopped\n' },
+  { id: 'builtin-redis', name: 'Redis', category: 'Database', description: '为应用提供高速缓存。使用命名卷保存持久化数据。', favorited: false, envSchema: [], defaultCompose: 'services:\n  redis:\n    image: redis:7-alpine\n    volumes:\n      - data:/data\nvolumes:\n  data:\n' },
+  { id: 'builtin-uptime-kuma', name: 'Uptime Kuma', category: 'DevOps', description: '跟踪站点与服务的可用性，建立自己的状态页面。', favorited: false, envSchema: [], defaultCompose: 'services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:2\n    ports:\n      - "3001:3001"\n    volumes:\n      - data:/app/data\nvolumes:\n  data:\n' },
+  { id: 'custom-team-tools', name: '团队工具箱', category: 'Custom', description: '自定义模板示例，可查看和复制配置，在自己的部署中编辑使用。', favorited: false, defaultCompose: 'services:\n  homepage:\n    image: ghcr.io/gethomepage/homepage:latest\n    ports:\n      - "3000:3000"\n' },
+];

@@ -55,7 +55,7 @@ test('多项目恢复本次会话选择并保留来源返回', async ({ page }) 
   await page.goto('./#/compose?from=events');
   await expect(page.getByLabel('选择 Compose 项目')).toHaveValue('cache');
   await expect(page).toHaveURL(/from=events/);
-  await page.getByRole('button', { name: '返回', exact: true }).click();
+  await page.getByRole('navigation', { name: '页面导航' }).getByRole('button', { name: '返回事件中心', exact: true }).click();
   await expect(page.getByRole('heading', { name: '事件中心', exact: true })).toBeVisible();
 });
 

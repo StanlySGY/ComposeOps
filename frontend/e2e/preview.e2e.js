@@ -17,7 +17,7 @@ const routes = {
   shell: '容器终端', monitor: '实时监控', resources: '存储资源', settings: '设置', topology: '服务拓扑中心', events: '事件中心',
   inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': '任务中心', workflows: '工作流中心',
   cron: '定时任务', gitops: 'GitOps 集成', review: '变更与回滚', cmdb: '资产中心 (CMDB)', 'node-groups': '节点组管理',
-  marketplace: '应用市场', cost: '成本分析',
+  marketplace: '应用市场', cost: '成本分析', tickets: '长期运维任务',
 };
 test('真实应用导航和全部页面可访问，没有后端流量或渲染错误', async ({ page }) => {
   test.setTimeout(60000);
@@ -121,7 +121,7 @@ test('真实 Agent 审批门可拒绝、确认，刷新后重置示例', async (
   await page.evaluate(() => { location.hash = '/services'; });
   await expect(page.locator('#project-knowledge-base')).toContainText('运行中');
   await page.getByRole('button', { name: '重置演示', exact: true }).click();
-  await expect(page.locator('#project-knowledge-base')).toContainText('部分异常');
+  await expect(page.locator('#project-knowledge-base')).toContainText('部分运行');
   expect(observed.errors).toEqual([]);
   expect(observed.network).toEqual([]);
 });
@@ -311,13 +311,20 @@ test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) 
   await page.getByRole('button', { name: '新建工作流' }).first().click();
   const dialog = page.getByRole('dialog', { name: '新建工作流' });
   await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await dialog.locator('input, select, button').evaluateAll(elements => elements.every(element => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.x >= 0 && bounds.right <= innerWidth;
+  }))).toBe(true);
   await dialog.getByRole('button', { name: '保存' }).click();
-  await expect(page.getByText('请填写工作流名称')).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('请填写工作流名称');
+  await expect(dialog.getByLabel('名称', { exact: true })).toBeFocused();
   await dialog.getByPlaceholder('如:故障自动处理').fill('回归测试工作流');
   const nodeIds = dialog.getByPlaceholder('节点 ID');
   await nodeIds.nth(1).fill('trigger');
   await dialog.getByRole('button', { name: '保存' }).click();
-  await expect(page.getByText('节点 ID 重复：trigger')).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('节点 ID 重复：trigger');
+  await expect(nodeIds.nth(1)).toBeFocused();
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -397,7 +404,7 @@ test('Agent 富内容放大预览提供模态语义、焦点循环、Escape 关�
 
   const trigger = page.getByRole('button', { name: '打开图表预览' });
   await trigger.focus();
-  await trigger.click();
+  await trigger.press('Enter');
 
   const dialog = page.getByRole('dialog', { name: '放大预览' });
   await expect(dialog).toBeVisible();
@@ -491,17 +498,17 @@ test('服务页进入日志再返回，筛选、展开、滚动与日志上下�
   await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
   await card.locator('.service-project-card__toggle').click();
   await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
-  const logLink = card.locator('a[href*="/logs"][href*="containerId=demo-wiki-api"]:visible');
+  const logLink = card.locator('[data-container="demo-wiki-api"]').getByRole('link', { name: '实时日志', exact: true });
   await expect(logLink).toBeVisible();
   // 移动端的卡片日志入口位于展开内容下方;先让真实入口进入视口,再记录离开时的位置。
   await logLink.scrollIntoViewIfNeeded();
   const scrollTop = await page.locator('.app-main').evaluate(el => el.scrollTop);
   await logLink.click();
   await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回服务总览' })).toBeVisible();
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
   await page.getByRole('textbox', { name: '搜索和过滤实时日志' }).fill('ENOTFOUND');
-  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await page.getByRole('button', { name: '返回服务总览' }).click();
   await expect(page.getByRole('heading', { name: '服务总览', exact: true })).toBeVisible();
   await expect(search).toHaveValue('wiki-api');
   await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
@@ -510,10 +517,12 @@ test('服务页进入日志再返回，筛选、展开、滚动与日志上下�
   // 通过侧栏普通“日志”入口不带 query 重进,应保留项目上下文和原始来源。
   await page.getByRole('link', { name: '日志', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: '实时日志', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '返回服务列表' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回服务总览' })).toBeVisible();
+  const options = page.getByRole('button', { name: '日志选项', exact: true });
+  if (await options.isVisible()) await options.click();
   await expect(page.getByRole('combobox', { name: '选择日志项目' })).toHaveValue('knowledge-base');
   await expect(page.getByRole('textbox', { name: '搜索和过滤实时日志' })).toHaveValue('ENOTFOUND');
-  await page.getByRole('button', { name: '返回服务列表' }).click();
+  await page.getByRole('button', { name: '返回服务总览' }).click();
   await expect(search).toHaveValue('wiki-api');
   await expect(card.locator('.service-project-card__toggle')).toHaveAttribute('aria-expanded', 'true');
 });
@@ -528,7 +537,130 @@ test('手机窄屏日志搜索框保持完整宽度并可实际过滤', async ({
   const width = await search.evaluate(element => element.getBoundingClientRect().width);
   expect(width).toBeGreaterThanOrEqual(250);
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
+  const logBox = await page.locator('.log-pane-body').boundingBox();
+  expect(logBox.y).toBeLessThan(500);
+  await expect(page.getByRole('combobox', { name: '选择日志项目' })).toBeHidden();
+  await page.getByRole('button', { name: '日志选项', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: '选择日志项目' })).toBeVisible();
+  await page.getByRole('combobox', { name: '按日志级别过滤' }).selectOption('error');
+  await page.getByRole('button', { name: '收起选项', exact: true }).click();
+  await expect(page.getByRole('group', { name: '当前日志级别筛选' })).toContainText('ERROR');
+  await page.getByRole('button', { name: '清除级别筛选' }).click();
+  await expect(page.getByRole('group', { name: '当前日志级别筛选' })).toHaveCount(0);
   await search.fill('ENOTFOUND');
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+});
+
+test('筛选外的批量选择明确提示，确认列出实际项目，取消不执行', async ({ page }) => {
+  await page.goto('./#/services');
+  await page.getByRole('checkbox', { name: '选择 knowledge-base', exact: true }).check();
+  await expect(page.getByRole('checkbox', { name: '选择当前', exact: true })).toHaveJSProperty('indeterminate', true);
+  await page.getByRole('checkbox', { name: '选择 cache', exact: true }).check();
+  await page.getByRole('searchbox', { name: '搜索服务项目' }).fill('wiki-api');
+  const bar = page.getByRole('region', { name: '批量项目操作' });
+  await expect(bar).toContainText('已选择 2 个项目');
+  await expect(bar).toContainText('其中 1 个不在当前筛选中');
+  await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
+  await page.evaluate(() => {
+    window.__batchRequests = 0;
+    const fetch = window.fetch;
+    window.fetch = (...args) => { if (String(args[0]).endsWith('/jobs') && args[1]?.method === 'POST') window.__batchRequests++; return fetch(...args); };
+  });
+  await bar.getByRole('button', { name: '重启', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '批量重启' });
+  await expect(dialog).toContainText('knowledge-base');
+  await expect(dialog).toContainText('cache');
+  await expect(dialog).toContainText('重启不会应用配置或新镜像');
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  expect(await page.evaluate(() => window.__batchRequests)).toBe(0);
+  await expect(bar).toBeVisible();
+  await bar.getByRole('button', { name: '取消选择' }).click();
+  await expect(bar).toHaveCount(0);
+});
+
+test('平板服务搜索保留可输入宽度，筛选和批量选择可同时使用', async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto('./#/services');
+  const search = page.getByRole('searchbox', { name: '搜索服务项目' });
+  await expect(search).toBeVisible();
+  expect((await search.boundingBox()).width).toBeGreaterThanOrEqual(250);
+  await page.getByRole('checkbox', { name: '选择 knowledge-base', exact: true }).check();
+  await page.getByRole('checkbox', { name: '选择 cache', exact: true }).check();
+  await search.fill('wiki-api');
+  await expect(page.locator('article[id^="project-"]')).toHaveCount(1);
+  await expect(page.getByRole('region', { name: '批量项目操作' })).toContainText('其中 1 个不在当前筛选中');
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 768);
+});
+
+test('手动刷新等待最新响应，显示忙碌状态且阻止重复提交', async ({ page }) => {
+  await page.goto('./#/services');
+  await expect(page.locator('#project-knowledge-base')).toBeVisible();
+  await page.getByRole('checkbox', { name: '自动刷新', exact: true }).uncheck();
+  await page.evaluate(() => {
+    const fetch = window.fetch;
+    window.__refreshRequests = 0;
+    window.fetch = async (...args) => {
+      if (!String(args[0]).endsWith('/projects')) return fetch(...args);
+      window.__refreshRequests++;
+      await new Promise(resolve => { window.__releaseRefresh = resolve; });
+      const response = await fetch(...args);
+      const body = await response.json();
+      body.projects.find(project => project.id === 'knowledge-base').note = '已取得本次刷新数据';
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    };
+  });
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  const refreshing = page.getByRole('button', { name: '刷新中', exact: true });
+  await expect(refreshing).toBeDisabled();
+  await expect(refreshing).toHaveAttribute('aria-busy', 'true');
+  await refreshing.evaluate(element => element.click());
+  expect(await page.evaluate(() => window.__refreshRequests)).toBe(1);
+  await page.evaluate(() => window.__releaseRefresh());
+  await expect(page.locator('#project-knowledge-base')).toContainText('已取得本次刷新数据');
+  await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+});
+
+test('持续日志流保持历史阅读位置，点击新日志提示才回到底部', async ({ page, isMobile, browserName }) => {
+  await page.goto('./#/services');
+  await expect(page.locator('#project-knowledge-base')).toBeVisible();
+  await page.evaluate(() => {
+    const message = WebSocket.prototype.message;
+    WebSocket.prototype.message = function (value) { if (this.url.includes('/ws/logs')) window.__logSocket = this; return message.call(this, value); };
+    location.hash = '/logs?projectId=knowledge-base&containerId=demo-wiki-api';
+  });
+  const region = page.getByRole('region', { name: 'wiki-api实时日志' });
+  await expect(region).toBeVisible();
+  await expect.poll(() => page.evaluate(() => !!window.__logSocket)).toBe(true);
+  await page.evaluate(() => { for (let i = 0; i < 180; i++) window.__logSocket.message({ type: 'stdout', data: `reading-line-${i}` }); });
+  // scrollHeight/clientHeight are rounded integers; allow a few pixels after font/layout settling.
+  await expect.poll(() => region.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(3);
+  await expect(page.getByText('reading-line-179', { exact: true })).toBeVisible();
+  await region.scrollIntoViewIfNeeded();
+  await region.focus();
+  await page.keyboard.press('Home');
+  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBe(0);
+  if (isMobile && browserName === 'webkit') {
+    // Mobile WebKit does not implement wheel input. Exercise its touch/scroll
+    // handlers; physical touch inertia remains a real-device verification item.
+    await region.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientX: 120, clientY: 400 }] });
+    await region.evaluate(el => { el.scrollTop += 48; el.dispatchEvent(new Event('scroll')); });
+    await region.dispatchEvent('touchend');
+  } else {
+    await region.hover();
+    await page.mouse.wheel(0, 48);
+  }
+  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  const top = await region.evaluate(el => el.scrollTop);
+  await page.evaluate(() => window.__logSocket.message({ type: 'stdout', data: 'arrived-while-reading' }));
+  const resume = page.getByRole('button', { name: '1 条新日志 · 回到最新' });
+  await expect(resume).toBeVisible();
+  await expect(region).toHaveJSProperty('scrollTop', top);
+  const chip = await resume.boundingBox(), pane = await page.locator('.log-pane').boundingBox();
+  expect(chip.x).toBeGreaterThanOrEqual(pane.x);
+  expect(chip.y + chip.height).toBeLessThanOrEqual(pane.y + pane.height);
+  await resume.click();
+  await expect(resume).toHaveCount(0);
+  await expect.poll(() => region.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(3);
+  await expect(page.getByText('arrived-while-reading', { exact: true })).toBeVisible();
 });
