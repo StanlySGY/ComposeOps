@@ -4,7 +4,7 @@
     <div class="login-glow login-glow-two" aria-hidden="true"></div>
     <div class="login-layout relative z-10 grid w-full max-w-5xl items-center gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16">
       <section class="login-intro hidden lg:block">
-        <div class="mb-8 flex items-center gap-3">
+        <div class="mb-7 flex items-center gap-3">
           <span class="login-brand-mark"><Boxes class="h-6 w-6" /></span>
           <div>
             <p class="text-lg font-semibold tracking-tight text-surface-100">ComposeOps</p>
@@ -16,38 +16,42 @@
           让复杂的容器运维，<span class="login-headline-accent">回归简单。</span>
         </h2>
         <p class="mt-5 max-w-lg text-sm leading-7 text-surface-400">集中查看服务状态、管理 Compose 配置、追踪日志与自动化任务。先看清状态，再安全地执行操作。</p>
-        <div class="mt-10 grid max-w-lg grid-cols-3 gap-3">
-          <div v-for="feature in features" :key="feature.title" class="login-feature rounded-xl border border-surface-800/80 bg-surface-900/50 p-3.5">
-            <component :is="feature.icon" class="mb-3 h-4 w-4 text-blue-300" />
+        <picture class="login-illustration" aria-hidden="true">
+          <source media="(min-width: 1024px)" :srcset="`${clusterSmall} 720w, ${clusterLarge} 1200w`" sizes="512px" type="image/webp" />
+          <img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" width="1200" height="516" alt="" decoding="async" draggable="false" />
+        </picture>
+        <div class="login-features grid max-w-lg grid-cols-3 gap-4">
+          <div v-for="feature in features" :key="feature.title" class="login-feature">
+            <component :is="feature.icon" class="mb-2.5 h-4 w-4 text-blue-300" />
             <p class="text-xs font-medium text-surface-200">{{ feature.title }}</p>
             <p class="mt-1 text-[11px] leading-4 text-surface-400">{{ feature.description }}</p>
           </div>
         </div>
-        <div class="mt-10 flex items-center gap-2 text-xs text-surface-400">
+        <div class="mt-7 flex items-center gap-2 text-xs text-surface-400">
           <ShieldCheck class="h-4 w-4 text-status-ok" />
           <span>个人运维控制台 · 管理员身份验证</span>
         </div>
       </section>
 
-      <section class="login-card w-full rounded-2xl border border-surface-700/70 bg-surface-900/90 p-6 shadow-2xl backdrop-blur-xl sm:p-8">
+      <section class="login-card w-full rounded-2xl border border-surface-700/70 bg-surface-900/90 p-6 shadow-2xl backdrop-blur-xl sm:p-8" aria-labelledby="login-title">
         <div class="mb-7 lg:hidden">
           <div class="flex items-center gap-2.5 text-surface-100">
             <span class="login-brand-mark login-brand-mark-small"><Boxes class="h-5 w-5" /></span>
-            <h1 class="text-xl font-semibold tracking-tight">ComposeOps</h1>
+            <p class="text-xl font-semibold tracking-tight">ComposeOps</p>
           </div>
           <p class="mt-2 text-sm text-surface-400">个人 Docker 运维控制台</p>
         </div>
         <div class="mb-6 flex items-start justify-between gap-4">
           <div>
             <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300">SECURE WORKSPACE</p>
-            <h1 class="mt-2 text-2xl font-semibold tracking-tight text-surface-50">{{ auth.setupRequired ? '创建管理员' : '欢迎回来' }}</h1>
+            <h1 id="login-title" class="mt-2 text-2xl font-semibold tracking-tight text-surface-50">{{ auth.setupRequired ? '创建管理员' : '欢迎回来' }}</h1>
             <p class="mt-2 text-sm leading-6 text-surface-400">
               {{ auth.setupRequired ? '设置管理员密码，完成控制台初始化。' : '验证身份后，继续管理你的容器服务。' }}
             </p>
           </div>
           <span class="login-lock-icon grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-surface-700/70 bg-surface-950/70 text-surface-300"><ShieldCheck class="h-5 w-5" /></span>
         </div>
-        <form class="space-y-5" @submit.prevent="submit">
+        <form class="space-y-5" :aria-busy="loading" @submit.prevent="submit">
           <div>
             <label for="admin-password" class="mb-1.5 block text-xs font-medium text-surface-300">管理员密码</label>
             <div class="password-field"><input id="admin-password" v-model="password" class="input w-full" :type="showPassword ? 'text' : 'password'" :autocomplete="auth.setupRequired ? 'new-password' : 'current-password'" :aria-invalid="!!error" :aria-describedby="error ? 'login-error' : capsLock ? 'caps-lock-hint' : undefined" required minlength="10" autofocus :placeholder="auth.setupRequired ? '至少 10 个字符' : '输入管理员密码'" @keydown="updateCapsLock" @keyup="updateCapsLock" @blur="capsLock = false" /><button type="button" class="password-visibility" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :aria-pressed="showPassword" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" /><Eye v-else :size="17" /></button></div>
@@ -63,7 +67,7 @@
             <span class="mt-1.5 block text-[11px] leading-5 text-surface-400">如需令牌，请从服务端配置或启动日志中获取。</span>
           </label>
           <p id="login-error" v-if="error" class="rounded-lg border border-status-error/25 bg-status-error/15 px-3 py-2.5 text-sm text-status-error" role="alert" aria-live="polite">{{ error }}</p>
-          <button class="btn-primary min-h-11 w-full justify-center rounded-xl" :disabled="loading">
+          <button class="login-submit btn-primary min-h-11 w-full justify-center rounded-xl" :disabled="loading">
             <span v-if="loading" class="loading-mark login-loading-mark" aria-hidden="true"></span>
             <LogIn v-else class="h-4 w-4" />
             {{ loading ? '正在验证…' : (auth.setupRequired ? '完成初始化' : '安全登录') }}
@@ -80,6 +84,8 @@
 import { ref } from 'vue';
 import { ArrowUp, Boxes, Eye, EyeOff, LogIn, ShieldCheck, Activity, FileCode2, ScrollText } from 'lucide-vue-next';
 import { useAuthStore } from '../stores/auth.js';
+import clusterSmall from '../assets/login-cluster-720.webp';
+import clusterLarge from '../assets/login-cluster-1200.webp';
 
 const auth = useAuthStore();
 const features = [
@@ -109,6 +115,7 @@ async function submit() {
 
 <style scoped>
 .login-page {
+  padding-bottom: 3rem;
   background:
     radial-gradient(ellipse at 16% 18%, rgba(37, 99, 235, 0.11), transparent 38%),
     radial-gradient(ellipse at 88% 82%, rgba(16, 185, 129, 0.07), transparent 34%),
@@ -154,8 +161,15 @@ async function submit() {
 
 .login-brand-mark-small { width: 36px; height: 36px; border-radius: 10px; }
 .login-headline-accent { display: block; color: #93c5fd; }
-.login-feature { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025); }
-.login-card { box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035); }
+.login-illustration { display: block; margin: 1.25rem -1rem 1rem; pointer-events: none; mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent), linear-gradient(to bottom, transparent, #000 12%, #000 84%, transparent); mask-composite: intersect; }
+.login-illustration img { display: block; width: 100%; height: auto; }
+.login-features { padding-top: 1.25rem; border-top: 1px solid rgba(148, 163, 184, 0.13); }
+.login-feature + .login-feature { border-left: 1px solid rgba(148, 163, 184, 0.13); padding-left: 1rem; }
+.login-card { box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035); transition: border-color 180ms ease, box-shadow 180ms ease; }
+.login-card:focus-within { border-color: rgba(96, 165, 250, 0.42); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28), 0 0 0 4px rgba(96, 165, 250, 0.035); }
+.login-submit > svg { transition: transform 160ms ease; }
+.login-submit:focus-visible > svg { transform: translateX(2px); }
+@media (hover: hover) { .login-submit:hover:not(:disabled) > svg { transform: translateX(2px); } }
 .login-lock-icon { color: #93c5fd; }
 .login-loading-mark { width: 15px; height: 15px; }
 .password-field { position: relative; }.password-field input { padding-right: 48px; min-height: 46px; }.password-visibility { position: absolute; right: 3px; top: 3px; bottom: 3px; width: 40px; display: grid; place-items: center; border-radius: 7px; color: var(--color-surface-400); }.password-visibility:hover { color: var(--color-surface-100); background: var(--panel-raised); }
