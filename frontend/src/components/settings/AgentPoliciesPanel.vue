@@ -20,10 +20,10 @@
       </div>
       <form class="grid gap-2 sm:grid-cols-[1fr_2fr_auto] sm:items-end" @submit.prevent="createGroup">
         <label class="block text-xs text-surface-400">新策略组名称
-          <input v-model="groupForm.name" class="input mt-1" maxlength="80" required placeholder="例如：生产环境保护" />
+          <input v-model="groupForm.name" class="input mt-1" maxlength="80" required aria-label="例如：生产环境保护" placeholder="例如：生产环境保护" />
         </label>
         <label class="block text-xs text-surface-400">说明
-          <input v-model="groupForm.description" class="input mt-1" maxlength="500" placeholder="适用范围或运维约定" />
+          <input v-model="groupForm.description" class="input mt-1" maxlength="500" aria-label="适用范围或运维约定" placeholder="适用范围或运维约定" />
         </label>
         <button class="btn-primary" type="submit" :disabled="saving || !groupForm.name.trim()"><Plus class="h-4 w-4" />创建策略组</button>
       </form>
@@ -34,9 +34,9 @@
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-medium text-surface-100">{{ group.name }}</span>
-                <span class="status-badge" :class="group.enabled ? 'bg-emerald-500/10 text-emerald-300' : 'bg-surface-800 text-surface-400'">{{ group.enabled ? '已启用' : '已停用' }}</span>
+                <span class="status-badge" :class="group.enabled ? 'bg-status-ok/10 text-status-ok' : 'bg-surface-800 text-surface-400'">{{ group.enabled ? '已启用' : '已停用' }}</span>
               </div>
-              <p class="mt-1 break-words text-xs text-surface-500">{{ group.description || '未填写说明' }} · {{ group.ruleCount }} 条规则</p>
+              <p class="mt-1 break-words text-xs text-surface-400">{{ group.description || '未填写说明' }} · {{ group.ruleCount }} 条规则</p>
             </div>
             <button class="icon-btn" :aria-label="(group.enabled ? '停用' : '启用') + '策略组 ' + group.name" :title="group.enabled ? '停用' : '启用'" @click="toggleGroup(group)">
               <ShieldCheck class="h-4 w-4" />
@@ -45,7 +45,7 @@
           </div>
         </div>
       </div>
-      <p v-else class="rounded-lg border border-dashed border-surface-700 p-4 text-sm text-surface-500">尚无策略组。创建策略组后再添加规则；空策略组不会改变现有审批行为。</p>
+      <EmptyState v-else compact icon="ShieldCheck" title="尚无策略组" description="填写上方名称创建策略组，再添加工具规则；空策略组不改变审批行为。" />
     </section>
 
     <section class="section-panel space-y-3">
@@ -54,9 +54,9 @@
           <h3 class="section-title">规则管理</h3>
           <p class="text-muted mt-1">工具名与项目 ID 精确匹配；参数 JSON 采用字段子集精确匹配，不支持正则和任意命令表达式。</p>
         </div>
-        <span class="status-badge bg-rose-500/10 text-rose-300">Deny 优先</span>
+        <span class="status-badge bg-status-error/10 text-status-error">Deny 优先</span>
       </div>
-      <p v-if="!groups.length" class="text-sm text-surface-500">请先创建策略组。</p>
+      <p v-if="!groups.length" class="text-sm text-surface-400">请先创建策略组。</p>
       <template v-else>
         <form class="space-y-3 rounded-xl border border-surface-800 bg-surface-950/30 p-3" @submit.prevent="createRule">
           <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -66,7 +66,7 @@
               </select>
             </label>
             <label class="block text-xs text-surface-400">规则名称
-              <input v-model="ruleForm.name" class="input mt-1" maxlength="100" required placeholder="例如：禁止删除生产卷" />
+              <input v-model="ruleForm.name" class="input mt-1" maxlength="100" required aria-label="例如：禁止删除生产卷" placeholder="例如：禁止删除生产卷" />
             </label>
             <label class="block text-xs text-surface-400">效果
               <select v-model="ruleForm.effect" class="input mt-1" aria-label="策略规则效果">
@@ -75,10 +75,10 @@
               </select>
             </label>
             <label class="block text-xs text-surface-400">工具名（完整名称或 *）
-              <input v-model="ruleForm.toolName" class="input mt-1 font-mono" maxlength="128" required placeholder="compose.ps 或 *" />
+              <input v-model="ruleForm.toolName" class="input mt-1 font-mono" maxlength="128" required aria-label="compose.ps 或 *" placeholder="compose.ps 或 *" />
             </label>
             <label class="block text-xs text-surface-400">项目 ID（精确值或 *）
-              <input v-model="ruleForm.projectId" class="input mt-1 font-mono" maxlength="200" required placeholder="project-id 或 *" />
+              <input v-model="ruleForm.projectId" class="input mt-1 font-mono" maxlength="200" required aria-label="project-id 或 *" placeholder="project-id 或 *" />
             </label>
             <label class="block text-xs text-surface-400">优先级（越小越先匹配）
               <input v-model.number="ruleForm.priority" type="number" min="-1000" max="1000" step="1" class="input mt-1" required />
@@ -88,13 +88,13 @@
             <textarea v-model="ruleForm.parametersText" class="input mt-1 font-mono" rows="3" spellcheck="false" aria-label="参数匹配 JSON"></textarea>
           </label>
           <label class="block text-xs text-surface-400">命中原因（写入审计）
-            <input v-model="ruleForm.reason" class="input mt-1" maxlength="500" placeholder="例如：生产环境禁止执行破坏性操作" />
+            <input v-model="ruleForm.reason" class="input mt-1" maxlength="500" aria-label="例如：生产环境禁止执行破坏性操作" placeholder="例如：生产环境禁止执行破坏性操作" />
           </label>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <label class="inline-flex items-center gap-2 text-sm text-surface-300"><input v-model="ruleForm.enabled" type="checkbox" />创建后立即启用</label>
             <button class="btn-primary" type="submit" :disabled="saving || !ruleForm.name.trim() || !ruleForm.groupId"><Plus class="h-4 w-4" />添加规则</button>
           </div>
-          <p class="text-xs text-amber-300">安全边界：敏感字段和值会被拒绝保存；所有拒绝规则先于允许规则；允许规则不能跳过 critical 确认或服务端权限检查。</p>
+          <p class="text-xs text-status-warn">安全边界：敏感字段和值会被拒绝保存；所有拒绝规则先于允许规则；允许规则不能跳过 critical 确认或服务端权限检查。</p>
         </form>
 
         <div class="table-wrap">
@@ -104,22 +104,22 @@
               <tr v-for="rule in rules" :key="rule.id">
                 <td class="min-w-40">
                   <div class="font-medium text-surface-100">{{ rule.name }}</div>
-                  <div class="mt-1 text-xs text-surface-500">{{ rule.groupName }} · 优先级 {{ rule.priority }}</div>
+                  <div class="mt-1 text-xs text-surface-400">{{ rule.groupName }} · 优先级 {{ rule.priority }}</div>
                   <div v-if="rule.reason" class="mt-1 text-xs text-surface-400">{{ rule.reason }}</div>
                 </td>
                 <td>
-                  <span class="status-badge" :class="rule.effect === 'deny' ? 'bg-rose-500/10 text-rose-300' : 'bg-emerald-500/10 text-emerald-300'">{{ rule.effect === 'deny' ? '拒绝' : '允许' }}</span>
+                  <span class="status-badge" :class="rule.effect === 'deny' ? 'bg-status-error/10 text-status-error' : 'bg-status-ok/10 text-status-ok'">{{ rule.effect === 'deny' ? '拒绝' : '允许' }}</span>
                   <div class="mt-1 max-w-52 break-all font-mono text-xs text-surface-400">{{ rule.toolName }}</div>
-                  <div class="max-w-52 break-all font-mono text-xs text-surface-500">{{ rule.projectId === '*' ? '所有项目' : rule.projectId }}</div>
+                  <div class="max-w-52 break-all font-mono text-xs text-surface-400">{{ rule.projectId === '*' ? '所有项目' : rule.projectId }}</div>
                 </td>
                 <td class="max-w-64 break-all font-mono text-xs text-surface-400">{{ JSON.stringify(rule.parameters) }}</td>
-                <td><span class="status-badge" :class="rule.enabled ? 'bg-emerald-500/10 text-emerald-300' : 'bg-surface-800 text-surface-400'">{{ rule.enabled ? '启用' : '停用' }}</span></td>
+                <td><span class="status-badge" :class="rule.enabled ? 'bg-status-ok/10 text-status-ok' : 'bg-surface-800 text-surface-400'">{{ rule.enabled ? '启用' : '停用' }}</span></td>
                 <td><div class="flex gap-1">
                   <button class="icon-btn" :aria-label="(rule.enabled ? '停用' : '启用') + '规则 ' + rule.name" :title="rule.enabled ? '停用' : '启用'" @click="toggleRule(rule)"><ShieldCheck class="h-4 w-4" /></button>
                   <button class="icon-btn" :aria-label="'删除规则 ' + rule.name" title="删除规则" @click="removeRule(rule)"><Trash2 class="h-4 w-4" /></button>
                 </div></td>
               </tr>
-              <tr v-if="!rules.length"><td colspan="5" class="py-6 text-center text-sm text-surface-500">这个策略组还没有规则。</td></tr>
+              <tr v-if="!rules.length"><td colspan="5" class="py-6 text-center text-sm text-surface-400">这个策略组还没有规则。</td></tr>
             </tbody>
           </table>
         </div>
@@ -139,19 +139,19 @@
           <thead><tr><th>时间</th><th>事件</th><th>工具 / 执行</th><th>决策与原因</th></tr></thead>
           <tbody>
             <tr v-for="event in auditEvents" :key="event.id">
-              <td class="whitespace-nowrap text-xs text-surface-500">{{ event.createdAt }}</td>
-              <td><span class="status-badge" :class="eventTone(event)">{{ eventLabel(event.eventType) }}</span><div class="mt-1 text-xs text-surface-500">{{ event.actor }}</div></td>
+              <td class="whitespace-nowrap text-xs text-surface-400">{{ event.createdAt }}</td>
+              <td><span class="status-badge" :class="eventTone(event)">{{ eventLabel(event.eventType) }}</span><div class="mt-1 text-xs text-surface-400">{{ event.actor }}</div></td>
               <td class="min-w-36">
                 <div class="font-mono text-xs text-surface-200">{{ event.toolName || '—' }}</div>
-                <div class="mt-1 max-w-48 break-all font-mono text-[11px] text-surface-600">{{ event.executionId || event.planId || '' }}</div>
-                <div v-if="event.parametersHash" class="mt-1 font-mono text-[10px] text-surface-600">SHA256 {{ event.parametersHash.slice(0, 12) }}…</div>
+                <div class="mt-1 max-w-48 break-all font-mono text-[11px] text-surface-400">{{ event.executionId || event.planId || '' }}</div>
+                <div v-if="event.parametersHash" class="mt-1 font-mono text-[10px] text-surface-400">SHA256 {{ event.parametersHash.slice(0, 12) }}…</div>
               </td>
               <td class="min-w-48">
                 <div class="text-sm text-surface-200">{{ event.decision || '—' }}<span v-if="event.ruleName"> · {{ event.ruleName }}</span></div>
-                <p v-if="event.reason" class="mt-1 whitespace-normal text-xs text-surface-500">{{ event.reason }}</p>
+                <p v-if="event.reason" class="mt-1 whitespace-normal text-xs text-surface-400">{{ event.reason }}</p>
               </td>
             </tr>
-            <tr v-if="!auditEvents.length"><td colspan="4" class="py-6 text-center text-sm text-surface-500">暂无审计事件。执行 Agent 工具后，策略决策与执行生命周期会显示在这里。</td></tr>
+            <tr v-if="!auditEvents.length"><td colspan="4"><EmptyState compact title="暂无审计事件" description="执行 Agent 工具后，可在这里查看策略决策与执行记录。" action-label="刷新审计" @action="loadAudit" /></td></tr>
           </tbody>
         </table>
       </div>
@@ -161,6 +161,7 @@
 
 <script setup>
 import { onMounted, ref, watch } from 'vue';
+import EmptyState from '../common/EmptyState.vue';
 import { Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 
@@ -272,8 +273,8 @@ function eventLabel(value) {
 }
 
 function eventTone(event) {
-  if (event.decision === 'deny' || event.decision === 'denied' || event.decision === 'rejected' || event.decision === 'failed') return 'bg-rose-500/10 text-rose-300';
-  if (event.decision === 'allow' || event.decision === 'allow_without_prompt' || event.decision === 'success' || event.decision === 'passed' || event.decision === 'approved') return 'bg-emerald-500/10 text-emerald-300';
+  if (event.decision === 'deny' || event.decision === 'denied' || event.decision === 'rejected' || event.decision === 'failed') return 'bg-status-error/10 text-status-error';
+  if (event.decision === 'allow' || event.decision === 'allow_without_prompt' || event.decision === 'success' || event.decision === 'passed' || event.decision === 'approved') return 'bg-status-ok/10 text-status-ok';
   return 'bg-surface-800 text-surface-300';
 }
 

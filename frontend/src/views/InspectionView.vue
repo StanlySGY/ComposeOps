@@ -41,8 +41,8 @@
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-4 text-xs text-muted">
-          <span class="flex items-center gap-1.5"><i class="status-dot bg-rose-400"></i>{{ latest.counts?.critical || 0 }} 严重</span>
-          <span class="flex items-center gap-1.5"><i class="status-dot bg-amber-400"></i>{{ latest.counts?.warning || 0 }} 关注</span>
+          <span class="flex items-center gap-1.5"><i class="status-dot bg-status-error"></i>{{ latest.counts?.critical || 0 }} 严重</span>
+          <span class="flex items-center gap-1.5"><i class="status-dot bg-status-warn"></i>{{ latest.counts?.warning || 0 }} 关注</span>
           <span class="flex items-center gap-1.5"><i class="status-dot bg-surface-500"></i>{{ latest.counts?.info || 0 }} 提示</span>
           <button class="icon-btn" title="查看完整报告" aria-label="查看完整报告" @click="openDetail(latest.id)"><FileText class="h-4 w-4" /></button>
         </div>
@@ -53,7 +53,7 @@
         <div class="mb-2 flex items-center gap-2"><span class="section-eyebrow">容量预测</span></div>
         <div class="grid gap-2 sm:grid-cols-2">
           <div v-for="prediction in latest.predictions" :key="prediction.metric" class="panel-card flex items-start gap-3">
-            <component :is="prediction.status === 'unknown' ? Hourglass : prediction.status === 'warning' ? TriangleAlert : CheckCircle2" class="mt-0.5 h-4 w-4 shrink-0" :class="prediction.status === 'warning' ? 'text-amber-300' : prediction.status === 'unknown' ? 'text-surface-500' : 'text-emerald-300'" />
+            <component :is="prediction.status === 'unknown' ? Hourglass : prediction.status === 'warning' ? TriangleAlert : CheckCircle2" class="mt-0.5 h-4 w-4 shrink-0" :class="prediction.status === 'warning' ? 'text-status-warn' : prediction.status === 'unknown' ? 'text-surface-400' : 'text-status-ok'" />
             <div class="min-w-0">
               <p class="text-sm text-surface-200">{{ predictionTitle(prediction) }}</p>
               <p class="mt-0.5 text-xs leading-5 text-muted">{{ prediction.detail }}</p>
@@ -68,7 +68,7 @@
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <span class="section-eyebrow">自动巡检</span>
-          <span class="count-badge" :class="schedule.enabled ? 'text-emerald-300' : 'text-surface-500'">{{ schedule.enabled ? '已启用' : '已停用' }}</span>
+          <span class="count-badge" :class="schedule.enabled ? 'text-status-ok' : 'text-surface-400'">{{ schedule.enabled ? '已启用' : '已停用' }}</span>
         </div>
         <p class="mt-1 text-xs text-muted">
           按间隔自动执行只读巡检并留存报告;默认关闭,开启后每天最多执行一次。
@@ -76,7 +76,7 @@
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-3">
-        <select v-model="intervalHours" class="input w-40! min-h-8! py-1.5! text-xs" :disabled="!schedule.enabled" aria-label="自动巡检间隔" title="自动巡检间隔">
+        <select v-model="intervalHours" class="input w-40 input-sm" :disabled="!schedule.enabled" aria-label="自动巡检间隔" title="自动巡检间隔">
           <option v-for="option in intervalOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
         <label class="toggle-label"><input type="checkbox" :checked="schedule.enabled" @change="toggleSchedule" /><span>{{ schedule.enabled ? '关闭自动巡检' : '开启自动巡检' }}</span></label>
@@ -87,7 +87,7 @@
     <div>
       <div class="mb-2 flex items-center justify-between">
         <h2 class="section-title">报告历史</h2>
-        <button v-if="reports.length" class="btn-ghost px-2! py-1! text-xs" @click="pruneReports"><Trash2 class="h-3.5 w-3.5" />清理 180 天前</button>
+        <button v-if="reports.length" class="btn-ghost btn-sm" @click="pruneReports"><Trash2 class="h-3.5 w-3.5" />清理 180 天前</button>
       </div>
       <div v-if="reports.length" class="table-wrap">
         <table class="data-table">
@@ -116,27 +116,23 @@
               </td>
               <td class="max-w-[380px] truncate text-surface-400">{{ report.summary }}</td>
               <td class="whitespace-nowrap">
-                <span class="text-rose-300">{{ report.counts?.critical || 0 }}</span>
-                <span class="mx-0.5 text-surface-600">/</span>
-                <span class="text-amber-300">{{ report.counts?.warning || 0 }}</span>
-                <span class="mx-0.5 text-surface-600">/</span>
-                <span class="text-surface-500">{{ report.counts?.info || 0 }}</span>
+                <span class="text-status-error">{{ report.counts?.critical || 0 }} 严重</span>
+                <span class="mx-0.5 text-surface-400">/</span>
+                <span class="text-status-warn">{{ report.counts?.warning || 0 }} 关注</span>
+                <span class="mx-0.5 text-surface-400">/</span>
+                <span class="text-surface-400">{{ report.counts?.info || 0 }} 提示</span>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div v-else-if="!loading" class="empty-state">
-        <ShieldCheck class="h-10 w-10 text-surface-600" />
-        <p>还没有巡检报告</p>
-        <button class="btn-primary" @click="runNow"><Play class="h-4 w-4" />现在巡检一次</button>
-      </div>
+      <EmptyState v-else-if="!loading" :action-disabled="running" compact title="还没有巡检报告" description="检查项目健康、资源与备份情况，生成可处理的建议。" action-label="现在巡检一次" @action="runNow" />
     </div>
 
     <!-- 报告明细抽屉 -->
     <BaseModal :show="!!detail" :title="detail ? `${formatTime(detail.report?.createdAt || detail.createdAt)} · ${sourceLabel(detail.report?.source || detail.source)} · 评分 ${detailScore() ?? '—'} / ${detailGradeLabel()}` : ''" size-class="max-h-[88vh] max-w-3xl flex flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4" @close="closeDetail">
       <template #header-actions>
-        <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="detailLoading" @click="askAgentForReport">交给 Agent</button>
+        <button class="btn-secondary btn-sm" :disabled="detailLoading" @click="askAgentForReport">交给 Agent</button>
       </template>
       <p v-if="detailLoading" class="text-sm text-muted" role="status" aria-live="polite" aria-atomic="true">正在加载巡检报告明细…</p>
       <template v-else-if="detail?.report">
@@ -146,7 +142,7 @@
           <h3 class="section-title mb-2">容量预测</h3>
           <div class="space-y-1.5">
             <p v-for="prediction in detail.report.predictions" :key="prediction.metric" class="flex items-start gap-2 text-sm text-surface-300">
-              <component :is="prediction.status === 'unknown' ? Hourglass : prediction.status === 'warning' ? TriangleAlert : CheckCircle2" class="mt-0.5 h-4 w-4 shrink-0" :class="prediction.status === 'warning' ? 'text-amber-300' : 'text-emerald-300'" />
+              <component :is="prediction.status === 'unknown' ? Hourglass : prediction.status === 'warning' ? TriangleAlert : CheckCircle2" class="mt-0.5 h-4 w-4 shrink-0" :class="prediction.status === 'warning' ? 'text-status-warn' : 'text-status-ok'" />
               <span class="min-w-0">{{ prediction.detail }}</span>
             </p>
           </div>
@@ -164,8 +160,8 @@
                 <p v-if="item.advice" class="mt-1.5 text-xs leading-5 text-muted">建议:{{ item.advice }}</p>
               </div>
               <div v-if="item.tool" class="flex shrink-0 flex-col items-end gap-1.5">
-                <button class="count-badge text-accent hover:underline" @click="handoffToAgent(item)">{{ item.tool }}</button>
-                <button class="btn-secondary px-2! py-1! text-xs" @click="handoffToAgent(item)"><Bot class="h-3.5 w-3.5" />让 Agent 处理</button>
+                <button class="count-badge text-status-info hover:underline" @click="handoffToAgent(item)">{{ item.tool }}</button>
+                <button class="btn-secondary btn-sm" @click="handoffToAgent(item)"><Bot class="h-3.5 w-3.5" />让 Agent 处理</button>
               </div>
             </div>
           </article>
@@ -178,11 +174,12 @@
 </template>
 
 <script setup>
+import EmptyState from '../components/common/EmptyState.vue';
 import { useRoute } from 'vue-router';
 const route = useRoute();
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { Bot, CheckCircle2, CircleAlert, CircleX, FileText, Hourglass, Info, Play, RefreshCw, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next';
+import { Bot, CheckCircle2, CircleAlert, CircleX, FileText, Hourglass, Info, Play, RefreshCw, Trash2, TriangleAlert } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { useToastStore } from '../stores/toast.js';
@@ -216,32 +213,32 @@ const intervalOptions = [
 
 function gradeBadgeClass(grade) {
   return {
-    healthy: 'text-emerald-300',
-    attention: 'text-amber-300',
-    degraded: 'text-amber-300',
-    critical: 'text-rose-300',
+    healthy: 'text-status-ok',
+    attention: 'text-status-warn',
+    degraded: 'text-status-warn',
+    critical: 'text-status-error',
   }[grade] || 'text-surface-400';
 }
 function scoreTextClass(score) {
-  return score >= GRADE_SCORE.healthy ? 'text-emerald-300' : score >= GRADE_SCORE.attention ? 'text-amber-300' : 'text-rose-300';
+  return score >= GRADE_SCORE.healthy ? 'text-status-ok' : score >= GRADE_SCORE.attention ? 'text-status-warn' : 'text-status-error';
 }
 function tileClass(score) {
   const base = 'border';
   if (score == null) return `${base} border-surface-700 bg-surface-900 text-surface-300`;
-  if (score >= GRADE_SCORE.healthy) return `${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`;
-  if (score >= GRADE_SCORE.attention) return `${base} border-amber-500/40 bg-amber-500/10 text-amber-300`;
-  return `${base} border-rose-500/40 bg-rose-500/10 text-rose-300`;
+  if (score >= GRADE_SCORE.healthy) return `${base} border-status-ok/40 bg-status-ok/10 text-status-ok`;
+  if (score >= GRADE_SCORE.attention) return `${base} border-status-warn/40 bg-status-warn/10 text-status-warn`;
+  return `${base} border-status-error/40 bg-status-error/10 text-status-error`;
 }
 function levelIcon(level) {
   return { critical: CircleX, warning: TriangleAlert, info: Info }[level] || CircleAlert;
 }
 function levelTextClass(level) {
-  return { critical: 'text-rose-300', warning: 'text-amber-300', info: 'text-surface-300' }[level] || '';
+  return { critical: 'text-status-error', warning: 'text-status-warn', info: 'text-surface-300' }[level] || '';
 }
 function levelBorderClass(level) {
   return {
-    critical: 'border-rose-900/50 bg-rose-950/20',
-    warning: 'border-amber-900/50 bg-amber-950/10',
+    critical: 'border-status-error/50 bg-status-error/15',
+    warning: 'border-status-warn/50 bg-status-warn/10',
     info: 'border-surface-800 bg-surface-950/40',
   }[level] || 'border-surface-800';
 }
@@ -300,7 +297,7 @@ async function runNow() {
   error.value = '';
   try {
     const data = await api.runInspection();
-    toast.success(`巡检完成:${data.report?.summary || '请查看报告'}`);
+    toast.success(`巡检完成：${data.report?.summary || '请查看报告'}`);
     await load();
   } catch (runError) {
     error.value = `巡检失败:${runError.message}`;
@@ -328,7 +325,7 @@ async function pruneReports() {
     toast.success(`已清理 ${result.removed || 0} 条历史报告`);
     await load();
   } catch (pruneError) {
-    toast.error(`清理失败:${pruneError.message}`);
+    toast.error(`清理失败：${pruneError.message}`);
   }
 }
 
@@ -339,7 +336,7 @@ async function openDetail(id) {
     const data = await api.getInspectionReport(id);
     detail.value = data.report ? { id, report: data.report } : detail.value;
   } catch (detailError) {
-    toast.error(`读取报告失败:${detailError.message}`);
+    toast.error(`读取报告失败：${detailError.message}`);
     detail.value = null;
   } finally {
     detailLoading.value = false;

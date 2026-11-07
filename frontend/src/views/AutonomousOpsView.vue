@@ -3,8 +3,8 @@
     <div class="page-header">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-          <h1 class="page-title">Autonomous Ops</h1>
-          <span class="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-300">COMMAND CENTER</span>
+          <h1 class="page-title">任务中心</h1>
+          <span class="rounded-full border border-status-ok/25 bg-status-ok/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-status-ok">运行与审批</span>
         </div>
         <p class="page-subtitle">统一查看任务、事件、人工审批与执行结果；每条记录都能追溯到原始来源。</p>
       </div>
@@ -15,37 +15,21 @@
       </div>
     </div>
 
-    <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="运行态势">
-      <button class="ops-kpi" :class="{ 'is-active': tab === 'approvals' }" @click="setTab('approvals')">
-        <span class="ops-kpi-icon is-amber"><ShieldAlert class="h-5 w-5" /></span>
-        <span class="ops-kpi-copy"><strong>{{ approvalCount }}</strong><small>等待你决策</small><em>工作流审批与 Agent 确认</em></span>
-        <ChevronRight class="ops-kpi-arrow h-4 w-4" />
-      </button>
-      <button class="ops-kpi" :class="{ 'is-active': tab === 'tasks' && taskTab === 'active' }" @click="setTab('tasks', 'active')">
-        <span class="ops-kpi-icon is-blue"><Activity class="h-5 w-5" /></span>
-        <span class="ops-kpi-copy"><strong>{{ activeCount }}</strong><small>正在运行</small><em>排队与执行中的任务</em></span>
-        <ChevronRight class="ops-kpi-arrow h-4 w-4" />
-      </button>
-      <button class="ops-kpi" :class="{ 'is-active': tab === 'review' }" @click="setTab('review')">
-        <span class="ops-kpi-icon is-rose"><TriangleAlert class="h-5 w-5" /></span>
-        <span class="ops-kpi-copy"><strong>{{ reviewCount }}</strong><small>需要核对</small><em>失败或副作用结果不确定</em></span>
-        <ChevronRight class="ops-kpi-arrow h-4 w-4" />
-      </button>
-      <button class="ops-kpi" :class="{ 'is-active': tab === 'events' }" @click="setTab('events')">
-        <span class="ops-kpi-icon is-violet"><BellRing class="h-5 w-5" /></span>
-        <span class="ops-kpi-copy"><strong>{{ openEventCount }}</strong><small>待处理事件</small><em>{{ events.length }} 条已汇聚事件</em></span>
-        <ChevronRight class="ops-kpi-arrow h-4 w-4" />
-      </button>
+    <section class="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="运行态势">
+      <MetricTile interactive title="等待你决策" :value="approvalCount" sub="工作流审批与 Agent 确认" :icon="ShieldAlert" tone="text-status-warn" :active="tab === 'approvals'" @click="setTab('approvals')" />
+      <MetricTile interactive title="正在运行" :value="activeCount" sub="排队与执行中的任务" :icon="Activity" :active="tab === 'tasks' && taskTab === 'active'" @click="setTab('tasks', 'active')" />
+      <MetricTile interactive title="需要核对" :value="reviewCount" sub="失败或结果不确定" :icon="TriangleAlert" tone="text-status-error" :active="tab === 'review'" @click="setTab('review')" />
+      <MetricTile interactive title="待处理事件" :value="openEventCount" :sub="`${events.length} 条已汇聚事件`" :icon="BellRing" :active="tab === 'events'" @click="setTab('events')" />
     </section>
 
     <div v-if="sourceErrors.length" class="space-y-2" role="status" aria-live="polite">
-      <div v-for="issue in sourceErrors" :key="issue.source" class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+      <div v-for="issue in sourceErrors" :key="issue.source" class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-status-warn/20 bg-status-warn/5 px-3 py-2 text-xs text-status-warn">
         <span>{{ issue.source }}读取失败：{{ issue.message }}。其他数据源仍正常显示。</span>
         <button class="font-semibold underline underline-offset-2" @click="load">重试</button>
       </div>
     </div>
 
-    <div class="ops-tabs" role="tablist" aria-label="统一运维视图" @keydown="handleTabKeydown">
+    <div class="tabs-segment" role="tablist" aria-label="统一运维视图" @keydown="handleTabKeydown">
       <button v-for="item in tabs" :key="item.id" :id="'ops-tab-' + item.id" :data-tab="item.id" role="tab"
         :aria-controls="'ops-panel-' + item.id" :aria-selected="tab === item.id"
         :tabindex="tab === item.id ? 0 : -1" :class="{ active: tab === item.id }" @click="setTab(item.id)">
@@ -77,7 +61,7 @@
             <option value="workflow">工作流</option>
             <option value="batch-job">批量任务</option>
           </select>
-          <button v-if="query || statusFilter !== 'all' || sourceFilter !== 'all'" class="btn-secondary min-h-9! px-3! text-xs!" @click="resetFilters">清除筛选</button>
+          <button v-if="query || statusFilter !== 'all' || sourceFilter !== 'all'" class="btn-secondary btn-sm" @click="resetFilters">清除筛选</button>
           <span class="ops-result-count">{{ currentList.length }} 条</span>
         </div>
 
@@ -129,7 +113,7 @@
           </div>
 
           <div v-if="selectedTask.source === 'workflow' && workflowDetail?.context?.pendingApprovalIntent" class="ops-approval-intent">
-            <div class="flex items-center gap-2 text-amber-200"><ShieldAlert class="h-4 w-4" /><strong>工作流审批意图</strong></div>
+            <div class="flex items-center gap-2 text-status-warn"><ShieldAlert class="h-4 w-4" /><strong>工作流审批意图</strong></div>
             <p>{{ selectedTask.approvalSummary || '后端已冻结审批意图，展开查看具体上下文。' }}</p>
             <pre>{{ prettyJson(workflowDetail.context.pendingApprovalIntent) }}</pre>
           </div>
@@ -174,7 +158,7 @@
                 <div><strong>{{ entry.label }}</strong><p>{{ entry.detail || '—' }}</p><time>{{ formatTime(entry.at) }}</time></div>
               </div>
             </div>
-            <div v-else class="ops-thread-empty">暂无可确认的关联时间线。系统不会仅凭时间相近就拼接来源不同的记录。</div>
+            <EmptyState v-else compact icon="History" title="暂无可确认的关联时间线" description="仅展示来源明确的关联记录；可切换其他任务查看。" />
           </div>
         </template>
         <div v-else class="ops-detail-placeholder">
@@ -240,7 +224,7 @@
             <p>{{ entry.detail || '—' }}</p>
             <time>{{ formatTime(entry.at) }}</time>
           </div>
-          <ChevronRight class="h-4 w-4 shrink-0 text-surface-600" />
+          <ChevronRight class="h-4 w-4 shrink-0 text-surface-400" />
         </button>
       </div>
       <div v-else class="ops-empty"><EmptyState icon="History" title="暂无时间线记录" description="事件、工具执行、工作流步骤和操作审计会逐步出现在这里。" /></div>
@@ -259,6 +243,7 @@
 </template>
 
 <script setup>
+import MetricTile from '../components/common/MetricTile.vue';
 import { eventDestination } from '../lib/deep-links.js';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -597,25 +582,6 @@ onBeforeUnmount(() => { loadSequence++; detailLoadSequence++; });
 <style scoped>
 .ops-command-center { min-width: 0; gap: 1.1rem; }
 .ops-command-center .page-header { align-items: flex-start; }
-.ops-kpi { display:flex; align-items:center; gap: .85rem; min-width:0; padding: .95rem 1rem; border:1px solid var(--border-subtle, rgba(82,82,91,.35)); border-radius: 1rem; background: var(--panel, rgba(18,22,29,.78)); text-align:left; transition:border-color .18s,background .18s,transform .18s; }
-.ops-kpi:hover,.ops-kpi.is-active { border-color:rgba(52,211,153,.4); background:rgba(16,185,129,.055); }
-.ops-kpi:active { transform:scale(.99); }
-.ops-kpi-icon { display:grid; width:2.35rem; height:2.35rem; flex:0 0 auto; place-items:center; border:1px solid currentColor; border-radius:.8rem; }
-.ops-kpi-icon.is-amber { color:#fbbf24; background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.2); }
-.ops-kpi-icon.is-blue { color:#60a5fa; background:rgba(59,130,246,.08); border-color:rgba(59,130,246,.2); }
-.ops-kpi-icon.is-rose { color:#fb7185; background:rgba(244,63,94,.08); border-color:rgba(244,63,94,.2); }
-.ops-kpi-icon.is-violet { color:#a78bfa; background:rgba(139,92,246,.08); border-color:rgba(139,92,246,.2); }
-.ops-kpi-copy { display:grid; min-width:0; flex:1; gap:.1rem; }
-.ops-kpi-copy strong { font-size:1.45rem; line-height:1.2; font-variant-numeric:tabular-nums; color:var(--text-primary,#f4f4f5); }
-.ops-kpi-copy small { color:var(--text-secondary,#d4d4d8); font-size:.78rem; font-weight:600; }
-.ops-kpi-copy em { overflow:hidden; color:var(--text-muted,#71717a); font-size:.68rem; font-style:normal; text-overflow:ellipsis; white-space:nowrap; }
-.ops-kpi-arrow { color:#71717a; }
-.ops-tabs { display:flex; gap:.35rem; overflow-x:auto; padding:.25rem; border:1px solid rgba(82,82,91,.3); border-radius:1rem; background:rgba(9,12,18,.55); scrollbar-width:none; }
-.ops-tabs::-webkit-scrollbar { display:none; }
-.ops-tabs button { display:inline-flex; align-items:center; gap:.45rem; flex:0 0 auto; min-height:2.5rem; padding:.55rem .8rem; border-radius:.75rem; color:#a1a1aa; font-size:.78rem; transition:background .16s,color .16s; }
-.ops-tabs button.active { background:rgba(52,211,153,.12); color:#6ee7b7; }
-.ops-tabs button:focus-visible,.ops-workspace:focus-visible,.ops-events-layout:focus-visible,.ops-global-timeline:focus-visible { outline:2px solid var(--color-accent); outline-offset:2px; }
-.ops-tabs button span { min-width:1.2rem; padding:0 .28rem; border-radius:999px; background:rgba(113,113,122,.17); color:inherit; font-size:.65rem; text-align:center; font-variant-numeric:tabular-nums; }
 .ops-workspace,.ops-events-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(21rem,.85fr); gap:.9rem; min-width:0; align-items:start; }
 .ops-list-pane,.ops-detail-pane { min-width:0; overflow:hidden; border:1px solid rgba(82,82,91,.32); border-radius:1rem; background:rgba(16,20,27,.72); }
 .ops-list-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:.55rem; padding:.8rem; border-bottom:1px solid rgba(82,82,91,.23); }
@@ -699,8 +665,6 @@ onBeforeUnmount(() => { loadSequence++; detailLoadSequence++; });
   .ops-command-center .page-header { gap:.7rem; }
   .ops-command-center .page-actions { width:100%; }
   .ops-command-center .page-actions button { flex:1; justify-content:center; min-width:0; padding:.55rem .45rem; font-size:.7rem; }
-  .ops-kpi { padding:.75rem; gap:.6rem; }
-  .ops-kpi-copy em { white-space:normal; }
   .ops-tabs button { padding:.5rem .62rem; font-size:.7rem; }
   .ops-list-toolbar { align-items:stretch; }
   .ops-list-toolbar .search-field { flex-basis:100%; }

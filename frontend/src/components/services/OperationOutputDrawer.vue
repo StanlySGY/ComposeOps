@@ -6,12 +6,12 @@
       <div class="progress mb-3" role="progressbar" aria-label="批量任务总体进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.max(0, Math.min(100, batchProgress))" :aria-valuetext="`${completedCount} / ${batchTasks.length} 项任务已完成`"><span aria-hidden="true" :style="{ width: `${batchProgress}%` }"></span></div>
       <div class="grid gap-2 sm:grid-cols-2">
         <div v-for="task in batchTasks" :key="task.id" class="batch-task">
-          <LoaderCircle v-if="task.status === 'running'" class="h-4 w-4 animate-spin text-accent" />
-          <CircleCheck v-else-if="task.status === 'success'" class="h-4 w-4 text-emerald-400" />
-          <CircleX v-else-if="task.status === 'failed'" class="h-4 w-4 text-rose-400" />
+          <LoaderCircle v-if="task.status === 'running'" class="h-4 w-4 animate-spin text-status-info" />
+          <CircleCheck v-else-if="task.status === 'success'" class="h-4 w-4 text-status-ok" />
+          <CircleX v-else-if="task.status === 'failed'" class="h-4 w-4 text-status-error" />
           <span v-else class="h-2 w-2 rounded-full bg-surface-600"></span>
           <span class="min-w-0 flex-1 truncate text-xs">{{ task.name }}</span>
-          <span class="text-[10px] text-surface-500">{{ statusLabel(task.status) }}</span>
+          <span class="text-[10px] text-surface-400">{{ statusLabel(task.status) }}</span>
         </div>
       </div>
     </div>
@@ -22,8 +22,8 @@
         <span class="text-xs text-muted">检测到执行失败，可交给 AI 分析根因与修复建议</span>
       </template>
       <template v-else>
-        <span class="text-xs text-emerald-300">执行完成。建议立即回到项目确认容器状态。</span>
-        <button class="btn-secondary text-xs!" @click="$emit('inspect')">查看项目状态</button>
+        <span class="text-xs text-status-ok">执行完成。建议立即回到项目确认容器状态。</span>
+        <button class="btn-secondary btn-sm" @click="$emit('inspect')">查看项目状态</button>
       </template>
     </div>
   </div>

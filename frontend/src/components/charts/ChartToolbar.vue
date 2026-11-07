@@ -4,7 +4,7 @@
       <button v-for="type in chartTypes" :key="type.key"
               @click="$emit('type-change', type.key)"
               :class="['chart-type-btn', modelValue === type.key && 'active']"
-              :title="type.label">
+              :title="type.label" :aria-label="type.label">
         <component :is="type.icon" class="w-4 h-4" />
       </button>
 
@@ -12,7 +12,7 @@
       <div class="export-dropdown" ref="exportDropdownRef">
         <button @click="toggleExportMenu"
                 class="chart-type-btn export-btn"
-                title="导出数据">
+                title="导出数据" aria-label="导出数据">
           <Download class="w-4 h-4" />
         </button>
         <div v-if="showExportMenu" class="export-menu">

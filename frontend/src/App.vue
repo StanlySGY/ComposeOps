@@ -17,7 +17,7 @@
         </div>
         <div class="content-outer mx-auto h-full min-h-full w-full">
           <ReturnLink v-if="!['logs', 'compose'].includes(route.name)" />
-          <div v-if="['ops-center', 'ops-tickets', 'maintenance-plan', 'workflows', 'cron'].includes(route.name)" class="px-4 pt-4 sm:px-6"><TaskNavigation /></div>
+          <div v-if="['ops-center', 'ops-tickets', 'maintenance-plan', 'workflows', 'cron'].includes(route.name)" class="route-prefix px-4 pt-4 sm:px-6"><TaskNavigation /></div>
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in" @after-enter="restoreRouteScroll">
               <keep-alive :include="keepAliveViews">

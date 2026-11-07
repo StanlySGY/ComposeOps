@@ -40,7 +40,7 @@ it('异步加载的定义和待审批实例显示在页面,刷新状态保持响
   store.instances = [];
   store.error = '刷新失败';
   await flushPromises();
-  expect(wrapper.text()).toContain('暂无工作流');
+  expect(wrapper.text()).toContain('还没有工作流');
   expect(wrapper.text()).toContain('暂无运行实例');
   expect(wrapper.text()).toContain('刷新失败');
 });

@@ -1,7 +1,7 @@
 <template>
   <BaseModal :show="open" title="日志查询语法" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[85vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4" @close="close">
     <template #header-actions>
-      <Braces class="w-4 h-4 text-accent" />
+      <Braces class="w-4 h-4 text-status-info" />
     </template>
     <p class="text-sm text-surface-300">搜索框支持字段谓词、短语、正则与布尔组合。空格即“与”,`|` 即“或”;写错时只提示,不会清空已有日志。</p>
     <div class="mt-3 table-wrap">

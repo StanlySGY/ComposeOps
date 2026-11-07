@@ -7,9 +7,9 @@
     @close="close"
   >
     <template #header-actions>
-      <KeyRound class="h-4 w-4 shrink-0 text-accent" />
-      <span class="hidden font-mono text-[11px] text-surface-500 sm:inline">{{ data.path || '.env' }}</span>
-      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input min-h-8! w-auto! py-1! text-xs" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
+      <KeyRound class="h-4 w-4 shrink-0 text-status-info" />
+      <span class="hidden font-mono text-[11px] text-surface-400 sm:inline">{{ data.path || '.env' }}</span>
+      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input w-auto input-sm" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
       <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
     </template>
 
@@ -23,17 +23,17 @@
         <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-surface-300 hover:text-surface-100" :disabled="backupLoading" @click="backupsExpanded = !backupsExpanded">
           <History class="h-4 w-4" />
           <span>历史备份</span>
-          <span class="text-surface-500">({{ envBackups.length }})</span>
+          <span class="text-surface-400">({{ envBackups.length }})</span>
           <RefreshCw class="ml-auto h-3.5 w-3.5" :class="{ 'animate-spin': backupLoading }" @click.stop="loadEnvBackups" />
         </button>
         <div v-if="backupsExpanded" class="max-h-36 space-y-1 overflow-auto border-t border-surface-800 p-2">
-          <p v-if="!envBackups.length && !backupLoading" class="px-2 py-3 text-center text-xs text-surface-500">当前文件暂无历史备份</p>
+          <p v-if="!envBackups.length && !backupLoading" class="px-2 py-3 text-center text-xs text-surface-400">当前文件暂无历史备份</p>
           <div v-for="backup in envBackups" :key="backup.name" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-900">
             <div class="min-w-0 flex-1">
               <p class="truncate font-mono text-[11px] text-surface-300">{{ backup.name }}</p>
-              <p class="text-[10px] text-surface-500">{{ formatBackupDate(backup.createdAt) }}<span v-if="backup.size != null"> · {{ formatBackupSize(backup.size) }}</span></p>
+              <p class="text-[10px] text-surface-400">{{ formatBackupDate(backup.createdAt) }}<span v-if="backup.size != null"> · {{ formatBackupSize(backup.size) }}</span></p>
             </div>
-            <button class="btn-secondary shrink-0 px-2! py-1! text-[11px]" :disabled="saving || backupLoading" @click="requestRestore(backup)">恢复</button>
+            <button class="btn-secondary shrink-0 btn-sm" :disabled="saving || backupLoading" @click="requestRestore(backup)">恢复</button>
           </div>
         </div>
       </section>
@@ -63,19 +63,19 @@
                   spellcheck="false"
                 />
                 <div v-if="entry.isSecret" class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-                  <button class="icon-btn h-7! w-7!" :title="revealed.has(entry._uid) ? '隐藏' : '显示'" :aria-label="revealed.has(entry._uid) ? '隐藏' : '显示'" @click="toggleReveal(entry._uid)"><Eye v-if="!revealed.has(entry._uid)" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
-                  <button class="icon-btn h-7! w-7!" title="复制值" aria-label="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
+                  <button class="icon-btn icon-btn-sm" :title="revealed.has(entry._uid) ? '隐藏' : '显示'" :aria-label="revealed.has(entry._uid) ? '隐藏' : '显示'" @click="toggleReveal(entry._uid)"><Eye v-if="!revealed.has(entry._uid)" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
+                  <button class="icon-btn icon-btn-sm" title="复制值" aria-label="复制值" @click="copyValue(entry)"><Copy class="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               <input v-model="entry.comment" :aria-label="entry.key ? `${entry.key} 说明注释` : `第 ${index + 1} 行说明注释`" class="input text-xs" placeholder="说明注释(可选)" />
             </div>
             <div class="flex shrink-0 items-center gap-1 self-end sm:self-center">
-              <button class="icon-btn h-7! w-7!" title="上移" aria-label="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn h-7! w-7!" title="下移" aria-label="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn h-7! w-7! hover:text-rose-400" title="删除" aria-label="删除变量" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn icon-btn-sm" title="上移" aria-label="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn icon-btn-sm" title="下移" aria-label="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn hover:text-status-error icon-btn-sm" title="删除" aria-label="删除变量" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
             </div>
           </div>
-          <div v-if="!filteredEntries.length" class="py-8 text-center text-sm text-surface-500">暂无变量{{ keyword ? '与过滤条件匹配' : ',点击下方添加' }}</div>
+          <div v-if="!filteredEntries.length" class="py-8 text-center text-sm text-surface-400">暂无变量{{ keyword ? '与过滤条件匹配' : ',点击下方添加' }}</div>
         </div>
 
         <!-- Raw 模式 -->
@@ -83,11 +83,11 @@
           <textarea
             v-model="rawText"
             aria-label="环境变量原始文本"
-            class="flex-1 resize-none rounded-lg border border-surface-800 bg-surface-1000 p-3 font-mono text-xs leading-5 text-emerald-200/90 outline-hidden focus:border-surface-600"
+            class="flex-1 resize-none rounded-lg border border-surface-800 bg-surface-1000 p-3 font-mono text-xs leading-5 text-status-ok/90 outline-hidden focus:border-surface-600"
             spellcheck="false"
             placeholder="# KEY=value&#10;SECRET_TOKEN=••••••••"
           ></textarea>
-          <p class="mt-2 text-[11px] text-surface-500">支持 `.env` 与 `docker compose` 变量语法;保存时自动做合法性校验。</p>
+          <p class="mt-2 text-[11px] text-surface-400">支持 `.env` 与 `docker compose` 变量语法;保存时自动做合法性校验。</p>
         </div>
       </div>
 
@@ -174,7 +174,7 @@ async function load() {
     if (result.file) activeFile.value = result.file;
     await loadEnvBackups();
   } catch (error) {
-    toast.error(`读取环境变量失败:${error.message}`);
+    toast.error(`读取环境变量失败：${error.message}`);
   } finally { loading.value = false; }
 }
 
@@ -194,7 +194,7 @@ async function loadEnvBackups() {
     envBackups.value = result.backups || [];
   } catch (error) {
     envBackups.value = [];
-    toast.error('读取历史备份失败:' + error.message);
+    toast.error('读取历史备份失败：' + error.message);
   } finally { backupLoading.value = false; }
 }
 
@@ -225,7 +225,7 @@ async function confirmRestore() {
     await load();
     emit('refresh');
   } catch (error) {
-    toast.error('恢复失败:' + error.message);
+    toast.error('恢复失败：' + error.message);
   } finally { saving.value = false; }
 }
 
@@ -310,7 +310,7 @@ async function doSave(apply) {
       emit('apply', { project: props.project });
     }
   } catch (error) {
-    toast.error(`保存失败:${error.message}`);
+    toast.error(`保存失败：${error.message}`);
   } finally { saving.value = false; pendingApply.value = false; }
 }
 

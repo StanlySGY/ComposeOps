@@ -1,5 +1,5 @@
 <template>
-  <nav v-if="target && target.path !== route.path" class="px-4 pt-4 sm:px-6" aria-label="返回来源页面">
+  <nav v-if="target && target.path !== route.path" class="route-prefix px-4 pt-4 sm:px-6" aria-label="返回来源页面">
     <button class="btn-ghost" @click="back"><ArrowLeft class="h-4 w-4" />{{ target.label }}</button>
   </nav>
 </template>

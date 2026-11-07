@@ -4,7 +4,7 @@
     :class="[data.cls, sizeCls]"
     :data-pulse="data.pulse"
     :title="data.tip || undefined"
-    :aria-label="data.tip || data.label"
+    :aria-label="label || data.tip || data.label"
   >
     <span class="relative inline-flex shrink-0" :class="dotSize">
       <span v-if="data.pulse" class="status-badge-pulse absolute inset-0 rounded-full" :class="data.dot"></span>
@@ -13,7 +13,7 @@
     <svg v-if="showIcon && iconPath" class="h-3.5 w-3.5 shrink-0" :class="{ 'animate-spin': isSpinning }" fill="currentColor" viewBox="0 0 20 20">
       <path :d="iconPath" clip-rule="evenodd" fill-rule="evenodd" />
     </svg>
-    <span v-if="showLabel" class="truncate">{{ data.label }}</span>
+    <span v-if="showLabel" class="truncate">{{ label || data.label }}</span>
   </span>
 </template>
 
@@ -22,6 +22,7 @@ import { computed } from 'vue';
 
 const props = defineProps({
   status: { type: String, default: '' },
+  label: { type: String, default: '' },
   health: { type: String, default: '' },
   size: { type: String, default: 'sm', validator: (v) => ['sm', 'md', 'lg'].includes(v) },
   showLabel: { type: Boolean, default: true },
@@ -29,19 +30,26 @@ const props = defineProps({
 });
 
 const STATUS = {
-  running: { label: '运行中', dot: 'bg-emerald-400', pulse: true, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '服务运行正常' },
-  restarting: { label: '重启中', dot: 'bg-amber-400', pulse: true, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]', tip: '服务正在重启' },
+  dangling: { label: '悬空', dot: 'bg-status-warn', cls: 'text-status-warn border-status-warn/30 bg-status-warn/10' },
+  orphan: { label: '孤儿', dot: 'bg-status-warn', cls: 'text-status-warn border-status-warn/30 bg-status-warn/10' },
+  unused: { label: '未使用', dot: 'bg-surface-400', cls: 'text-surface-300 border-surface-700 bg-surface-800/40' },
+  inUse: { label: '使用中', dot: 'bg-status-info', cls: 'text-status-info border-status-info/30 bg-status-info/10' },
+  referenced: { label: '被引用', dot: 'bg-status-info', cls: 'text-status-info border-status-info/30 bg-status-info/10' },
+  attached: { label: '已接入', dot: 'bg-status-info', cls: 'text-status-info border-status-info/30 bg-status-info/10' },
+  builtin: { label: '内置', dot: 'bg-surface-400', cls: 'text-surface-300 border-surface-700 bg-surface-800/40' },
+  running: { label: '运行中', dot: 'bg-status-ok', pulse: true, cls: 'text-status-ok border-status-ok/30 bg-status-ok/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '服务运行正常' },
+  restarting: { label: '重启中', dot: 'bg-status-warn', pulse: true, cls: 'text-status-warn border-status-warn/30 bg-status-warn/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]', tip: '服务正在重启' },
   paused: { label: '已暂停', dot: 'bg-sky-400', pulse: false, cls: 'text-sky-300 border-sky-500/30 bg-sky-500/10', tip: '服务已暂停' },
   stopped: { label: '已停止', dot: 'bg-surface-500', pulse: false, cls: 'text-surface-400 border-surface-700/50 bg-surface-900/60', tip: '服务已停止' },
-  partial: { label: '部分异常', dot: 'bg-amber-400', pulse: false, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]', tip: '部分容器未正常运行' },
-  degraded: { label: '运行降级', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.22)]', tip: '服务质量已降级,请检查' },
-  error: { label: '异常', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '运行异常,请检查日志' },
+  partial: { label: '部分异常', dot: 'bg-status-warn', pulse: false, cls: 'text-status-warn border-status-warn/30 bg-status-warn/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]', tip: '部分容器未正常运行' },
+  degraded: { label: '运行降级', dot: 'bg-status-error', pulse: false, cls: 'text-status-error border-status-error/40 bg-status-error/10 shadow-[0_0_10px_rgba(244,63,94,0.22)]', tip: '服务质量已降级,请检查' },
+  error: { label: '异常', dot: 'bg-status-error', pulse: false, cls: 'text-status-error border-status-error/40 bg-status-error/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '运行异常,请检查日志' },
   queued: { label: '排队中', dot: 'bg-accent', pulse: true, cls: 'text-blue-300 border-blue-500/30 bg-blue-500/10', tip: '任务已创建,等待执行' },
   task: { label: '执行中', dot: 'bg-accent', pulse: true, cls: 'text-blue-300 border-blue-500/30 bg-blue-500/10 shadow-[0_0_10px_rgba(37,99,235,0.2)]', tip: '任务正在执行' },
   pending: { label: '等待', dot: 'bg-surface-500', pulse: false, cls: 'text-surface-400 border-surface-600/40 bg-surface-800/40', tip: '等待执行' },
-  success: { label: '成功', dot: 'bg-emerald-400', pulse: false, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '执行成功' },
-  failed: { label: '失败', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '执行失败,请查看详情' },
-  interrupted: { label: '已中断', dot: 'bg-amber-400', pulse: false, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10', tip: '任务被中断' },
+  success: { label: '成功', dot: 'bg-status-ok', pulse: false, cls: 'text-status-ok border-status-ok/30 bg-status-ok/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '执行成功' },
+  failed: { label: '失败', dot: 'bg-status-error', pulse: false, cls: 'text-status-error border-status-error/40 bg-status-error/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '执行失败,请查看详情' },
+  interrupted: { label: '已中断', dot: 'bg-status-warn', pulse: false, cls: 'text-status-warn border-status-warn/30 bg-status-warn/10', tip: '任务被中断' },
 };
 
 const effectiveStatus = computed(() => {
@@ -53,10 +61,10 @@ const effectiveStatus = computed(() => {
 const data = computed(() => {
   const st = effectiveStatus.value;
   if (st === 'healthy') {
-    return { label: '健康', dot: 'bg-emerald-400', pulse: true, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '服务健康' };
+    return { label: '健康', dot: 'bg-status-ok', pulse: true, cls: 'text-status-ok border-status-ok/30 bg-status-ok/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]', tip: '服务健康' };
   }
   if (st === 'unhealthy') {
-    return { label: '不健康', dot: 'bg-rose-400', pulse: false, cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '服务不健康,请检查' };
+    return { label: '不健康', dot: 'bg-status-error', pulse: false, cls: 'text-status-error border-status-error/40 bg-status-error/10 shadow-[0_0_10px_rgba(244,63,94,0.25)]', tip: '服务不健康,请检查' };
   }
   return STATUS[st] || { label: st || '未知', dot: 'bg-surface-600', pulse: false, cls: 'text-surface-400 border-surface-600/40 bg-surface-800/40', tip: '未知状态' };
 });

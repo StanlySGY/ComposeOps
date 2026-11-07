@@ -33,12 +33,12 @@ const text = computed(() => String(props.line.data || ''));
 const level = computed(() => props.line.level || (/(error|exception|fatal|crash|panic|failed)/i.test(text.value) ? 'error' : /(warn|deprecat)/i.test(text.value) ? 'warn' : 'info'));
 const isError = computed(() => level.value === 'error');
 const levelClass = computed(() => {
-  if (props.line.type === 'stderr' || level.value === 'error') return 'text-rose-300';
-  if (level.value === 'warn') return 'text-amber-200';
+  if (props.line.type === 'stderr' || level.value === 'error') return 'text-status-error';
+  if (level.value === 'warn') return 'text-status-warn';
   return 'text-surface-200';
 });
 const levelBadge = computed(() => level.value === 'error' ? 'ERROR' : level.value === 'warn' ? 'WARN' : '');
-const levelBadgeClass = computed(() => level.value === 'error' ? 'bg-rose-950/60 text-rose-300 border-rose-500/40' : 'bg-amber-950/60 text-amber-300 border-amber-500/40');
+const levelBadgeClass = computed(() => level.value === 'error' ? 'bg-status-error/15 text-status-error border-status-error/40' : 'bg-status-warn/15 text-status-warn border-status-warn/40');
 const ts = computed(() => props.line.ts || null);
 const shortTs = computed(() => {
   if (!ts.value) return '';

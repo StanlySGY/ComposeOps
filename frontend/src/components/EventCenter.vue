@@ -8,8 +8,8 @@
     <section v-if="open" id="event-center-panel" ref="eventCenterPanel" class="event-panel z-50" role="dialog" aria-modal="true" aria-labelledby="event-center-title" tabindex="-1" @keydown="trapFocus">
       <header class="flex flex-wrap items-center justify-between gap-2 border-b border-surface-800 px-4 py-3">
         <div class="min-w-0 flex-1"><h2 id="event-center-title" class="text-sm font-semibold text-surface-100">事件中心</h2><p class="mt-0.5 text-muted">需要关注的运行状态与系统操作</p></div>
-        <label class="toggle-label gap-1.5! text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="w-8! h-[18px]!" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
-        <label class="toggle-label gap-1.5! text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="w-8! h-[18px]!" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
+        <label class="toggle-label gap-1.5 text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="w-8 h-[18px]" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
+        <label class="toggle-label gap-1.5 text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="w-8 h-[18px]" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
         <button class="icon-btn" aria-label="关闭事件中心" @click="closePanel"><X class="h-4 w-4" /></button>
       </header>
       <div class="max-h-[min(68vh,32rem)] overflow-y-auto p-2">
@@ -22,26 +22,26 @@
             </span>
           </router-link>
           <div class="flex shrink-0 items-center gap-1">
-            <button v-if="event.persisted" class="icon-btn h-6! w-6!" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :aria-label="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-accent': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
-            <button v-if="event.logs" class="icon-btn h-6! w-6!" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" :aria-label="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
-            <button v-if="event.persisted && !event.read" class="icon-btn h-6! w-6!" title="标记已读" aria-label="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
-            <button v-if="event.persisted" class="icon-btn h-6! w-6!" title="静默此告警" aria-label="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
+            <button v-if="event.persisted" class="icon-btn icon-btn-sm" :title="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :aria-label="event.diagnosis ? '查看 AI 诊断' : 'AI 诊断此告警(守护模式)'" :disabled="diagnosingId === event.id" @click="diagnose(event)"><Sparkles class="h-3 w-3" :class="{ 'animate-spin text-status-info': diagnosingId === event.id, 'text-violet-400': event.diagnosis && diagnosingId !== event.id }" /></button>
+            <button v-if="event.logs" class="icon-btn icon-btn-sm" :title="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" :aria-label="expandedLogEventId === event.id ? '折叠日志' : '展开日志'" @click="toggleLogs(event)"><ChevronRight class="h-3 w-3" :class="{ 'rotate-90': expandedLogEventId === event.id }" /></button>
+            <button v-if="event.persisted && !event.read" class="icon-btn icon-btn-sm" title="标记已读" aria-label="标记已读" @click="markRead(event)"><Check class="h-3 w-3" /></button>
+            <button v-if="event.persisted" class="icon-btn icon-btn-sm" title="静默此告警" aria-label="静默此告警" @click="muteEvent(event)"><VolumeX class="h-3 w-3" /></button>
           </div>
           <div v-if="event.logs && expandedLogEventId === event.id" class="w-full basis-full"><pre class="event-logs">{{ event.logs }}</pre></div>
           <div v-if="expandedDiagnosisId === event.id" class="w-full basis-full rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5">
             <p class="mb-1 flex items-center gap-1 text-[11px] font-medium text-violet-300"><Sparkles class="h-3 w-3" />AI 诊断(守护模式)</p>
             <pre class="max-h-56 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-surface-200">{{ event.diagnosis || '正在诊断...' }}</pre>
-            <div v-if="eventContainerLink({ target: event.to }, '/logs')" class="mt-2 flex gap-3 text-xs text-accent"><router-link :to="eventContainerLink({ target: event.to }, '/logs')" @click="closePanel">去日志</router-link><router-link :to="eventContainerLink({ target: event.to }, '/monitor')" @click="closePanel">去监控</router-link></div>
+            <div v-if="eventContainerLink({ target: event.to }, '/logs')" class="mt-2 flex gap-3 text-xs text-status-info"><router-link :to="eventContainerLink({ target: event.to }, '/logs')" @click="closePanel">去日志</router-link><router-link :to="eventContainerLink({ target: event.to }, '/monitor')" @click="closePanel">去监控</router-link></div>
             <button v-if="event.diagnosis" class="mt-2 inline-flex items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] text-violet-300 hover:bg-violet-500/20" @click="planRepair(event)"><Wand2 class="h-3 w-3" />一键生成修复计划</button>
           </div>
         </div>
-        <EmptyState icon="CircleCheckBig" icon-class="text-emerald-400" compact title="当前没有待处理事件" description="异常与告警事件会出现在这里" />
+        <EmptyState icon="CircleCheckBig" icon-class="text-status-ok" compact title="当前没有待处理事件" description="异常与告警事件会出现在这里" />
       </div>
       <footer class="flex items-center justify-between border-t border-surface-800 px-4 py-2.5 text-muted">
         <span>{{ unreadCount }} 未读 · {{ eventCount }} 个需要关注</span>
         <div class="flex items-center gap-2">
           <button class="text-muted hover:text-surface-200 text-xs" @click="pruneAll">清空 7 天前</button>
-          <router-link to="/events?tab=operations" class="text-accent hover:text-blue-300" @click="closePanel">操作与任务</router-link>
+          <router-link to="/events?tab=operations" class="text-status-info hover:text-blue-300" @click="closePanel">操作与任务</router-link>
         </div>
       </footer>
     </section>
@@ -119,9 +119,9 @@ async function loadGuardian() {
 async function toggleGuardian() {
   try {
     guardian.value = await api.setGuardian(!guardian.value.enabled);
-    toast.success(guardian.value.enabled ? '守护模式已开启:新告警将自动触发 AI 诊断' : '守护模式已关闭');
+    toast.success(guardian.value.enabled ? '守护模式已开启：新告警将自动触发 AI 诊断' : '守护模式已关闭');
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 /** 一键生成修复计划:把告警与 AI 诊断交给全局 Agent 抽屉,由它出计划、走确认门执行。 */
@@ -150,7 +150,7 @@ async function diagnose(eventItem) {
     const idx = alertEvents.value.findIndex((item) => item.id === eventItem.id);
     if (idx >= 0) alertEvents.value[idx] = { ...alertEvents.value[idx], diagnosis: result.diagnosis };
   } catch (e) {
-    toast.error(`AI 诊断失败:${e.message}`);
+    toast.error(`AI 诊断失败：${e.message}`);
     expandedDiagnosisId.value = null;
   } finally {
     diagnosingId.value = '';

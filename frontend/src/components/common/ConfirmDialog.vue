@@ -44,8 +44,8 @@ const emit = defineEmits(['confirm', 'cancel']);
 
 const TONES = {
   info: { icon: Info, text: 'text-sky-300', box: 'border-sky-900/50 bg-sky-950/40', btn: 'btn-primary' },
-  warning: { icon: AlertTriangle, text: 'text-amber-300', box: 'border-amber-900/50 bg-amber-950/40', btn: 'btn-primary' },
-  danger: { icon: ShieldAlert, text: 'text-rose-300', box: 'border-rose-900/50 bg-rose-950/40', btn: 'btn-danger' },
+  warning: { icon: AlertTriangle, text: 'text-status-warn', box: 'border-status-warn/50 bg-status-warn/15', btn: 'btn-primary' },
+  danger: { icon: ShieldAlert, text: 'text-status-error', box: 'border-status-error/50 bg-status-error/15', btn: 'btn-danger' },
 };
 
 const tone = computed(() => TONES[props.tone] || TONES.info);

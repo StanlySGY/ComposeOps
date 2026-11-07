@@ -46,36 +46,21 @@
     </section>
 
     <p v-if="statsLoading && !statsLoaded" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载应用市场统计</p>
-    <p v-if="statsError" class="mx-4 mb-3 rounded-md border border-rose-900/50 bg-rose-950/20 px-3 py-2 text-xs text-rose-300 sm:mx-0" role="alert">
+    <p v-if="statsError" class="mx-4 mb-3 rounded-md border border-status-error/50 bg-status-error/15 px-3 py-2 text-xs text-status-error sm:mx-0" role="alert">
       应用市场统计加载失败：{{ statsError }}<span v-if="statsLoaded">，以下显示的是上次成功读取的数据。</span><span v-else>，统计数据暂不可用。</span>
       <button type="button" class="ml-2 underline underline-offset-2" @click="loadStats">重试统计</button>
     </p>
-    <p v-if="statsLoaded && !stats.communityAvailable" class="mx-4 mb-3 rounded-md border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 sm:mx-0">{{ stats.communityMessage || '社区模板源尚未接入,当前仅提供内置和自定义模板。' }}</p>
+    <p v-if="statsLoaded && !stats.communityAvailable" class="mx-4 mb-3 rounded-md border border-status-warn/50 bg-status-warn/15 px-3 py-2 text-xs text-status-warn sm:mx-0">{{ stats.communityMessage || '社区模板源尚未接入,当前仅提供内置和自定义模板。' }}</p>
 
     <!-- 统计卡片 -->
     <section v-if="statsLoaded" class="stats-grid" :aria-busy="statsLoading">
-      <div class="stat-card">
-        <div class="label">内置模板</div>
-        <div class="value">{{ stats.totalBuiltin }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">社区模板</div>
-        <div class="value">{{ stats.totalCommunity }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">自定义模板</div>
-        <div class="value">{{ stats.totalCustom }}</div>
-      </div>
-      <div class="stat-card" :class="{ highlight: stats.totalFavorites > 0 }">
-        <div class="label">我的收藏</div>
-        <div class="value">{{ stats.totalFavorites }}</div>
-      </div>
+      <MetricTile title="内置模板" :value="stats.totalBuiltin" />
+      <MetricTile title="社区模板" :value="stats.totalCommunity" />
+      <MetricTile title="自定义模板" :value="stats.totalCustom" />
+      <MetricTile title="我的收藏" :value="stats.totalFavorites" :active="stats.totalFavorites > 0" />
     </section>
 
-    <div v-if="loading" class="loading-state" role="status" aria-live="polite" aria-atomic="true">
-      <div class="spinner"></div>
-      <p>加载模板...</p>
-    </div>
+    <Skeleton v-if="loading" variant="cards" :rows="4" label="正在加载应用模板" />
 
     <div v-else-if="error" class="error-state" role="alert">
       <p>{{ error }}</p>
@@ -147,13 +132,7 @@
     </section>
 
     <!-- 创建/编辑模态框 -->
-    <div v-if="showCreateModal || editingTemplate" class="modal-backdrop" @click.self="closeModal">
-      <div ref="createModalRef" class="modal" role="dialog" aria-modal="true" aria-labelledby="market-create-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, closeModal)">
-        <div class="modal-header">
-          <h2 id="market-create-dialog-title">{{ editingTemplate ? '编辑模板' : '创建模板' }}</h2>
-          <button @click="closeModal" class="icon-btn close-btn" aria-label="关闭创建或编辑模板弹窗">×</button>
-        </div>
-        <div class="modal-body">
+    <BaseModal :show="showCreateModal || !!editingTemplate" :title="editingTemplate ? '编辑模板' : '创建模板'" @close="closeModal" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
           <div class="form-group">
             <label for="market-template-name">模板名称</label>
             <input id="market-template-name" v-model="formData.name" type="text" class="input" placeholder="例如: LNMP Stack" />
@@ -170,23 +149,17 @@
             <label for="market-template-compose">Compose 内容</label>
             <textarea id="market-template-compose" v-model="formData.defaultCompose" rows="10" class="input" placeholder="version: '3'..."></textarea>
           </div>
-        </div>
-        <div class="modal-footer">
+
+      <template #footer>
           <button @click="closeModal" class="btn-secondary btn-cancel">取消</button>
           <button @click="saveTemplate" class="btn-primary btn-save">保存</button>
-        </div>
-      </div>
-    </div>
+
+      </template>
+    </BaseModal>
 
     <!-- AI 发现应用模态框 -->
-    <div v-if="showAiModal" class="modal-backdrop" @click.self="showAiModal = false">
-      <div ref="aiModalRef" class="modal" role="dialog" aria-modal="true" aria-labelledby="market-ai-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, () => { showAiModal = false })">
-        <div class="modal-header">
-          <h2 id="market-ai-dialog-title">AI 找应用</h2>
-          <button @click="showAiModal = false" class="icon-btn close-btn" aria-label="关闭 AI 找应用弹窗">×</button>
-        </div>
-        <div class="modal-body">
-          <p class="text-xs text-zinc-500 mb-3">输入应用名,Agent 会联网检索官方部署方式并生成可一键部署的 Compose 模板草稿,确认后保存为自定义模板。</p>
+    <BaseModal :show="showAiModal" title="AI 找应用" @close="showAiModal = false" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
+          <p class="text-xs text-surface-400 mb-3">输入应用名,Agent 会联网检索官方部署方式并生成可一键部署的 Compose 模板草稿,确认后保存为自定义模板。</p>
           <div class="form-group">
             <label for="market-ai-query">应用名称</label>
             <input id="market-ai-query" v-model="aiQuery" type="text" class="input" placeholder="例如: umami / immich / gitea" @keydown.enter="runAiDiscover" />
@@ -194,29 +167,23 @@
           <div v-if="aiPreview" class="form-group">
             <label>生成结果预览(确认后保存为自定义模板)</label>
             <div class="rounded-lg border border-surface-700/60 bg-surface-950/50 p-3 text-xs space-y-2">
-              <p><b class="text-zinc-200">{{ aiPreview.name }}</b> <span class="ml-1 text-zinc-500">{{ aiPreview.category }}</span></p>
-              <p class="text-zinc-400">{{ aiPreview.description }}</p>
-              <p v-if="aiPreview.envSchema?.length" class="text-zinc-500">需要 {{ aiPreview.envSchema.length }} 个配置项:{{ aiPreview.envSchema.map((item) => item.key).join(', ') }}</p>
+              <p><b class="text-surface-200">{{ aiPreview.name }}</b> <span class="ml-1 text-surface-400">{{ aiPreview.category }}</span></p>
+              <p class="text-surface-400">{{ aiPreview.description }}</p>
+              <p v-if="aiPreview.envSchema?.length" class="text-surface-400">需要 {{ aiPreview.envSchema.length }} 个配置项:{{ aiPreview.envSchema.map((item) => item.key).join(', ') }}</p>
               <pre class="probe-output max-h-40">{{ aiPreview.defaultCompose }}</pre>
             </div>
           </div>
-        </div>
-        <div class="modal-footer">
+
+      <template #footer>
           <button @click="showAiModal = false" class="btn-secondary btn-cancel">取消</button>
           <button v-if="!aiPreview" @click="runAiDiscover" class="btn-primary btn-save" :disabled="aiDiscovering || !aiQuery.trim()">{{ aiDiscovering ? '生成中…' : '生成模板' }}</button>
           <button v-else @click="useAiTemplate" class="btn-primary btn-save">填入创建表单</button>
-        </div>
-      </div>
-    </div>
+
+      </template>
+    </BaseModal>
 
     <!-- 查看模板模态框 -->
-    <div v-if="viewingTemplate" class="modal-backdrop" @click.self="viewingTemplate = null">
-      <div ref="viewModalRef" class="modal view-modal" role="dialog" aria-modal="true" aria-labelledby="market-view-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, () => { viewingTemplate = null })">
-        <div class="modal-header">
-          <h2 id="market-view-dialog-title">{{ viewingTemplate.name }}</h2>
-          <button @click="viewingTemplate = null" class="icon-btn close-btn" aria-label="关闭模板详情">×</button>
-        </div>
-        <div class="modal-body">
+    <BaseModal :show="!!viewingTemplate" :title="viewingTemplate?.name || '模板详情'" @close="viewingTemplate = null" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
           <div class="template-meta">
             <span class="action-label category-badge">{{ viewingTemplate.category }}</span>
             <span class="action-label source-badge">{{ getSourceLabel(viewingTemplate.id) }}</span>
@@ -227,18 +194,11 @@
             <h3>Compose 配置</h3>
             <pre><code>{{ viewingTemplate.defaultCompose || viewingTemplate.compose }}</code></pre>
           </div>
-        </div>
-      </div>
-    </div>
+
+    </BaseModal>
 
     <!-- 部署模板模态框 -->
-    <div v-if="deployTarget" class="modal-backdrop" @click.self="closeDeploy" :class="{ 'pointer-events-none': deploying }">
-      <div ref="deployModalRef" class="modal deploy-modal" role="dialog" aria-modal="true" aria-labelledby="market-deploy-dialog-title" tabindex="-1" @keydown="handleMarketplaceDialogKeydown($event, closeDeploy)">
-        <div class="modal-header">
-          <h2 id="market-deploy-dialog-title">部署应用: {{ deployTarget.name }}</h2>
-          <button @click="closeDeploy" class="icon-btn close-btn" aria-label="关闭部署弹窗">×</button>
-        </div>
-        <div class="modal-body space-y-4">
+    <BaseModal :show="!!deployTarget" :title="`部署应用：${deployTarget?.name || ''}`" :close-disabled="deploying" @close="closeDeploy" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
           <p class="template-description">{{ deployTarget.description || '暂无描述' }}</p>
           <div class="form-group">
             <label for="market-deploy-project-name">项目名称</label>
@@ -255,17 +215,17 @@
             </div>
             <p v-else class="text-xs text-muted mt-2">该模板无需额外配置。</p>
           </div>
-          <p v-if="deployError" class="text-xs text-rose-400" role="alert">{{ deployError }}</p>
-        </div>
-        <div class="modal-footer">
+          <p v-if="deployError" class="text-xs text-status-error" role="alert">{{ deployError }}</p>
+
+      <template #footer>
           <button @click="closeDeploy" class="btn-secondary btn-cancel">取消</button>
           <button @click="deployTemplate" class="btn-primary btn-save" :disabled="deploying">
             <LoaderCircle v-if="deploying" class="w-4 h-4 animate-spin" />
             {{ deploying ? '部署中…' : '部署' }}
           </button>
-        </div>
-      </div>
-    </div>
+
+      </template>
+    </BaseModal>
 
     <ConfirmDialog
       :show="showDeleteDialog"
@@ -280,7 +240,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue';
+import MetricTile from '../components/common/MetricTile.vue';
+import Skeleton from '../components/common/Skeleton.vue';
+import BaseModal from '../components/common/BaseModal.vue';
+import { computed, onActivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -307,14 +270,11 @@ const onlyFavorites = ref(false);
 
 const showCreateModal = ref(false);
 const editingTemplate = ref(null);
-const createModalRef = ref(null);
 const aiDiscovering = ref(false);
 const showAiModal = ref(false);
-const aiModalRef = ref(null);
 const aiQuery = ref('');
 const aiPreview = ref(null);
 const viewingTemplate = ref(null);
-const viewModalRef = ref(null);
 const formData = ref({
   name: '',
   category: '',
@@ -385,11 +345,11 @@ async function toggleFavorite(templateId) {
   try {
     const isFavorited = filteredTemplates.value.find(t => t.id === templateId)?.favorited;
     await api.toggleMarketplaceFavorite(templateId, isFavorited);
-    
+
     await Promise.all([loadTemplates(), loadStats()]);
     toast.success(isFavorited ? '已取消收藏' : '已添加收藏');
   } catch (err) {
-    toast.error(err.message || '操作失败');
+    toast.error(err);
   }
 }
 
@@ -428,7 +388,7 @@ async function saveTemplate() {
     closeModal();
     await Promise.all([loadTemplates(), loadStats()]);
   } catch (err) {
-    toast.error(err.message || '保存失败');
+    toast.error(err);
   }
 }
 
@@ -446,7 +406,7 @@ async function confirmDelete() {
     toast.success('模板已删除');
     await Promise.all([loadTemplates(), loadStats()]);
   } catch (err) {
-    toast.error(err.message || '删除失败');
+    toast.error(err);
   } finally {
     pendingDeleteId.value = null;
   }
@@ -483,7 +443,7 @@ async function runAiDiscover() {
     const { template } = await api.discoverAiTemplate(aiQuery.value.trim());
     aiPreview.value = template;
   } catch (error) {
-    useToastStore().error(error.message);
+    toast.error(error);
   } finally {
     aiDiscovering.value = false;
   }
@@ -524,7 +484,6 @@ const deployProjectName = ref('');
 const deployValues = ref({});
 const deploying = ref(false);
 const deployError = ref('');
-const deployModalRef = ref(null);
 const deployVariables = computed(() => {
   const template = deployTarget.value;
   if (!template) return [];
@@ -534,74 +493,6 @@ const deployVariables = computed(() => {
     config && typeof config === 'object' ? { key: name, ...config } : { key: name, default: config }
   );
 });
-
-const MARKETPLACE_MODAL_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-let marketplaceModalOpener = null;
-
-function handleMarketplaceDialogKeydown(event, close) {
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    event.stopPropagation();
-    close();
-    return;
-  }
-  if (event.key !== 'Tab') return;
-
-  const dialog = event.currentTarget;
-  const focusable = [...dialog.querySelectorAll(MARKETPLACE_MODAL_FOCUSABLE)]
-    .filter((element) => !element.closest('[hidden]') && element.getAttribute('aria-hidden') !== 'true');
-  if (!focusable.length) {
-    event.preventDefault();
-    return;
-  }
-
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
-watch(
-  () => [
-    showCreateModal.value || Boolean(editingTemplate.value),
-    showAiModal.value,
-    Boolean(viewingTemplate.value),
-    Boolean(deployTarget.value),
-  ],
-  async (openStates, previousStates = []) => {
-    const anyOpen = openStates.some(Boolean);
-    if (!anyOpen) {
-      if (marketplaceModalOpener?.isConnected) marketplaceModalOpener.focus();
-      marketplaceModalOpener = null;
-      return;
-    }
-
-    if (!previousStates.some(Boolean)) {
-      const activeElement = document.activeElement;
-      const modalRefs = [createModalRef, aiModalRef, viewModalRef, deployModalRef];
-      marketplaceModalOpener = activeElement instanceof HTMLElement
-        && !modalRefs.some((modalRef) => modalRef.value?.contains(activeElement))
-        ? activeElement
-        : null;
-    }
-
-    await nextTick();
-    const [createOpen, aiOpen, viewOpen, deployOpen] = openStates;
-    const dialog = createOpen ? createModalRef.value
-      : aiOpen ? aiModalRef.value
-        : viewOpen ? viewModalRef.value
-          : deployOpen ? deployModalRef.value
-            : null;
-    const focusTarget = dialog?.querySelector(MARKETPLACE_MODAL_FOCUSABLE) || dialog;
-    focusTarget?.focus();
-  },
-  { flush: 'post' },
-);
 
 function openDeploy(template) {
   deployTarget.value = template;
@@ -681,7 +572,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
    scoped 内只保留市场页布局与局部语义类的微调。 */
 .marketplace-view {
   /* 部署按钮的强调色:沿用全站 emerald 状态色 */
-  --market-accent-2: #34d399; /* = emerald-400 */
+  --market-accent-2: var(--color-status-ok);
 }
 
 .page-actions-market { @apply flex items-center gap-3; }
@@ -700,23 +591,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
   gap: 1rem;
   margin-bottom: 2rem;
 }
-.stat-card { @apply panel-card !p-5; }
-.stat-card.highlight { @apply border-accent/60 bg-accent/5; }
-.stat-card .label { @apply mb-2 text-[13px] text-surface-400; }
-.stat-card .value { @apply text-3xl font-semibold tracking-tight text-surface-50; }
-
-.loading-state,
 .error-state { @apply grid min-h-[40vh] place-items-center text-center text-surface-400; }
-
-.spinner {
-  width: 3rem;
-  height: 3rem;
-  border: 3px solid theme('colors.surface.800');
-  border-top-color: theme('colors.accent.DEFAULT');
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
 
 .templates-grid {
   display: grid;
@@ -725,7 +600,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 }
 
 .template-card {
-  @apply panel-card grid !p-5;
+  @apply panel-card grid p-5;
   grid-template-rows: auto 1fr auto;
   gap: 1rem;
   transition: border-color 0.2s ease, transform 0.2s ease;
@@ -734,25 +609,25 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 
 /* 精选模板用小徽章标注,不再整卡高亮边框(避免与收藏态混淆) */
 .featured-badge {
-  @apply ml-2 inline-block rounded-full border border-accent/40 bg-accent/10 px-1.5 py-px align-middle text-[11px] font-medium text-accent;
+  @apply ml-2 inline-block rounded-full border border-accent/40 bg-accent/10 px-1.5 py-px align-middle text-[11px] font-medium text-status-info;
 }
 
 .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
 .card-header h3 { @apply m-0 flex-1 text-lg font-semibold text-surface-50; }
 
-.favorite-btn { @apply px-2 py-1 text-xl text-surface-500 transition-colors hover:text-amber-400; background: transparent; border: none; cursor: pointer; }
-.favorite-btn.active { @apply text-amber-400; }
+.favorite-btn { @apply px-2 py-1 text-xl text-surface-400 transition-colors hover:text-status-warn; background: transparent; border: none; cursor: pointer; }
+.favorite-btn.active { @apply text-status-warn; }
 
 .card-body { display: grid; gap: 0.75rem; }
 .meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .description { @apply m-0 text-sm leading-6 text-surface-400; }
-.author, .stats-row { @apply text-[13px] text-surface-500; }
+.author, .stats-row { @apply text-[13px] text-surface-400; }
 .stats-row { display: flex; gap: 1rem; }
 
 .card-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .card-actions .btn-secondary,
-.card-actions .btn-danger { @apply min-w-fit flex-1 rounded-lg! px-3 py-2 !text-[13px]; }
+.card-actions .btn-danger { @apply min-w-fit flex-1; }
 
 .btn-deploy {
   border-color: color-mix(in srgb, var(--market-accent-2) 35%, transparent) !important;
@@ -764,12 +639,6 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
   border-color: var(--market-accent-2) !important;
 }
 
-/* 模态微调:尺寸与布局,颜色全部来自全站 .modal */
-.view-modal { @apply sm:!max-w-3xl; }
-.modal-header h2 { @apply m-0 text-base font-semibold text-surface-100; }
-.modal-body { @apply overflow-y-auto p-5; }
-.modal-footer { @apply flex justify-end gap-3 border-t border-surface-800 p-4; }
-
 .form-group { display: grid; gap: 0.5rem; margin-bottom: 1rem; }
 .form-group label { @apply text-sm font-medium text-surface-400; }
 .form-group textarea { resize: vertical; font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace; }
@@ -779,7 +648,7 @@ onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void P
 
 .template-meta { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
 .template-description { @apply mb-4 text-[15px] leading-7 text-surface-300; }
-.template-author { @apply mb-6 text-sm text-surface-500; }
+.template-author { @apply mb-6 text-sm text-surface-400; }
 
 .compose-preview h3 { @apply mb-3 mt-0 text-sm font-medium text-surface-200; }
 .compose-preview pre { @apply m-0 overflow-x-auto rounded-lg border border-surface-800 bg-surface-950/70 p-4; }

@@ -22,9 +22,9 @@
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <h3 class="truncate text-sm font-semibold text-surface-100">{{ def.name }}</h3>
-                <span class="count-badge" :class="def.enabled ? 'text-emerald-300' : 'text-surface-500'">{{ def.enabled ? '启用' : '停用' }}</span>
+                <span class="count-badge" :class="def.enabled ? 'text-status-ok' : 'text-surface-400'">{{ def.enabled ? '启用' : '停用' }}</span>
               </div>
-              <p class="mt-1 line-clamp-2 text-xs text-surface-500">{{ def.description || '无描述' }}</p>
+              <p class="mt-1 line-clamp-2 text-xs text-surface-400">{{ def.description || '无描述' }}</p>
             </div>
             <span class="count-badge text-sky-300">{{ def.nodes.length }} 节点</span>
           </div>
@@ -32,12 +32,12 @@
             <span v-for="node in def.nodes" :key="node.id" class="count-badge text-surface-400">{{ nodeLabel(node.type) }}</span>
           </div>
           <div class="mt-4 flex gap-2 border-t border-surface-800 pt-3">
-            <button class="btn-secondary flex-1 px-2! py-1.5! text-xs" :disabled="!def.enabled" @click="run(def)"><Play class="w-3.5 h-3.5" />运行</button>
-            <button class="btn-secondary flex-1 px-2! py-1.5! text-xs" @click="openEdit(def)"><Pencil class="w-3.5 h-3.5" />编辑</button>
-            <button class="btn-secondary flex-1 px-2! py-1.5! text-xs" @click="deleteTarget = def"><Trash2 class="w-3.5 h-3.5" />删除</button>
+            <button class="btn-secondary flex-1 btn-sm" :disabled="!def.enabled" @click="run(def)"><Play class="w-3.5 h-3.5" />运行</button>
+            <button class="btn-secondary flex-1 btn-sm" @click="openEdit(def)"><Pencil class="w-3.5 h-3.5" />编辑</button>
+            <button class="btn-secondary flex-1 btn-sm" @click="deleteTarget = def"><Trash2 class="w-3.5 h-3.5" />删除</button>
           </div>
         </div>
-        <div v-if="!definitions.length" class="rounded-xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-500">暂无工作流,点击「新建工作流」创建</div>
+        <EmptyState v-if="!definitions.length" compact title="还没有工作流" description="将常用操作编排成可重复运行的流程。" action-label="新建工作流" @action="openCreate" />
       </div>
     </section>
 
@@ -54,33 +54,33 @@
               <td><span class="status-badge" :class="instanceTone(inst.status)">{{ instanceLabel(inst.status) }}</span></td>
               <td class="text-xs text-surface-400">
                 <div>{{ inst.currentNode || '—' }}</div>
-                <div v-if="inst.status === 'waiting_approval' && inst.context?.pendingApprovalIntent" class="mt-1 max-w-xs whitespace-normal rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-200">
+                <div v-if="inst.status === 'waiting_approval' && inst.context?.pendingApprovalIntent" class="mt-1 max-w-xs whitespace-normal rounded-md border border-status-warn/20 bg-status-warn/5 px-2 py-1 text-[11px] text-status-warn">
                   <template v-if="inst.context.pendingApprovalIntent.actionIntent">
                     待确认：{{ actionLabel(inst.context.pendingApprovalIntent.actionIntent.action) }} · 项目 {{ inst.context.pendingApprovalIntent.actionIntent.projectId || '运行上下文' }}
                   </template>
                   <template v-else>此审批节点后没有可识别的执行动作</template>
                 </div>
-                <div v-else-if="inst.status === 'waiting_approval'" class="mt-1 max-w-xs whitespace-normal rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1 text-[11px] text-rose-300">
+                <div v-else-if="inst.status === 'waiting_approval'" class="mt-1 max-w-xs whitespace-normal rounded-md border border-status-error/20 bg-status-error/5 px-2 py-1 text-[11px] text-status-error">
                   缺少审批意图快照。为安全起见，请取消此旧实例并重新运行。
                 </div>
               </td>
-              <td class="text-xs text-surface-500">{{ formatTime(inst.createdAt) }}</td>
+              <td class="text-xs text-surface-400">{{ formatTime(inst.createdAt) }}</td>
               <td>
                 <div class="flex gap-1">
-                  <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" :disabled="!inst.context?.pendingApprovalIntent" @click="approve(inst, true)">通过</button>
-                  <button v-if="inst.status === 'waiting_approval'" class="btn-secondary px-2! py-1! text-xs" @click="approve(inst, false)">拒绝</button>
+                  <button v-if="inst.status === 'waiting_approval'" class="btn-secondary btn-sm" :disabled="!inst.context?.pendingApprovalIntent" @click="approve(inst, true)">通过</button>
+                  <button v-if="inst.status === 'waiting_approval'" class="btn-secondary btn-sm" @click="approve(inst, false)">拒绝</button>
                   <button v-if="['pending', 'running', 'waiting_approval'].includes(inst.status)" class="icon-btn" title="取消" :aria-label="`取消工作流 ${inst.name}`" @click="cancel(inst)"><X class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
-            <tr v-if="!instances.length"><td colspan="6" class="py-8 text-center text-sm text-surface-500">暂无运行实例</td></tr>
+            <tr v-if="!instances.length"><td colspan="6" class="py-8 text-center text-sm text-surface-400"><EmptyState compact title="暂无运行实例" description="运行一个已启用的工作流后，可在这里查看状态和审批。" action-label="刷新实例" @action="load" /></td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
     <!-- 新建/编辑弹窗 -->
-    <BaseModal :show="showEditor" :title="editingId ? '编辑工作流' : '新建工作流'" size-class="max-w-2xl!" body-class="space-y-3 p-5 pt-0" @close="showEditor = false">
+    <BaseModal :show="showEditor" :title="editingId ? '编辑工作流' : '新建工作流'" size-class="sm:max-w-2xl" body-class="space-y-3 p-5 pt-0" @close="showEditor = false">
       <div class="space-y-3">
           <div>
             <label class="form-label" for="workflow-name">名称</label>
@@ -102,13 +102,13 @@
             <label class="form-grid-label sm:col-span-2"><span>事件类型(必填，逗号分隔)</span><input v-model="form.triggerConfig.eventTypes" class="input" placeholder="container, alert, gitops" /></label>
             <label class="form-grid-label"><span>来源(可选)</span><input v-model="form.triggerConfig.sources" class="input" placeholder="docker, alert" /></label>
             <label class="form-grid-label"><span>动作(可选)</span><input v-model="form.triggerConfig.actions" class="input" placeholder="die, health_status: unhealthy" /></label>
-            <label class="form-grid-label sm:col-span-2"><span>项目 ID(可选，限制到一个纳管项目)</span><input v-model="form.triggerConfig.projectId" class="input" placeholder="不填则匹配所选事件类型的所有纳管项目" /></label>
-            <p class="sm:col-span-2 text-xs text-surface-500">事件必须显式选择类型。工作流自身事件不会再次触发工作流；Docker、告警和统一事件中心事件均经过去重。</p>
+            <label class="form-grid-label sm:col-span-2"><span>项目 ID(可选，限制到一个纳管项目)</span><input v-model="form.triggerConfig.projectId" class="input" aria-label="不填则匹配所选事件类型的所有纳管项目" placeholder="不填则匹配所选事件类型的所有纳管项目" /></label>
+            <p class="sm:col-span-2 text-xs text-surface-400">事件必须显式选择类型。工作流自身事件不会再次触发工作流；Docker、告警和统一事件中心事件均经过去重。</p>
           </div>
           <div v-else-if="form.triggerType === 'cron'" class="grid gap-2 rounded-lg border border-surface-800 bg-surface-950/40 p-3 sm:grid-cols-2">
             <label class="form-grid-label"><span>Cron 表达式(必填)</span><input v-model="form.triggerConfig.cron" class="input font-mono" placeholder="*/5 * * * *" /></label>
             <label class="form-grid-label"><span>项目 ID(可选)</span><select v-model="form.triggerConfig.projectId" class="input"><option value="">使用工作流运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
-            <p class="sm:col-span-2 text-xs text-surface-500">按服务端本地时区解析；同一分钟最多触发一次，重复 tick 和重启由 SQLite 幂等键去重。</p>
+            <p class="sm:col-span-2 text-xs text-surface-400">按服务端本地时区解析；同一分钟最多触发一次，重复 tick 和重启由 SQLite 幂等键去重。</p>
           </div>
           <div>
             <label class="form-label">节点编排</label>
@@ -116,8 +116,8 @@
               <div v-for="(node, i) in form.nodes" :key="i" class="rounded-lg border border-surface-800 bg-surface-900/60 p-3">
                 <div class="flex items-center gap-2">
                   <span class="count-badge shrink-0 text-surface-400">{{ nodeLabel(node.type) }}</span>
-                  <input v-model="node.id" class="input py-1! text-xs" :aria-label="`第 ${i + 1} 个节点 ID`" placeholder="节点 ID" />
-                  <select v-model="node.type" class="input py-1! text-xs" :aria-label="`第 ${i + 1} 个节点类型`" @change="normalizeNode(node)">
+                  <input v-model="node.id" class="input input-sm" :aria-label="`第 ${i + 1} 个节点 ID`" placeholder="节点 ID" />
+                  <select v-model="node.type" class="input input-sm" :aria-label="`第 ${i + 1} 个节点类型`" @change="normalizeNode(node)">
                     <option value="trigger">触发</option>
                     <option value="condition">条件</option>
                     <option value="agent">Agent</option>
@@ -128,28 +128,28 @@
                   <button class="icon-btn shrink-0" title="删除节点" :aria-label="`删除节点 ${i + 1}`" @click="form.nodes.splice(i, 1)"><X class="w-4 h-4" /></button>
                 </div>
                 <div class="mt-2 grid gap-2 sm:grid-cols-3">
-                  <label class="form-grid-label sm:col-span-3"><span>下一节点(可选)</span><input v-model="node.next" class="input py-1! text-xs" list="workflow-node-ids" placeholder="留空按列表顺序执行" /></label>
+                  <label class="form-grid-label sm:col-span-3"><span>下一节点(可选)</span><input v-model="node.next" class="input input-sm" list="workflow-node-ids" aria-label="留空按列表顺序执行" placeholder="留空按列表顺序执行" /></label>
                   <template v-if="node.type === 'condition'">
-                    <label class="form-grid-label sm:col-span-3"><span>条件表达式</span><input v-model="node.config.expression" class="input py-1! text-xs" placeholder="如: context.verified == true" /></label>
-                    <label class="form-grid-label"><span>满足时跳转</span><input v-model="node.onTrue" class="input py-1! text-xs" list="workflow-node-ids" placeholder="节点 ID" /></label>
-                    <label class="form-grid-label"><span>不满足时跳转</span><input v-model="node.onFalse" class="input py-1! text-xs" list="workflow-node-ids" placeholder="节点 ID" /></label>
+                    <label class="form-grid-label sm:col-span-3"><span>条件表达式</span><input v-model="node.config.expression" class="input input-sm" aria-label="如: context.verified == true" placeholder="如: context.verified == true" /></label>
+                    <label class="form-grid-label"><span>满足时跳转</span><input v-model="node.onTrue" class="input input-sm" list="workflow-node-ids" aria-label="节点 ID" placeholder="节点 ID" /></label>
+                    <label class="form-grid-label"><span>不满足时跳转</span><input v-model="node.onFalse" class="input input-sm" list="workflow-node-ids" aria-label="节点 ID" placeholder="节点 ID" /></label>
                   </template>
                   <template v-else-if="node.type === 'agent'">
-                    <label class="form-grid-label sm:col-span-3"><span>分析提示词</span><textarea v-model="node.config.prompt" class="input py-1! text-xs" rows="2" placeholder="请分析当前运维上下文并给出建议" /></label>
-                    <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input py-1! text-xs"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                    <label class="form-grid-label sm:col-span-3"><span>分析提示词</span><textarea v-model="node.config.prompt" class="input input-sm" rows="2" aria-label="请分析当前运维上下文并给出建议" placeholder="请分析当前运维上下文并给出建议" /></label>
+                    <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input input-sm"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
                   </template>
                   <template v-else-if="node.type === 'action'">
-                    <label class="form-grid-label"><span>操作</span><select v-model="node.config.action" class="input py-1! text-xs"><option value="">选择操作</option><option value="up">启动</option><option value="stop">停止</option><option value="restart">重启</option><option value="pull">拉取镜像</option></select></label>
-                    <label class="form-grid-label sm:col-span-2"><span>项目</span><select v-model="node.config.projectId" class="input py-1! text-xs"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                    <label class="form-grid-label"><span>操作</span><select v-model="node.config.action" class="input input-sm"><option value="">选择操作</option><option value="up">启动</option><option value="stop">停止</option><option value="restart">重启</option><option value="pull">拉取镜像</option></select></label>
+                    <label class="form-grid-label sm:col-span-2"><span>项目</span><select v-model="node.config.projectId" class="input input-sm"><option value="">选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
                   </template>
                   <template v-else-if="node.type === 'verify'">
-                    <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input py-1! text-xs"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
+                    <label class="form-grid-label sm:col-span-3"><span>项目(可选)</span><select v-model="node.config.projectId" class="input input-sm"><option value="">使用运行上下文</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select></label>
                   </template>
                 </div>
               </div>
             </div>
             <datalist id="workflow-node-ids"><option v-for="node in form.nodes" :key="node.id" :value="node.id" /></datalist>
-            <button class="btn-secondary mt-2 px-3! py-1.5! text-xs" @click="addNode"><Plus class="w-3.5 h-3.5" />添加节点</button>
+            <button class="btn-secondary mt-2 btn-sm" @click="addNode"><Plus class="w-3.5 h-3.5" />添加节点</button>
           </div>
         </div>
         <template #footer>
@@ -162,6 +162,7 @@
 </template>
 
 <script setup>
+import EmptyState from '../components/common/EmptyState.vue';
 import { onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { storeToRefs } from 'pinia';
@@ -191,11 +192,11 @@ function actionLabel(action) {
   return { up: '启动', stop: '停止', restart: '重启', pull: '拉取镜像' }[action] || action || '未知动作';
 }
 function instanceTone(status) {
-  if (status === 'success') return 'bg-emerald-500/10 text-emerald-400';
-  if (status === 'failed') return 'bg-rose-500/10 text-rose-400';
-  if (status === 'waiting_approval') return 'bg-amber-500/10 text-amber-400';
+  if (status === 'success') return 'bg-status-ok/10 text-status-ok';
+  if (status === 'failed') return 'bg-status-error/10 text-status-error';
+  if (status === 'waiting_approval') return 'bg-status-warn/10 text-status-warn';
   if (status === 'running') return 'bg-sky-500/10 text-sky-400';
-  if (status === 'outcome_unknown') return 'bg-amber-500/10 text-amber-300';
+  if (status === 'outcome_unknown') return 'bg-status-warn/10 text-status-warn';
   if (status === 'cancelled') return 'bg-surface-800 text-surface-400';
   return 'bg-surface-800 text-surface-400';
 }
@@ -249,7 +250,7 @@ async function save() {
   for (const node of form.nodes) {
     normalizeNode(node);
     if (!node.id?.trim()) { toast.error('每个节点都需要填写 ID'); return; }
-    if (ids.has(node.id)) { toast.error(`节点 ID 重复:${node.id}`); return; }
+    if (ids.has(node.id)) { toast.error(`节点 ID 重复：${node.id}`); return; }
     ids.add(node.id);
     if (node.type === 'condition' && !node.config.expression?.trim()) { toast.error(`条件节点「${node.id}」需要表达式`); return; }
     if (node.type === 'action' && (!node.config.action || !node.config.projectId)) { toast.error(`执行节点「${node.id}」需要选择操作和项目`); return; }
@@ -264,7 +265,7 @@ async function save() {
     toast.success('工作流已保存');
     showEditor.value = false;
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 const deleteTarget = ref(null);
@@ -276,7 +277,7 @@ async function confirmRemove() {
     await store.remove(def.id);
     toast.success('工作流已删除');
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 async function run(def) {
@@ -284,7 +285,7 @@ async function run(def) {
     await store.run(def.id);
     toast.success(`已启动工作流「${def.name}」`);
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 async function approve(inst, approved) {
@@ -292,7 +293,7 @@ async function approve(inst, approved) {
     await store.approve(inst.id, { approved });
     toast.success(approved ? '已通过审批' : '已拒绝');
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 async function cancel(inst) {
@@ -300,7 +301,7 @@ async function cancel(inst) {
     await store.cancel(inst.id);
     toast.success('已取消实例');
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 

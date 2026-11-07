@@ -1,3 +1,4 @@
+import { userError } from '../lib/user-error.js';
 import { notifyDataChanged, DATA_CHANGED_EVENT } from '../lib/data-changes.js';
 // 统一 API 客户端,基于 fetch 封装
 import { normalizeBackgroundJob, normalizeCostReport, normalizeDockerUsage, normalizeJobsResponse, normalizeMetrics, normalizeMountPlan, normalizeStorageDf } from '../lib/api-normalizers.js';
@@ -31,13 +32,15 @@ function doFetch(path, opts = {}) {
   }).then(async (res) => {
     if (!res.ok) {
       let msg = res.statusText;
+      let code;
       try {
         const body = await res.json();
         msg = body.message || body.error || JSON.stringify(body);
+        code = body.code || body.error;
       } catch {
         // 错误响应可能不是 JSON,保留 HTTP 状态文本作为兜底。
       }
-      const err = new Error(msg);
+      const err = userError(msg, { status: res.status, code });
       err.status = res.status;
       if (res.status === 401) window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
       throw err;
@@ -50,7 +53,7 @@ function doFetch(path, opts = {}) {
       catch { return text; }
     }
     return res.text();
-  });
+  }).catch(cause => { throw userError(cause); });
 }
 function revalidate(key, path, opts) {
   const entry = swrCache.get(key);
@@ -66,7 +69,7 @@ function revalidate(key, path, opts) {
 /** SSE/流式响应的非 2xx 错误统一解析为 Error。 */
 async function streamError(res, fallback) {
   const payload = await res.json().catch(() => ({}));
-  return new Error(payload.message || payload.error || fallback);
+  return userError(payload.message || payload.error || fallback, { status: res.status, code: payload.code || payload.error });
 }
 async function request(path, opts = {}) {
   if (!isGet(opts)) {
@@ -117,6 +120,7 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
+  recordCostSnapshot: () => request('/cost-analysis/snapshot', { method: 'POST' }),
   previewRetentionPolicy: () => request('/metrics/retention-policy'),
   listInspectionReports: (limit = 100) => request(`/ops/inspection/reports?limit=${limit}`),
   setHostGroup: (id, group) => request(`/hosts/${encodeURIComponent(id)}/group`, { method: 'PATCH', body: JSON.stringify({ group }) }),
@@ -293,6 +297,7 @@ export const api = {
   getOperations: () => request('/personal/operations', { cacheable: true }),
   getDockerUsage: async () => normalizeDockerUsage(await request('/personal/maintenance/usage')),
   getCostAnalysisReport: async () => normalizeCostReport(await request('/cost-analysis/report')),
+  getCostTrends: () => request('/cost-analysis/trends?days=7'),
   getCostSuggestions: () => request('/cost-analysis/suggestions'),
   getUpdateSettings: () => request('/personal/updates'),
   saveUpdateSettings: (payload) => request('/personal/updates', { method: 'PUT', body: JSON.stringify(payload) }),

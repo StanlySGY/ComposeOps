@@ -28,7 +28,7 @@
             <span>资产血缘树</span>
           </button>
         </div>
-        <button class="btn-secondary" :class="{ 'border-accent! text-accent!': useCmdb }" @click="toggleSource">
+        <button class="btn-secondary" :class="{ 'border-accent! text-status-info!': useCmdb }" @click="toggleSource">
           <Database class="w-4 h-4" />{{ useCmdb ? 'CMDB 资产数据' : '实时发现数据' }}
         </button>
         <button class="btn-secondary" :disabled="loading" @click="load">
@@ -41,11 +41,11 @@
 
     <!-- 图谱概览统计 -->
     <div class="metric-grid">
-      <div class="metric-tile"><span class="metric-icon text-blue-300"><Server class="h-5 w-5" /></span><span><strong>{{ hosts.length }}</strong><small>宿主节点</small></span><span class="metric-meta">{{ activeHostName }}</span></div>
-      <div class="metric-tile"><span class="metric-icon text-emerald-300"><Boxes class="h-5 w-5" /></span><span><strong>{{ projects.length }}</strong><small>纳管项目</small></span><span class="metric-meta">{{ containerCount }} 容器</span></div>
-      <div class="metric-tile"><span class="metric-icon text-violet-300"><HardDrive class="h-5 w-5" /></span><span><strong>{{ volumeCount }}</strong><small>持久化卷</small></span><span class="metric-meta">本地存储绑定</span></div>
-      <div class="metric-tile"><span class="metric-icon text-rose-300"><AlertTriangle class="h-5 w-5" /></span><span><strong>{{ alertCount }}</strong><small>关联事件</small></span><span class="metric-meta">监控告警</span></div>
-      <div class="metric-tile"><span class="metric-icon text-amber-300"><Bot class="h-5 w-5" /></span><span><strong>{{ inspectionCount }}</strong><small>智能巡检</small></span><span class="metric-meta">巡检档案</span></div>
+      <MetricTile title="宿主节点" :value="hosts.length" :sub="activeHostName" :icon="Server" tone="text-blue-300" />
+      <MetricTile title="纳管项目" :value="projects.length" :sub="`${containerCount} 容器`" :icon="Boxes" tone="text-status-ok" />
+      <MetricTile title="持久化卷" :value="volumeCount" sub="本地存储绑定" :icon="HardDrive" tone="text-violet-300" />
+      <MetricTile title="关联事件" :value="alertCount" sub="监控告警" :icon="AlertTriangle" tone="text-status-error" />
+      <MetricTile title="智能巡检" :value="inspectionCount" sub="巡检档案" :icon="Bot" tone="text-status-warn" />
     </div>
 
     <!-- 视图 1：iOS 实体关系图谱 -->
@@ -57,9 +57,9 @@
         </div>
         <div class="flex flex-wrap items-center gap-3 text-xs text-surface-400">
           <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-sky-400"></span>宿主</span>
-          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>项目</span>
+          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-status-ok"></span>项目</span>
           <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-violet-400"></span>卷</span>
-          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-rose-400"></span>告警</span>
+          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-status-error"></span>告警</span>
         </div>
       </div>
 
@@ -94,7 +94,7 @@
               <p class="text-[11px] text-surface-400 font-mono">{{ host.type || 'local' }} 节点 · {{ host.active ? '当前活跃宿主' : '从节点' }}</p>
             </div>
           </div>
-          <span class="count-badge" :class="host.active ? 'text-emerald-300' : 'text-surface-500'">
+          <span class="count-badge" :class="host.active ? 'text-status-ok' : 'text-surface-400'">
             {{ projects.length }} 个管理项目
           </span>
         </div>
@@ -104,34 +104,34 @@
           <div
             v-for="p in projects"
             :key="p.id"
-            class="rounded-xl border border-white/8 bg-surface-950/60 p-3.5 space-y-2.5 transition-all hover:border-emerald-500/30"
+            class="rounded-xl border border-white/8 bg-surface-950/60 p-3.5 space-y-2.5 transition-all hover:border-status-ok/30"
           >
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <span class="w-2 h-2 rounded-full" :class="p.status === 'running' || (p.containers && p.containers.length) ? 'bg-emerald-400' : 'bg-surface-500'"></span>
+                  <span class="w-2 h-2 rounded-full" :class="p.status === 'running' || (p.containers && p.containers.length) ? 'bg-status-ok' : 'bg-surface-500'"></span>
                   <h4 class="text-sm font-semibold text-surface-100 truncate font-mono">{{ p.projectName || p.name }}</h4>
                 </div>
                 <p class="text-[11px] text-surface-400 mt-0.5 truncate">{{ p.workingDir || '标准项目路径' }}</p>
               </div>
-              <router-link :to="deepLink('/services', { focus: p.id, from: 'services' })" class="icon-btn text-surface-400 hover:text-surface-100" title="进入服务">
+              <router-link :to="deepLink('/services', { focus: p.id, from: 'services' })" class="icon-btn text-surface-400 hover:text-surface-100" title="进入服务" aria-label="进入服务">
                 <ChevronRight class="w-4 h-4" />
               </router-link>
             </div>
 
             <!-- 包含容器 -->
             <div class="text-xs space-y-1">
-              <span class="text-surface-500">容器服务 ({{ p.containers?.length || 0 }})：</span>
+              <span class="text-surface-400">容器服务 ({{ p.containers?.length || 0 }})：</span>
               <div class="flex flex-wrap gap-1">
                 <span
                   v-for="c in (p.containers || []).slice(0, 4)"
                   :key="c.id"
                   class="ios-mini-tag"
-                  :class="c.state === 'running' ? 'text-emerald-300 border-emerald-500/20' : 'text-surface-400 border-white/5'"
+                  :class="c.state === 'running' ? 'text-status-ok border-status-ok/20' : 'text-surface-400 border-white/5'"
                 >
                   {{ c.name.split('_').pop() || c.name }}
                 </span>
-                <span v-if="(p.containers?.length || 0) > 4" class="text-[10px] text-surface-500 self-center">
+                <span v-if="(p.containers?.length || 0) > 4" class="text-[10px] text-surface-400 self-center">
                   +{{ p.containers.length - 4 }}
                 </span>
               </div>
@@ -139,7 +139,7 @@
 
             <!-- 数据卷 -->
             <div v-if="projectVolumes(p).length" class="text-xs pt-1 border-t border-white/5">
-              <span class="text-surface-500">存储卷：</span>
+              <span class="text-surface-400">存储卷：</span>
               <span class="font-mono text-[11px] text-violet-300 ml-1">{{ projectVolumes(p).join(', ') }}</span>
             </div>
           </div>
@@ -156,25 +156,25 @@
           <div class="space-y-2">
             <div v-for="host in hosts" :key="host.id" class="flex items-center justify-between rounded-lg border border-surface-800 bg-surface-900/60 px-3 py-2">
               <span class="text-sm text-surface-200">{{ host.name }}</span>
-              <span class="count-badge" :class="host.active ? 'text-emerald-300' : 'text-surface-500'">{{ host.active ? '活跃' : host.type }}</span>
+              <span class="count-badge" :class="host.active ? 'text-status-ok' : 'text-surface-400'">{{ host.active ? '活跃' : host.type }}</span>
             </div>
           </div>
         </div>
         <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
-          <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-300"><Boxes class="h-4 w-4" />项目 ({{ projects.length }})</h3>
+          <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-status-ok"><Boxes class="h-4 w-4" />项目 ({{ projects.length }})</h3>
           <div class="space-y-2">
             <div v-for="project in projects.slice(0, 6)" :key="project.id" class="flex items-center justify-between rounded-lg border border-surface-800 bg-surface-900/60 px-3 py-2">
               <span class="min-w-0 flex-1 truncate text-sm text-surface-200">{{ project.projectName }}</span>
-              <span class="count-badge" :class="project.status === 'running' || (project.containers && project.containers.length) ? 'text-emerald-300' : 'text-rose-300'">{{ (project.containers?.length || 0) + ' 容器' }}</span>
+              <span class="count-badge" :class="project.status === 'running' || (project.containers && project.containers.length) ? 'text-status-ok' : 'text-status-error'">{{ (project.containers?.length || 0) + ' 容器' }}</span>
             </div>
           </div>
         </div>
         <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
-          <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-rose-300"><AlertTriangle class="h-4 w-4" />待处理告警 ({{ alertCount }})</h3>
-          <div v-if="!alerts.length" class="text-sm text-surface-500 py-3 text-center">暂无活动告警</div>
+          <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-status-error"><AlertTriangle class="h-4 w-4" />待处理告警 ({{ alertCount }})</h3>
+          <EmptyState v-if="!alerts.length" compact icon="Bell" title="暂无活动告警" description="可在事件中心查看历史记录。"><router-link to="/events?from=cmdb" class="btn-secondary btn-sm">查看事件</router-link></EmptyState>
           <div v-else class="space-y-2">
             <div v-for="alert in alerts.slice(0, 4)" :key="alert.id" class="flex items-center gap-2 rounded-lg border border-surface-800 bg-surface-900/60 px-3 py-2">
-              <span class="h-2 w-2 shrink-0 rounded-full" :class="alert.priority === 'danger' ? 'bg-rose-400' : 'bg-amber-400'"></span>
+              <span class="h-2 w-2 shrink-0 rounded-full" :class="alert.priority === 'danger' ? 'bg-status-error' : 'bg-status-warn'"></span>
               <span class="min-w-0 flex-1 truncate text-xs text-surface-200">{{ alert.title }}</span>
             </div>
           </div>
@@ -185,6 +185,7 @@
 </template>
 
 <script setup>
+import MetricTile from '../components/common/MetricTile.vue';
 import { deepLink } from '../lib/deep-links.js';
 const props = defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';

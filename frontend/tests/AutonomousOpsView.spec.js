@@ -79,7 +79,7 @@ async function mountView() {
 describe('AutonomousOpsView command center', () => {
   it('汇聚 Agent、后台任务、工作流和批量任务，并默认聚焦待审批记录', async () => {
     await mountView();
-    expect(wrapper.text()).toContain('Autonomous Ops');
+    expect(wrapper.text()).toContain('任务中心');
     expect(wrapper.text()).toContain('日志收集');
     expect(wrapper.text()).toContain('生产发布审批');
     expect(wrapper.text()).toContain('检查 content-factory 服务');

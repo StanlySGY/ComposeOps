@@ -15,19 +15,19 @@
       <button class="icon-btn sm:hidden" title="快速跳转" aria-label="打开快速跳转" @click="commandOpen = true">
         <Search class="h-4 w-4" />
       </button>
-      <span v-if="backendOnline" class="status-pill text-emerald-300 hidden md:inline-flex">
-        <span class="status-ping bg-emerald-400"></span><span class="hidden sm:inline">服务正常</span>
+      <span v-if="backendOnline" class="status-pill text-status-ok hidden md:inline-flex">
+        <span class="status-ping bg-status-ok"></span><span class="hidden sm:inline">服务正常</span>
       </span>
-      <span v-else class="status-pill text-rose-300 md:inline-flex hidden">
-        <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span class="hidden sm:inline">服务离线</span>
+      <span v-else class="status-pill text-status-error md:inline-flex hidden">
+        <span class="w-1.5 h-1.5 rounded-full bg-status-error"></span><span class="hidden sm:inline">服务离线</span>
       </span>
       <div class="relative">
-        <button ref="projectSwitcherTriggerRef" class="btn-secondary min-h-8! px-2.5! py-1! text-xs" title="快速切换项目" aria-label="快速切换项目" :aria-expanded="projectSwitcherOpen" :aria-controls="projectSwitcherOpen ? 'project-switcher-panel' : undefined" @click="toggleProjectSwitcher">
+        <button ref="projectSwitcherTriggerRef" class="btn-secondary btn-sm" title="快速切换项目" aria-label="快速切换项目" :aria-expanded="projectSwitcherOpen" :aria-controls="projectSwitcherOpen ? 'project-switcher-panel' : undefined" @click="toggleProjectSwitcher">
           <Layers class="w-3.5 h-3.5" /><span class="hidden min-[380px]:inline">项目</span>
           <ChevronDown class="w-3 h-3" />
         </button>
         <div v-if="projectSwitcherOpen" class="command-backdrop" @click.self="projectSwitcherOpen = false"></div>
-        <div v-if="projectSwitcherOpen" id="project-switcher-panel" ref="projectSwitcherPanelRef" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-60" role="dialog" aria-modal="true" aria-labelledby="project-switcher-title" tabindex="-1" @keydown="trapProjectSwitcherTab">
+        <div v-if="projectSwitcherOpen" id="project-switcher-panel" ref="projectSwitcherPanelRef" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-[46]" role="dialog" aria-modal="true" aria-labelledby="project-switcher-title" tabindex="-1" @keydown="trapProjectSwitcherTab">
           <div id="project-switcher-title" class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
           <label class="search-field mx-2 my-2 flex-none">
             <Search class="h-3.5 w-3.5 shrink-0" />
@@ -38,17 +38,17 @@
               <span class="status-dot shrink-0" :class="projectStatusDotClass(p.status)"></span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-sm font-mono text-surface-200">{{ p.projectName }}</span>
-                <span class="block truncate text-[10px] text-surface-500">{{ p.owner }} · {{ p.containers.length }} 容器</span>
+                <span class="block truncate text-[10px] text-surface-400">{{ p.owner }} · {{ p.containers.length }} 容器</span>
               </span>
-              <span v-if="p.managed" class="count-badge shrink-0 text-[9px] text-emerald-300">纳管</span>
+              <span v-if="p.managed" class="count-badge shrink-0 text-[9px] text-status-ok">纳管</span>
             </button>
-            <p v-if="!quickProjects.length" class="px-2 py-4 text-center text-xs text-surface-600">{{ projectQuery ? '没有匹配的项目' : '暂无项目' }}</p>
+            <p v-if="!quickProjects.length" class="px-2 py-4 text-center text-xs text-surface-400">{{ projectQuery ? '没有匹配的项目' : '暂无项目' }}</p>
           </div>
         </div>
       </div>
       <HostSwitcher />
       <EventCenter />
-      <button class="icon-btn" title="打开页面 Agent" aria-label="打开页面 Agent" @click="emitAgentOpen"><Bot class="w-4 h-4 text-accent" /></button>
+      <button class="icon-btn" title="打开页面 Agent" aria-label="打开页面 Agent" @click="emitAgentOpen"><Bot class="w-4 h-4 text-status-info" /></button>
       <button class="icon-btn hidden sm:inline-flex header-density" :title="density === 'compact' ? '切换为舒适视图' : '切换为紧凑视图'" aria-label="紧凑布局" :aria-pressed="density === 'compact'" @click="toggleDensity"><Rows3 class="w-4 h-4" /></button>
       <span class="hidden lg:inline text-muted">{{ currentTime }}</span>
       <span class="hidden sm:inline h-5 w-px bg-surface-800"></span>
@@ -233,9 +233,9 @@ function toggleProjectSwitcher() {
   projectQuery.value = '';
 }
 // 与 StatusBadge.vue 的 STATUS 语义一致:运行=emerald、部分异常=restarting/amber、停止=surface、异常=rose。
-const PROJECT_STATUS_DOT = { running: 'bg-emerald-400', restarting: 'bg-amber-400', partial: 'bg-amber-400', stopped: 'bg-surface-500' };
+const PROJECT_STATUS_DOT = { running: 'bg-status-ok', restarting: 'bg-status-warn', partial: 'bg-status-warn', stopped: 'bg-surface-500' };
 function projectStatusDotClass(status) {
-  return PROJECT_STATUS_DOT[status] || 'bg-rose-400';
+  return PROJECT_STATUS_DOT[status] || 'bg-status-error';
 }
 async function runProjectAction(project, action) {
   try {
@@ -243,7 +243,7 @@ async function runProjectAction(project, action) {
     window.dispatchEvent(new CustomEvent('composeops:operation-started', { detail: { projectName: project.projectName, action } }));
     return true;
   } catch (error) {
-    toast.error(`操作提交失败:${error?.message || '未知错误'}`);
+    toast.error(`操作提交失败：${error?.message || '未知错误'}`);
     return false;
   }
 }
@@ -300,7 +300,7 @@ async function switchNode(host) {
     await hostsStore.switchHost(host.id);
     window.dispatchEvent(new CustomEvent('composeops:host-changed'));
   } catch (error) {
-    toast.error(`切换到 ${host.name} 失败:${error?.message || '未知错误'}`);
+    toast.error(`切换到 ${host.name} 失败：${error?.message || '未知错误'}`);
   }
 }
 async function reloadHostProjects() {

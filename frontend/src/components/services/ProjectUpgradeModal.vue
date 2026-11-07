@@ -1,30 +1,30 @@
 <template>
   <BaseModal :show="true" :title="`镜像更新 · ${project.projectName}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[88vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-3" @close="close">
     <template #header-actions>
-      <Sparkles class="w-4 h-4 text-accent" />
+      <Sparkles class="w-4 h-4 text-status-info" />
     </template>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <div v-if="!data && !error" class="text-muted py-8 text-center" role="status" aria-live="polite" aria-atomic="true">正在检测镜像更新…</div>
     <template v-else-if="data">
       <div class="flex items-center gap-2">
-        <span class="count-badge" :class="data.hasUpdate ? 'text-amber-300' : hasUncertainStatus ? 'text-rose-300' : 'text-surface-400'">{{ overallStatusLabel }}</span>
+        <span class="count-badge" :class="data.hasUpdate ? 'text-status-warn' : hasUncertainStatus ? 'text-status-error' : 'text-surface-400'">{{ overallStatusLabel }}</span>
         <span class="text-muted text-xs">{{ formatTime(data.checkedAt) }} 检测</span>
         <button class="icon-btn ml-auto" title="立即刷新" aria-label="立即刷新" :disabled="refreshing" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': refreshing }" /></button>
       </div>
       <div class="space-y-2">
         <div v-for="image in data.images" :key="image.service" class="card p-3">
           <div class="flex items-center gap-2">
-            <input v-if="image.hasUpdate" v-model="selectedServices" class="accent-amber-400" type="checkbox" :value="image.service" :aria-label="`选择升级服务 ${image.service}`" />
-            <span v-else class="w-2 h-2 rounded-full" :class="image.status === 'current' ? 'bg-emerald-400' : image.status === 'failed' ? 'bg-rose-400' : 'bg-surface-600'"></span>
-            <strong class="font-mono text-sm flex-1 min-w-0 truncate">{{ image.service }}<span class="text-surface-500"> · </span>{{ image.image || '本地构建' }}</strong>
-            <span v-if="image.hasUpdate" class="count-badge text-amber-300">可升级</span>
-            <span v-else class="count-badge" :class="image.status === 'current' ? 'text-emerald-300' : image.status === 'failed' ? 'text-rose-300' : 'text-surface-400'">{{ imageStatusLabel(image.status) }}</span>
+            <input v-if="image.hasUpdate" v-model="selectedServices" class="accent-status-warn" type="checkbox" :value="image.service" :aria-label="`选择升级服务 ${image.service}`" />
+            <span v-else class="w-2 h-2 rounded-full" :class="image.status === 'current' ? 'bg-status-ok' : image.status === 'failed' ? 'bg-status-error' : 'bg-surface-600'"></span>
+            <strong class="font-mono text-sm flex-1 min-w-0 truncate">{{ image.service }}<span class="text-surface-400"> · </span>{{ image.image || '本地构建' }}</strong>
+            <span v-if="image.hasUpdate" class="count-badge text-status-warn">可升级</span>
+            <span v-else class="count-badge" :class="image.status === 'current' ? 'text-status-ok' : image.status === 'failed' ? 'text-status-error' : 'text-surface-400'">{{ imageStatusLabel(image.status) }}</span>
           </div>
           <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] font-mono text-surface-400">
-            <div class="min-w-0"><span class="text-surface-600">本地 </span><span class="truncate block">{{ shortDigest(image.localDigest) }}</span></div>
-            <div class="min-w-0"><span class="text-surface-600">远端 </span><span class="truncate block">{{ shortDigest(image.remoteDigest) }}</span></div>
+            <div class="min-w-0"><span class="text-surface-400">本地 </span><span class="truncate block">{{ shortDigest(image.localDigest) }}</span></div>
+            <div class="min-w-0"><span class="text-surface-400">远端 </span><span class="truncate block">{{ shortDigest(image.remoteDigest) }}</span></div>
           </div>
-          <p v-if="image.error || image.reason" class="mt-1 text-[11px]" :class="image.error ? 'text-rose-400' : 'text-surface-400'">{{ image.error || image.reason }}</p>
+          <p v-if="image.error || image.reason" class="mt-1 text-[11px]" :class="image.error ? 'text-status-error' : 'text-surface-400'">{{ image.error || image.reason }}</p>
         </div>
       </div>
       <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-xs text-surface-400">

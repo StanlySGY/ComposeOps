@@ -11,7 +11,7 @@ describe('StatusBadge.vue', () => {
       expect(wrapper.text()).toContain('运行中');
       expect(wrapper.find('[data-pulse="true"]').exists()).toBe(true);
       expect(wrapper.find('.status-badge-pulse').exists()).toBe(true);
-      expect(wrapper.classes()).toContain('text-emerald-300');
+      expect(wrapper.classes()).toContain('text-status-ok');
     });
 
     it('renders stopped status without pulse', () => {
@@ -28,7 +28,7 @@ describe('StatusBadge.vue', () => {
         props: { status: 'error' }
       });
       expect(wrapper.text()).toContain('异常');
-      expect(wrapper.classes()).toContain('text-rose-300');
+      expect(wrapper.classes()).toContain('text-status-error');
       expect(wrapper.attributes('title')).toContain('运行异常');
     });
 
@@ -37,7 +37,7 @@ describe('StatusBadge.vue', () => {
         props: { status: 'success' }
       });
       expect(wrapper.text()).toContain('成功');
-      expect(wrapper.classes()).toContain('text-emerald-300');
+      expect(wrapper.classes()).toContain('text-status-ok');
     });
 
     it('renders unknown status with fallback', () => {
@@ -55,7 +55,7 @@ describe('StatusBadge.vue', () => {
         props: { status: 'stopped', health: 'healthy' }
       });
       expect(wrapper.text()).toContain('健康');
-      expect(wrapper.classes()).toContain('text-emerald-300');
+      expect(wrapper.classes()).toContain('text-status-ok');
     });
 
     it('renders unhealthy status when health prop is set', () => {
@@ -63,7 +63,7 @@ describe('StatusBadge.vue', () => {
         props: { status: 'running', health: 'unhealthy' }
       });
       expect(wrapper.text()).toContain('不健康');
-      expect(wrapper.classes()).toContain('text-rose-300');
+      expect(wrapper.classes()).toContain('text-status-error');
     });
   });
 

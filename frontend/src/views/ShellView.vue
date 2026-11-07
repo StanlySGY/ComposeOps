@@ -18,10 +18,10 @@
       <div v-if="connected" class="flex md:hidden items-center justify-between gap-1.5 border-t border-surface-800 bg-surface-950/95 px-3 py-2 overflow-x-auto shrink-0 z-20">
         <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x1b')">ESC</button>
         <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\t')">TAB</button>
-        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-rose-300 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x03')">Ctrl+C</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-status-error active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x03')">Ctrl+C</button>
         <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x1b[A')">▲</button>
         <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-surface-200 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('\x1b[B')">▼</button>
-        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-emerald-300 active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('clear\n')">Clear</button>
+        <button class="px-2.5 py-1 rounded-md bg-surface-800 text-xs font-mono font-medium text-status-ok active:scale-95 active:bg-surface-700 shrink-0" @click="sendKey('clear\n')">Clear</button>
       </div>
       <div v-if="termReady && !connected" class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-surface-1000/95 px-6">
         <div class="flex items-center gap-1.5">
@@ -33,7 +33,7 @@
           <p class="font-mono text-sm text-surface-300">终端未连接</p>
           <p class="text-muted">请选择上方项目与容器后点击「连接」</p>
         </div>
-        <div class="flex flex-wrap items-center justify-center gap-3 font-mono text-[11px] text-surface-600">
+        <div class="flex flex-wrap items-center justify-center gap-3 font-mono text-[11px] text-surface-400">
           <span><kbd class="shortcut-key">Ctrl+C</kbd> 中断</span>
           <span><kbd class="shortcut-key">Ctrl+L</kbd> 清屏</span>
           <span><kbd class="shortcut-key">Ctrl+D</kbd> 退出 Shell</span>

@@ -8,7 +8,7 @@
           <span class="login-brand-mark"><Boxes class="h-6 w-6" /></span>
           <div>
             <p class="text-lg font-semibold tracking-tight text-surface-100">ComposeOps</p>
-            <p class="mt-0.5 text-xs text-surface-500">DOCKER OPERATIONS WORKSPACE</p>
+            <p class="mt-0.5 text-xs text-surface-400">DOCKER OPERATIONS WORKSPACE</p>
           </div>
         </div>
         <p class="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">一处掌控，清晰运维</p>
@@ -20,11 +20,11 @@
           <div v-for="feature in features" :key="feature.title" class="login-feature rounded-xl border border-surface-800/80 bg-surface-900/50 p-3.5">
             <component :is="feature.icon" class="mb-3 h-4 w-4 text-blue-300" />
             <p class="text-xs font-medium text-surface-200">{{ feature.title }}</p>
-            <p class="mt-1 text-[11px] leading-4 text-surface-500">{{ feature.description }}</p>
+            <p class="mt-1 text-[11px] leading-4 text-surface-400">{{ feature.description }}</p>
           </div>
         </div>
-        <div class="mt-10 flex items-center gap-2 text-xs text-surface-500">
-          <ShieldCheck class="h-4 w-4 text-emerald-400" />
+        <div class="mt-10 flex items-center gap-2 text-xs text-surface-400">
+          <ShieldCheck class="h-4 w-4 text-status-ok" />
           <span>个人运维控制台 · 管理员身份验证</span>
         </div>
       </section>
@@ -54,24 +54,24 @@
           </label>
           <label v-if="auth.setupRequired" class="block">
             <span class="mb-1.5 block text-xs font-medium text-surface-300">确认密码</span>
-            <input v-model="confirm" class="input w-full" type="password" autocomplete="new-password" required minlength="10" placeholder="再次输入管理员密码" />
+            <input v-model="confirm" class="input w-full" type="password" autocomplete="new-password" required minlength="10" aria-label="再次输入管理员密码" placeholder="再次输入管理员密码" />
           </label>
           <label v-if="auth.setupRequired" class="block">
-            <span class="mb-1.5 block text-xs font-medium text-surface-300">引导令牌 <span class="font-normal text-surface-500">（如服务端已配置）</span></span>
-            <input v-model="setupToken" class="input w-full" type="password" autocomplete="one-time-code" placeholder="未配置时可留空" />
-            <span class="mt-1.5 block text-[11px] leading-5 text-surface-500">如需令牌，请从服务端配置或启动日志中获取。</span>
+            <span class="mb-1.5 block text-xs font-medium text-surface-300">引导令牌 <span class="font-normal text-surface-400">（如服务端已配置）</span></span>
+            <input v-model="setupToken" class="input w-full" type="password" autocomplete="one-time-code" aria-label="未配置时可留空" placeholder="未配置时可留空" />
+            <span class="mt-1.5 block text-[11px] leading-5 text-surface-400">如需令牌，请从服务端配置或启动日志中获取。</span>
           </label>
-          <p id="login-error" v-if="error" class="rounded-lg border border-rose-500/25 bg-rose-950/30 px-3 py-2.5 text-sm text-rose-300" role="alert" aria-live="polite">{{ error }}</p>
+          <p id="login-error" v-if="error" class="rounded-lg border border-status-error/25 bg-status-error/15 px-3 py-2.5 text-sm text-status-error" role="alert" aria-live="polite">{{ error }}</p>
           <button class="btn-primary min-h-11 w-full justify-center rounded-xl" :disabled="loading">
             <span v-if="loading" class="loading-mark login-loading-mark" aria-hidden="true"></span>
             <LogIn v-else class="h-4 w-4" />
             {{ loading ? '正在验证…' : (auth.setupRequired ? '完成初始化' : '安全登录') }}
           </button>
         </form>
-        <p class="mt-6 border-t border-surface-800 pt-4 text-center text-[11px] leading-5 text-surface-500">访问受管理员密码保护。请勿在共享设备上保存凭据。</p>
+        <p class="mt-6 border-t border-surface-800 pt-4 text-center text-[11px] leading-5 text-surface-400">访问受管理员密码保护。请勿在共享设备上保存凭据。</p>
       </section>
     </div>
-    <p class="absolute bottom-3 left-0 right-0 px-4 text-center text-[10px] tracking-wide text-surface-600">COMPOSEOPS <span class="mx-1.5">·</span> DOCKER COMPOSE WORKSPACE</p>
+    <p class="absolute bottom-3 left-0 right-0 px-4 text-center text-[10px] tracking-wide text-surface-400">COMPOSEOPS <span class="mx-1.5">·</span> DOCKER COMPOSE WORKSPACE</p>
   </main>
 </template>
 

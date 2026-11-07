@@ -18,7 +18,7 @@ export const metrics = {
   containers: projects.flatMap(p => p.containers.map((c, i) => ({ id: c.id, name: c.name, projectId: p.id, projectName: p.projectName, state: c.state, cpuPercent: i ? 7 : 2, memoryUsage: 180 * 1024 ** 2, memoryLimit: GB, memoryPercent: 18, networkRx: 1048576, networkTx: 524288, netIO: { rx: 1048576, tx: 524288 }, blockIO: { read: 0, write: 0 } }))),
   network: { rx: 1048576, tx: 524288 }, disk: [{ mount: '/', total: 128 * GB, used: 40 * GB, free: 88 * GB, percent: 31.25 }],
 };
-export const inspection = { latest: { id: 1, score: 82, grade: 'warning', summary: 'wiki-api 异常退出，建议检查数据库连接配置（示例）', createdAt: at, issues: [{ id: 'demo', level: 'warning', title: 'wiki-api 连接失败', message: '数据库主机名 db-old 无法解析' }], checks: [], stats: { warning: 1, critical: 0, passed: 8 } }, reports: [], schedule: { enabled: false }, trend: [] };
+export const inspection = { latest: { id: 1, score: 82, grade: 'attention', summary: 'wiki-api 异常退出，建议检查数据库连接配置（示例）', createdAt: at, issues: [{ id: 'demo', level: 'warning', title: 'wiki-api 连接失败', message: '数据库主机名 db-old 无法解析' }], checks: [], stats: { warning: 1, critical: 0, passed: 8 } }, reports: [], schedule: { enabled: false }, trend: [] };
 export const operations = [{ id: 1, action: 'compose.save', status: 'success', projectName: 'homepage', createdAt: at, detail: '示例配置保存' }];
 export const alerts = [{ id: 1, title: 'wiki-api 异常退出', detail: 'getaddrinfo ENOTFOUND db-old（预设日志）', target: 'knowledge-base', priority: 'warning', created_at: at, read: false, muted: false, type: 'exit', status: 'open' }];
 export const storage = { images: { count: 5, total: 2 * GB, reclaimable: 200 * 1024 ** 2 }, containers: { count: 5, total: 100 * 1024 ** 2, reclaimable: 0 }, volumes: { count: 2, total: 800 * 1024 ** 2, reclaimable: 0, orphans: 0 }, buildCache: { count: 0, total: 0, reclaimable: 0 }, total: 2.9 * GB, reclaimable: 200 * 1024 ** 2, disk: { free: 88 * GB, total: 128 * GB } };
@@ -32,3 +32,12 @@ export const logs = '2026-10-01T09:42:01Z [INFO] Starting wiki-api (示例日志
 export const compose = new Map(projects.map(p => [p.id, p.id === 'knowledge-base'
   ? 'services:\n  wiki-api:\n    image: example/wiki-api:2.3\n    environment:\n      DB_HOST: db-old\n    depends_on:\n      - postgres\n  postgres:\n    image: postgres:17-alpine\n    volumes:\n      - data:/var/lib/postgresql/data\nvolumes:\n  data:\n'
   : 'services:\n  ' + p.containers[0].service + ':\n    image: ' + p.containers[0].image + '\n    restart: unless-stopped\n']));
+
+// Cost examples use the same response shape as the server; all values remain fictional.
+export const costReport = {
+  summary: { totalProjects: 4, totalContainers: 5, runningContainers: 4, totalCPUPercent: 18, totalMemoryMB: 3480, totalImagesMB: 2048, reclaimableMB: 200 },
+  projects: projects.map((p, index) => ({ projectId: p.id, projectName: p.projectName, containerCount: p.containers.length, runningCount: p.containers.filter(c => c.state === 'running').length, totalCPUPercent: 8 - index, totalMemoryMB: 1200 - index * 200 })),
+  containers: [], images: [{ id: 'demo-image', tags: ['example/wiki-api:2.3'], sizeMB: 780 }],
+  trends: [10, 14, 12, 23, 20, 16, 18].map((cpu, i) => ({ timestamp: Date.parse(at) - (6 - i) * 86400000, totalCPUPercent: cpu, totalMemoryMB: 2800 + i * 110 })),
+  storage: Object.fromEntries(Object.entries(storage).filter(([, value]) => typeof value === 'object' && 'count' in value).map(([key, value]) => [key, { active: value.count, total: value.count, sizeMB: value.total / 1024 ** 2, reclaimableMB: value.reclaimable / 1024 ** 2 }])),
+};

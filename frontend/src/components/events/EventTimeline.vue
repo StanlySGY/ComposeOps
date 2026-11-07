@@ -4,11 +4,11 @@
 
     <!-- 摘要统计 -->
     <div class="metric-grid">
-      <div class="metric-tile"><span class="metric-icon text-blue-300"><History class="h-5 w-5" /></span><span><strong>{{ events.length }}</strong><small>事件总数</small></span><span class="metric-meta">当前筛选范围</span></div>
-      <div class="metric-tile"><span class="metric-icon text-rose-300"><CircleX class="h-5 w-5" /></span><span><strong>{{ errorCount }}</strong><small>异常事件</small></span><span class="metric-meta">失败 / 严重 / 告警</span></div>
-      <div class="metric-tile"><span class="metric-icon text-emerald-300"><Bot class="h-5 w-5" /></span><span><strong>{{ sourceCount('agent') }}</strong><small>Agent 活动</small></span><span class="metric-meta">执行与巡检</span></div>
-      <div class="metric-tile"><span class="metric-icon text-violet-300"><GitBranch class="h-5 w-5" /></span><span><strong>{{ sourceCount('gitops') }}</strong><small>GitOps 活动</small></span><span class="metric-meta">同步与漂移</span></div>
-      <div class="metric-tile"><span class="metric-icon text-amber-300"><Clock3 class="h-5 w-5" /></span><span><strong>{{ sourceCount('cron') }}</strong><small>定时任务</small></span><span class="metric-meta">执行记录</span></div>
+      <MetricTile title="事件总数" :value="events.length" sub="当前筛选范围" :icon="History" tone="text-blue-300" />
+      <MetricTile title="异常事件" :value="errorCount" sub="失败 / 严重 / 告警" :icon="CircleX" tone="text-status-error" />
+      <MetricTile title="Agent 活动" :value="sourceCount('agent')" sub="执行与巡检" :icon="Bot" tone="text-status-ok" />
+      <MetricTile title="GitOps 活动" :value="sourceCount('gitops')" sub="同步与漂移" :icon="GitBranch" tone="text-violet-300" />
+      <MetricTile title="定时任务" :value="sourceCount('cron')" sub="执行记录" :icon="Clock3" tone="text-status-warn" />
     </div>
 
     <!-- 过滤器 -->
@@ -38,6 +38,7 @@
       <span class="ml-auto whitespace-nowrap text-muted" role="status" aria-live="polite" aria-atomic="true">显示 {{ filteredEvents.length }} / {{ events.length }}</span>
     </div>
 
+    <HistoryControls v-model:page="page" v-model:sort-key="sortKey" v-model:descending="descending" :total="total" :page-size="pageSize" :options="sortOptions" label="事件时间线" />
     <!-- 时间轴 -->
     <Skeleton v-if="loading && !events.length" variant="table" :rows="6" label="事件加载中" class="flex-1" />
     <EmptyState v-else-if="!events.length && !error" icon="History" title="暂无事件" description="执行操作、运行 Agent 或触发定时任务后,事件会出现在这里" />
@@ -45,7 +46,7 @@
     <div v-else class="min-h-0 flex-1 overflow-y-auto pr-1">
       <div class="relative space-y-1">
         <div class="absolute left-[7px] top-2 bottom-2 w-px bg-surface-800"></div>
-        <div v-for="event in filteredEvents" :key="event.key" class="relative flex gap-3 py-2 pl-0">
+        <div v-for="event in pagedRows" :key="event.key" class="relative flex gap-3 py-2 pl-0">
           <div class="relative z-10 mt-1 flex h-4 w-4 shrink-0 items-center justify-center">
             <span class="h-3 w-3 rounded-full border-2" :class="dotClass(event.level)"></span>
           </div>
@@ -54,7 +55,7 @@
               <span class="count-badge shrink-0" :class="sourceBadgeClass(event.source)">{{ sourceLabel(event.source) }}</span>
               <span class="count-badge shrink-0" :class="levelBadgeClass(event.level)">{{ levelLabel(event.level) }}</span>
               <span class="font-mono text-xs tabular-nums text-surface-400">{{ formatTime(event.timestamp) }}</span>
-              <span v-if="event.projectName" class="ml-auto truncate text-xs text-surface-500">{{ event.projectName }}</span>
+              <span v-if="event.projectName" class="ml-auto truncate text-xs text-surface-400">{{ event.projectName }}</span>
             </div>
             <p class="mt-1.5 text-sm font-medium text-surface-100">{{ event.title }}</p>
             <p v-if="event.detail" class="mt-1 line-clamp-2 text-xs leading-5 text-surface-400">{{ event.detail }}</p>
@@ -66,6 +67,9 @@
 </template>
 
 <script setup>
+import MetricTile from '../common/MetricTile.vue';
+import { usePagedRows } from '../../composables/usePagedRows.js';
+import HistoryControls from '../../components/common/HistoryControls.vue';
 // 运维时间机器:客户端聚合操作/Agent/告警/定时/GitOps 五路事件的只读时间线,嵌入事件中心 tab
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../../composables/usePullRefresh.js';
@@ -88,13 +92,13 @@ const LEVEL_LABELS = { success: '成功', info: '提示', warning: '关注', err
 function sourceLabel(s) { return SOURCE_LABELS[s] || s; }
 function levelLabel(l) { return LEVEL_LABELS[l] || l; }
 function sourceBadgeClass(s) {
-  return { operation: 'text-blue-300', agent: 'text-emerald-300', alert: 'text-rose-300', cron: 'text-amber-300', gitops: 'text-violet-300' }[s] || 'text-surface-400';
+  return { operation: 'text-blue-300', agent: 'text-status-ok', alert: 'text-status-error', cron: 'text-status-warn', gitops: 'text-violet-300' }[s] || 'text-surface-400';
 }
 function levelBadgeClass(l) {
-  return { success: 'text-emerald-300', info: 'text-sky-300', warning: 'text-amber-300', error: 'text-rose-300' }[l] || 'text-surface-400';
+  return { success: 'text-status-ok', info: 'text-sky-300', warning: 'text-status-warn', error: 'text-status-error' }[l] || 'text-surface-400';
 }
 function dotClass(l) {
-  return { success: 'border-emerald-400 bg-emerald-400', info: 'border-sky-400 bg-sky-400', warning: 'border-amber-400 bg-amber-400', error: 'border-rose-400 bg-rose-400' }[l] || 'border-surface-500 bg-surface-500';
+  return { success: 'border-status-ok bg-status-ok', info: 'border-sky-400 bg-sky-400', warning: 'border-status-warn bg-status-warn', error: 'border-status-error bg-status-error' }[l] || 'border-surface-500 bg-surface-500';
 }
 
 const errorCount = computed(() => events.value.filter((e) => e.level === 'error' || e.level === 'warning').length);
@@ -240,4 +244,7 @@ function agentStatusLabel(status) {
 
 usePullRefresh(load);
 onMounted(load);
+
+const { rows: pagedRows, page, pageSize, total, sortKey, descending } = usePagedRows(filteredEvents, { time: item => item.ts, source: item => item.source, level: item => item.level }, 'time');
+const sortOptions = [{ key: 'time', label: '事件时间' }, { key: 'source', label: '事件来源' }, { key: 'level', label: '级别' }];
 </script>

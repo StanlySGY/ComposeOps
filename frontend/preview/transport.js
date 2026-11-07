@@ -1,5 +1,5 @@
 import { parseDocument } from 'yaml';
-import { at, projects, metrics, inspection, operations, alerts, storage, channels, preferences, backups, logs, compose } from './fixtures.js';
+import { at, projects, metrics, inspection, operations, alerts, storage, channels, preferences, backups, logs, compose, costReport } from './fixtures.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -104,9 +104,9 @@ export async function previewFetch(input, options = {}) {
     '/events/events': { events: alerts, total: alerts.length }, '/events/events/stats': { total: 1, unread: 1, byType: {}, byPriority: {} },
     '/workflows/definitions': { definitions: [] }, '/workflows/instances': { instances: [] },
     '/cmdb/assets': { assets: [], total: 0 }, '/cmdb/topology': { nodes: [], edges: [] },
-    '/cost-analysis/report': { summary: { totalProjects: 4, totalContainers: 5, runningContainers: 4 }, projects: [], containers: [], images: [], trends: [], storage },
+    '/cost-analysis/report': costReport, '/cost-analysis/trends': costReport.trends,
     '/cost-analysis/suggestions': { suggestions: [] },
-    '/marketplace/stats': { total: 0, favorites: 0, categories: [] }, '/marketplace/templates/search': { templates: [], total: 0, categories: [] },
+    '/marketplace/stats': { totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [], communityAvailable: false }, '/marketplace/templates/search': { results: [], templates: [], total: 0, categories: [] },
   };
   if (method === 'GET') {
     if (path in reads) return json(clone(reads[path]));
@@ -125,6 +125,7 @@ export async function previewFetch(input, options = {}) {
     }
     if (path.endsWith('/compaction')) return json({ compactedBeforeId: 0, summary: '' });
   }
+  if (path === '/cost-analysis/snapshot' && method === 'POST') { const snapshot = { ...costReport.summary, timestamp: Date.now() }; costReport.trends.push(snapshot); return json(snapshot); }
   if (path === '/ai/agent/execute-stream' && method === 'POST') return agentStream(body, options.signal);
   if (path === '/ai/agent/approve' && method === 'POST') {
     const respond = pending.get(body.executionId);

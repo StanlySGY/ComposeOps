@@ -70,7 +70,7 @@
         </div>
         <div v-for="(vol, idx) in service.volumes" :key="idx" class="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center">
           <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
-            <span class="text-xs text-surface-500 sm:hidden">宿主机路径或命名卷</span>
+            <span class="text-xs text-surface-400 sm:hidden">宿主机路径或命名卷</span>
             <input
               v-model="vol.host"
               :aria-label="`第 ${idx + 1} 行卷挂载 · 宿主机路径或命名卷`"
@@ -81,7 +81,7 @@
           </label>
           <span class="text-muted hidden sm:inline">:</span>
           <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
-            <span class="text-xs text-surface-500 sm:hidden">容器路径</span>
+            <span class="text-xs text-surface-400 sm:hidden">容器路径</span>
             <input
               v-model="vol.container"
               :aria-label="`第 ${idx + 1} 行卷挂载 · 容器路径`"
@@ -102,7 +102,7 @@
         </div>
         <div v-for="(env, idx) in service.environment" :key="idx" class="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center">
           <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
-            <span class="text-xs text-surface-500 sm:hidden">变量名</span>
+            <span class="text-xs text-surface-400 sm:hidden">变量名</span>
             <input
               v-model="env.key"
               :aria-label="`第 ${idx + 1} 行环境变量名称`"
@@ -113,7 +113,7 @@
           </label>
           <span class="text-muted hidden sm:inline">=</span>
           <label class="flex w-full min-w-0 flex-col gap-1 sm:flex-1">
-            <span class="text-xs text-surface-500 sm:hidden">变量值</span>
+            <span class="text-xs text-surface-400 sm:hidden">变量值</span>
             <input
               v-model="env.value"
               :aria-label="`第 ${idx + 1} 行环境变量值`"
@@ -357,7 +357,7 @@ function save() {
 .input {
   @apply w-full px-3 py-2 text-sm rounded-lg bg-surface-900 border border-surface-700
          text-surface-100 placeholder-surface-500
-         focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500
+         focus:outline-hidden focus:ring-2 focus:ring-status-ok/50 focus:border-status-ok
          disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
@@ -373,11 +373,11 @@ function save() {
 }
 
 .btn-primary {
-  @apply px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white
-         hover:bg-emerald-500 transition-colors inline-flex items-center gap-2;
+  @apply px-4 py-2 rounded-lg text-sm font-medium bg-status-ok text-white
+         hover:bg-status-ok transition-colors inline-flex items-center gap-2;
 }
 
 .text-muted {
-  @apply text-xs text-surface-500;
+  @apply text-xs text-surface-400;
 }
 </style>

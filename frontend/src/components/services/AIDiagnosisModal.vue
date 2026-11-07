@@ -1,7 +1,7 @@
 <template>
   <BaseModal :show="open" :title="`AI 一键诊断 · ${title}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[86vh] flex-col" body-class="min-h-0 flex-1 p-0" @close="close">
     <template #header-actions>
-      <Sparkles class="w-4 h-4 text-accent" />
+      <Sparkles class="w-4 h-4 text-status-info" />
     </template>
     <div class="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1fr)_11rem]">
       <div class="min-w-0 overflow-y-auto p-4">
@@ -55,7 +55,7 @@ let controller = null;
 
 const title = computed(() => props.projectName || '容器诊断');
 const statusText = computed(() => status.value === 'error' && statusMessage.value ? statusMessage.value : ({ idle: '', running: 'AI 正在分析日志…', done: '诊断完成', error: '诊断失败' })[status.value] || '');
-const statusClass = computed(() => status.value === 'error' ? 'text-rose-400' : status.value === 'done' ? 'text-emerald-400' : 'text-muted');
+const statusClass = computed(() => status.value === 'error' ? 'text-status-error' : status.value === 'done' ? 'text-status-ok' : 'text-muted');
 
 watch(() => props.open, (isOpen) => { if (isOpen) start(); });
 

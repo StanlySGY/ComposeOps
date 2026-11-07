@@ -28,12 +28,12 @@
       </div>
       <div class="grid w-full max-w-2xl gap-3 sm:grid-cols-2">
         <button v-for="preset in presets" :key="preset.name" class="cron-preset-card" @click="openCreate(preset)">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-surface-700 bg-surface-950/60"><component :is="preset.icon" class="h-4 w-4 text-accent" /></span>
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-surface-700 bg-surface-950/60"><component :is="preset.icon" class="h-4 w-4 text-status-info" /></span>
           <span class="min-w-0 flex-1 text-left">
             <strong class="block truncate text-sm font-medium text-surface-200">{{ preset.name }}</strong>
             <small class="block truncate text-muted">{{ preset.description }}</small>
           </span>
-          <Plus class="h-4 w-4 shrink-0 text-surface-500" />
+          <Plus class="h-4 w-4 shrink-0 text-surface-400" />
         </button>
       </div>
     </div>
@@ -45,50 +45,47 @@
             <strong class="text-sm text-surface-100">{{ job.name }}</strong>
             <span class="count-badge">{{ job.typeLabel }}</span>
             <span class="count-badge font-mono text-xs">{{ job.cron }}</span>
-            <span v-if="job.enabled" class="count-badge text-emerald-300">启用</span>
-            <span v-else class="count-badge text-surface-500">停用</span>
+            <span v-if="job.enabled" class="count-badge text-status-ok">启用</span>
+            <span v-else class="count-badge text-surface-400">停用</span>
           </div>
           <div class="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-muted">
             <span>下次执行:{{ job.nextRunAt ? new Date(job.nextRunAt).toLocaleString('zh-CN') : '—' }}</span>
             <template v-if="job.lastRunAt">
-              <span :class="job.lastStatus === 'success' ? 'text-emerald-400' : 'text-rose-400'">最近:{{ job.lastStatus === 'success' ? '成功' : '失败' }}</span>
+              <span :class="job.lastStatus === 'success' ? 'text-status-ok' : 'text-status-error'">最近:{{ job.lastStatus === 'success' ? '成功' : '失败' }}</span>
               <span>于 {{ new Date(job.lastRunAt).toLocaleString('zh-CN') }}</span>
-              <span v-if="job.lastError" class="text-rose-400 truncate max-w-[320px]" :title="job.lastError">{{ job.lastError }}</span>
+              <span v-if="job.lastError" class="text-status-error truncate max-w-[320px]" :title="job.lastError">{{ job.lastError }}</span>
             </template>
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <button class="btn-secondary" :disabled="runningId === job.id" @click="runNow(job)"><Play class="w-4 h-4" :class="{ 'animate-pulse': runningId === job.id }" />立即执行</button>
           <label class="toggle-label" :title="job.enabled ? '点击停用' : '点击启用'"><input type="checkbox" :checked="job.enabled" :aria-label="job.enabled ? `停用定时任务 ${job.name}` : `启用定时任务 ${job.name}`" @change="toggleEnabled(job)" /></label>
-          <button class="icon-btn" title="删除任务" :aria-label="`删除定时任务 ${job.name}`" @click="removeJob(job)"><Trash2 class="w-4 h-4 text-rose-300" /></button>
+          <button class="icon-btn" title="删除任务" :aria-label="`删除定时任务 ${job.name}`" @click="removeJob(job)"><Trash2 class="w-4 h-4 text-status-error" /></button>
         </div>
       </article>
 
       <div class="border-t border-surface-800 pt-3">
         <div class="flex items-center justify-between"><h2 class="section-title">执行历史</h2><span class="text-muted text-xs">最多保留 200 条</span></div>
-        <div v-if="history.length" class="space-y-1">
-          <div v-for="item in history" :key="item.id" class="flex flex-wrap items-center gap-2 text-xs py-1 border-b border-surface-800/60">
-            <span class="count-badge shrink-0" :class="item.status === 'success' ? 'text-emerald-300' : 'text-rose-300'">{{ item.status === 'success' ? '成功' : '失败' }}</span>
-            <span class="shrink-0 text-surface-400">{{ new Date(item.at).toLocaleString('zh-CN') }}</span>
-            <span class="text-surface-300">{{ item.jobName }}</span>
-            <span class="text-muted">{{ item.durationMs }}ms</span>
-            <span v-if="item.error" class="text-rose-400 truncate flex-1 max-w-[360px]" :title="item.error">{{ item.error }}</span>
-          </div>
-        </div>
-        <p v-else class="text-muted text-sm py-3">暂无执行记录,点击「立即执行」触发一次。</p>
+        <HistoryControls v-model:page="page" v-model:sort-key="sortKey" v-model:descending="descending" :total="total" :page-size="pageSize" :options="sortOptions" label="定时执行历史" />
+        <div v-if="history.length" class="table-wrap"><table class="data-table"><thead><tr>
+          <th v-for="option in sortOptions" :key="option.key" :aria-sort="ariaSort(option.key)"><button class="inline-flex items-center gap-1 py-1" @click="sortBy(option.key)">{{ option.label }}<span v-if="sortKey === option.key" aria-hidden="true">{{ descending ? '↓' : '↑' }}</span></button></th><th>说明</th>
+        </tr></thead><tbody><tr v-for="item in pagedRows" :key="item.id">
+          <td class="whitespace-nowrap">{{ new Date(item.at).toLocaleString('zh-CN') }}</td><td>{{ item.jobName }}</td><td><StatusBadge :status="item.status" /></td><td>{{ item.durationMs }} ms</td><td class="max-w-72"><details v-if="item.error"><summary class="cursor-pointer text-status-error">查看错误</summary><p class="whitespace-pre-wrap text-xs">{{ item.error }}</p></details><span v-else class="text-muted">—</span></td>
+        </tr></tbody></table></div>
+        <EmptyState v-else compact icon="History" title="暂无执行记录" description="选择上方任务并点击「立即执行」，即可查看执行结果。" action-label="刷新记录" @action="load" />
       </div>
     </div>
 
     <BaseModal :show="!!editor" title="新建定时任务" size-class="max-w-[calc(100vw-2rem)] sm:max-w-lg flex max-h-[88vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-3" @close="closeEditor">
       <template #header-actions>
-        <button class="btn-secondary px-2.5! py-1.5! text-xs" title="让 Agent 根据当前表单创建任务" @click="openCronAgent"><Bot class="h-3.5 w-3.5" />让 Agent 创建</button>
+        <button class="btn-secondary btn-sm" title="让 Agent 根据当前表单创建任务" @click="openCronAgent"><Bot class="h-3.5 w-3.5" />让 Agent 创建</button>
       </template>
       <template v-if="editor">
         <p v-if="editorError" class="alert-error" role="alert">{{ editorError }}</p>
-        <label>任务名称<input v-model="editor.name" class="input" placeholder="例如:每天凌晨自动备份数据库" /></label>
+        <label>任务名称<input v-model="editor.name" class="input" aria-label="例如:每天凌晨自动备份数据库" placeholder="例如:每天凌晨自动备份数据库" /></label>
         <label>任务类型<select v-model="editor.type" class="input"><option v-for="(info, key) in types" :key="key" :value="key">{{ info.label }} — {{ info.description }}</option></select></label>
         <label>周期模板<select v-model="editor.cron" class="input" @change="onCronTemplateChange"><option value="0 3 * * *">每天凌晨 3:00</option><option value="0 0 * * 0">每周日 0:00</option><option value="0 * * * *">每小时整点</option><option value="*/5 * * * *">每 5 分钟(测试用)</option><option value="custom">自定义表达式…</option></select></label>
-        <label v-if="manualCron">Cron 表达式<input v-model="editor.cron" class="input font-mono" placeholder="分 时 日 月 周,如 0 3 * * *" /><span class="text-xs text-muted">下一次执行:{{ nextPreview }}</span></label>
+        <label v-if="manualCron">Cron 表达式<input v-model="editor.cron" class="input font-mono" aria-label="分 时 日 月 周,如 0 3 * * *" placeholder="分 时 日 月 周,如 0 3 * * *" /><span class="text-xs text-muted">下一次执行:{{ nextPreview }}</span></label>
         <details class="text-sm"><summary class="cursor-pointer text-surface-300">支持的预设表达式</summary><div class="mt-2 space-y-1 text-xs text-muted font-mono"><p>0 3 * * *- 每天 03:00</p><p>0 0 * * 0 - 每周日 00:00</p><p>0 * * * * - 每小时整点</p><p>*/30 * * * * - 每 30 分钟</p></div></details>
       </template>
       <template #footer>
@@ -109,6 +106,10 @@
 </template>
 
 <script setup>
+import EmptyState from '../components/common/EmptyState.vue';
+import StatusBadge from '../components/common/StatusBadge.vue';
+import { usePagedRows } from '../composables/usePagedRows.js';
+import HistoryControls from '../components/common/HistoryControls.vue';
 import { useRoute } from 'vue-router';
 const route = useRoute();
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -159,7 +160,7 @@ async function load() {
     const data = await api.listCronJobs();
     jobs.value = data.jobs || [];
     types.value = data.types || {};
-    history.value = ((await api.getCronHistory()).history || []).filter(item => !route.query.job || item.jobId === route.query.job);
+    history.value = ((await api.getCronHistory(200)).history || []).filter(item => !route.query.job || item.jobId === route.query.job);
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -209,7 +210,7 @@ async function runNow(job) {
     toast.success(result.summary || '执行成功');
     await load();
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   } finally {
     runningId.value = '';
   }
@@ -220,7 +221,7 @@ async function toggleEnabled(job) {
     job.enabled = !job.enabled;
     await load();
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 async function removeJob(job) {
@@ -235,7 +236,7 @@ async function confirmRemove() {
     toast.success('任务已删除');
     await load();
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 watch(editor, (value) => {
@@ -249,4 +250,7 @@ onMounted(() => {
 });
 function handleHostChanged() { void load(); }
 onBeforeUnmount(() => { window.removeEventListener('composeops:cron-agent-created', handleAgentCreated); window.removeEventListener('composeops:host-changed', handleHostChanged); });
+
+const { rows: pagedRows, page, pageSize, total, sortKey, descending, sortBy, ariaSort } = usePagedRows(history, { at: item => Date.parse(item.at) || 0, jobName: item => item.jobName, status: item => item.status, durationMs: item => Number(item.durationMs) || 0 }, 'at');
+const sortOptions = [{ key: 'at', label: '执行时间' }, { key: 'jobName', label: '任务名称' }, { key: 'status', label: '状态' }, { key: 'durationMs', label: '耗时' }];
 </script>

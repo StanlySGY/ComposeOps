@@ -14,8 +14,8 @@ function observe(page) {
 }
 const routes = {
   dashboard: '运维总览', services: '服务总览', compose: 'Compose 配置', logs: '实时日志', agent: 'AI 智能运维 Agent',
-  shell: '容器终端', monitor: '实时监控', resources: '存储清理', settings: '设置', topology: '服务拓扑中心', events: '事件中心',
-  inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': 'Autonomous Ops', workflows: '工作流中心',
+  shell: '容器终端', monitor: '实时监控', resources: '存储资源', settings: '设置', topology: '服务拓扑中心', events: '事件中心',
+  inspection: 'AI 巡检中心', 'agent/history': 'Agent 执行历史', 'ops-center': '任务中心', workflows: '工作流中心',
   cron: '定时任务', gitops: 'GitOps 集成', review: '变更与回滚', cmdb: '资产中心 (CMDB)', 'node-groups': '节点组管理',
   marketplace: '应用市场', cost: '成本分析',
 };
@@ -41,6 +41,10 @@ test('真实应用导航和全部页面可访问，没有后端流量或渲染�
       ].some((value) => String(value || '').trim()))
       .map((element) => ({ tag: element.tagName.toLowerCase(), className: String(element.className || '').slice(0, 80), html: element.outerHTML.slice(0, 180) })));
     expect(unnamedControls, `存在缺少可识别名称的按钮/链接：${route}`).toEqual([]);
+    const unnamedForms = await page.locator('main input:visible, main select:visible, main textarea:visible').evaluateAll(elements => elements
+      .filter(element => !element.getAttribute('aria-label') && !element.getAttribute('aria-labelledby') && ![...(element.labels || [])].some(label => label.textContent.trim()))
+      .map(element => element.outerHTML.slice(0, 200)));
+    expect(unnamedForms, `存在未命名表单：${route}`).toEqual([]);
   }
   expect(observed.errors).toEqual([]);
   expect(observed.network).toEqual([]);
@@ -152,7 +156,7 @@ test('真实服务搜索、日志与卷备份界面可交互', async ({ page }) 
   await page.goto('./#/logs?projectId=knowledge-base&containerId=demo-wiki-api');
   await expect(page.getByText(/ENOTFOUND db-old/)).toBeVisible();
   await page.goto('./#/resources');
-  await page.getByRole('button', { name: '卷备份' }).click();
+  await page.getByRole('tab', { name: '卷备份' }).click();
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
   await page.getByRole('button', { name: '验证备份 cache-data-demo.tar.gz' }).click();
   await expect(page.getByText('✓ 128 文件')).toBeVisible();
@@ -271,7 +275,7 @@ test('移动端更多功能抽屉可访问、焦点受限、Escape 可关闭且�
 
 test('数据卷恢复和删除均先展示明确的确认门，取消后不执行破坏性操作', async ({ page }) => {
   await page.goto('./#/resources');
-  await page.getByRole('button', { name: '卷备份' }).click();
+  await page.getByRole('tab', { name: '卷备份' }).click();
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
   await page.getByRole('button', { name: '恢复卷 cache_data 的备份' }).click();
   const restoreDialog = page.getByRole('dialog', { name: '恢复数据卷' });
@@ -304,7 +308,7 @@ test('定时任务创建表单先做本地校验，离线不支持的提交会�
 
 test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) => {
   await page.goto('./#/workflows');
-  await page.getByRole('button', { name: '新建工作流' }).click();
+  await page.getByRole('button', { name: '新建工作流' }).first().click();
   const dialog = page.getByRole('dialog', { name: '新建工作流' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: '保存' }).click();
@@ -313,7 +317,7 @@ test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) 
   const nodeIds = dialog.getByPlaceholder('节点 ID');
   await nodeIds.nth(1).fill('trigger');
   await dialog.getByRole('button', { name: '保存' }).click();
-  await expect(page.getByText('节点 ID 重复:trigger')).toBeVisible();
+  await expect(page.getByText('节点 ID 重复：trigger')).toBeVisible();
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -330,7 +334,7 @@ test('应用市场创建弹窗支持读屏语义、焦点循环、Escape 关闭�
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute('aria-modal', 'true');
   await expect(dialog.getByRole('heading', { name: '创建模板' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: '关闭创建或编辑模板弹窗' })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: '关闭', exact: true })).toBeFocused();
 
   const focusable = dialog.locator('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])');
   const first = focusable.first();

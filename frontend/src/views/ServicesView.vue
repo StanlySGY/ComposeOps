@@ -24,8 +24,8 @@
           </span>
         </button>
         <template v-if="!inspectionCollapsed">
-          <button class="btn-secondary px-2.5! py-1.5! text-xs shrink-0" @click="askAgentReviewInspection"><Bot class="h-3.5 w-3.5" />让 Agent 分析</button>
-          <button class="btn-primary px-2.5! py-1.5! text-xs shrink-0" @click="router.push('/inspection')">查看巡检</button>
+          <button class="btn-secondary shrink-0 btn-sm" @click="askAgentReviewInspection"><Bot class="h-3.5 w-3.5" />让 Agent 分析</button>
+          <button class="btn-primary shrink-0 btn-sm" @click="router.push('/inspection')">查看巡检</button>
         </template>
       </div>
       <button v-if="!inspectionCollapsed" class="mt-3 flex w-full min-w-0 items-start gap-3 text-left" @click="router.push('/inspection')" title="查看完整巡检报告">
@@ -49,16 +49,16 @@
           纳管 {{ managedCount }} / {{ store.projects.length }} · 健康 {{ healthyCount }} · 需关注 {{ attentionCount }} · 容器 {{ runningContainerCount }}/{{ containerCount }} 运行中 · 健康分 {{ healthScore }}
         </span>
       </button>
-      <div v-if="!metricsCollapsed" class="metric-grid mt-3">
-        <button class="metric-tile" :class="{ active: filter === 'managed' }" @click="filter = filter === 'managed' ? 'all' : 'managed'"><span class="metric-icon text-blue-300"><Boxes class="h-5 w-5" /></span><span><strong>{{ managedCount }}</strong><small>已纳管项目</small></span><span class="metric-meta">共 {{ store.projects.length }} 个</span></button>
-        <button class="metric-tile" :class="{ active: filter === 'running' }" @click="filter = filter === 'running' ? 'all' : 'running'"><span class="metric-icon text-emerald-300"><CircleCheckBig class="h-5 w-5" /></span><span><strong>{{ healthyCount }}</strong><small>健康运行</small></span><span class="metric-meta">项目状态正常</span></button>
-        <button class="metric-tile" :class="{ active: filter === 'attention' }" @click="filter = filter === 'attention' ? 'all' : 'attention'"><span class="metric-icon text-amber-300"><AlertTriangle class="h-5 w-5" /></span><span><strong>{{ attentionCount }}</strong><small>需要关注</small></span><span class="metric-meta">停止、部分异常或不健康</span></button>
-        <button class="metric-tile" :class="{ active: filter === 'stopped' }" @click="filter = filter === 'stopped' ? 'all' : 'stopped'"><span class="metric-icon text-surface-300"><Container class="h-5 w-5" /></span><span><strong>{{ runningContainerCount }} / {{ containerCount }}</strong><small>运行中容器</small></span><span class="metric-meta">{{ stoppedContainerCount }} 个未运行</span></button>
-        <button class="metric-tile"><span class="metric-icon" :class="healthTone"><Gauge class="h-5 w-5" /></span><span><strong class="font-mono tabular-nums" :class="healthTone">{{ healthScore }}</strong><small>健康分数</small></span><span class="metric-meta">综合项目与容器状态</span></button>
+      <div v-if="!metricsCollapsed" class="metric-grid service-metrics mt-3">
+        <MetricTile interactive title="已纳管项目" :value="managedCount" :sub="`共 ${store.projects.length} 个项目`" :icon="Boxes" :active="filter === 'managed'" :aria-pressed="filter === 'managed'" @click="filter = filter === 'managed' ? 'all' : 'managed'" />
+        <MetricTile interactive title="健康运行" :value="healthyCount" sub="项目状态正常" :icon="CircleCheckBig" tone="text-status-ok" :active="filter === 'running'" :aria-pressed="filter === 'running'" @click="filter = filter === 'running' ? 'all' : 'running'" />
+        <MetricTile interactive title="需要关注" :value="attentionCount" sub="停止或健康异常" :icon="AlertTriangle" tone="text-status-warn" :active="filter === 'attention'" :aria-pressed="filter === 'attention'" @click="filter = filter === 'attention' ? 'all' : 'attention'" />
+        <MetricTile interactive title="运行中容器" :value="`${runningContainerCount} / ${containerCount}`" :sub="`${stoppedContainerCount} 个未运行`" :icon="Container" :active="filter === 'stopped'" :aria-pressed="filter === 'stopped'" @click="filter = filter === 'stopped' ? 'all' : 'stopped'" />
+        <MetricTile title="健康分数" :value="healthScore" sub="项目与容器综合状态" :icon="Gauge" :tone="healthTone" />
       </div>
     </section>
     <div v-if="store.projects.length" class="toolbar-panel">
-      <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" placeholder="搜索项目、容器、镜像或路径" /></label>
+      <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" aria-label="搜索项目、容器、镜像或路径" placeholder="搜索项目、容器、镜像或路径" /></label>
       <select v-model="filter" class="input sm:w-40" aria-label="状态筛选"><option value="all">全部项目</option><option value="attention">需要关注</option><option value="running">健康运行</option><option value="stopped">已停止</option><option value="managed">已纳管</option><option value="unmanaged">未纳管</option><option value="favorites">仅收藏</option></select>
       <select v-model="sort" class="input sm:w-40" aria-label="项目排序"><option value="priority">异常与收藏优先</option><option value="name">按项目名称</option><option value="owner">按项目归属</option></select>
       <label class="toggle-label whitespace-nowrap"><input type="checkbox" :checked="allVisibleSelected" :disabled="!visibleManagedProjects.length" @change="toggleAllVisible" />选择当前</label>
@@ -68,7 +68,7 @@
     <ConfirmDialog :show="batchConfirmation.show" :title="'批量' + actionLabel(batchConfirmation.action)" :message="'将对 ' + batchConfirmation.count + ' 个已纳管项目执行“' + actionLabel(batchConfirmation.action) + '”。操作会按顺序执行，失败项目仍会保留在结果中。确认继续?'" tone="warning" :confirm-text="'确认' + actionLabel(batchConfirmation.action)" :busy="batchSubmitting" @confirm="confirmBatch" @cancel="batchConfirmation.show = false" />
     <ConfirmDialog :show="!!restartTarget" title="重启项目" :message="`确认重启 ${restartTarget?.projectName || ''}?`" tone="warning" confirm-text="重启" @confirm="confirmKeyboardRestart" @cancel="restartTarget = null" />
     <Skeleton v-if="store.loading && !store.projects.length" variant="cards" :rows="4" label="服务列表加载中" class="flex-1" />
-    <EmptyState v-else-if="!store.projects.length" icon="Boxes" title="暂未发现 Compose 项目" description="Docker 中没有带 Compose 标签的项目,或尚未扫描" />
+    <EmptyState v-else-if="!store.projects.length" icon="Boxes" title="暂未发现 Compose 项目" description="可重新扫描当前节点，或从应用市场部署第一个应用。" action-label="重新扫描" @action="refresh" />
     <EmptyState v-else-if="!visibleProjects.length" icon="Search" title="没有匹配当前条件的项目" description="调整搜索关键词或筛选条件后重试" action-label="清除筛选" class="flex-1" @action="resetFilters" />
     <div v-else class="flex-1 space-y-3">
       <ServiceProjectCard
@@ -88,6 +88,7 @@
 </template>
 
 <script setup>
+import MetricTile from '../components/common/MetricTile.vue';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search } from 'lucide-vue-next';
@@ -155,15 +156,15 @@ function toggleMetricsCollapsed() { metricsCollapsed.value = !metricsCollapsed.v
 const lastUpdated = ref('');
 const inspectionGradeBadge = computed(() => {
   const grade = inspection.value?.latest?.grade;
-  return { healthy: 'text-emerald-300', attention: 'text-amber-300', degraded: 'text-amber-300', critical: 'text-rose-300' }[grade] || 'text-surface-400';
+  return { healthy: 'text-status-ok', attention: 'text-status-warn', degraded: 'text-status-warn', critical: 'text-status-error' }[grade] || 'text-surface-400';
 });
 const inspectionTileClass = computed(() => {
   const score = inspection.value?.latest?.score;
   const base = 'border';
   if (score == null) return `${base} border-surface-700 bg-surface-900 text-surface-300`;
-  if (score >= GP.healthy) return `${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`;
-  if (score >= GP.attention) return `${base} border-amber-500/40 bg-amber-500/10 text-amber-300`;
-  return `${base} border-rose-500/40 bg-rose-500/10 text-rose-300`;
+  if (score >= GP.healthy) return `${base} border-status-ok/40 bg-status-ok/10 text-status-ok`;
+  if (score >= GP.attention) return `${base} border-status-warn/40 bg-status-warn/10 text-status-warn`;
+  return `${base} border-status-error/40 bg-status-error/10 text-status-error`;
 });
 function formatInspectionTime(value) {
   if (!value) return '';
@@ -208,7 +209,7 @@ const healthScore = computed(() => {
   }, 0);
   return Math.max(0, Math.round((1 - penalties / total) * 100));
 });
-const healthTone = computed(() => healthScore.value >= 90 ? 'text-emerald-300' : healthScore.value >= 70 ? 'text-amber-300' : 'text-rose-300');
+const healthTone = computed(() => healthScore.value >= 90 ? 'text-status-ok' : healthScore.value >= 70 ? 'text-status-warn' : 'text-status-error');
 const visibleProjects = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   const matcher = statusMatchers[filter.value];

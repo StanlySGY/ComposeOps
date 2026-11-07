@@ -7,22 +7,22 @@
         <div class="storage-bar" role="img" :aria-label="`Docker 磁盘占用分布：镜像 ${formatBytes(df.images?.total)}，卷 ${formatBytes(df.volumes?.total)}，容器 ${formatBytes(df.containers?.total)}，构建缓存 ${formatBytes(df.buildCache?.total)}`">
           <span v-if="df.images?.total" class="storage-seg bg-blue-500" :style="{ width: segPercent(df.images.total) }" title="镜像"></span>
           <span v-if="df.volumes?.total" class="storage-seg bg-violet-500" :style="{ width: segPercent(df.volumes.total) }" title="卷"></span>
-          <span v-if="df.containers?.total" class="storage-seg bg-amber-500" :style="{ width: segPercent(df.containers.total) }" title="容器"></span>
-          <span v-if="df.buildCache?.total" class="storage-seg bg-emerald-500" :style="{ width: segPercent(df.buildCache.total) }" title="构建缓存"></span>
+          <span v-if="df.containers?.total" class="storage-seg bg-status-warn" :style="{ width: segPercent(df.containers.total) }" title="容器"></span>
+          <span v-if="df.buildCache?.total" class="storage-seg bg-status-ok" :style="{ width: segPercent(df.buildCache.total) }" title="构建缓存"></span>
         </div>
         <div class="mt-2 flex flex-wrap gap-3 text-[11px] text-surface-400">
           <span><span class="inline-block h-2 w-2 rounded-xs bg-blue-500"></span> 镜像 {{ formatBytes(df.images?.total) }}</span>
           <span><span class="inline-block h-2 w-2 rounded-xs bg-violet-500"></span> 卷 {{ formatBytes(df.volumes?.total) }}</span>
-          <span><span class="inline-block h-2 w-2 rounded-xs bg-amber-500"></span> 容器 {{ formatBytes(df.containers?.total) }}</span>
-          <span><span class="inline-block h-2 w-2 rounded-xs bg-emerald-500"></span> 缓存 {{ formatBytes(df.buildCache?.total) }}</span>
+          <span><span class="inline-block h-2 w-2 rounded-xs bg-status-warn"></span> 容器 {{ formatBytes(df.containers?.total) }}</span>
+          <span><span class="inline-block h-2 w-2 rounded-xs bg-status-ok"></span> 缓存 {{ formatBytes(df.buildCache?.total) }}</span>
         </div>
-        <p class="mt-3 text-sm text-emerald-300">可安全释放 {{ formatBytes(df.reclaimable) }}<span v-if="df.volumes?.orphans">(含 {{ df.volumes.orphans }} 个孤儿卷 {{ formatBytes(df.volumes.reclaimable) }})</span></p>
+        <p class="mt-3 text-sm text-status-ok">可安全释放 {{ formatBytes(df.reclaimable) }}<span v-if="df.volumes?.orphans">(含 {{ df.volumes.orphans }} 个孤儿卷 {{ formatBytes(df.volumes.reclaimable) }})</span></p>
         <p v-if="df.disk" class="text-muted text-xs">磁盘剩余 {{ formatBytes(df.disk.free) }} / {{ formatBytes(df.disk.total) }}</p>
       </div>
 
       <div class="rounded-xl border border-surface-800 p-3 space-y-3">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2"><Zap class="h-4 w-4 text-amber-300" /><div><strong class="text-sm text-surface-200">一键极速安全清理</strong><p class="text-muted text-xs mt-0.5">清理悬空镜像、退出容器与未使用构建缓存</p></div></div>
+          <div class="flex items-center gap-2"><Zap class="h-4 w-4 text-status-warn" /><div><strong class="text-sm text-surface-200">一键极速安全清理</strong><p class="text-muted text-xs mt-0.5">清理悬空镜像、退出容器与未使用构建缓存</p></div></div>
           <button class="btn-primary" :disabled="pruning" @click="runPrune('safe')">{{ pruning ? '清理中…' : '立即清理' }}</button>
         </div>
         <div class="border-t border-surface-800 pt-3">
@@ -37,7 +37,7 @@
     <div v-else-if="loadingDf" class="text-muted py-8 text-center" role="status" aria-live="polite">正在读取磁盘占用…</div>
     <div v-else class="text-muted py-8 text-center">磁盘占用暂不可用，请检查 Docker 连接后重试。</div>
     <template #footer>
-      <span v-if="lastReclaimed" class="mr-auto text-sm text-emerald-400" role="status" aria-live="polite" aria-atomic="true">已释放 {{ formatBytes(lastReclaimed) }}</span>
+      <span v-if="lastReclaimed" class="mr-auto text-sm text-status-ok" role="status" aria-live="polite" aria-atomic="true">已释放 {{ formatBytes(lastReclaimed) }}</span>
       <button class="btn-secondary" @click="close">关闭</button>
     </template>
   </BaseModal>

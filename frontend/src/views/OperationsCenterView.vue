@@ -38,7 +38,7 @@
               <span class="text-sm text-surface-300">自动巡检</span>
               <label class="toggle-label"><input v-model="enableInspection" type="checkbox" aria-label="自动巡检" /></label>
             </div>
-            <p class="mt-1 text-xs text-surface-500">按同一周期执行只读 AI 巡检并留存报告</p>
+            <p class="mt-1 text-xs text-surface-400">按同一周期执行只读 AI 巡检并留存报告</p>
           </div>
           <button class="btn-primary w-full" :disabled="!targetProjectId || generating" @click="generateFlow">
             <Sparkles class="w-4 h-4" :class="{ 'animate-pulse': generating }" />{{ generating ? '生成中...' : '生成任务流' }}
@@ -47,20 +47,17 @@
 
         <!-- 任务流预览 -->
         <div class="lg:col-span-2">
-          <div v-if="!flowSteps.length" class="flex h-full min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-surface-700 p-6 text-center">
-            <Bot class="mb-3 h-8 w-8 text-surface-600" />
-            <p class="text-sm text-surface-400">选择项目后生成计划，系统会列出实际会创建的定时任务</p>
-          </div>
+          <EmptyState v-if="!flowSteps.length" icon="Bot" title="选择项目后生成计划" description="系统会先列出实际创建的定时任务，确认后再保存。" />
           <div v-else class="space-y-2">
             <div v-for="(step, idx) in flowSteps" :key="idx" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
-              <span class="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-xs" :class="step.tone === 'danger' ? 'border-rose-500/40 text-rose-300' : step.tone === 'warning' ? 'border-amber-500/40 text-amber-300' : 'border-emerald-500/40 text-emerald-300'">{{ idx + 1 }}</span>
+              <span class="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-xs" :class="step.tone === 'danger' ? 'border-status-error/40 text-status-error' : step.tone === 'warning' ? 'border-status-warn/40 text-status-warn' : 'border-status-ok/40 text-status-ok'">{{ idx + 1 }}</span>
               <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-surface-100">{{ step.title }}</p>
                 <p class="mt-0.5 text-xs text-surface-400">{{ step.description }}</p>
               </div>
-              <span class="shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold" :class="step.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : step.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ step.tag }}</span>
+              <span class="shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold" :class="step.tone === 'danger' ? 'bg-status-error/15 text-status-error' : step.tone === 'warning' ? 'bg-status-warn/15 text-status-warn' : 'bg-status-ok/15 text-status-ok'">{{ step.tag }}</span>
             </div>
-            <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200/80">
+            <div class="rounded-lg border border-status-warn/20 bg-status-warn/5 px-3 py-2 text-xs text-status-warn/80">
               当前计划会创建“数据卷备份”“拉取镜像”和可选的“AI 巡检”定时任务；部署、健康检查和回滚仍需在服务/运维操作中执行，不会被假装成已自动化。
             </div>
             <div class="flex gap-2 pt-1">
@@ -76,30 +73,30 @@
     <section class="section-panel">
       <div class="mb-4 flex items-center justify-between gap-3">
         <div><h2 class="section-title">Agent 后台任务</h2><p class="mt-1 text-muted">任务独立于聊天连接运行；中断后结果不确定的任务需要先核对 Docker 实际状态</p></div>
-        <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="taskLoading" @click="loadAgentTasks()"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': taskLoading }" />刷新任务</button>
+        <button class="btn-secondary btn-sm" :disabled="taskLoading" @click="loadAgentTasks()"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': taskLoading }" />刷新任务</button>
       </div>
       <p v-if="agentTaskError" class="alert-error" role="alert">{{ agentTaskError }}</p>
-      <div v-if="!agentTasks.length && !agentTaskError" class="rounded-xl border border-dashed border-surface-700 p-6 text-center text-sm text-surface-500">暂无 Agent 后台任务。通过 AI 助手将长时间的 Compose 操作转入后台后，任务会出现在这里。</div>
+      <EmptyState v-if="!agentTasks.length && !agentTaskError" compact title="暂无后台任务" description="从 AI 助手发起后台操作，可在这里跟踪进度。"><router-link to="/agent?from=maintenance-plan" class="btn-secondary btn-sm">打开 AI 助手</router-link></EmptyState>
       <div v-else-if="agentTasks.length" class="table-wrap">
         <table class="data-table">
           <thead><tr><th>任务</th><th>项目</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead>
           <tbody>
             <template v-for="task in agentTasks" :key="task.id">
               <tr class="hover:bg-surface-800/25">
-                <td><div class="font-medium text-surface-100">{{ task.label }}</div><div class="mt-0.5 font-mono text-[10px] text-surface-500">{{ task.id }}</div></td>
+                <td><div class="font-medium text-surface-100">{{ task.label }}</div><div class="mt-0.5 font-mono text-[10px] text-surface-400">{{ task.id }}</div></td>
                 <td class="max-w-48 truncate text-xs text-surface-400" :title="task.projectId || ''">{{ task.projectId || '全局任务' }}</td>
-                <td><span class="status-badge" :class="agentTaskTone(task.status)">{{ agentTaskStatusLabel(task.status) }}</span><p v-if="task.error" class="mt-1 max-w-64 text-xs text-amber-300">{{ task.error }}</p></td>
+                <td><span class="status-badge" :class="agentTaskTone(task.status)">{{ agentTaskStatusLabel(task.status) }}</span><p v-if="task.error" class="mt-1 max-w-64 text-xs text-status-warn">{{ task.error }}</p></td>
                 <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(task.startedAt || task.createdAt) }}</td>
                 <td><div class="flex gap-1">
-                  <button class="btn-secondary px-2! py-1! text-xs" @click="toggleTaskOutput(task)"><FileText class="h-3.5 w-3.5" />{{ expandedTaskId === task.id ? '收起' : '输出' }}</button>
-                  <button v-if="['queued', 'running'].includes(task.status)" class="btn-secondary px-2! py-1! text-xs" @click="stopTarget = task"><Square class="h-3.5 w-3.5" />停止</button>
+                  <button class="btn-secondary btn-sm" @click="toggleTaskOutput(task)"><FileText class="h-3.5 w-3.5" />{{ expandedTaskId === task.id ? '收起' : '输出' }}</button>
+                  <button v-if="['queued', 'running'].includes(task.status)" class="btn-secondary btn-sm" @click="stopTarget = task"><Square class="h-3.5 w-3.5" />停止</button>
                 </div></td>
               </tr>
               <tr v-if="expandedTaskId === task.id" :key="task.id + '-output'">
                 <td colspan="5" class="bg-surface-950/40">
-                  <p v-if="taskDetails[task.id]?.error" class="mb-2 text-xs text-amber-300">{{ taskDetails[task.id].error }}</p>
+                  <p v-if="taskDetails[task.id]?.error" class="mb-2 text-xs text-status-warn">{{ taskDetails[task.id].error }}</p>
                   <pre class="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-surface-800 bg-black/20 p-3 font-mono text-xs text-surface-300">{{ taskDetails[task.id]?.output || '暂无任务输出' }}</pre>
-                  <p v-if="taskDetails[task.id]?.status === 'outcome_unknown'" class="mt-2 text-xs text-amber-300">该任务没有可证明的最终结果。请先检查目标容器/项目状态，不要直接重放原操作。</p>
+                  <p v-if="taskDetails[task.id]?.status === 'outcome_unknown'" class="mt-2 text-xs text-status-warn">该任务没有可证明的最终结果。请先检查目标容器/项目状态，不要直接重放原操作。</p>
                 </td>
               </tr>
             </template>
@@ -112,11 +109,11 @@
     <section class="section-panel">
       <div class="mb-4 flex items-center justify-between">
         <div><h2 class="section-title">现有定时任务</h2><p class="mt-1 text-muted">当前已配置的自动运维任务</p></div>
-        <router-link to="/cron" class="text-xs text-emerald-400 hover:text-emerald-300">管理全部 →</router-link>
+        <router-link to="/cron" class="text-xs text-status-ok hover:text-status-ok">管理全部 →</router-link>
       </div>
       <p v-if="loading && !loadErrors.jobs" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">正在加载定时任务…</p>
       <p v-else-if="loadErrors.jobs" class="alert-error" role="alert">{{ loadErrors.jobs }}</p>
-      <div v-else-if="!jobs.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无定时任务。可通过上方任务流生成,或到定时任务页手动创建。</div>
+      <EmptyState v-else-if="!jobs.length" compact title="暂无定时任务" description="可通过上方流程生成，或在定时任务页创建。"><router-link to="/cron?from=maintenance-plan" class="btn-secondary btn-sm">创建定时任务</router-link></EmptyState>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>任务</th><th>类型</th><th>Cron</th><th>状态</th><th>最近执行</th></tr></thead>
@@ -125,7 +122,7 @@
               <td class="font-medium text-surface-100">{{ job.name }}</td>
               <td><span class="count-badge text-sky-300">{{ jobTypeLabel(job.type) }}</span></td>
               <td class="font-mono text-xs text-surface-400">{{ job.cron }}</td>
-              <td><span class="status-badge" :class="job.enabled ? 'bg-emerald-500/10 text-emerald-400' : 'bg-surface-800 text-surface-400'">{{ job.enabled ? '启用' : '停用' }}</span></td>
+              <td><span class="status-badge" :class="job.enabled ? 'bg-status-ok/10 text-status-ok' : 'bg-surface-800 text-surface-400'">{{ job.enabled ? '启用' : '停用' }}</span></td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ job.lastRunAt ? formatTime(job.lastRunAt) : '—' }}</td>
             </tr>
           </tbody>
@@ -136,11 +133,11 @@
     <!-- AI 主动巡检 -->
     <section class="section-panel">
       <div class="mb-4 flex items-center justify-between">
-        <div class="flex items-center gap-2"><h2 class="section-title">AI 主动巡检</h2><Bot class="h-4 w-4 text-emerald-400" /></div>
+        <div class="flex items-center gap-2"><h2 class="section-title">AI 主动巡检</h2><Bot class="h-4 w-4 text-status-ok" /></div>
         <!-- 巡检开关/间隔的唯一入口在 AI 巡检页,这里只展示当前状态,避免两处控件互相打架 -->
         <div class="text-xs text-surface-400">
           自动巡检{{ inspectionEnabled ? `已开启 · ${inspectionScheduleLabel}` : '已关闭' }},在
-          <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link>调整
+          <router-link to="/inspection" class="text-status-info hover:underline">AI 巡检页</router-link>调整
         </div>
       </div>
       <p v-if="loading && !loadErrors.inspection" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">正在加载巡检状态…</p>
@@ -151,18 +148,19 @@
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-surface-100">最近巡检:{{ inspectionGradeLabel }}</p>
             <p class="mt-0.5 text-sm text-surface-300">{{ latestInspection.summary }}</p>
-            <p class="mt-0.5 text-xs text-surface-500">{{ formatTime(latestInspection.createdAt) }}</p>
+            <p class="mt-0.5 text-xs text-surface-400">{{ formatTime(latestInspection.createdAt) }}</p>
           </div>
-          <router-link to="/inspection" class="btn-secondary px-2.5! py-1.5! text-xs">查看报告</router-link>
+          <router-link to="/inspection" class="btn-secondary btn-sm">查看报告</router-link>
         </div>
       </div>
-      <div v-else-if="!loading" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无巡检报告。前往 <router-link to="/inspection" class="text-accent hover:underline">AI 巡检页</router-link> 生成第一份报告。</div>
+      <EmptyState v-else-if="!loading" compact title="暂无巡检报告" description="运行一次巡检，了解当前项目的健康状态。"><router-link to="/inspection?from=maintenance-plan" class="btn-secondary btn-sm">前往巡检</router-link></EmptyState>
     </section>
     <ConfirmDialog :show="!!stopTarget" title="停止后台任务" :message="'确认向任务「' + (stopTarget?.label || '') + '」发送停止请求？若执行方式无法确认进程已终止，任务会标记为结果待核对。'" tone="warning" confirm-text="发送停止请求" @confirm="confirmStopTask" @cancel="stopTarget = null" />
   </div>
 </template>
 
 <script setup>
+import EmptyState from '../components/common/EmptyState.vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, FileText, RefreshCw, Rocket, Sparkles, Square } from 'lucide-vue-next';
@@ -201,8 +199,8 @@ function agentTaskStatusLabel(status) {
   return { queued: '等待执行', running: '执行中', stopping: '正在停止', completed: '已完成', failed: '失败', stopped: '已取消', outcome_unknown: '结果待核对' }[status] || status;
 }
 function agentTaskTone(status) {
-  if (status === 'completed') return 'bg-emerald-500/10 text-emerald-400';
-  if (status === 'failed' || status === 'outcome_unknown') return 'bg-amber-500/10 text-amber-300';
+  if (status === 'completed') return 'bg-status-ok/10 text-status-ok';
+  if (status === 'failed' || status === 'outcome_unknown') return 'bg-status-warn/10 text-status-warn';
   if (status === 'running' || status === 'stopping') return 'bg-sky-500/10 text-sky-300';
   return 'bg-surface-800 text-surface-400';
 }
@@ -253,9 +251,9 @@ const inspectionGradeLabel = computed(() => {
 const inspectionTileClass = computed(() => {
   const score = latestInspection.value?.score;
   if (score == null) return 'border-surface-700 bg-surface-900 text-surface-300';
-  if (score >= 90) return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
-  if (score >= 70) return 'border-amber-500/40 bg-amber-500/10 text-amber-300';
-  return 'border-rose-500/40 bg-rose-500/10 text-rose-300';
+  if (score >= 90) return 'border-status-ok/40 bg-status-ok/10 text-status-ok';
+  if (score >= 70) return 'border-status-warn/40 bg-status-warn/10 text-status-warn';
+  return 'border-status-error/40 bg-status-error/10 text-status-error';
 });
 
 const inspectionScheduleLabel = computed(() => (

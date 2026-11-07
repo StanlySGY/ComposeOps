@@ -27,11 +27,11 @@
         </div>
       </div>
     </div>
-    <div v-if="filePath" class="text-muted font-mono truncate">{{ filePath }}<span v-if="dirty" class="text-amber-400 ml-2">● 未保存</span></div>
+    <div v-if="filePath" class="text-muted font-mono truncate">{{ filePath }}<span v-if="dirty" class="text-status-warn ml-2">● 未保存</span></div>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p><p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p>
-    <div v-if="semanticIssues.length" class="card p-3 space-y-1.5 border border-amber-900/40">
-      <div class="flex items-center gap-2 text-xs font-semibold text-amber-300"><ShieldAlert class="w-4 h-4" />语义校验 {{ semanticIssues.filter((i) => i.level === 'error').length }} 个错误 · {{ semanticIssues.filter((i) => i.level === 'warn').length }} 个警告</div>
-      <p v-for="(issue, index) in semanticIssues" :key="index" class="flex items-start gap-2 text-xs" :class="issue.level === 'error' ? 'text-rose-300' : issue.level === 'warn' ? 'text-amber-200' : 'text-surface-400'">
+    <div v-if="semanticIssues.length" class="card p-3 space-y-1.5 border border-status-warn/40">
+      <div class="flex items-center gap-2 text-xs font-semibold text-status-warn"><ShieldAlert class="w-4 h-4" />语义校验 {{ semanticIssues.filter((i) => i.level === 'error').length }} 个错误 · {{ semanticIssues.filter((i) => i.level === 'warn').length }} 个警告</div>
+      <p v-for="(issue, index) in semanticIssues" :key="index" class="flex items-start gap-2 text-xs" :class="issue.level === 'error' ? 'text-status-error' : issue.level === 'warn' ? 'text-status-warn' : 'text-surface-400'">
         <span class="shrink-0 font-semibold">{{ issue.level === 'error' ? '✕' : issue.level === 'warn' ? '!' : 'i' }}</span>
         <span>{{ issue.message }}<template v-if="issue.service"> · {{ issue.service }}</template></span>
       </p>
@@ -64,13 +64,13 @@
             </div>
             <div class="flex items-center gap-2">
               <button class="icon-btn" :aria-label="`编辑服务 ${service.name}`" :title="`编辑服务 ${service.name}`" @click="editService(service)"><Pencil class="w-4 h-4" /></button>
-              <button class="icon-btn text-rose-400 hover:text-rose-300" :aria-label="`删除服务 ${service.name}`" :title="`删除服务 ${service.name}`" @click="deleteService(service.name)"><Trash2 class="w-4 h-4" /></button>
+              <button class="icon-btn text-status-error hover:text-status-error" :aria-label="`删除服务 ${service.name}`" :title="`删除服务 ${service.name}`" @click="deleteService(service.name)"><Trash2 class="w-4 h-4" /></button>
             </div>
           </div>
           <div v-if="service.ports?.length" class="pt-2 border-t border-surface-800">
             <div class="text-xs font-medium text-surface-300 mb-1.5">端口映射</div>
             <div class="flex flex-wrap gap-2">
-              <span v-for="(port, idx) in service.ports" :key="idx" class="text-xs px-2 py-1 rounded-sm bg-surface-900 text-emerald-300 font-mono">{{ port }}</span>
+              <span v-for="(port, idx) in service.ports" :key="idx" class="text-xs px-2 py-1 rounded-sm bg-surface-900 text-status-ok font-mono">{{ port }}</span>
             </div>
           </div>
         </div>
@@ -96,30 +96,30 @@
 
     <BaseModal :show="showPreview && !!changePreview" title="保存前变更预览" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl" body-class="p-3 space-y-3 max-h-[70vh] overflow-auto" @close="closePreview">
       <template v-if="changePreview">
-        <div v-if="changePreview.added.length" class="rounded-lg border border-emerald-900/40 bg-emerald-950/20 p-2.5">
-          <div class="text-xs font-semibold text-emerald-300">新增服务 {{ changePreview.added.length }}</div>
-          <div class="mt-1 flex flex-wrap gap-1.5"><span v-for="item in changePreview.added" :key="item.service" class="count-badge text-emerald-300">{{ item.service }}</span></div>
+        <div v-if="changePreview.added.length" class="rounded-lg border border-status-ok/40 bg-status-ok/15 p-2.5">
+          <div class="text-xs font-semibold text-status-ok">新增服务 {{ changePreview.added.length }}</div>
+          <div class="mt-1 flex flex-wrap gap-1.5"><span v-for="item in changePreview.added" :key="item.service" class="count-badge text-status-ok">{{ item.service }}</span></div>
         </div>
-        <div v-if="changePreview.changed.length" class="rounded-lg border border-amber-900/40 bg-amber-950/20 p-2.5">
-          <div class="text-xs font-semibold text-amber-300">配置变更,容器将被重建 {{ changePreview.changed.length }}</div>
+        <div v-if="changePreview.changed.length" class="rounded-lg border border-status-warn/40 bg-status-warn/15 p-2.5">
+          <div class="text-xs font-semibold text-status-warn">配置变更,容器将被重建 {{ changePreview.changed.length }}</div>
           <div class="mt-1 space-y-1">
-            <p v-for="item in changePreview.changed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-500">· {{ item.reasons.join(', ') }} · {{ item.container }}</span></p>
+            <p v-for="item in changePreview.changed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-400">· {{ item.reasons.join(', ') }} · {{ item.container }}</span></p>
           </div>
         </div>
         <div v-if="changePreview.restarted.length" class="rounded-lg border border-sky-900/40 bg-sky-950/20 p-2.5">
           <div class="text-xs font-semibold text-sky-300">运行中容器将重启 {{ changePreview.restarted.length }}</div>
           <div class="mt-1 flex flex-wrap gap-1.5"><span v-for="item in changePreview.restarted" :key="item.service" class="count-badge text-sky-300">{{ item.service }}</span></div>
         </div>
-        <div v-if="changePreview.removed.length" class="rounded-lg border border-rose-900/40 bg-rose-950/20 p-2.5">
-          <div class="text-xs font-semibold text-rose-300">将被移除的服务 {{ changePreview.removed.length }}</div>
-          <div class="mt-1 space-y-1"><p v-for="item in changePreview.removed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-500">· {{ item.container }} ({{ item.state }})</span></p></div>
+        <div v-if="changePreview.removed.length" class="rounded-lg border border-status-error/40 bg-status-error/15 p-2.5">
+          <div class="text-xs font-semibold text-status-error">将被移除的服务 {{ changePreview.removed.length }}</div>
+          <div class="mt-1 space-y-1"><p v-for="item in changePreview.removed" :key="item.service" class="text-xs text-surface-300">{{ item.service }} <span class="text-surface-400">· {{ item.container }} ({{ item.state }})</span></p></div>
         </div>
-        <div v-if="changePreview.portConflicts?.length" class="rounded-lg border border-rose-900/50 bg-rose-950/25 p-2.5">
-          <div class="text-xs font-semibold text-rose-300">宿主端口冲突 {{ changePreview.portConflicts.length }}</div>
+        <div v-if="changePreview.portConflicts?.length" class="rounded-lg border border-status-error/50 bg-status-error/15 p-2.5">
+          <div class="text-xs font-semibold text-status-error">宿主端口冲突 {{ changePreview.portConflicts.length }}</div>
           <p v-for="(item, index) in changePreview.portConflicts" :key="`${item.service}-${item.port}-${index}`" class="mt-1 text-xs text-surface-300">{{ item.service }} · {{ item.ip }}:{{ item.port }}/{{ item.protocol }} 已被 {{ item.holder }} 占用</p>
         </div>
-        <p v-else-if="changePreview.portConflictsKnown === false" class="text-xs text-amber-300">未能读取宿主容器端口占用情况，本次未完成端口冲突检测。</p>
-        <p v-if="changePreview.changeAnalysisKnown === false" class="text-xs text-amber-300">未能读取当前 Compose 文件，本次无法比较服务配置差异。</p>
+        <p v-else-if="changePreview.portConflictsKnown === false" class="text-xs text-status-warn">未能读取宿主容器端口占用情况，本次未完成端口冲突检测。</p>
+        <p v-if="changePreview.changeAnalysisKnown === false" class="text-xs text-status-warn">未能读取当前 Compose 文件，本次无法比较服务配置差异。</p>
         <p v-if="!changePreview.added.length && !changePreview.changed.length && !changePreview.restarted.length && !changePreview.removed.length && !changePreview.portConflicts.length" class="text-xs text-surface-400">未检测到已确认的容器变更。</p>
       </template>
       <template #footer>
@@ -173,6 +173,7 @@
 
 <script setup>
 import { returnTarget } from '../lib/deep-links.js';
+import { useHostsStore } from '../stores/hosts.js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
@@ -278,6 +279,7 @@ let contentDisposable;
 const project = computed(() => projects.value.find((p) => p.id === projectId.value));
 const dirty = computed(() => content.value !== original.value);
 const toast = useToastStore();
+const hostsStore = useHostsStore();
 
 // 编辑器有未保存改动时不响应下拉刷新,否则本地内容会被远端版本覆盖。
 usePullRefresh(async () => {
@@ -307,7 +309,19 @@ function resetLoadedConfig() {
 }
 async function syncProjectFromRoute() {
   if (!projectsLoaded.value) return;
-  const requestedId = String(route.query.projectId || '');
+  let requestedId = String(route.query.projectId || '');
+  if (!requestedId && !dirty.value) {
+    let remembered = null;
+    try { remembered = sessionStorage.getItem(selectionKey()); } catch { /* 浏览器可能禁用存储 */ }
+    const choice = projects.value.find(item => item.id === remembered)
+      || (remembered !== '' && projects.value.length === 1 ? projects.value[0] : null);
+    if (choice) {
+      requestedId = choice.id;
+      // 导航参数成为唯一选择来源；下一次 watch 完成装载。
+      await router.replace({ query: { ...route.query, projectId: requestedId } });
+      return;
+    }
+  }
   if (!requestedId) {
     if (projectId.value) {
       projectId.value = '';
@@ -325,6 +339,7 @@ async function syncProjectFromRoute() {
   }
   if (projectId.value === requestedId) return;
   projectId.value = requestedId;
+  rememberSelection();
   resetLoadedConfig();
   await load();
 }
@@ -610,7 +625,17 @@ function findLineByContent(yamlContent, searchText, startLine = 0) {
   }
   return startLine || 1;
 }
-async function selectProject() { resetLoadedConfig(); await router.replace({ query: projectId.value ? { projectId: projectId.value } : {} }); await nextTick(); createEditor(); if (projectId.value) load(); }
+function selectionKey() { return `composeops:compose-project:${hostsStore.activeHostId || 'local'}`; }
+function rememberSelection() { try { sessionStorage.setItem(selectionKey(), projectId.value); } catch { /* 选择不依赖存储可用性 */ } }
+async function selectProject() {
+  rememberSelection();
+  resetLoadedConfig();
+  const query = { ...route.query };
+  if (projectId.value) query.projectId = projectId.value; else delete query.projectId;
+  await router.replace({ query });
+  await nextTick(); createEditor();
+  if (projectId.value) await load();
+}
 async function load() {
   const requestedProjectId = projectId.value;
   const requestedFileIndex = fileIndex.value;
@@ -739,7 +764,7 @@ async function confirmRestore() {
     await load();
     toast.success('配置版本已成功回滚并生效');
   } catch (e) {
-    toast.error(`备份恢复失败:${e.message}`);
+    toast.error(`备份恢复失败：${e.message}`);
   } finally {
     pendingBackup.value = null;
   }

@@ -53,7 +53,7 @@ async function mountSettings() {
       stubs: {
         DataMaintenancePanel: true,
         AiChannelsPanel: true,
-        StatCard: true,
+        MetricTile: true,
         EmptyState: true,
         StoragePruneModal: true,
         ConfirmDialog: true,

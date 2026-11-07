@@ -5,32 +5,32 @@
       <button class="btn-secondary" data-action="add" :disabled="channels.length >= 12 || ordering" @click="addChannel"><Plus class="w-4 h-4" />添加渠道</button>
     </div>
     <p v-if="orderMessage" class="text-xs text-surface-300" :role="orderMessageError ? 'alert' : 'status'" :aria-live="orderMessageError ? 'assertive' : 'polite'" aria-atomic="true">{{ orderMessage }}</p>
-    <p v-if="!channels.length" class="rounded-xl border border-dashed border-surface-700 p-6 text-center text-sm text-surface-400">还没有 AI 渠道。添加直连接口或现有 New API 的地址和令牌。</p>
+    <EmptyState v-if="!channels.length" compact icon="Bot" title="还没有 AI 渠道" description="添加模型接口的地址和令牌，开始使用 AI 助手。" action-label="添加第一个渠道" :action-disabled="ordering" @action="addChannel" />
     <article v-for="(channel, index) in channels" :key="channel.id" class="card min-w-0 space-y-4 p-4 sm:p-5" :data-channel-id="channel.id" :aria-busy="!!busy[channel.id]">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-surface-800 pb-3">
-        <div class="flex min-w-0 flex-wrap items-center gap-2"><span class="count-badge">{{ index + 1 }}</span><strong class="text-sm text-surface-100 break-all">{{ channel.name || '新渠道' }}</strong><span class="text-xs" :class="channel.dirty ? 'text-amber-400' : channel.health?.status === 'healthy' ? 'text-emerald-400' : 'text-surface-400'">{{ statusLabel(channel) }}</span></div>
+        <div class="flex min-w-0 flex-wrap items-center gap-2"><span class="count-badge">{{ index + 1 }}</span><strong class="text-sm text-surface-100 break-all">{{ channel.name || '新渠道' }}</strong><span class="text-xs" :class="channel.dirty ? 'text-status-warn' : channel.health?.status === 'healthy' ? 'text-status-ok' : 'text-surface-400'">{{ statusLabel(channel) }}</span></div>
         <div class="flex items-center gap-1">
           <label class="toggle-label mr-2"><input type="checkbox" data-field="enabled" :checked="channel.enabled" :disabled="!!busy[channel.id]" @change="update(channel.id, { enabled: $event.target.checked })" />启用</label>
           <button class="icon-btn" title="提高优先级（立即保存顺序）" aria-label="提高优先级" :disabled="!canMove(index, -1)" @click="move(index, -1)"><ArrowUp class="w-4 h-4" /></button>
           <button class="icon-btn" title="降低优先级（立即保存顺序）" aria-label="降低优先级" :disabled="!canMove(index, 1)" @click="move(index, 1)"><ArrowDown class="w-4 h-4" /></button>
-          <button class="icon-btn hover:text-rose-400" title="删除渠道" aria-label="删除渠道" :disabled="!!busy[channel.id] || ordering" @click="removeTarget = channel"><Trash2 class="w-4 h-4" /></button>
+          <button class="icon-btn hover:text-status-error" title="删除渠道" aria-label="删除渠道" :disabled="!!busy[channel.id] || ordering" @click="removeTarget = channel"><Trash2 class="w-4 h-4" /></button>
         </div>
       </div>
       <fieldset class="form-grid min-w-0" :disabled="!!busy[channel.id]">
-        <label>渠道名称<input class="input" data-field="name" :value="channel.name" maxlength="80" placeholder="例如：主渠道 / 备用 / New API" @input="update(channel.id, { name: $event.target.value })" /></label>
+        <label>渠道名称<input class="input" data-field="name" :value="channel.name" maxlength="80" aria-label="例如：主渠道 / 备用 / New API" placeholder="例如：主渠道 / 备用 / New API" @input="update(channel.id, { name: $event.target.value })" /></label>
         <label>接口地址<input class="input" data-field="baseUrl" :value="channel.baseUrl" placeholder="https://example.com/v1" @input="update(channel.id, { baseUrl: $event.target.value })" /></label>
         <div class="min-w-0 space-y-2">
           <label class="flex flex-col gap-1 text-xs text-surface-400">{{ channel.hasApiKey ? '更新 API Key' : 'API Key' }}<input class="input" data-field="apiKey" type="password" autocomplete="new-password" :value="channel.apiKey" :placeholder="channel.hasApiKey ? '留空保留已保存的密钥' : '填写此渠道的密钥或 New API 令牌'" @input="update(channel.id, { apiKey: $event.target.value })" /></label>
-          <button v-if="channel.saved && channel.hasApiKey" class="inline-flex items-center gap-1.5 text-xs text-surface-300 hover:text-emerald-400" data-action="reveal" @click="toggleKey(channel)"><component :is="revealed[channel.id] ? EyeOff : Eye" class="h-3.5 w-3.5" />{{ revealed[channel.id] ? '隐藏已保存密钥' : '查看已保存密钥' }}</button>
-          <p v-if="addressChanged(channel)" class="text-xs leading-5 text-amber-400">地址已变更，请重新填写对应密钥后保存。</p>
+          <button v-if="channel.saved && channel.hasApiKey" class="inline-flex items-center gap-1.5 text-xs text-surface-300 hover:text-status-ok" data-action="reveal" @click="toggleKey(channel)"><component :is="revealed[channel.id] ? EyeOff : Eye" class="h-3.5 w-3.5" />{{ revealed[channel.id] ? '隐藏已保存密钥' : '查看已保存密钥' }}</button>
+          <p v-if="addressChanged(channel)" class="text-xs leading-5 text-status-warn">地址已变更，请重新填写对应密钥后保存。</p>
         </div>
         <label>模型
           <div class="flex min-w-0 items-center gap-1.5">
             <div class="relative min-w-0 flex-1" :ref="el => (modelPickerRoots[channel.id] = el)">
-              <input class="input min-w-0 w-full pr-9" data-field="model" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" :aria-expanded="isModelOpen(channel.id)" :aria-controls="modelListId(channel.id)" :aria-activedescendant="activeModelOptionId(channel)" :value="channel.model" placeholder="输入或选择模型名称" autocomplete="off" spellcheck="false" @focus="openModels(channel)" @click="openModels(channel)" @input="updateModel(channel, $event.target.value)" @keydown="onModelKeydown(channel, $event)" />
+              <input class="input min-w-0 w-full pr-9" data-field="model" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" :aria-expanded="isModelOpen(channel.id)" :aria-controls="modelListId(channel.id)" :aria-activedescendant="activeModelOptionId(channel)" :value="channel.model" aria-label="输入或选择模型名称" placeholder="输入或选择模型名称" autocomplete="off" spellcheck="false" @focus="openModels(channel)" @click="openModels(channel)" @input="updateModel(channel, $event.target.value)" @keydown="onModelKeydown(channel, $event)" />
               <button type="button" class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-surface-400 transition hover:bg-surface-800 hover:text-surface-100" :aria-label="isModelOpen(channel.id) ? '收起模型列表' : '选择模型'" :aria-expanded="isModelOpen(channel.id)" :disabled="!modelLists[channel.id]?.length" @mousedown.prevent @click="toggleModels(channel)"><ChevronDown class="h-4 w-4 transition-transform" :class="{ 'rotate-180': isModelOpen(channel.id) }" /></button>
               <div v-if="isModelOpen(channel.id)" :id="modelListId(channel.id)" class="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-2xl" role="listbox" :aria-label="`${channel.name || '渠道'} 可选模型`">
-                <button v-for="(name, modelIndex) in filteredModels(channel.id)" :id="modelOptionId(channel.id, modelIndex)" :key="name" type="button" class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-surface-200 transition hover:bg-surface-800 focus:bg-surface-800 focus:outline-none" :class="{ 'bg-surface-800 text-white': modelActiveIndex[channel.id] === modelIndex, 'text-emerald-300': channel.model === name }" role="option" :aria-selected="channel.model === name" @mousedown.prevent @mouseenter="modelActiveIndex[channel.id] = modelIndex" @click="selectModel(channel, name)"><span class="min-w-0 flex-1 break-all">{{ name }}</span><Check v-if="channel.model === name" class="h-4 w-4 shrink-0 text-emerald-400" /></button>
+                <button v-for="(name, modelIndex) in filteredModels(channel.id)" :id="modelOptionId(channel.id, modelIndex)" :key="name" type="button" class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-surface-200 transition hover:bg-surface-800 focus:bg-surface-800 focus:outline-none" :class="{ 'bg-surface-800 text-white': modelActiveIndex[channel.id] === modelIndex, 'text-status-ok': channel.model === name }" role="option" :aria-selected="channel.model === name" @mousedown.prevent @mouseenter="modelActiveIndex[channel.id] = modelIndex" @click="selectModel(channel, name)"><span class="min-w-0 flex-1 break-all">{{ name }}</span><Check v-if="channel.model === name" class="h-4 w-4 shrink-0 text-status-ok" /></button>
                 <p v-if="!filteredModels(channel.id).length" class="px-3 py-3 text-xs text-surface-400">没有匹配的模型；可以继续使用手动输入的名称。</p>
               </div>
             </div>
@@ -44,14 +44,14 @@
       </div>
       <fieldset class="min-w-0 space-y-3" :disabled="!!busy[channel.id]">
         <label class="toggle-label"><input type="checkbox" data-field="supportsTools" :checked="channel.supportsTools" @change="update(channel.id, { supportsTools: $event.target.checked })" />用于 AI 助手（需要工具调用）</label>
-        <p v-if="!channel.supportsTools" class="text-xs text-amber-400">此渠道仅用于普通模型请求，不参与 AI 助手的工具调用。</p>
+        <p v-if="!channel.supportsTools" class="text-xs text-status-warn">此渠道仅用于普通模型请求，不参与 AI 助手的工具调用。</p>
         <details class="rounded-lg bg-surface-950/30 px-3 py-2" :open="channel.streamToolCalls === false || undefined">
-          <summary class="cursor-pointer text-xs text-surface-400">高级设置<span v-if="channel.streamToolCalls === false" class="ml-2 text-emerald-400">兼容模式</span></summary>
+          <summary class="cursor-pointer text-xs text-surface-400">高级设置<span v-if="channel.streamToolCalls === false" class="ml-2 text-status-ok">兼容模式</span></summary>
           <div class="form-grid mt-3">
             <label>首段响应等待（秒）<input class="input" data-field="timeout" type="number" min="1" max="120" :value="channel.firstTokenTimeoutMs / 1000" @input="update(channel.id, { firstTokenTimeoutMs: Number($event.target.value) * 1000 })" /></label>
             <label>工具响应模式<select class="input" data-field="streamToolCalls" :value="channel.streamToolCalls === false ? 'compatible' : 'stream'" :disabled="!channel.supportsTools" @change="update(channel.id, { streamToolCalls: $event.target.value === 'stream' })"><option value="stream">流式模式</option><option value="compatible">兼容模式（完整返回）</option></select></label>
           </div>
-          <p class="mt-2 text-xs leading-5 text-surface-500">上游出现工具参数截断时可选兼容模式。工具轮次需等待完整回复后显示；普通聊天仍可流式输出。</p>
+          <p class="mt-2 text-xs leading-5 text-surface-400">上游出现工具参数截断时可选兼容模式。工具轮次需等待完整回复后显示；普通聊天仍可流式输出。</p>
         </details>
       </fieldset>
       <div class="flex flex-wrap items-center gap-2 border-t border-surface-800 pt-3">
@@ -59,21 +59,22 @@
         <button class="btn-secondary" data-action="test" :disabled="!!busy[channel.id] || ordering" @click="testChannel(channel)"><Activity class="w-4 h-4" />{{ busy[channel.id] === 'test' ? '测试中…' : channel.dirty || !channel.saved ? '保存并测试' : '测试连接' }}</button>
         <button v-if="channel.dirty && channel.saved" class="btn-ghost" data-action="revert" :disabled="!!busy[channel.id]" @click="revert(channel.id)">撤销修改</button>
         <button v-if="conflicts[channel.id]" class="btn-ghost" :disabled="!!busy[channel.id]" @click="reloadChannel(channel)">重新载入此渠道</button>
-        <span class="text-xs text-surface-500">{{ channel.supportsTools ? '验证参数及结果回传，最多 3 次小请求。' : '验证聊天连接，发起 1 次小请求。' }}</span>
+        <span class="text-xs text-surface-400">{{ channel.supportsTools ? '验证参数及结果回传，最多 3 次小请求。' : '验证聊天连接，发起 1 次小请求。' }}</span>
       </div>
-      <p v-if="notices[channel.id]" :role="notices[channel.id].ok ? 'status' : 'alert'" :aria-live="notices[channel.id].ok ? 'polite' : 'assertive'" aria-atomic="true" class="text-xs break-words" :class="notices[channel.id].ok ? 'text-emerald-400' : 'text-rose-400'">{{ notices[channel.id].text }}</p>
+      <p v-if="notices[channel.id]" :role="notices[channel.id].ok ? 'status' : 'alert'" :aria-live="notices[channel.id].ok ? 'polite' : 'assertive'" aria-atomic="true" class="text-xs break-words" :class="notices[channel.id].ok ? 'text-status-ok' : 'text-status-error'">{{ notices[channel.id].text }}</p>
       <div v-if="results[channel.id]" class="rounded-lg border border-surface-800 p-3 space-y-2" role="status">
-        <p class="text-xs" :class="results[channel.id].ok ? 'text-emerald-400' : 'text-amber-400'">{{ results[channel.id].ok ? '测试通过' : '测试未全部通过' }} · {{ results[channel.id].latencyMs }} ms · {{ results[channel.id].mode === 'compatible' ? '兼容模式' : '流式模式' }}</p>
-        <ul class="space-y-2"><li v-for="check in results[channel.id].checks" :key="check.id" class="flex items-start gap-2 text-xs"><component :is="check.status === 'passed' ? CheckCircle2 : check.status === 'failed' ? AlertCircle : MinusCircle" class="mt-0.5 h-3.5 w-3.5 shrink-0" :class="check.status === 'passed' ? 'text-emerald-400' : check.status === 'failed' ? 'text-amber-400' : 'text-surface-500'" /><span class="min-w-0 break-words text-surface-300">{{ check.label }}：{{ check.message }}</span></li></ul>
-        <p v-if="results[channel.id].suggestion" class="text-xs leading-5 text-amber-400">{{ results[channel.id].suggestion }}</p>
+        <p class="text-xs" :class="results[channel.id].ok ? 'text-status-ok' : 'text-status-warn'">{{ results[channel.id].ok ? '测试通过' : '测试未全部通过' }} · {{ results[channel.id].latencyMs }} ms · {{ results[channel.id].mode === 'compatible' ? '兼容模式' : '流式模式' }}</p>
+        <ul class="space-y-2"><li v-for="check in results[channel.id].checks" :key="check.id" class="flex items-start gap-2 text-xs"><component :is="check.status === 'passed' ? CheckCircle2 : check.status === 'failed' ? AlertCircle : MinusCircle" class="mt-0.5 h-3.5 w-3.5 shrink-0" :class="check.status === 'passed' ? 'text-status-ok' : check.status === 'failed' ? 'text-status-warn' : 'text-surface-400'" /><span class="min-w-0 break-words text-surface-300">{{ check.label }}：{{ check.message }}</span></li></ul>
+        <p v-if="results[channel.id].suggestion" class="text-xs leading-5 text-status-warn">{{ results[channel.id].suggestion }}</p>
       </div>
-      <p v-else-if="channel.health?.lastError && !channel.dirty" class="text-xs text-amber-400 break-words" role="alert">最近故障：{{ channel.health.lastError }}</p>
+      <p v-else-if="channel.health?.lastError && !channel.dirty" class="text-xs text-status-warn break-words" role="alert">最近故障：{{ channel.health.lastError }}</p>
     </article>
     <ConfirmDialog :show="!!removeTarget" title="删除 AI 渠道" :message="`确认删除「${removeTarget?.name || '新渠道'}」？${removeTarget?.saved ? '删除后立即停止使用此渠道。' : '尚未保存的内容将丢弃。'}`" tone="danger" confirm-text="删除渠道" :busy="!!busy[removeTarget?.id]" @confirm="removeChannel" @cancel="removeTarget = null" />
   </div>
 </template>
 
 <script setup>
+import EmptyState from '../common/EmptyState.vue';
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import { Activity, AlertCircle, ArrowDown, ArrowUp, Check, CheckCircle2, ChevronDown, Copy, Eye, EyeOff, MinusCircle, Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';

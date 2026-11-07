@@ -2,14 +2,14 @@
   <BaseModal :show="show" title="从这里开始使用 ComposeOps" size-class="sm:max-w-xl" body-class="p-5 space-y-4" @close="dismiss">
     <p class="text-sm leading-6 text-surface-300">先查看，再按项目授权。AI 是可选能力，没有模型密钥也可以管理服务、配置和日志。</p>
     <p v-if="loading" class="text-xs text-surface-400" role="status">正在检查当前工作区…</p>
-    <p v-else-if="loadError" class="text-xs text-amber-300" role="status">暂时无法检查全部配置，你仍可以通过下面的入口开始使用。</p>
+    <p v-else-if="loadError" class="text-xs text-status-warn" role="status">暂时无法检查全部配置，你仍可以通过下面的入口开始使用。</p>
     <ol class="space-y-3">
       <li v-for="step in steps" :key="step.n" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-4">
-        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-emerald-900/40 bg-emerald-950/30 text-sm text-emerald-300"><Check v-if="step.done" class="h-4 w-4" /><template v-else>{{ step.n }}</template></span>
-        <div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-surface-100">{{ step.title }}<span v-if="step.optional" class="ml-2 text-[10px] font-normal text-surface-500">可选</span></h3><p class="mt-1 text-xs leading-5 text-surface-400">{{ step.desc }}</p><router-link :to="step.to" class="mt-2 inline-flex min-h-9 items-center gap-1 text-xs text-emerald-400" @click="dismiss">{{ step.action }}<ArrowRight class="h-3.5 w-3.5" /></router-link></div>
+        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-status-ok/40 bg-status-ok/15 text-sm text-status-ok"><Check v-if="step.done" class="h-4 w-4" /><template v-else>{{ step.n }}</template></span>
+        <div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-surface-100">{{ step.title }}<span v-if="step.optional" class="ml-2 text-[10px] font-normal text-surface-400">可选</span></h3><p class="mt-1 text-xs leading-5 text-surface-400">{{ step.desc }}</p><router-link :to="step.to" class="mt-2 inline-flex min-h-9 items-center gap-1 text-xs text-status-ok" @click="dismiss">{{ step.action }}<ArrowRight class="h-3.5 w-3.5" /></router-link></div>
       </li>
     </ol>
-    <p class="text-xs leading-5 text-surface-500">“纳管”开放容器控制；“Compose”进一步开放配置与重建权限。可以从少量测试项目开始，确认操作范围后再扩大。</p>
+    <p class="text-xs leading-5 text-surface-400">“纳管”开放容器控制；“Compose”进一步开放配置与重建权限。可以从少量测试项目开始，确认操作范围后再扩大。</p>
     <template #footer><button class="btn-ghost" :disabled="loading" @click="openGuide">重新检查</button><button class="btn-primary" @click="dismiss">开始使用</button></template>
   </BaseModal>
 </template>

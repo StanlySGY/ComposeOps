@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { userError } from '../lib/user-error.js';
 
 let seq = 0;
 const MAX_VISIBLE = 3;
@@ -14,7 +15,11 @@ export const useToastStore = defineStore('toast', {
   actions: {
     push(type, message, duration = 3500) {
       const id = ++seq;
-      this.items.push({ id, type, message, duration, leaving: false });
+      const localized = type === 'error' ? userError(message) : null;
+      const details = localized?.details || '';
+      message = localized?.message || String(message);
+      if (type === 'error' && duration === 3500) duration = 8000;
+      this.items.push({ id, type, message, details, duration, leaving: false });
       if (this.items.length > MAX_VISIBLE + 2) this.items.shift();
       this._scheduleDismiss(id, duration);
       return id;

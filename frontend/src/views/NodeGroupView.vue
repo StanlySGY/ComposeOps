@@ -14,22 +14,22 @@
 
     <!-- 舰队总览 -->
     <div class="metric-grid">
-      <StatCard title="节点" :value="String(hosts.length)" :sub="`${onlineCount} 在线 · ${offlineCount} 离线`" tone="bg-sky-400" />
-      <StatCard title="容器总数" :value="String(totalContainers)" :sub="`${totalRunning} 运行中`" tone="bg-emerald-400" />
-      <StatCard title="巡检评分" :value="inspectionScore ?? '—'" :sub="inspectionScore ? '最近一次巡检' : '尚未巡检'" tone="bg-violet-400" />
+      <MetricTile title="节点" :value="String(hosts.length)" :sub="`${onlineCount} 在线 · ${offlineCount} 离线`" tone="text-sky-400" />
+      <MetricTile title="容器总数" :value="String(totalContainers)" :sub="`${totalRunning} 运行中`" tone="text-status-ok" />
+      <MetricTile title="巡检评分" :value="inspectionScore ?? '—'" :sub="inspectionScore ? '最近一次巡检' : '尚未巡检'" tone="text-violet-400" />
     </div>
 
     <!-- 批量动作 -->
-    <div class="section-panel py-3! flex flex-wrap items-center gap-2">
+    <div class="section-panel py-3 flex flex-wrap items-center gap-2">
       <span class="text-xs font-medium text-surface-300">批量动作</span>
-      <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="pingAll">
+      <button class="btn-secondary btn-sm" :disabled="batchBusy || !hosts.length" @click="pingAll">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'ping' }" />探测全部节点
       </button>
-      <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchInspection">
+      <button class="btn-secondary btn-sm" :disabled="batchBusy || !hosts.length" @click="runBatchInspection">
         <ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'inspection' }" />巡检(当前节点项目)
       </button>
       <ImageUpdatePanel />
-      <span class="ml-auto text-xs text-surface-500">巡检作用于当前活跃节点:{{ activeHost?.name || '—' }}</span>
+      <span class="ml-auto text-xs text-surface-400">巡检作用于当前活跃节点:{{ activeHost?.name || '—' }}</span>
     </div>
 
     <!-- 节点组 -->
@@ -40,23 +40,23 @@
             <span class="grid h-8 w-8 place-items-center rounded-lg border" :class="group.tone">{{ group.icon }}</span>
             <div>
               <h2 class="section-title mb-0!">{{ group.label }}</h2>
-              <p class="text-xs text-surface-500">{{ group.description }}</p>
+              <p class="text-xs text-surface-400">{{ group.description }}</p>
             </div>
           </div>
           <span class="count-badge">{{ groupHosts(group.id).length }} 节点</span>
         </div>
 
-        <div v-if="!groupHosts(group.id).length" class="rounded-xl border border-dashed border-surface-700 p-4 text-center text-sm text-surface-500">暂无节点</div>
+        <EmptyState v-if="!groupHosts(group.id).length" compact title="此分组暂无节点" description="在节点管理中添加连接，或调整已有节点的分组。"><router-link to="/settings?tab=hosts&from=node-groups" class="btn-secondary btn-sm">管理节点</router-link></EmptyState>
         <div v-else class="space-y-2">
           <div v-for="host in groupHosts(group.id)" :key="host.id" class="flex items-center gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
-            <span class="h-2 w-2 shrink-0 rounded-full" :class="host.status === 'online' ? 'bg-emerald-400' : host.status === 'offline' ? 'bg-rose-400' : 'bg-surface-500'"></span>
+            <span class="h-2 w-2 shrink-0 rounded-full" :class="host.status === 'online' ? 'bg-status-ok' : host.status === 'offline' ? 'bg-status-error' : 'bg-surface-500'"></span>
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm font-medium text-surface-100">{{ host.name }}</p>
-              <p class="truncate text-xs text-surface-500">{{ host.type === 'local' ? '本机 Docker' : `${host.type.toUpperCase()} · ${host.host}:${host.port}` }}</p>
+              <p class="truncate text-xs text-surface-400">{{ host.type === 'local' ? '本机 Docker' : `${host.type.toUpperCase()} · ${host.host}:${host.port}` }}</p>
             </div>
             <span class="count-badge">{{ host.runningCount ?? 0 }}/{{ host.containerCount ?? 0 }} 运行</span>
-            <span v-if="host.latencyMs != null" class="count-badge" :class="host.latencyMs < 300 ? 'text-emerald-300' : 'text-amber-300'">{{ host.latencyMs }}ms</span>
-            <span v-if="host.active" class="count-badge text-emerald-300">活跃</span>
+            <span v-if="host.latencyMs != null" class="count-badge" :class="host.latencyMs < 300 ? 'text-status-ok' : 'text-status-warn'">{{ host.latencyMs }}ms</span>
+            <span v-if="host.active" class="count-badge text-status-ok">活跃</span>
             <button class="icon-btn" :title="host.active ? '当前活跃节点' : '切换到此节点'" :aria-label="host.active ? '当前活跃节点' : `切换到节点 ${host.name}`" :disabled="host.active || pinging === host.id" @click="switchHost(host)"><ArrowLeftRight class="w-4 h-4" /></button>
           </div>
         </div>
@@ -71,17 +71,17 @@
           <thead><tr><th>节点</th><th>类型</th><th>地址</th><th>分组</th><th>状态</th><th>容器</th><th>延迟</th></tr></thead>
           <tbody>
             <tr v-for="host in hosts" :key="host.id" class="hover:bg-surface-800/25">
-              <td class="font-medium text-surface-100">{{ host.name }}<span v-if="host.active" class="ml-2 count-badge text-emerald-300">活跃</span></td>
+              <td class="font-medium text-surface-100">{{ host.name }}<span v-if="host.active" class="ml-2 count-badge text-status-ok">活跃</span></td>
               <td><span class="count-badge text-sky-300">{{ host.type.toUpperCase() }}</span></td>
               <td class="font-mono text-xs text-surface-400">{{ host.type === 'local' ? '本机' : `${host.host}:${host.port}` }}</td>
               <td>
-                <select class="input py-1! text-xs" :value="groupOf(host.id)" :aria-label="`设置节点 ${host.name} 的分组`" @change="assignGroup(host, $event.target.value)">
+                <select class="input input-sm" :value="groupOf(host.id)" :aria-label="`设置节点 ${host.name} 的分组`" @change="assignGroup(host, $event.target.value)">
                   <option value="production">生产</option>
                   <option value="staging">测试</option>
                   <option value="edge">边缘</option>
                 </select>
               </td>
-              <td><span class="status-badge" :class="host.status === 'online' ? 'bg-emerald-500/10 text-emerald-400' : host.status === 'offline' ? 'bg-rose-500/10 text-rose-400' : 'bg-surface-800 text-surface-400'">{{ host.status === 'online' ? '在线' : host.status === 'offline' ? '离线' : '未知' }}</span></td>
+              <td><span class="status-badge" :class="host.status === 'online' ? 'bg-status-ok/10 text-status-ok' : host.status === 'offline' ? 'bg-status-error/10 text-status-error' : 'bg-surface-800 text-surface-400'">{{ host.status === 'online' ? '在线' : host.status === 'offline' ? '离线' : '未知' }}</span></td>
               <td class="font-mono text-xs text-surface-400">{{ host.runningCount ?? 0 }}/{{ host.containerCount ?? 0 }}</td>
               <td class="font-mono text-xs text-surface-400">{{ host.latencyMs != null ? `${host.latencyMs}ms` : '—' }}</td>
             </tr>
@@ -93,13 +93,14 @@
 </template>
 
 <script setup>
+import EmptyState from '../components/common/EmptyState.vue';
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { ArrowLeftRight, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 import { api } from '../api/client.js';
-import StatCard from '../components/StatCard.vue';
+import MetricTile from '../components/common/MetricTile.vue';
 import ImageUpdatePanel from '../components/services/ImageUpdatePanel.vue';
 
 const hostsStore = useHostsStore();
@@ -110,7 +111,7 @@ const batchBusy = ref('');
 const inspectionScore = ref(null);
 
 const groups = [
-  { id: 'production', label: '生产组', description: '正式环境节点', icon: '生', tone: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+  { id: 'production', label: '生产组', description: '正式环境节点', icon: '生', tone: 'border-status-ok/40 bg-status-ok/10 text-status-ok' },
   { id: 'staging', label: '测试组', description: '预发布与测试节点', icon: '测', tone: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
   { id: 'edge', label: '边缘组', description: '边缘计算节点', icon: '边', tone: 'border-violet-500/40 bg-violet-500/10 text-violet-300' },
 ];
@@ -139,7 +140,7 @@ function switchHost(host) {
   if (host.active) return;
   hostsStore.switchHost(host.id).then(() => {
     toast.success(`已切换到节点 ${host.name}`);
-  }).catch((e) => toast.error(e.message));
+  }).catch((e) => toast.error(e));
 }
 
 /** 并行探测全部节点:刷新容器数/运行数/延迟/在线状态(舰队视图数据源)。 */
@@ -148,7 +149,7 @@ async function pingAll() {
   batchBusy.value = 'ping';
   try {
     await Promise.allSettled(hosts.value.map((host) => hostsStore.ping(host.id)));
-    toast.success(`已探测 ${hosts.value.length} 个节点:${onlineCount.value} 在线`);
+    toast.success(`已探测 ${hosts.value.length} 个节点：${onlineCount.value} 在线`);
   } finally {
     batchBusy.value = '';
   }
@@ -160,9 +161,9 @@ async function runBatchInspection() {
   try {
     const report = await api.runInspection();
     inspectionScore.value = report?.score ?? null;
-    toast.success(`巡检完成:${report?.summary || ''}(评分 ${report?.score ?? '—'})`);
+    toast.success(`巡检完成：${report?.summary || ''}(评分 ${report?.score ?? '—'})`);
   } catch (e) {
-    toast.error(`巡检失败:${e.message}`);
+    toast.error(`巡检失败：${e.message}`);
   } finally {
     batchBusy.value = '';
   }

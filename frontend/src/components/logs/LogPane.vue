@@ -4,7 +4,7 @@
     <div v-if="heading" class="log-pane-head">
       <span class="container-badge" :class="badgeClass">{{ heading }}</span>
       <span class="text-[11px] text-muted tabular-nums">{{ lines.length }} 条</span>
-      <span v-if="paneErrorCount" class="text-[11px] text-rose-400">ERROR {{ paneErrorCount }}</span>
+      <span v-if="paneErrorCount" class="text-[11px] text-status-error">ERROR {{ paneErrorCount }}</span>
     </div>
     <div ref="boxEl" class="terminal-output card log-pane-body" role="region" :aria-label="`${heading || fallbackName || '容器'}实时日志`" tabindex="0" aria-live="off" @scroll="onScroll" @wheel="onWheel">
       <template v-if="lines.length">

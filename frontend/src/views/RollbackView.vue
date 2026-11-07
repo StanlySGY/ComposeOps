@@ -27,28 +27,28 @@
 
     <!-- 摘要统计 -->
     <div class="metric-grid">
-      <div class="metric-tile"><span class="metric-icon text-blue-300"><FileCode2 class="h-5 w-5" /></span><span><strong>{{ composeBackups.length }}</strong><small>Compose 备份</small></span><span class="metric-meta">配置版本</span></div>
-      <div class="metric-tile"><span class="metric-icon text-violet-300"><HardDrive class="h-5 w-5" /></span><span><strong>{{ volumeBackups.length }}</strong><small>数据卷备份</small></span><span class="metric-meta">持久化数据</span></div>
-      <div class="metric-tile"><span class="metric-icon text-emerald-300"><GitBranch class="h-5 w-5" /></span><span><strong>{{ gitopsRepos.length }}</strong><small>GitOps 仓库</small></span><span class="metric-meta">代码版本</span></div>
-      <div class="metric-tile"><span class="metric-icon text-amber-300"><RotateCcw class="h-5 w-5" /></span><span><strong>{{ rollbackableProjectCount }}</strong><small>可回滚项目</small></span><span class="metric-meta">有升级备份</span></div>
+      <MetricTile title="Compose 备份" :value="composeBackups.length" sub="配置版本" :icon="FileCode2" tone="text-blue-300" />
+      <MetricTile title="数据卷备份" :value="volumeBackups.length" sub="持久化数据" :icon="HardDrive" tone="text-violet-300" />
+      <MetricTile title="GitOps 仓库" :value="gitopsRepos.length" sub="代码版本" :icon="GitBranch" tone="text-status-ok" />
+      <MetricTile title="可回滚项目" :value="rollbackableProjectCount" sub="有升级备份" :icon="RotateCcw" tone="text-status-warn" />
     </div>
 
     <!-- Compose 配置备份 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">Compose 配置备份</h2><p class="mt-1 text-muted">保存配置或升级时自动留存的版本,可一键恢复</p></div>
       <p v-if="loadErrors.compose" class="alert-error" role="alert">{{ loadErrors.compose }}</p>
-      <div v-else-if="!loading && !composeBackups.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无 Compose 配置备份。保存配置或执行镜像升级后会自动生成。</div>
+      <EmptyState v-else-if="!loading && !composeBackups.length" compact title="暂无 Compose 配置备份" description="保存配置时会自动保留旧版本。"><router-link to="/compose?from=review" class="btn-secondary btn-sm">查看配置</router-link></EmptyState>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>原因</th><th>文件</th><th>时间</th><th class="text-right">操作</th></tr></thead>
           <tbody>
             <tr v-for="backup in composeBackups" :key="backup.id" class="hover:bg-surface-800/25">
               <td class="font-medium text-surface-100">{{ backup.projectName || backup.projectId }}</td>
-              <td><span class="count-badge" :class="backup.reason === 'upgrade' || backup.reason?.startsWith('upgrade:') ? 'text-amber-300' : 'text-sky-300'">{{ reasonLabel(backup.reason) }}</span></td>
+              <td><span class="count-badge" :class="backup.reason === 'upgrade' || backup.reason?.startsWith('upgrade:') ? 'text-status-warn' : 'text-sky-300'">{{ reasonLabel(backup.reason) }}</span></td>
               <td class="max-w-56 truncate font-mono text-xs text-surface-400" :title="backup.filePath">{{ backup.filePath }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(backup.createdAt) }}</td>
               <td class="text-right">
-                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="restoreCompose(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
+                <button class="btn-secondary btn-sm" :disabled="busy" @click="restoreCompose(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
               </td>
             </tr>
           </tbody>
@@ -60,7 +60,7 @@
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">数据卷备份</h2><p class="mt-1 text-muted">命名卷的 tar 备份,可恢复到指定时间点</p></div>
       <p v-if="loadErrors.volume" class="alert-error" role="alert">{{ loadErrors.volume }}</p>
-      <div v-else-if="!loading && !volumeBackups.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无数据卷备份。可在存储清理页或定时任务中创建卷备份。</div>
+      <EmptyState v-else-if="!loading && !volumeBackups.length" compact title="暂无数据卷备份" description="先为命名卷创建备份，再进行恢复或演练。"><router-link to="/resources?tab=backups&from=review" class="btn-secondary btn-sm">创建卷备份</router-link></EmptyState>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>卷</th><th>大小</th><th>时间</th><th class="text-right">操作</th></tr></thead>
@@ -71,7 +71,7 @@
               <td class="font-mono text-xs text-surface-400">{{ formatBytes(backup.bytes) }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ formatTime(backup.createdAt) }}</td>
               <td class="text-right">
-                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="restoreVolume(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
+                <button class="btn-secondary btn-sm" :disabled="busy" @click="restoreVolume(backup)"><RotateCcw class="h-3.5 w-3.5" />恢复</button>
               </td>
             </tr>
           </tbody>
@@ -83,7 +83,7 @@
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">GitOps 回滚</h2><p class="mt-1 text-muted">将 GitOps 仓库工作区回滚到指定提交</p></div>
       <p v-if="loadErrors.gitops" class="alert-error" role="alert">{{ loadErrors.gitops }}</p>
-      <div v-else-if="!loading && !gitopsRepos.length" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无 GitOps 仓库。可在 GitOps 页添加仓库。</div>
+      <EmptyState v-else-if="!loading && !gitopsRepos.length" compact title="暂无 GitOps 仓库" description="连接仓库后即可查看提交和恢复历史。"><router-link to="/gitops?from=review" class="btn-secondary btn-sm">添加仓库</router-link></EmptyState>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>仓库</th><th>分支</th><th>最后同步</th><th class="text-right">操作</th></tr></thead>
@@ -93,7 +93,7 @@
               <td class="font-mono text-xs text-surface-400">{{ repo.branch || 'main' }}</td>
               <td class="whitespace-nowrap font-mono text-xs text-surface-400">{{ repo.lastSync ? formatTime(repo.lastSync) : '—' }}</td>
               <td class="text-right">
-                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="openGitopsHistory(repo)"><History class="h-3.5 w-3.5" />历史</button>
+                <button class="btn-secondary btn-sm" :disabled="busy" @click="openGitopsHistory(repo)"><History class="h-3.5 w-3.5" />历史</button>
               </td>
             </tr>
           </tbody>
@@ -104,16 +104,16 @@
     <!-- 镜像升级回滚 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">升级配置恢复</h2><p class="mt-1 text-muted">仅展示有升级前 Compose 备份且当前非运行状态的项目；恢复配置并重建容器，不保证回退已拉取的镜像版本</p></div>
-      <div v-if="!rollbackableProjectCount" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4 text-sm text-surface-400">暂无符合条件的升级配置恢复项目。完成升级并生成 Compose 备份后,若项目异常停止,可在此恢复配置。</div>
+      <EmptyState v-if="!rollbackableProjectCount" compact title="当前没有可恢复的升级配置" description="完成升级并生成备份后，异常项目会出现在这里。"><router-link to="/services?from=review" class="btn-secondary btn-sm">查看服务</router-link></EmptyState>
       <div v-else class="table-wrap">
         <table class="data-table">
           <thead><tr><th>项目</th><th>状态</th><th class="text-right">操作</th></tr></thead>
           <tbody>
             <tr v-for="project in rollbackableProjects" :key="project.id" class="hover:bg-surface-800/25">
               <td class="font-medium text-surface-100">{{ project.projectName }}</td>
-              <td><span class="status-badge" :class="project.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : project.status === 'stopped' ? 'bg-surface-800/40 text-surface-400' : project.status === 'partial' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'">{{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'partial' ? '部分异常' : '异常' }}</span></td>
+              <td><span class="status-badge" :class="project.status === 'running' ? 'bg-status-ok/10 text-status-ok' : project.status === 'stopped' ? 'bg-surface-800/40 text-surface-400' : project.status === 'partial' ? 'bg-status-warn/10 text-status-warn' : 'bg-status-error/10 text-status-error'">{{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'partial' ? '部分异常' : '异常' }}</span></td>
               <td class="text-right">
-                <button class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />恢复升级前配置</button>
+                <button class="btn-secondary btn-sm" :disabled="busy" @click="rollbackUpgrade(project)"><RotateCcw class="h-3.5 w-3.5" />恢复升级前配置</button>
               </td>
             </tr>
           </tbody>
@@ -123,15 +123,15 @@
 
     <!-- GitOps 历史弹窗 -->
     <BaseModal :show="showGitopsHistory" :title="`提交历史 · ${currentGitopsRepo?.name || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex-1 overflow-auto p-4 space-y-2" @close="showGitopsHistory = false">
-      <div v-if="!gitopsCommits.length" class="text-sm text-surface-400">暂无提交历史</div>
+      <EmptyState v-if="!gitopsCommits.length" compact title="暂无提交历史" description="关闭弹窗后检查仓库连接与同步状态。" action-label="关闭历史" @action="showGitopsHistory = false" />
       <div v-for="commit in gitopsCommits" :key="commit.hash" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
         <code class="shrink-0 rounded-sm bg-surface-800 px-2 py-0.5 font-mono text-xs text-sky-300">{{ commit.hash.substring(0, 7) }}</code>
         <div class="min-w-0 flex-1">
           <p class="text-sm text-surface-200">{{ commit.message }}</p>
-          <p class="mt-0.5 text-xs text-surface-500">{{ commit.author }} · {{ commit.date }}</p>
+          <p class="mt-0.5 text-xs text-surface-400">{{ commit.author }} · {{ commit.date }}</p>
         </div>
-        <button v-if="commit.hash !== currentGitopsRepo?.lastCommit" class="btn-secondary px-2.5! py-1.5! text-xs" :disabled="busy" @click="rollbackGitops(commit.hash)"><RotateCcw class="h-3.5 w-3.5" />回滚</button>
-        <span v-else class="count-badge text-emerald-300">当前</span>
+        <button v-if="commit.hash !== currentGitopsRepo?.lastCommit" class="btn-secondary btn-sm" :disabled="busy" @click="rollbackGitops(commit.hash)"><RotateCcw class="h-3.5 w-3.5" />回滚</button>
+        <span v-else class="count-badge text-status-ok">当前</span>
       </div>
       <template #footer>
         <button class="btn-secondary" @click="showGitopsHistory = false">关闭</button>
@@ -141,7 +141,7 @@
     <!-- 回滚输出抽屉 -->
     <BaseModal :show="output.open" :title="output.title" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="output.open = false">
       <template #header-actions>
-        <span v-if="output.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="output.running ? 'text-sky-300' : output.status === 'failed' ? 'text-rose-300' : output.status === 'cancelled' || output.status === 'unknown' ? 'text-amber-300' : 'text-emerald-300'">{{ output.running ? '回滚执行中' : output.status === 'failed' ? '回滚失败' : output.status === 'cancelled' ? '回滚已中断' : output.status === 'unknown' ? '回滚结果未确认' : '回滚完成' }}</span>
+        <span v-if="output.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="output.running ? 'text-sky-300' : output.status === 'failed' ? 'text-status-error' : output.status === 'cancelled' || output.status === 'unknown' ? 'text-status-warn' : 'text-status-ok'">{{ output.running ? '回滚执行中' : output.status === 'failed' ? '回滚失败' : output.status === 'cancelled' ? '回滚已中断' : output.status === 'unknown' ? '回滚结果未确认' : '回滚完成' }}</span>
       </template>
       <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4" role="region" aria-label="回滚执行输出" tabindex="0" aria-live="off" :aria-busy="output.running">{{ output.text || '等待输出...' }}</pre>
       <template #footer>
@@ -154,6 +154,8 @@
 </template>
 
 <script setup>
+import MetricTile from '../components/common/MetricTile.vue';
+import EmptyState from '../components/common/EmptyState.vue';
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';

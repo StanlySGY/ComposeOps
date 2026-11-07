@@ -1,7 +1,7 @@
 <template>
   <aside class="app-sidebar fixed md:static bottom-0 left-0 right-0 z-40 h-16 md:h-auto md:pt-16 md:w-[216px] shrink-0 flex flex-col">
     <nav class="hidden md:flex md:flex-col flex-1 md:px-3 md:py-4 overflow-y-auto">
-      <div class="hidden md:block px-2 pb-1 pt-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-500">运行</div>
+      <div class="hidden md:block px-2 pb-1 pt-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-400">运行</div>
       <router-link
         v-for="item in primaryItems"
         :key="item.to"
@@ -40,8 +40,8 @@
       </button>
     </nav>
     <div class="hidden md:block mx-4 mb-4 rounded-xl border border-surface-800/80 bg-surface-950/50 p-3">
-      <div class="flex items-center gap-2 text-xs text-surface-300"><span class="status-dot bg-emerald-400"></span>本地控制台</div>
-      <button class="mt-2 inline-flex min-h-9 items-center gap-2 text-xs text-surface-400 hover:text-emerald-400" @click="openGuide"><CircleHelp class="h-3.5 w-3.5" />入门指南</button>
+      <div class="flex items-center gap-2 text-xs text-surface-300"><span class="status-dot bg-status-ok"></span>本地控制台</div>
+      <button class="mt-2 inline-flex min-h-9 items-center gap-2 text-xs text-surface-400 hover:text-status-ok" @click="openGuide"><CircleHelp class="h-3.5 w-3.5" />入门指南</button>
     </div>
   </aside>
   <teleport to="body">
@@ -50,10 +50,10 @@
         <button class="btn-secondary mb-3 w-full" @click="moreOpen = false; openGuide()"><CircleHelp class="h-4 w-4" />入门指南</button>
         <div class="mb-3 flex items-center justify-between"><div><h2 id="mobile-more-dialog-title" class="text-base font-semibold text-surface-100">更多功能</h2><p class="mt-0.5 text-xs text-muted">配置、排障与系统工具</p></div><button class="icon-btn" aria-label="关闭更多功能" @click="moreOpen = false">×</button></div>
         <div v-for="group in mobileGroups" :key="group.label" class="mb-4 last:mb-0">
-          <h3 class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-600">{{ group.label }}</h3>
+          <h3 class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-400">{{ group.label }}</h3>
           <div class="grid grid-cols-2 gap-2">
             <router-link v-for="item in group.items" :key="item.to" :to="item.to" class="flex min-h-14 items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-2.5 text-sm text-surface-300 transition hover:border-surface-600 hover:bg-surface-800" @click="moreOpen = false">
-              <component :is="item.icon" class="h-4 w-4 shrink-0 text-accent" /><span>{{ item.label }}</span>
+              <component :is="item.icon" class="h-4 w-4 shrink-0 text-status-info" /><span>{{ item.label }}</span>
             </router-link>
           </div>
         </div>

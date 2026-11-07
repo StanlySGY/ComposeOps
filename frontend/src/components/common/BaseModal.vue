@@ -5,7 +5,7 @@
         <Transition name="modal-pop" appear>
           <div ref="modalRef" class="modal" :class="sizeClass" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1">
             <div class="modal-header">
-              <span class="truncate">{{ title }}</span>
+              <h2 class="m-0 truncate text-sm font-medium">{{ title }}</h2>
               <div class="flex items-center gap-1">
                 <slot name="header-actions" />
                 <button class="icon-btn" aria-label="关闭" :disabled="closeDisabled" @click="emit('close')"><X class="w-4 h-4" /></button>

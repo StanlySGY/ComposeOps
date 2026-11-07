@@ -21,37 +21,26 @@
       <button id="event-tab-state" data-tab="state" :class="{ active: tab === 'state' }" role="tab" aria-controls="event-center-panel" :aria-selected="tab === 'state'" :tabindex="tab === 'state' ? 0 : -1" @click="setTab('state')"><Gauge class="h-4 w-4" />状态历史</button>
     </div>
 
-    <section id="event-center-panel" role="tabpanel" :aria-labelledby="`event-tab-${tab}`" tabindex="0">
+    <section class="space-y-4" id="event-center-panel" role="tabpanel" :aria-labelledby="`event-tab-${tab}`" tabindex="0">
     <template v-if="tab === 'events'">
       <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
       <!-- 统计 -->
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="section-panel flex items-center gap-3">
-          <span class="grid h-10 w-10 place-items-center rounded-xl border border-surface-700 bg-surface-900 text-surface-300"><Activity class="w-5 h-5" /></span>
-          <div><p class="text-2xl font-semibold text-surface-100">{{ stats?.total || 0 }}</p><p class="text-xs text-surface-500">事件总数</p></div>
-        </div>
-        <div class="section-panel flex items-center gap-3">
-          <span class="grid h-10 w-10 place-items-center rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300"><AlertTriangle class="w-5 h-5" /></span>
-          <div><p class="text-2xl font-semibold text-surface-100">{{ stats?.open || 0 }}</p><p class="text-xs text-surface-500">待处理</p></div>
-        </div>
-        <div class="section-panel flex items-center gap-3">
-          <span class="grid h-10 w-10 place-items-center rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300"><CircleAlert class="w-5 h-5" /></span>
-          <div><p class="text-2xl font-semibold text-surface-100">{{ stats?.bySeverity?.danger || 0 }}</p><p class="text-xs text-surface-500">严重告警</p></div>
-        </div>
-        <div class="section-panel flex items-center gap-3">
-          <span class="grid h-10 w-10 place-items-center rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300"><Workflow class="w-5 h-5" /></span>
-          <div><p class="text-2xl font-semibold text-surface-100">{{ stats?.byType?.workflow || 0 }}</p><p class="text-xs text-surface-500">工作流事件</p></div>
-        </div>
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <MetricTile title="事件总数" :value="stats?.total ?? '—'" :icon="Activity" />
+        <MetricTile title="待处理" :value="stats?.open ?? '—'" :icon="AlertTriangle" tone="text-status-warn" />
+        <MetricTile title="严重告警" :value="stats?.bySeverity?.danger ?? '—'" :icon="CircleAlert" tone="text-status-error" />
+        <MetricTile title="工作流事件" :value="stats?.byType?.workflow ?? '—'" :icon="Workflow" />
       </div>
 
       <!-- 过滤 -->
       <div class="flex flex-wrap gap-2">
-        <button v-for="t in typeFilters" :key="t.value" class="btn-secondary px-3! py-1.5! text-xs" :class="{ 'border-accent! text-accent!': typeFilter === t.value }" @click="typeFilter = t.value">{{ t.label }}</button>
+        <button v-for="t in typeFilters" :key="t.value" class="btn-secondary btn-sm" :class="{ 'border-accent! text-status-info!': typeFilter === t.value }" @click="typeFilter = t.value">{{ t.label }}</button>
       </div>
 
       <!-- 事件列表 -->
-      <section class="section-panel">
+      <Skeleton v-if="loading && !events.length" variant="table" :rows="5" label="正在加载事件记录" />
+      <section v-else class="section-panel">
         <div class="mb-4"><h2 class="section-title">事件流</h2><p class="mt-1 text-muted">点击状态可流转事件状态</p></div>
         <div class="space-y-2">
           <div v-for="event in events" :key="event.id" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
@@ -60,21 +49,21 @@
               <div class="flex flex-wrap items-center gap-2">
                 <span class="count-badge" :class="typeTone(event.eventType)">{{ typeLabel(event.eventType) }}</span>
                 <span class="text-sm font-medium text-surface-100">{{ event.title }}</span>
-                <span class="text-xs text-surface-600">{{ event.assetName || '' }}</span>
+                <span class="text-xs text-surface-400">{{ event.assetName || '' }}</span>
               </div>
               <p v-if="event.detail" class="mt-1 text-xs text-surface-400">{{ event.detail }}</p>
-              <p class="mt-1 text-[11px] text-surface-600">{{ formatTime(event.createdAt) }} · {{ event.source }}</p>
+              <p class="mt-1 text-[11px] text-surface-400">{{ formatTime(event.createdAt) }} · {{ event.source }}</p>
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-2">
               <router-link v-if="eventDestination(event)" class="btn-ghost" :to="eventDestination(event)">查看来源</router-link>
               <router-link v-if="eventContainerLink(event, '/logs')" class="btn-ghost" :to="eventContainerLink(event, '/logs')">日志</router-link>
               <router-link v-if="eventContainerLink(event, '/monitor')" class="btn-ghost" :to="eventContainerLink(event, '/monitor')">监控</router-link>
               <router-link class="btn-ghost" :to="deepLink('/tickets', { create: 1, sourceType: 'event', sourceId: event.id, title: event.title, description: event.detail, projectId: event.payload?.projectId, from: 'events' })">建工单</router-link>
-              <button class="btn-secondary px-2! py-1! text-xs" @click="setStatus(event, 'resolved')">解决</button>
-              <button class="btn-secondary px-2! py-1! text-xs" @click="setStatus(event, 'closed')">关闭</button>
+              <button class="btn-secondary btn-sm" @click="setStatus(event, 'resolved')">解决</button>
+              <button class="btn-secondary btn-sm" @click="setStatus(event, 'closed')">关闭</button>
             </div>
           </div>
-          <div v-if="!events.length" class="rounded-xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-500">暂无事件</div>
+          <EmptyState v-if="!events.length" compact icon="History" title="暂无事件" description="运行巡检或执行任务后，可在这里跟踪结果。" action-label="刷新事件" @action="load" />
         </div>
       </section>
     </template>
@@ -86,6 +75,9 @@
 </template>
 
 <script setup>
+import EmptyState from '../components/common/EmptyState.vue';
+import Skeleton from '../components/common/Skeleton.vue';
+import MetricTile from '../components/common/MetricTile.vue';
 import { deepLink, eventDestination, eventContainerLink } from '../lib/deep-links.js';
 import { computed, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
@@ -137,10 +129,10 @@ function typeLabel(type) {
   return { alert: '告警', inspection: '巡检', deployment: '部署', rollback: '回滚', agent: 'Agent', gitops: 'GitOps', workflow: '工作流', system: '系统', cron: '定时任务', backup: '备份' }[type] || type;
 }
 function typeTone(type) {
-  return { alert: 'text-rose-300', inspection: 'text-sky-300', deployment: 'text-emerald-300', rollback: 'text-amber-300', agent: 'text-violet-300', gitops: 'text-cyan-300', workflow: 'text-indigo-300' }[type] || 'text-surface-300';
+  return { alert: 'text-status-error', inspection: 'text-sky-300', deployment: 'text-status-ok', rollback: 'text-status-warn', agent: 'text-violet-300', gitops: 'text-cyan-300', workflow: 'text-indigo-300' }[type] || 'text-surface-300';
 }
 function severityDot(severity) {
-  return { danger: 'bg-rose-400', warning: 'bg-amber-400', info: 'bg-sky-400' }[severity] || 'bg-surface-500';
+  return { danger: 'bg-status-error', warning: 'bg-status-warn', info: 'bg-sky-400' }[severity] || 'bg-surface-500';
 }
 function formatTime(ts) {
   if (!ts) return '';
@@ -156,7 +148,7 @@ async function setStatus(event, status) {
     await store.update(event.id, { status });
     toast.success(`事件已标记为${status === 'resolved' ? '已解决' : '已关闭'}`);
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 const showPruneConfirm = ref(false);
@@ -166,7 +158,7 @@ async function prune() {
     await store.prune(30);
     toast.success('历史事件已清理');
   } catch (e) {
-    toast.error(e.message);
+    toast.error(e);
   }
 }
 

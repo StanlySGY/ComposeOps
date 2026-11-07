@@ -1,68 +1,68 @@
 <template>
   <div class="space-y-4">
-    <p class="text-xs leading-5 text-zinc-500">用一次性 helper 容器把项目的<b class="text-zinc-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份,只有新备份成功后才清理超额旧包；磁盘空间不足时会失败并保留已有备份,不会自动删掉旧恢复点来腾空间。运行中的服务若持续写入，tar 快照不保证数据库事务一致；数据库卷请先停写或使用数据库原生备份。</p>
+    <p class="text-xs leading-5 text-surface-400">用一次性 helper 容器把项目的<b class="text-surface-300">命名卷</b>打包为 tar.gz,存放于 Docker 宿主机的 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">data/volume-backups</code>(可在设置中用 <code class="rounded-sm bg-surface-950 px-1 text-[11px] text-cyan-200">backup.volume_dir</code> 覆盖;远程宿主则位于远端文件系统)。bind mount 与变量引用不纳入。每个卷保留最近 20 份,只有新备份成功后才清理超额旧包；磁盘空间不足时会失败并保留已有备份,不会自动删掉旧恢复点来腾空间。运行中的服务若持续写入，tar 快照不保证数据库事务一致；数据库卷请先停写或使用数据库原生备份。</p>
     <div class="flex flex-wrap items-end gap-2">
       <label class="form-grid-label"><span>项目</span>
-        <select v-model="projectId" class="input min-h-9! w-56 text-xs" aria-label="选择要备份卷的项目" @change="loadVolumes">
+        <select v-model="projectId" class="input w-56 input-sm" aria-label="选择要备份卷的项目" @change="loadVolumes">
           <option value="">选择项目</option>
           <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option>
         </select>
       </label>
-      <button class="btn-secondary min-h-9! text-xs" :disabled="!projectId || loadingVolumes" @click="loadVolumes"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingVolumes }" />读取卷</button>
-      <button class="btn-primary min-h-9! text-xs" :disabled="!selected.length || backing" @click="backupSelected"><HardDriveDownload class="h-3.5 w-3.5" />备份选中 {{ selected.length }} 个卷</button>
+      <button class="btn-secondary btn-sm" :disabled="!projectId || loadingVolumes" @click="loadVolumes"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingVolumes }" />读取卷</button>
+      <button class="btn-primary btn-sm" :disabled="!selected.length || backing" @click="backupSelected"><HardDriveDownload class="h-3.5 w-3.5" />备份选中 {{ selected.length }} 个卷</button>
     </div>
 
     <div v-if="projectId && volumes.length" class="grid gap-1.5 sm:grid-cols-2">
-      <label v-for="volume in volumes" :key="volume.name" class="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-xs" :class="volume.skip ? 'border-surface-800/60 bg-surface-950/30 text-zinc-600' : selected.includes(volume.name) ? 'border-accent/50 bg-accent/10' : 'border-surface-800 bg-surface-950/40 hover:border-surface-700'">
-        <input v-if="!volume.skip" v-model="selected" type="checkbox" :value="volume.name" :aria-label="`选择数据卷 ${volume.name}`" class="accent-cyan-500" />
-        <Ban v-else class="h-3.5 w-3.5 shrink-0 text-zinc-700" />
-        <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{{ volume.name }}</span>
+      <label v-for="volume in volumes" :key="volume.name" class="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-xs" :class="volume.skip ? 'border-surface-800/60 bg-surface-950/30 text-surface-400' : selected.includes(volume.name) ? 'border-accent/50 bg-accent/10' : 'border-surface-800 bg-surface-950/40 hover:border-surface-700'">
+        <input v-if="!volume.skip" v-model="selected" type="checkbox" :value="volume.name" :aria-label="`选择数据卷 ${volume.name}`" class="checkbox" />
+        <Ban v-else class="h-3.5 w-3.5 shrink-0 text-surface-400" />
+        <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-surface-300">{{ volume.name }}</span>
         <span v-if="volume.skip" class="shrink-0 text-[10px]">{{ volume.skip }}</span>
-        <span v-else-if="volume.exists === false" class="shrink-0 text-[10px] text-amber-400">宿主上不存在</span>
+        <span v-else-if="volume.exists === false" class="shrink-0 text-[10px] text-status-warn">宿主上不存在</span>
         <span v-else-if="volume.external" class="shrink-0 text-[10px] text-cyan-400">external</span>
       </label>
     </div>
-    <p v-if="volumeError" class="text-xs text-rose-400" role="alert">卷列表加载失败：{{ volumeError }}</p>
-    <p v-else-if="loadingVolumes" class="text-xs text-zinc-500" role="status" aria-live="polite">正在读取卷列表…</p>
-    <p v-else-if="projectId && !volumes.length" class="text-xs text-zinc-600">该项目 compose 中没有声明卷。</p>
+    <p v-if="volumeError" class="text-xs text-status-error" role="alert">卷列表加载失败：{{ volumeError }}</p>
+    <p v-else-if="loadingVolumes" class="text-xs text-surface-400" role="status" aria-live="polite">正在读取卷列表…</p>
+    <p v-else-if="projectId && !volumes.length" class="text-xs text-surface-400">该项目 compose 中没有声明卷。</p>
 
     <div class="rounded-xl border border-surface-800 bg-surface-950/40">
-      <div class="flex items-center justify-between border-b border-surface-800/80 px-3 py-2 text-xs text-zinc-400">
+      <div class="flex items-center justify-between border-b border-surface-800/80 px-3 py-2 text-xs text-surface-400">
         <span>备份记录<button class="ml-2 text-cyan-400 hover:text-cyan-300" @click="loadBackups">刷新</button></span>
         <label class="flex items-center gap-1.5">仅看项目
-          <select v-model="filterProjectId" class="input min-h-7! py-0.5! text-[11px]" aria-label="筛选备份记录的项目" @change="loadBackups"><option value="">全部</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
+          <select v-model="filterProjectId" class="input input-sm" aria-label="筛选备份记录的项目" @change="loadBackups"><option value="">全部</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.projectName }}</option></select>
         </label>
       </div>
-      <p v-if="backupsError" class="px-3 py-2 text-xs text-rose-400" role="alert">备份记录加载失败：{{ backupsError }}</p>
-      <p v-else-if="loadingBackups" class="px-3 py-2 text-xs text-zinc-500" role="status" aria-live="polite">正在读取备份记录…</p>
+      <p v-if="backupsError" class="px-3 py-2 text-xs text-status-error" role="alert">备份记录加载失败：{{ backupsError }}</p>
+      <p v-else-if="loadingBackups" class="px-3 py-2 text-xs text-surface-400" role="status" aria-live="polite">正在读取备份记录…</p>
       <div v-else class="max-h-72 overflow-y-auto">
         <table v-if="backups.length" class="w-full text-left text-xs">
-          <thead class="sticky top-0 bg-surface-950/95 text-[10px] uppercase tracking-wide text-zinc-600">
+          <thead class="sticky top-0 bg-surface-950/95 text-[10px] uppercase tracking-wide text-surface-400">
             <tr><th class="px-3 py-2 font-medium">项目 / 卷</th><th class="px-3 py-2 font-medium">文件</th><th class="px-3 py-2 font-medium">大小</th><th class="px-3 py-2 font-medium">时间</th><th class="px-3 py-2 font-medium">宿主</th><th class="px-3 py-2 font-medium">演练</th><th class="px-3 py-2"></th></tr>
           </thead>
           <tbody>
             <tr v-for="backup in backups" :key="backup.id" class="border-t border-surface-800/60 hover:bg-surface-900/40">
-              <td class="px-3 py-2"><b class="text-zinc-300">{{ backup.projectName }}</b><span class="block font-mono text-[10px] text-zinc-600">{{ backup.volume }}</span></td>
-              <td class="max-w-52 truncate px-3 py-2 font-mono text-[11px] text-zinc-400">{{ backup.file }}</td>
-              <td class="px-3 py-2 text-zinc-400">{{ formatBytes(backup.bytes) }}</td>
-              <td class="px-3 py-2 text-zinc-500">{{ formatTime(backup.createdAt) }}</td>
-              <td class="px-3 py-2"><span class="rounded-sm bg-surface-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">{{ backup.host }}</span></td>
+              <td class="px-3 py-2"><b class="text-surface-300">{{ backup.projectName }}</b><span class="block font-mono text-[10px] text-surface-400">{{ backup.volume }}</span></td>
+              <td class="max-w-52 truncate px-3 py-2 font-mono text-[11px] text-surface-400">{{ backup.file }}</td>
+              <td class="px-3 py-2 text-surface-400">{{ formatBytes(backup.bytes) }}</td>
+              <td class="px-3 py-2 text-surface-400">{{ formatTime(backup.createdAt) }}</td>
+              <td class="px-3 py-2"><span class="rounded-sm bg-surface-800/80 px-1.5 py-0.5 text-[10px] text-surface-400">{{ backup.host }}</span></td>
               <td class="px-3 py-2">
-                <span v-if="backup.verifyStatus === 'verified'" class="status-badge bg-emerald-500/10 text-emerald-400" :title="`演练通过 · ${backup.verifyFiles ?? '—'} 个文件 · ${formatTime(backup.verifyAt)}`">✓ {{ backup.verifyFiles ?? '?' }} 文件</span>
+                <span v-if="backup.verifyStatus === 'verified'" class="status-badge bg-status-ok/10 text-status-ok" :title="`演练通过 · ${backup.verifyFiles ?? '—'} 个文件 · ${formatTime(backup.verifyAt)}`">✓ {{ backup.verifyFiles ?? '?' }} 文件</span>
                 <span v-else-if="backup.verifyStatus === 'empty'" class="status-badge bg-surface-800 text-surface-400" title="备份可解压,但内容为空">空备份</span>
-                <span v-else-if="backup.verifyStatus === 'failed'" class="status-badge bg-rose-500/10 text-rose-400" title="还原演练失败,备份不可用">损坏</span>
-                <span v-else class="text-[10px] text-zinc-600">未演练</span>
+                <span v-else-if="backup.verifyStatus === 'failed'" class="status-badge bg-status-error/10 text-status-error" title="还原演练失败,备份不可用">损坏</span>
+                <span v-else class="text-[10px] text-surface-400">未演练</span>
               </td>
               <td class="whitespace-nowrap px-3 py-2 text-right">
                 <a :href="api.volumeBackupDownloadUrl(backup.id)" class="inline-flex h-8 w-8 items-center justify-center rounded-md text-cyan-400 transition-colors hover:bg-cyan-500/10 hover:text-cyan-300" title="下载备份" :aria-label="`下载备份 ${backup.file}`"><Download class="h-3.5 w-3.5" /></a>
-                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-emerald-400 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40" title="验证备份：在一次性临时卷中解包并统计文件数，不会修改原卷" :aria-label="`验证备份 ${backup.file}`" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
-                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-400 transition-colors hover:bg-amber-500/10 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '完整替换卷内容（备份中不存在的文件也会删除）'" :aria-label="restoringId === backup.id ? `正在恢复 ${backup.volume}` : `恢复卷 ${backup.volume} 的备份`" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
-                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title="删除备份" :aria-label="`删除备份 ${backup.file}`" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-status-ok transition-colors hover:bg-status-ok/10 hover:text-status-ok disabled:cursor-not-allowed disabled:opacity-40" title="验证备份：在一次性临时卷中解包并统计文件数，不会修改原卷" :aria-label="`验证备份 ${backup.file}`" :disabled="verifyingId === backup.id" @click="doVerify(backup)"><ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': verifyingId === backup.id }" /></button>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-status-warn transition-colors hover:bg-status-warn/10 hover:text-status-warn disabled:cursor-not-allowed disabled:opacity-40" :title="restoringId === backup.id ? '正在验证备份并恢复' : '完整替换卷内容（备份中不存在的文件也会删除）'" :aria-label="restoringId === backup.id ? `正在恢复 ${backup.volume}` : `恢复卷 ${backup.volume} 的备份`" :disabled="restoringId === backup.id || verifyingId === backup.id" @click="askRestore(backup)"><Undo2 class="h-3.5 w-3.5" :class="{ 'animate-spin': restoringId === backup.id }" /></button>
+                <button class="inline-flex h-8 w-8 items-center justify-center rounded-md text-surface-400 transition-colors hover:bg-status-error/10 hover:text-status-error" title="删除备份" :aria-label="`删除备份 ${backup.file}`" @click="askDelete(backup)"><Trash2 class="h-3.5 w-3.5" /></button>
               </td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="px-3 py-6 text-center text-xs text-zinc-600">还没有备份记录。</p>
+        <EmptyState v-else compact icon="History" title="还没有备份记录" description="在上方选择项目和命名卷，即可创建第一份备份。" action-label="刷新记录" @action="loadBackups" />
       </div>
     </div>
 
@@ -73,6 +73,7 @@
 </template>
 
 <script setup>
+import EmptyState from '../common/EmptyState.vue';
 import { onMounted, ref, watch } from 'vue';
 import { Ban, Download, HardDriveDownload, RefreshCw, ShieldCheck, Trash2, Undo2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
@@ -182,12 +183,12 @@ async function doVerify(backup) {
   verifyingId.value = backup.id;
   try {
     const result = await api.verifyVolumeBackup(backup.id);
-    if (result.status === 'verified') { backupStatus.value = `备份演练通过：还原出 ${result.files} 个文件`; backupStatusError.value = false; toast.success(`演练通过:还原出 ${result.files} 个文件(${(result.durationMs / 1000).toFixed(1)}s)`); }
+    if (result.status === 'verified') { backupStatus.value = `备份演练通过：还原出 ${result.files} 个文件`; backupStatusError.value = false; toast.success(`演练通过：还原出 ${result.files} 个文件(${(result.durationMs / 1000).toFixed(1)}s)`); }
     else if (result.status === 'empty') { backupStatus.value = '备份可正常解压，但内容为空'; backupStatusError.value = false; toast.info(backupStatus.value); }
     else { backupStatus.value = '演练失败：备份疑似损坏'; backupStatusError.value = true; toast.error(backupStatus.value); }
   } catch (error) {
     backupStatus.value = `演练失败：${error.message}`; backupStatusError.value = true;
-    toast.error(`演练失败:${error.message}`);
+    toast.error(`演练失败：${error.message}`);
   } finally {
     verifyingId.value = '';
     await loadBackups();
@@ -222,7 +223,7 @@ async function doDelete() {
     await loadBackups();
   } catch (error) {
     backupStatus.value = `删除备份失败：${error.message}`; backupStatusError.value = true;
-    toast.error(error.message);
+    toast.error(error);
   }
 }
 onMounted(async () => {

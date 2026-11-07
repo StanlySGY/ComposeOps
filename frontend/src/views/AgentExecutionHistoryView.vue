@@ -12,41 +12,25 @@
       </div>
     </div>
 
-    <div v-if="error" class="card border-rose-500/20 bg-rose-500/5 p-4 text-rose-300" role="alert">{{ error }}</div>
+    <div v-if="error" class="card border-status-error/20 bg-status-error/5 p-4 text-status-error" role="alert">{{ error }}</div>
 
     <section v-if="usage" class="space-y-3">
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div class="card p-4">
-          <p class="text-xs text-zinc-500">总 token</p>
-          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.total_tokens) }}</p>
-          <p class="mt-1 text-xs text-zinc-500">最近 {{ usage.days }} 天</p>
-        </div>
-        <div class="card p-4">
-          <p class="text-xs text-zinc-500">LLM 调用</p>
-          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.calls) }}</p>
-          <p class="mt-1 text-xs text-zinc-500">Tool Loop 轮次</p>
-        </div>
-        <div class="card p-4">
-          <p class="text-xs text-zinc-500">输入 token</p>
-          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.prompt_tokens) }}</p>
-          <p class="mt-1 text-xs text-zinc-500">上下文与工具结果</p>
-        </div>
-        <div class="card p-4">
-          <p class="text-xs text-zinc-500">输出 token</p>
-          <p class="mt-1 text-xl font-semibold text-zinc-100">{{ formatNumber(usage.totals?.completion_tokens) }}</p>
-          <p class="mt-1 text-xs text-zinc-500">模型生成内容</p>
-        </div>
+        <MetricTile title="总 token" :value="formatNumber(usage.totals?.total_tokens)" :sub="`最近 ${usage.days} 天`" />
+        <MetricTile title="LLM 调用" :value="formatNumber(usage.totals?.calls)" sub="Tool Loop 轮次" />
+        <MetricTile title="输入 token" :value="formatNumber(usage.totals?.prompt_tokens)" sub="上下文与工具结果" />
+        <MetricTile title="输出 token" :value="formatNumber(usage.totals?.completion_tokens)" sub="模型生成内容" />
       </div>
 
       <div v-if="usage.byModel?.length" class="card p-4">
         <div class="flex items-center justify-between gap-3">
-          <h2 class="text-sm font-medium text-zinc-200">模型用量</h2>
-          <span class="text-xs text-zinc-500">按总 token 排序</span>
+          <h2 class="text-sm font-medium text-surface-200">模型用量</h2>
+          <span class="text-xs text-surface-400">按总 token 排序</span>
         </div>
         <div class="mt-3 grid gap-2 md:grid-cols-2">
-          <div v-for="model in usage.byModel" :key="model.model" class="flex items-center justify-between gap-3 rounded-sm border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
-            <span class="min-w-0 truncate font-mono text-zinc-300">{{ model.model }}</span>
-            <span class="shrink-0 text-zinc-500">{{ formatNumber(model.total_tokens) }} · {{ formatNumber(model.calls) }} 次</span>
+          <div v-for="model in usage.byModel" :key="model.model" class="flex items-center justify-between gap-3 rounded-sm border border-surface-800 bg-surface-900/40 px-3 py-2 text-xs">
+            <span class="min-w-0 truncate font-mono text-surface-300">{{ model.model }}</span>
+            <span class="shrink-0 text-surface-400">{{ formatNumber(model.total_tokens) }} · {{ formatNumber(model.calls) }} 次</span>
           </div>
         </div>
       </div>
@@ -54,11 +38,11 @@
 
     <section v-if="executions.length" class="card p-3">
       <div class="flex flex-wrap items-center gap-2">
-        <label class="search-field min-h-9! min-w-48 flex-1">
+        <label class="search-field min-h-9 min-w-48 flex-1">
           <Search class="h-3.5 w-3.5" />
-          <input v-model="searchQuery" class="py-1! text-xs" placeholder="搜索任务内容或计划 ID" aria-label="搜索 Agent 执行历史" />
+          <input v-model="searchQuery" class="py-1 text-xs" placeholder="搜索任务内容或计划 ID" aria-label="搜索 Agent 执行历史" />
         </label>
-        <select v-model="statusFilter" class="input min-h-9! w-full sm:w-36 py-1! text-xs" aria-label="按执行状态筛选">
+        <select v-model="statusFilter" class="input w-full sm:w-36 input-sm" aria-label="按执行状态筛选">
           <option value="all">全部状态</option>
           <option value="executing">执行中</option>
           <option value="pending_confirmation">待确认</option>
@@ -67,21 +51,22 @@
           <option value="outcome_unknown">结果待核对</option>
           <option value="pending">待执行</option>
         </select>
-        <select v-model="roleFilter" class="input min-h-9! w-full sm:w-40 py-1! text-xs" aria-label="按 Worker 筛选">
+        <select v-model="roleFilter" class="input w-full sm:w-40 input-sm" aria-label="按 Worker 筛选">
           <option value="all">全部 Worker</option>
           <option value="planner">运维规划师</option>
           <option value="executor">执行者</option>
           <option value="validator">只读验证者</option>
           <option value="incident_responder">应急响应者</option>
         </select>
-        <button v-if="searchQuery || statusFilter !== 'all' || roleFilter !== 'all'" class="btn-secondary min-h-9! px-3! text-xs!" @click="resetFilters">清除筛选</button>
+        <button v-if="searchQuery || statusFilter !== 'all' || roleFilter !== 'all'" class="btn-secondary btn-sm" @click="resetFilters">清除筛选</button>
       </div>
-      <div class="mt-2 flex items-center justify-between text-xs text-zinc-500">
+      <div class="mt-2 flex items-center justify-between text-xs text-surface-400">
         <span>显示 {{ filteredExecutions.length }} / {{ executions.length }} 次执行</span>
         <span>按计划记录聚合 · 展开查看步骤、结果与轨迹</span>
       </div>
     </section>
 
+    <HistoryControls v-model:page="page" v-model:sort-key="sortKey" v-model:descending="descending" :total="total" :page-size="pageSize" :options="sortOptions" label="执行历史" />
     <div v-if="!loading && !executions.length" class="card p-8">
       <EmptyState icon="history" title="暂无执行记录" description="Agent 工作流执行后会在此显示" />
     </div>
@@ -92,45 +77,45 @@
     </div>
 
     <div v-else-if="filteredExecutions.length" class="space-y-3">
-      <div v-for="exec in filteredExecutions" :key="exec.planId" class="card p-4">
+      <div v-for="exec in pagedRows" :key="exec.planId" class="card p-4">
         <div class="mb-3 flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
             <div class="mb-1 flex items-center gap-2">
-              <h3 class="truncate text-base font-semibold text-zinc-200">{{ exec.message || '工作流执行' }}</h3>
+              <h3 class="truncate text-base font-semibold text-surface-200">{{ exec.message || '工作流执行' }}</h3>
               <span :class="statusClass(exec.status)" class="status-badge">{{ statusLabel(exec.status) }}</span>
             </div>
-            <p class="text-sm text-zinc-400">计划 ID: {{ exec.planId }}</p>
-            <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500">
+            <p class="text-sm text-surface-400">计划 ID: {{ exec.planId }}</p>
+            <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-surface-400">
               <span>角色: {{ roleLabel(exec.role) }}</span>
               <span>步骤: {{ exec.stepCount }}</span>
               <span v-if="exec.createdAt">创建: {{ formatTime(exec.createdAt) }}</span>
               <span v-if="exec.executedAt">执行: {{ formatTime(exec.executedAt) }}</span>
             </div>
           </div>
-          <button class="btn-secondary px-3! py-1.5! text-xs!" @click="toggleDetail(exec.planId)">
+          <button class="btn-secondary btn-sm" @click="toggleDetail(exec.planId)">
             <ChevronDown :class="{ 'rotate-180': expandedPlan === exec.planId }" class="h-3.5 w-3.5 transition-transform" />
             {{ expandedPlan === exec.planId ? '收起' : '详情' }}
           </button>
         </div>
 
-        <div v-if="expandedPlan === exec.planId" class="space-y-4 border-t border-zinc-800 pt-4">
+        <div v-if="expandedPlan === exec.planId" class="space-y-4 border-t border-surface-800 pt-4">
           <!-- 工作流步骤 -->
           <div v-if="exec.steps && exec.steps.length">
-            <h4 class="mb-2 text-sm font-medium text-zinc-300">工作流步骤</h4>
+            <h4 class="mb-2 text-sm font-medium text-surface-300">工作流步骤</h4>
             <div class="space-y-2">
-              <div v-for="(step, idx) in exec.steps" :key="idx" class="rounded-sm border border-zinc-800 bg-zinc-900/40 p-3">
+              <div v-for="(step, idx) in exec.steps" :key="idx" class="rounded-sm border border-surface-800 bg-surface-900/40 p-3">
                 <div class="mb-2 flex items-start justify-between">
                   <div class="flex items-center gap-2">
-                    <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-medium text-zinc-400">{{ idx + 1 }}</span>
-                    <span class="font-mono text-sm text-zinc-300">{{ step.tool }}</span>
-                    <span v-if="step.risk" :class="riskClass(step.risk)" class="risk-badge">{{ riskLabel(step.risk) }}</span>
+                    <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-800 text-xs font-medium text-surface-400">{{ idx + 1 }}</span>
+                    <span class="font-mono text-sm text-surface-300">{{ step.tool }}</span>
+                    <RiskBadge v-if="step.risk" :risk="step.risk" />
                   </div>
-                  <span v-if="step.confirmationRequired" class="text-xs text-amber-400">需确认</span>
+                  <span v-if="step.confirmationRequired" class="text-xs text-status-warn">需确认</span>
                 </div>
-                <div v-if="step.reason" class="mb-2 text-xs text-zinc-400">{{ step.reason }}</div>
+                <div v-if="step.reason" class="mb-2 text-xs text-surface-400">{{ step.reason }}</div>
                 <div v-if="step.params && Object.keys(step.params).length" class="text-xs">
-                  <span class="text-zinc-500">参数:</span>
-                  <code class="ml-2 rounded-sm bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-300">{{ formatParams(step.params) }}</code>
+                  <span class="text-surface-400">参数:</span>
+                  <code class="ml-2 rounded-sm bg-surface-800 px-1.5 py-0.5 font-mono text-surface-300">{{ formatParams(step.params) }}</code>
                 </div>
               </div>
             </div>
@@ -138,19 +123,19 @@
 
           <!-- 执行结果 -->
           <div v-if="exec.results && exec.results.length">
-            <h4 class="mb-2 text-sm font-medium text-zinc-300">执行结果</h4>
+            <h4 class="mb-2 text-sm font-medium text-surface-300">执行结果</h4>
             <div class="space-y-2">
               <div v-for="(result, idx) in exec.results" :key="idx" class="rounded-sm border p-3" :class="resultBorderClass(result.status)">
                 <div class="mb-2 flex items-start justify-between">
                   <div class="flex items-center gap-2">
                     <component :is="resultIcon(result.status)" :class="resultIconClass(result.status)" class="h-4 w-4 shrink-0" />
-                    <span class="font-mono text-sm text-zinc-300">{{ result.tool }}</span>
+                    <span class="font-mono text-sm text-surface-300">{{ result.tool }}</span>
                   </div>
-                  <span v-if="result.durationMs" class="text-xs text-zinc-500">{{ result.durationMs }}ms</span>
+                  <span v-if="result.durationMs" class="text-xs text-surface-400">{{ result.durationMs }}ms</span>
                 </div>
-                <div v-if="result.error" class="mb-2 text-sm text-rose-300">{{ result.error }}</div>
-                <div v-if="result.result" class="max-h-32 overflow-auto rounded-sm bg-zinc-900 p-2 text-xs">
-                  <pre class="whitespace-pre-wrap text-zinc-400">{{ stringifyResult(result.result) }}</pre>
+                <div v-if="result.error" class="mb-2 text-sm text-status-error">{{ result.error }}</div>
+                <div v-if="result.result" class="max-h-32 overflow-auto rounded-sm bg-surface-900 p-2 text-xs">
+                  <pre class="whitespace-pre-wrap text-surface-400">{{ stringifyResult(result.result) }}</pre>
                 </div>
               </div>
             </div>
@@ -158,11 +143,11 @@
 
           <!-- 执行轨迹 -->
           <div v-if="exec.thoughts && exec.thoughts.length">
-            <h4 class="mb-2 text-sm font-medium text-zinc-300">执行轨迹</h4>
+            <h4 class="mb-2 text-sm font-medium text-surface-300">执行轨迹</h4>
             <div class="space-y-1.5">
               <div v-for="(thought, idx) in exec.thoughts" :key="idx" class="flex gap-3 text-xs">
                 <span :class="phaseColor(thought.phase)" class="w-16 shrink-0 font-medium">{{ phaseLabel(thought.phase) }}</span>
-                <span class="flex-1 text-zinc-400">{{ thought.content }}</span>
+                <span class="flex-1 text-surface-400">{{ thought.content }}</span>
               </div>
             </div>
           </div>
@@ -173,10 +158,14 @@
 </template>
 
 <script setup>
+import RiskBadge from '../components/common/RiskBadge.vue';
+import { usePagedRows } from '../composables/usePagedRows.js';
+import HistoryControls from '../components/common/HistoryControls.vue';
 import { computed, onActivated, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { api } from '../api/client.js';
 import { RefreshCw, ChevronDown, CircleCheck, CircleX, Clock, AlertCircle, Search } from 'lucide-vue-next';
+import MetricTile from '../components/common/MetricTile.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 
 const loading = ref(false);
@@ -208,7 +197,7 @@ async function load() {
   usage.value = null;
   try {
     const [executionResult, usageResult] = await Promise.allSettled([
-      api.getAgentExecutions(),
+      api.getAgentExecutions('', 500),
       api.getAgentUsage(30),
     ]);
     if (executionResult.status === 'rejected') throw executionResult.reason;
@@ -317,11 +306,11 @@ function statusLabel(status) {
 }
 
 function statusClass(status) {
-  if (status === 'completed') return 'bg-emerald-500/10 text-emerald-400';
-  if (status === 'failed') return 'bg-rose-500/10 text-rose-400';
+  if (status === 'completed') return 'bg-status-ok/10 text-status-ok';
+  if (status === 'failed') return 'bg-status-error/10 text-status-error';
   if (status === 'executing') return 'bg-blue-500/10 text-blue-400';
-  if (status === 'outcome_unknown') return 'bg-amber-500/10 text-amber-300';
-  return 'bg-zinc-700/50 text-zinc-400';
+  if (status === 'outcome_unknown') return 'bg-status-warn/10 text-status-warn';
+  return 'bg-surface-700/50 text-surface-400';
 }
 
 function roleLabel(role) {
@@ -349,28 +338,11 @@ function phaseColor(phase) {
   const colors = {
     understanding: 'text-blue-400',
     planning: 'text-purple-400',
-    executing: 'text-amber-400',
-    validating: 'text-emerald-400',
-    done: 'text-zinc-400',
+    executing: 'text-status-warn',
+    validating: 'text-status-ok',
+    done: 'text-surface-400',
   };
-  return colors[phase] || 'text-zinc-500';
-}
-
-function riskLabel(risk) {
-  const labels = {
-    low: '低风险',
-    medium: '中风险',
-    high: '高风险',
-    critical: '极高',
-  };
-  return labels[risk] || risk;
-}
-
-function riskClass(risk) {
-  if (risk === 'critical') return 'bg-rose-500/20 text-rose-300';
-  if (risk === 'high') return 'bg-orange-500/20 text-orange-300';
-  if (risk === 'medium') return 'bg-amber-500/20 text-amber-300';
-  return 'bg-blue-500/20 text-blue-300';
+  return colors[phase] || 'text-surface-400';
 }
 
 function resultIcon(status) {
@@ -381,23 +353,26 @@ function resultIcon(status) {
 }
 
 function resultIconClass(status) {
-  if (status === 'success') return 'text-emerald-400';
-  if (status === 'failed') return 'text-rose-400';
-  if (status === 'precondition_failed' || status === 'postcondition_failed') return 'text-amber-400';
-  return 'text-zinc-500';
+  if (status === 'success') return 'text-status-ok';
+  if (status === 'failed') return 'text-status-error';
+  if (status === 'precondition_failed' || status === 'postcondition_failed') return 'text-status-warn';
+  return 'text-surface-400';
 }
 
 function resultBorderClass(status) {
-  if (status === 'success') return 'border-emerald-500/20 bg-emerald-500/5';
-  if (status === 'failed') return 'border-rose-500/20 bg-rose-500/5';
-  if (status === 'precondition_failed' || status === 'postcondition_failed') return 'border-amber-500/20 bg-amber-500/5';
-  return 'border-zinc-800 bg-zinc-900/40';
+  if (status === 'success') return 'border-status-ok/20 bg-status-ok/5';
+  if (status === 'failed') return 'border-status-error/20 bg-status-error/5';
+  if (status === 'precondition_failed' || status === 'postcondition_failed') return 'border-status-warn/20 bg-status-warn/5';
+  return 'border-surface-800 bg-surface-900/40';
 }
 
 usePullRefresh(load, { keepAlive: true });
 onMounted(() => load());
 let historyActivatedOnce = false;
 onActivated(() => { if (historyActivatedOnce) void load(); historyActivatedOnce = true; });
+
+const { rows: pagedRows, page, pageSize, total, sortKey, descending } = usePagedRows(filteredExecutions, { createdAt: item => Date.parse(item.createdAt) || 0, status: item => item.status, message: item => item.message }, 'createdAt');
+const sortOptions = [{ key: 'createdAt', label: '创建时间' }, { key: 'status', label: '状态' }, { key: 'message', label: '任务名称' }];
 </script>
 
 <style scoped>
@@ -406,7 +381,4 @@ onActivated(() => { if (historyActivatedOnce) void load(); historyActivatedOnce 
   @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium;
 }
 
-.risk-badge {
-  @apply inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium;
-}
 </style>

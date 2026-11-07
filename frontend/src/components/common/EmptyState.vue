@@ -11,7 +11,7 @@
     </div>
     <div class="space-y-1">
       <p class="text-sm font-medium text-surface-300">{{ title }}</p>
-      <p v-if="description" class="mx-auto max-w-sm text-xs leading-5 text-surface-500">{{ description }}</p>
+      <p v-if="description" class="mx-auto max-w-sm text-xs leading-5 text-surface-400">{{ description }}</p>
     </div>
     <slot />
     <button v-if="actionLabel" class="btn-primary" type="button" :disabled="actionDisabled" @click="$emit('action')">
@@ -22,13 +22,13 @@
 
 <script setup>
 import { computed } from 'vue';
-import { Bot, Boxes, CircleCheckBig, FileClock, FileCode2, FolderCog, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-vue-next';
+import { Activity, Bell, BellRing, Layers, Network, ShieldCheck, Bot, Boxes, CircleCheckBig, FileClock, FileCode2, FolderCog, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-vue-next';
 
-const ICONS = { Bot, Boxes, CircleCheckBig, FileClock, FileCode2, FolderCog, History, Inbox, ListChecks, RefreshCw, Search };
+const ICONS = { Activity, Bell, BellRing, Layers, Network, ShieldCheck, Bot, Boxes, CircleCheckBig, FileClock, FileCode2, FolderCog, History, Inbox, ListChecks, RefreshCw, Search };
 
 const props = defineProps({
   icon: { type: [Object, Function, String], default: 'Inbox' },
-  iconClass: { type: String, default: 'text-surface-500' },
+  iconClass: { type: String, default: 'text-surface-400' },
   title: { type: String, required: true },
   description: { type: String, default: '' },
   actionLabel: { type: String, default: '' },
@@ -39,7 +39,7 @@ const props = defineProps({
 defineEmits(['action']);
 
 const iconComp = computed(() => {
-  if (typeof props.icon === 'string') return ICONS[props.icon] || Inbox;
+  if (typeof props.icon === 'string') return ICONS[props.icon] || Object.entries(ICONS).find(([name]) => name.toLowerCase() === props.icon.toLowerCase())?.[1] || Inbox;
   return props.icon || Inbox;
 });
 const actionIconComp = computed(() => {

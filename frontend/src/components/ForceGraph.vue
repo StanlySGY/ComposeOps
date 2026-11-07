@@ -29,11 +29,11 @@
 
       <div class="flex items-center gap-2 text-xs text-surface-400">
         <span class="ios-stat-chip">
-          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span class="w-2 h-2 rounded-full bg-status-ok"></span>
           {{ activeNodesCount }} 正常
         </span>
-        <span v-if="alertNodesCount" class="ios-stat-chip text-rose-300">
-          <span class="w-2 h-2 rounded-full bg-rose-400"></span>
+        <span v-if="alertNodesCount" class="ios-stat-chip text-status-error">
+          <span class="w-2 h-2 rounded-full bg-status-error"></span>
           {{ alertNodesCount }} 告警/异常
         </span>
       </div>

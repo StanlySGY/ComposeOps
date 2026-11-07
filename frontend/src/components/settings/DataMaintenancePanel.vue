@@ -23,7 +23,7 @@ import ConfirmDialog from '../common/ConfirmDialog.vue';
 const store = useServicesStore(); const toast = useToastStore();
 const preview = ref(null); const evaluation = ref(null); const busy = ref(false); const confirm = ref(false); const containerId = ref('');
 const containers = computed(() => store.projects.filter(p => p.managed).flatMap(p => p.containers.map(c => ({ id: c.id, label: `${p.projectName} / ${c.name}` }))));
-async function run(fn) { busy.value = true; try { await fn(); } catch (e) { toast.error(e.message); } finally { busy.value = false; } }
+async function run(fn) { busy.value = true; try { await fn(); } catch (e) { toast.error(e); } finally { busy.value = false; } }
 function previewRetention() { return run(async () => { preview.value = (await api.previewRetentionPolicy()).preview; }); }
 function evaluate() { return run(async () => { evaluation.value = await api.evaluateAlerts(containerId.value); }); }
 function apply() { confirm.value = false; return run(async () => { const result = await api.applyRetentionPolicy(); toast.success(`已清理 ${result.result.deleted30d} 条过期指标`); preview.value = null; }); }

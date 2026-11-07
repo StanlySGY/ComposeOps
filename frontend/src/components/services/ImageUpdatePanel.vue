@@ -5,7 +5,7 @@
       <p class="text-sm text-muted" role="status">{{ summary }}</p>
       <div v-for="item in projects" :key="item.projectId" class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-surface-800 p-3"><span class="text-sm">{{ item.projectName || item.projectId }}</span><button class="btn-ghost" @click="openProject(item.projectId)">{{ item.hasUpdate ? `有 ${item.images?.filter(image => image.hasUpdate).length || 1} 项可升级` : '查看检查结果' }} →</button></div>
     </template>
-    <p v-if="error" class="text-xs text-rose-300" role="alert">{{ error }}</p>
+    <p v-if="error" class="text-xs text-status-error" role="alert">{{ error }}</p>
   </div>
 </template>
 <script setup>

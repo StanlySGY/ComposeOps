@@ -23,7 +23,7 @@
 
     <div v-if="loadError" class="alert-error flex items-center justify-between gap-3" role="alert">
       <span>{{ loadError }}</span>
-      <button class="btn-secondary px-2.5! py-1! text-xs" :disabled="loading" @click="load">重试</button>
+      <button class="btn-secondary btn-sm" :disabled="loading" @click="load">重试</button>
     </div>
 
     <nav class="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="常用运维入口">
@@ -33,33 +33,11 @@
 
     <template v-else>
       <div class="metric-grid">
-        <router-link to="/services" class="metric-tile hover:border-emerald-500/40" aria-label="查看全部项目">
-          <span class="metric-icon text-blue-300"><Boxes class="h-5 w-5" /></span>
-          <span><strong>{{ projectCount }}</strong><small>项目总数</small></span>
-          <span class="metric-meta">健康 {{ healthyProjects }}</span>
-        </router-link>
-        <router-link to="/services" class="metric-tile hover:border-emerald-500/40" aria-label="查看容器状态">
-          <span class="metric-icon text-emerald-300"><Container class="h-5 w-5" /></span>
-          <span><strong>{{ containerCount }}</strong><small>容器总数</small></span>
-          <span class="metric-meta">运行 {{ runningContainers }}</span>
-        </router-link>
-        <router-link to="/monitor" class="metric-tile hover:border-emerald-500/40" aria-label="查看 CPU 实时监控">
-          <span class="metric-icon" :class="cpuTone"><Cpu class="h-5 w-5" /></span>
-          <span><strong class="font-mono tabular-nums" :class="cpuTone">{{ cpu == null ? '—' : `${cpu}%` }}</strong><small>环境 CPU</small></span>
-          <SparklineChart :cpu="monitorTrends.cpu" :mem="[]" :width="72" :height="20" />
-          <span class="metric-meta">{{ cpuState }}</span>
-        </router-link>
-        <router-link to="/monitor" class="metric-tile hover:border-emerald-500/40" aria-label="查看内存实时监控">
-          <span class="metric-icon" :class="memoryTone"><MemoryStick class="h-5 w-5" /></span>
-          <span><strong class="font-mono tabular-nums" :class="memoryTone">{{ memory == null ? '—' : `${memory}%` }}</strong><small>环境内存</small></span>
-          <SparklineChart :cpu="[]" :mem="monitorTrends.mem" :width="72" :height="20" />
-          <span class="metric-meta">{{ memoryState }}</span>
-        </router-link>
-        <router-link to="/inspection" class="metric-tile hover:border-emerald-500/40" aria-label="查看巡检报告">
-          <span class="metric-icon" :class="inspectionTone"><Gauge class="h-5 w-5" /></span>
-          <span><strong class="font-mono tabular-nums" :class="inspectionTone">{{ inspectionScore }}</strong><small>巡检评分</small></span>
-          <span class="metric-meta">{{ inspectionSummary }}</span>
-        </router-link>
+        <MetricTile title="项目总数" :value="projectCount" :sub="`健康 ${healthyProjects}`" :icon="Boxes" to="/services" />
+        <MetricTile title="容器总数" :value="containerCount" :sub="`运行 ${runningContainers}`" :icon="Container" tone="text-status-ok" to="/services" />
+        <MetricTile title="环境 CPU" :value="cpu == null ? '—' : `${cpu}%`" :sub="cpuState" :icon="Cpu" :tone="cpuTone" :trend="monitorTrends.cpu" to="/monitor" />
+        <MetricTile title="环境内存" :value="memory == null ? '—' : `${memory}%`" :sub="memoryState" :icon="MemoryStick" :tone="memoryTone" :trend="monitorTrends.mem" to="/monitor" />
+        <MetricTile title="巡检评分" :value="inspectionScore" :sub="inspectionSummary" :icon="Gauge" :tone="inspectionTone" to="/inspection" />
       </div>
 
       <section v-if="hasLoaded && !loadError && !projectCount" class="section-panel text-center">
@@ -72,21 +50,21 @@
         <div class="mb-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="flex items-center gap-2">
-              <AlertTriangle class="h-4 w-4 text-amber-300" />
+              <AlertTriangle class="h-4 w-4 text-status-warn" />
               <h3 class="font-semibold text-surface-100">需要处理</h3>
-              <span class="count-badge text-amber-300">{{ attentionProjects }}</span>
+              <span class="count-badge text-status-warn">{{ attentionProjects }}</span>
             </div>
             <p class="mt-1 text-xs text-muted">优先处理异常项目，避免在多个页面之间来回寻找。</p>
           </div>
-          <router-link to="/services" class="shrink-0 whitespace-nowrap text-xs text-accent hover:text-blue-300">查看全部 <ArrowRight class="inline h-3.5 w-3.5" /></router-link>
+          <router-link to="/services" class="shrink-0 whitespace-nowrap text-xs text-status-info hover:text-blue-300">查看全部 <ArrowRight class="inline h-3.5 w-3.5" /></router-link>
         </div>
         <div class="dashboard-attention-list">
           <div v-for="project in attentionProjectList" :key="project.id" class="dashboard-attention-row">
-            <span class="status-dot" :class="project.status === 'running' ? 'bg-amber-400' : 'bg-rose-400'"></span>
+            <span class="status-dot" :class="project.status === 'running' ? 'bg-status-warn' : 'bg-status-error'"></span>
             <div class="min-w-0 flex-1">
               <div class="flex min-w-0 items-center gap-2">
                 <span class="truncate text-sm font-medium text-surface-200">{{ project.projectName }}</span>
-                <span class="count-badge hidden sm:inline-flex" :class="project.status === 'running' ? 'text-amber-300' : 'text-rose-300'">{{ project.status === 'running' ? '健康检查异常' : '未运行' }}</span>
+                <span class="count-badge hidden sm:inline-flex" :class="project.status === 'running' ? 'text-status-warn' : 'text-status-error'">{{ project.status === 'running' ? '健康检查异常' : '未运行' }}</span>
               </div>
               <p class="mt-0.5 truncate text-xs text-muted">{{ project.containers.filter(c => c.health === 'unhealthy').length ? `${project.containers.filter(c => c.health === 'unhealthy').length} 个容器不健康` : `${project.containers.length} 个容器 · ${project.status}` }}</p>
             </div>
@@ -99,17 +77,17 @@
       <section class="section-panel">
           <div class="mb-4 flex items-center justify-between">
             <h3 class="font-semibold text-surface-100">最近事件</h3>
-            <router-link to="/events?tab=timeline" class="shrink-0 whitespace-nowrap text-xs text-emerald-400 hover:text-emerald-300">查看全部 →</router-link>
+            <router-link to="/events?tab=timeline" class="shrink-0 whitespace-nowrap text-xs text-status-ok hover:text-status-ok">查看全部 →</router-link>
           </div>
           <div v-if="recentEvents.length" class="space-y-2">
             <div v-for="event in recentEvents" :key="event.key" class="flex items-center gap-3 rounded-lg border border-surface-800 bg-surface-900/60 px-3 py-2">
               <span class="h-2 w-2 shrink-0 rounded-full" :class="dotClass(event.level)"></span>
               <span class="count-badge shrink-0 text-[10px]" :class="sourceBadgeClass(event.source)">{{ sourceLabel(event.source) }}</span>
               <span class="min-w-0 flex-1 truncate text-sm text-surface-200">{{ event.title }}</span>
-              <span class="shrink-0 font-mono text-[11px] tabular-nums text-surface-500">{{ formatTime(event.timestamp) }}</span>
+              <span class="shrink-0 font-mono text-[11px] tabular-nums text-surface-400">{{ formatTime(event.timestamp) }}</span>
             </div>
           </div>
-          <EmptyState v-else compact icon="History" title="暂无事件记录" />
+          <EmptyState v-else compact icon="History" title="暂无事件记录" description="运行巡检或执行任务后，会在这里显示动态。"><router-link to="/inspection?from=dashboard" class="btn-secondary btn-sm">前往巡检</router-link></EmptyState>
         </section>
     </template>
   </div>
@@ -125,7 +103,7 @@ import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
 import Skeleton from '../components/common/Skeleton.vue';
-import SparklineChart from '../components/common/SparklineChart.vue';
+import MetricTile from '../components/common/MetricTile.vue';
 import { monitorTrends, pushMonitorTrend } from '../lib/monitor-trends.js';
 
 const store = useServicesStore();
@@ -153,26 +131,26 @@ const cpu = computed(() => metrics.value?.host?.cpu?.percent ?? null);
 const memory = computed(() => metrics.value?.host?.memory?.percent ?? null);
 const cpuState = computed(() => cpu.value == null ? '暂无指标' : cpu.value > 80 ? '负载较高' : '运行正常');
 const memoryState = computed(() => memory.value == null ? '暂无指标' : memory.value > 80 ? '内存偏高' : '资源充足');
-const cpuTone = computed(() => cpu.value == null ? 'text-surface-400' : cpu.value > 80 ? 'text-amber-300' : 'text-emerald-300');
-const memoryTone = computed(() => memory.value == null ? 'text-surface-400' : memory.value > 80 ? 'text-amber-300' : 'text-emerald-300');
+const cpuTone = computed(() => cpu.value == null ? 'text-surface-400' : cpu.value > 80 ? 'text-status-warn' : 'text-status-ok');
+const memoryTone = computed(() => memory.value == null ? 'text-surface-400' : memory.value > 80 ? 'text-status-warn' : 'text-status-ok');
 
 const inspectionScore = computed(() => inspection.value?.latest?.score ?? '--');
 const inspectionSummary = computed(() => inspection.value?.latest?.summary ?? '暂无巡检数据');
 const inspectionTone = computed(() => {
   const score = inspection.value?.latest?.score;
   if (score == null) return 'text-surface-300';
-  if (score >= 90) return 'text-emerald-300';
-  if (score >= 70) return 'text-amber-300';
-  return 'text-rose-300';
+  if (score >= 90) return 'text-status-ok';
+  if (score >= 70) return 'text-status-warn';
+  return 'text-status-error';
 });
 
 const SOURCE_LABELS = { operation: '操作', agent: 'Agent', alert: '告警', cron: '定时', gitops: 'GitOps' };
 function sourceLabel(s) { return SOURCE_LABELS[s] || s; }
 function sourceBadgeClass(s) {
-  return { operation: 'text-blue-300', agent: 'text-emerald-300', alert: 'text-rose-300', cron: 'text-amber-300', gitops: 'text-violet-300' }[s] || 'text-surface-400';
+  return { operation: 'text-blue-300', agent: 'text-status-ok', alert: 'text-status-error', cron: 'text-status-warn', gitops: 'text-violet-300' }[s] || 'text-surface-400';
 }
 function dotClass(l) {
-  return { success: 'bg-emerald-400', info: 'bg-sky-400', warning: 'bg-amber-400', error: 'bg-rose-400' }[l] || 'bg-surface-500';
+  return { success: 'bg-status-ok', info: 'bg-sky-400', warning: 'bg-status-warn', error: 'bg-status-error' }[l] || 'bg-surface-500';
 }
 function formatTime(iso) {
   if (!iso) return '—';

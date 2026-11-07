@@ -26,11 +26,11 @@
     <template v-else>
       <!-- 项目概览指标卡片 -->
       <div class="metric-grid">
-        <div class="metric-tile"><span class="metric-icon text-blue-300"><Boxes class="h-5 w-5" /></span><span><strong>{{ services.length }}</strong><small>服务节点</small></span><span class="metric-meta">{{ project?.projectName }}</span></div>
-        <div class="metric-tile"><span class="metric-icon text-emerald-300"><GitBranch class="h-5 w-5" /></span><span><strong>{{ edgeCount }}</strong><small>依赖关系</small></span><span class="metric-meta">depends_on 链路</span></div>
-        <div class="metric-tile"><span class="metric-icon text-violet-300"><Network class="h-5 w-5" /></span><span><strong>{{ networkCount }}</strong><small>网络</small></span><span class="metric-meta">共享网络</span></div>
-        <div class="metric-tile"><span class="metric-icon text-amber-300"><HardDrive class="h-5 w-5" /></span><span><strong>{{ volumeCount }}</strong><small>数据卷</small></span><span class="metric-meta">持久化存储</span></div>
-        <div class="metric-tile"><span class="metric-icon text-rose-300"><Container class="h-5 w-5" /></span><span><strong>{{ runningContainers }} / {{ containerCount }}</strong><small>运行容器</small></span><span class="metric-meta">实时健康度</span></div>
+        <MetricTile title="服务节点" :value="services.length" :sub="project?.projectName" :icon="Boxes" tone="text-blue-300" />
+        <MetricTile title="依赖关系" :value="edgeCount" sub="depends_on 链路" :icon="GitBranch" tone="text-status-ok" />
+        <MetricTile title="网络" :value="networkCount" sub="共享网络" :icon="Network" tone="text-violet-300" />
+        <MetricTile title="数据卷" :value="volumeCount" sub="持久化存储" :icon="HardDrive" tone="text-status-warn" />
+        <MetricTile title="运行容器" :value="`${runningContainers} / ${containerCount}`" sub="实时健康度" :icon="Container" tone="text-status-error" />
       </div>
 
       <!-- iOS 拓扑架构图 -->
@@ -41,9 +41,9 @@
             <p class="mt-1 text-muted">卡片展示服务状态与规格，贝塞尔曲线标明依赖流向；点击卡片可高亮上下游链路</p>
           </div>
           <div class="flex flex-wrap items-center gap-3 text-xs text-surface-400">
-            <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>运行正常</span>
-            <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-rose-400"></span>停止/异常</span>
-            <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-amber-400"></span>健康度告警</span>
+            <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-status-ok"></span>运行正常</span>
+            <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-status-error"></span>停止/异常</span>
+            <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-status-warn"></span>健康度告警</span>
             <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-surface-500"></span>静态声明</span>
           </div>
         </div>
@@ -90,11 +90,11 @@
                       class="ios-tag-btn"
                       @click="selectedService = dep"
                     >
-                      <ArrowUpRight class="w-3 h-3 text-emerald-400" />
+                      <ArrowUpRight class="w-3 h-3 text-status-ok" />
                       {{ dep }}
                     </button>
                   </div>
-                  <span v-else class="text-surface-500 ml-1">无直接依赖 (基础服务)</span>
+                  <span v-else class="text-surface-400 ml-1">无直接依赖 (基础服务)</span>
                 </div>
 
                 <div>
@@ -110,16 +110,16 @@
                       {{ down }}
                     </button>
                   </div>
-                  <span v-else class="text-surface-500 ml-1">无下游服务依赖</span>
+                  <span v-else class="text-surface-400 ml-1">无下游服务依赖</span>
                 </div>
 
                 <div v-if="selectedSvcData.ports.length" class="pt-1">
                   <span class="text-surface-400">暴露端口：</span>
-                  <span class="font-mono text-emerald-300 ml-1">{{ selectedSvcData.ports.join(', ') }}</span>
+                  <span class="font-mono text-status-ok ml-1">{{ selectedSvcData.ports.join(', ') }}</span>
                 </div>
                 <div v-if="selectedSvcData.volumes.length">
                   <span class="text-surface-400">挂载卷：</span>
-                  <span class="font-mono text-amber-300 ml-1">{{ selectedSvcData.volumes.length }} 个存储绑定</span>
+                  <span class="font-mono text-status-warn ml-1">{{ selectedSvcData.volumes.length }} 个存储绑定</span>
                 </div>
               </div>
 
@@ -127,14 +127,14 @@
               <div class="mt-4 pt-3 border-t border-white/10 flex items-center gap-2">
                 <router-link
                   :to="deepLink('/logs', { projectId: selectedSvcData.projectId || selectedProjectId, from: 'topology' })"
-                  class="btn-secondary text-xs! py-1.5! px-3!"
+                  class="btn-secondary btn-sm"
                 >
                   <ScrollText class="w-3.5 h-3.5" />
                   实时日志
                 </router-link>
                 <router-link
                   :to="deepLink('/services', { focus: selectedSvcData.projectId || selectedProjectId, from: 'topology' })"
-                  class="btn-secondary text-xs! py-1.5! px-3!"
+                  class="btn-secondary btn-sm"
                 >
                   <Sliders class="w-3.5 h-3.5" />
                   服务管理
@@ -181,16 +181,16 @@
                 </td>
                 <td><span class="status-badge" :class="svcStateClass(svc)">{{ svcStateLabel(svc) }}</span></td>
                 <td class="text-surface-300">
-                  <span v-if="!svc.dependsOn.length" class="text-surface-500">—</span>
+                  <span v-if="!svc.dependsOn.length" class="text-surface-400">—</span>
                   <span v-else class="inline-flex flex-wrap gap-1">
                     <span v-for="d in svc.dependsOn" :key="d" class="count-badge text-surface-300">{{ d }}</span>
                   </span>
                 </td>
-                <td class="font-mono text-xs text-emerald-300">{{ svc.ports.length ? svc.ports.join(', ') : '—' }}</td>
-                <td class="font-mono text-xs text-amber-300">{{ svc.volumes.length ? svc.volumes.length + ' 个' : '—' }}</td>
+                <td class="font-mono text-xs text-status-ok">{{ svc.ports.length ? svc.ports.join(', ') : '—' }}</td>
+                <td class="font-mono text-xs text-status-warn">{{ svc.volumes.length ? svc.volumes.length + ' 个' : '—' }}</td>
                 <td class="max-w-56 truncate text-muted" :title="svc.image">{{ svc.image || '—' }}</td>
                 <td>
-                  <button class="btn-ghost text-xs! py-1! px-2!" @click="toggleService(svc.name)">
+                  <button class="btn-ghost btn-sm" @click="toggleService(svc.name)">
                     {{ selectedService === svc.name ? '取消聚焦' : '图谱聚焦' }}
                   </button>
                 </td>
@@ -204,6 +204,7 @@
 </template>
 
 <script setup>
+import MetricTile from '../components/common/MetricTile.vue';
 import { deepLink } from '../lib/deep-links.js';
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
@@ -295,11 +296,11 @@ function svcState(svc) {
 }
 function svcStateClass(svc) {
   const s = svcState(svc);
-  return { running: 'bg-emerald-500/10 text-emerald-400', unhealthy: 'bg-amber-500/10 text-amber-400', stopped: 'bg-rose-500/10 text-rose-400', none: 'bg-surface-800 text-surface-400' }[s] || 'bg-surface-800 text-surface-400';
+  return { running: 'bg-status-ok/10 text-status-ok', unhealthy: 'bg-status-warn/10 text-status-warn', stopped: 'bg-status-error/10 text-status-error', none: 'bg-surface-800 text-surface-400' }[s] || 'bg-surface-800 text-surface-400';
 }
 function svcStateClassDot(svc) {
   const s = svcState(svc);
-  return { running: 'bg-emerald-400', unhealthy: 'bg-amber-400', stopped: 'bg-rose-400', none: 'bg-surface-500' }[s] || 'bg-surface-500';
+  return { running: 'bg-status-ok', unhealthy: 'bg-status-warn', stopped: 'bg-status-error', none: 'bg-surface-500' }[s] || 'bg-surface-500';
 }
 function svcStateLabel(svc) {
   const s = svcState(svc);

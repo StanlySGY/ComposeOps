@@ -5,9 +5,9 @@
        无需裁剪。 -->
   <article :id="`project-${project.id}`" class="card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused }">
     <header class="service-project-card__header min-h-16 flex items-center gap-1 px-2 md:px-4">
-      <input type="checkbox" class="ml-2 accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @click.stop @change="$emit('toggle-select')" />
+      <input type="checkbox" class="checkbox ml-2" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @click.stop @change="$emit('toggle-select')" />
       <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" @click="toggleFavorite(project)">
-        <Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-amber-400' : ''" />
+        <Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-status-warn' : ''" />
       </button>
       <button class="service-project-card__toggle min-w-0 flex-1 self-stretch flex items-center gap-3 text-left px-1" :aria-expanded="expanded" @click="$emit('toggle-expand')">
         <div class="min-w-0 flex-1 sm:flex-none sm:w-48 md:w-60">
@@ -15,15 +15,15 @@
         </div>
         <span class="status-dot sm:hidden" :class="statusDotClass"></span>
         <div class="hidden sm:block"><StatusBadge :status="project.status" /></div>
-        <span class="count-badge shrink-0" :class="project.managed ? 'text-emerald-300' : ''">{{ project.managed ? '已纳管' : '未纳管' }}</span>
-        <span v-if="imageState === 'updated'" class="count-badge shrink-0 bg-amber-950/50 text-amber-300">镜像待应用</span>
-        <span v-else-if="imageState === 'failed'" class="count-badge hidden shrink-0 bg-rose-950/50 text-rose-300 lg:inline">镜像检查失败</span>
-        <span v-else-if="imageState === 'current'" class="count-badge hidden shrink-0 text-emerald-300 xl:inline">镜像已检查</span>
+        <span class="count-badge shrink-0" :class="project.managed ? 'text-status-ok' : ''">{{ project.managed ? '已纳管' : '未纳管' }}</span>
+        <span v-if="imageState === 'updated'" class="count-badge shrink-0 bg-status-warn/15 text-status-warn">镜像待应用</span>
+        <span v-else-if="imageState === 'failed'" class="count-badge hidden shrink-0 bg-status-error/15 text-status-error lg:inline">镜像检查失败</span>
+        <span v-else-if="imageState === 'current'" class="count-badge hidden shrink-0 text-status-ok xl:inline">镜像已检查</span>
         <span class="hidden sm:inline text-muted shrink-0">{{ project.containers.length }} 个容器</span>
         <span v-if="statusHint" class="hidden sm:inline text-muted shrink-0" :class="statusHintClass">{{ statusHint }}</span>
         <span class="hidden lg:inline text-muted shrink-0">{{ project.owner }}</span>
         <span class="hidden md:block text-muted font-mono truncate flex-1" :title="project.workingDir">{{ project.workingDir }}</span>
-        <ChevronDown class="w-4 h-4 text-surface-500 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
+        <ChevronDown class="w-4 h-4 text-surface-400 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
       </button>
       <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden md:inline-flex" />
       <ImageUpdatePanel :project="project" compact @result="updateInfo = $event" @open="$emit('upgrade')" />
@@ -43,9 +43,9 @@
             <span class="text-xs text-surface-400">{{ dependencyText }}</span>
           </div>
           <div v-if="envPreview.length" class="mt-1.5">
-            <div class="flex items-center gap-1.5"><span class="count-badge text-[10px] bg-surface-800/60 text-surface-300"><KeyRound class="w-3 h-3" />环境变量</span><button class="text-[10px] text-surface-500 hover:text-surface-300" @click="showEnvPreview = !showEnvPreview">{{ showEnvPreview ? '收起' : '预览' }}</button></div>
+            <div class="flex items-center gap-1.5"><span class="count-badge text-[10px] bg-surface-800/60 text-surface-300"><KeyRound class="w-3 h-3" />环境变量</span><button class="text-[10px] text-surface-400 hover:text-surface-300" @click="showEnvPreview = !showEnvPreview">{{ showEnvPreview ? '收起' : '预览' }}</button></div>
             <div v-if="showEnvPreview" class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
-              <span v-for="entry in envPreview" :key="entry.key" class="truncate font-mono text-[11px]"><span class="text-surface-500">{{ entry.key }}</span><span class="text-surface-400">={{ entry.masked }}</span></span>
+              <span v-for="entry in envPreview" :key="entry.key" class="truncate font-mono text-[11px]"><span class="text-surface-400">{{ entry.key }}</span><span class="text-surface-400">={{ entry.masked }}</span></span>
             </div>
           </div>
           <p v-if="project.note" class="text-sm text-surface-300 border-l-2 border-surface-700 pl-2 mt-2">{{ project.note }}</p>
@@ -63,7 +63,7 @@
         <router-link class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :to="deepLink('/compose', { projectId: project.id, from: 'services' })"><FileCode2 class="w-4 h-4" />配置</router-link>
         <button class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :disabled="!project.editable || busy" title="编辑项目环境变量 (.env)" @click="$emit('env')"><KeyRound class="w-4 h-4" />环境变量</button>
         <button class="btn-ghost" :disabled="!project.managed || busy" @click="$emit('activity')"><History class="h-4 w-4" />活动</button>
-        <button v-if="dbContainers.length" class="btn-ghost" :disabled="!project.managed || busy" title="一键导出数据库备份并下载" @click="$emit('db-dump')"><Database class="h-4 w-4 text-emerald-300" />备份数据库</button>
+        <button v-if="dbContainers.length" class="btn-ghost" :disabled="!project.managed || busy" title="一键导出数据库备份并下载" @click="$emit('db-dump')"><Database class="h-4 w-4 text-status-ok" />备份数据库</button>
       </div>
 
       <div v-if="!project.managed" class="alert-warning flex flex-col sm:flex-row sm:items-center gap-2">
@@ -82,28 +82,28 @@
         <div v-for="container in project.containers" :key="container.id" class="py-2.5">
           <!-- 桌面端紧凑单行模式 -->
           <div class="hidden sm:flex items-center gap-2">
-            <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+            <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-status-ok' : 'bg-status-error'"></span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
                 <span class="text-sm font-mono truncate">{{ container.name }}</span>
-                <span v-if="metrics[container.id]?.cpu != null" class="metric-chip" :class="metrics[container.id].cpu >= 85 ? 'bg-rose-950/50 text-rose-300' : metrics[container.id].cpu >= 60 ? 'bg-amber-950/50 text-amber-300' : 'text-emerald-300'">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
-                <span v-if="metrics[container.id]?.mem != null" class="metric-chip" :class="metrics[container.id].mem >= 90 ? 'bg-rose-950/50 text-rose-300' : 'text-emerald-300'">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB / {{ numberValue(metrics[container.id].mem).toFixed(1) }}%</span>
+                <span v-if="metrics[container.id]?.cpu != null" class="metric-chip" :class="metrics[container.id].cpu >= 85 ? 'bg-status-error/15 text-status-error' : metrics[container.id].cpu >= 60 ? 'bg-status-warn/15 text-status-warn' : 'text-status-ok'">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}%</span>
+                <span v-if="metrics[container.id]?.mem != null" class="metric-chip" :class="metrics[container.id].mem >= 90 ? 'bg-status-error/15 text-status-error' : 'text-status-ok'">MEM {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }}MB / {{ numberValue(metrics[container.id].mem).toFixed(1) }}%</span>
               </div>
               <div class="text-muted truncate">{{ container.image }}<span v-if="container.ports.length"> · {{ portText(container) }}</span><span v-if="container.health" :class="healthClass(container.health)"> · {{ container.health }}</span></div>
               <div v-if="container.stoppedAt || container.startedAt" class="text-muted text-[11px]">{{ containerStateHint(container) }}</div>
             </div>
             <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
-            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="deepLink('/shell', { projectId: project.id, containerId: container.id, from: 'services' })"><TerminalSquare class="w-4 h-4" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="deepLink('/agent', { projectId: project.id, containerId: container.id, diagnose: '1', from: 'services' })"><Bot class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" aria-label="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
+            <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" aria-label="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-status-ok" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" aria-label="容器终端" :to="deepLink('/shell', { projectId: project.id, containerId: container.id, from: 'services' })"><TerminalSquare class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" aria-label="AI 诊断" :to="deepLink('/agent', { projectId: project.id, containerId: container.id, diagnose: '1', from: 'services' })"><Bot class="w-4 h-4" /></router-link>
           </div>
 
           <!-- 移动端触控友好卡片模式 -->
           <div class="flex sm:hidden flex-col gap-2 rounded-xl p-2.5 bg-surface-900/50 border border-surface-800/70">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                <span class="status-dot shrink-0" :class="container.state === 'running' ? 'bg-status-ok' : 'bg-status-error'"></span>
                 <span class="text-sm font-mono font-medium truncate">{{ container.name }}</span>
               </div>
               <StatusBadge :status="container.state" size="sm" />
@@ -118,7 +118,7 @@
             <router-link
               v-if="container.state !== 'running' && project.managed"
               :to="deepLink('/agent', { projectId: project.id, containerId: container.id, diagnose: '1', from: 'services' })"
-              class="flex items-center justify-center gap-1.5 rounded-lg bg-amber-950/40 border border-amber-500/30 px-3 py-1.5 text-xs text-amber-300 font-medium active:scale-98"
+              class="flex items-center justify-center gap-1.5 rounded-lg bg-status-warn/15 border border-status-warn/30 px-3 py-1.5 text-xs text-status-warn font-medium active:scale-98"
             >
               <Bot class="w-3.5 h-3.5" />
               <span>容器异常 · 唤醒 Agent 一键诊断</span>
@@ -296,7 +296,7 @@ function closeStats() {
 const locked = computed(() => props.busy || !!props.actionRunning);
 const dbContainers = computed(() => props.project.containers.filter((c) => /(postgres|postgis|mysql|mariadb|redis|valkey|mongo)/i.test(c.image)));
 const attention = computed(() => props.project.status !== 'running' || props.project.containers.some((container) => container.health === 'unhealthy'));
-const statusDotClass = computed(() => (props.project.status === 'running' ? 'bg-emerald-400' : props.project.status === 'partial' ? 'bg-amber-400' : 'bg-rose-400'));
+const statusDotClass = computed(() => (props.project.status === 'running' ? 'bg-status-ok' : props.project.status === 'partial' ? 'bg-status-warn' : 'bg-status-error'));
 const statusHint = computed(() => {
   if (!props.project.containers.length) return '';
   // 最近一次状态变化:优先 'x 分钟前停止',其次启动时间
@@ -312,7 +312,7 @@ const statusHint = computed(() => {
   }
   return '';
 });
-const statusHintClass = computed(() => (props.project.status === 'running' ? 'text-emerald-300/80' : 'text-amber-300/80'));
+const statusHintClass = computed(() => (props.project.status === 'running' ? 'text-status-ok/80' : 'text-status-warn/80'));
 const dependencyText = computed(() => {
   const entries = [...dependencyMap.value.entries()]
     .filter(([, deps]) => deps && deps.length)
@@ -339,7 +339,7 @@ async function editNote(project) {
   project.note = note.slice(0, 500); await api.saveProjectPreference(project.id, { note: project.note });
 }
 function portText(container) { return container.ports.map((port) => `${port.public}:${port.private}`).join(', '); }
-function healthClass(health) { return health === 'unhealthy' ? 'text-rose-400' : health === 'healthy' ? 'text-emerald-400' : 'text-amber-400'; }
+function healthClass(health) { return health === 'unhealthy' ? 'text-status-error' : health === 'healthy' ? 'text-status-ok' : 'text-status-warn'; }
 function timeAgo(ts) {
   if (!ts) return '';
   const diff = Math.max(0, Date.now() - Number(ts));

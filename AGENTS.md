@@ -5,7 +5,7 @@
 ## 基本状态
 - Monorepo:`frontend/`(Vue 3 + Vite + Pinia + Tailwind + lucide-vue-next + Monaco + xterm)与 `backend/`(Fastify + Node.js `node:sqlite` 默认明文存储/可选 `better-sqlite3-multiple-ciphers` 静态加密 + dockerode + ssh2)。
 - 前端 hash router(`/services /compose /logs /shell /ai /monitor /operations /settings`);后端 REST 前缀 `/api/v1`。
-- 向量/弹层 z-index 阶梯:`z-0` 内容 → `z-40` Tab/Sidebar → `z-45` Header → `z-50` EventCenter → `z-[51]` 抽屉面板 → `z-[55]` Modal 背板 → `z-[60]` Cmd+K → `z-[70]` Toast。
+- 向量/弹层 z-index 阶梯:`z-0` 内容 → `z-40` Tab/Sidebar → `z-45` Header → `z-[46]` Header 项目/节点下拉 → `z-50` EventCenter → `z-[51]` 抽屉面板 → `z-[55]` Modal 背板 → `z-[60]` Cmd+K → `z-[70]` Toast。
 - 弹层 Esc 统一由 `frontend/src/composables/useEscapeKey.js` 管理(modal > drawer > event > command,`lockBody` 计数锁滚动)。
 - 端口映射 `0.0.0.0:28765:3001` 为用户明确配置,勿改。
 - 敏感识别正则:`/(SECRET|TOKEN|PASSWORD|PASSWD|\bPASS\b|(?:API|PRIVATE|ACCESS|SECRET|AUTH|SIGNING)[_-]?KEY)/i`。

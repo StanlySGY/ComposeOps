@@ -30,7 +30,7 @@
                 <div class="ios-row-title">检索后端</div>
                 <div class="ios-row-desc">内置检索(GitHub + DuckDuckGo)无需任何配置;需要更强检索质量时可切换 Tavily / Brave / 自托管 SearXNG,失败自动回退内置。</div>
               </div>
-              <select v-model="ai.searchProvider" class="input max-w-44!" aria-label="检索后端">
+              <select v-model="ai.searchProvider" class="input max-w-44" aria-label="检索后端">
                 <option v-for="item in (ai.searchProviders || ['builtin'])" :key="item" :value="item">{{ searchProviderLabel(item) }}</option>
               </select>
             </div>
@@ -56,8 +56,8 @@
     <section v-if="tab === 'personal'" class="settings-section">
       <h2 class="section-title">界面偏好</h2>
       <div class="ios-group">
-        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">自动刷新间隔（秒）</div><div class="ios-row-desc">服务、监控等页面的轮询周期,最小 3 秒。</div></div><div class="ios-row-control"><input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input max-w-24! text-center" aria-label="自动刷新间隔（秒）" /></div></div>
-        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">日志默认行数</div><div class="ios-row-desc">打开日志页时默认拉取的行数,10–5000。</div></div><div class="ios-row-control"><input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input max-w-24! text-center" aria-label="日志默认行数" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">自动刷新间隔（秒）</div><div class="ios-row-desc">服务、监控等页面的轮询周期,最小 3 秒。</div></div><div class="ios-row-control"><input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input max-w-24 text-center" aria-label="自动刷新间隔（秒）" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">日志默认行数</div><div class="ios-row-desc">打开日志页时默认拉取的行数,10–5000。</div></div><div class="ios-row-control"><input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input max-w-24 text-center" aria-label="日志默认行数" /></div></div>
       </div>
       <button class="btn-primary self-start" :disabled="savingPreferences" @click="savePreferences"><Save class="w-4 h-4" />{{ savingPreferences ? '保存中…' : '保存偏好' }}</button>
       <h2 class="section-title">修改管理员密码</h2>
@@ -85,9 +85,9 @@
           <div class="ios-row-main"><div class="ios-row-title">启用异常通知</div><div class="ios-row-desc">触发时按下方渠道推送,并写入事件中心。</div></div>
           <label class="toggle-label"><input v-model="notifications.enabled" type="checkbox" aria-label="启用异常通知" /></label>
         </div>
-        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">轮询间隔（秒）</div><div class="ios-row-desc">容器状态巡检周期,最小 30 秒。</div></div><div class="ios-row-control"><input v-model.number="notifications.intervalSeconds" type="number" min="30" class="input max-w-24! text-center" aria-label="通知轮询间隔（秒）" /></div></div>
-        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">内存告警阈值（%）</div></div><div class="ios-row-control"><input v-model.number="notifications.memoryThreshold" type="number" min="1" max="100" class="input max-w-24! text-center" aria-label="内存告警阈值（%）" /></div></div>
-        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">Docker 空间告警（GB）</div></div><div class="ios-row-control"><input v-model.number="notifications.dockerStorageThresholdGb" type="number" min="1" class="input max-w-24! text-center" aria-label="Docker 空间告警阈值（GB）" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">轮询间隔（秒）</div><div class="ios-row-desc">容器状态巡检周期,最小 30 秒。</div></div><div class="ios-row-control"><input v-model.number="notifications.intervalSeconds" type="number" min="30" class="input max-w-24 text-center" aria-label="通知轮询间隔（秒）" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">内存告警阈值（%）</div></div><div class="ios-row-control"><input v-model.number="notifications.memoryThreshold" type="number" min="1" max="100" class="input max-w-24 text-center" aria-label="内存告警阈值（%）" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">Docker 空间告警（GB）</div></div><div class="ios-row-control"><input v-model.number="notifications.dockerStorageThresholdGb" type="number" min="1" class="input max-w-24 text-center" aria-label="Docker 空间告警阈值（GB）" /></div></div>
       </div>
       <h2 class="section-title">推送渠道</h2>
       <div v-for="channel in notifications.channels || []" :key="channel.type" class="ios-group mb-4">
@@ -102,8 +102,8 @@
             <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">Chat ID</label><input v-model="channel.chatId" class="input" aria-label="Telegram Chat ID" /></div>
           </template>
           <template v-if="channel.type === 'email'">
-            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">SMTP 主机</div></div><div class="ios-row-control"><input v-model="channel.smtpHost" class="input max-w-44!" aria-label="邮件 SMTP 主机" /></div></div>
-            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">端口</div></div><div class="ios-row-control"><input v-model.number="channel.smtpPort" type="number" class="input max-w-24! text-center" aria-label="邮件 SMTP 端口" /></div></div>
+            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">SMTP 主机</div></div><div class="ios-row-control"><input v-model="channel.smtpHost" class="input max-w-44" aria-label="邮件 SMTP 主机" /></div></div>
+            <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">端口</div></div><div class="ios-row-control"><input v-model.number="channel.smtpPort" type="number" class="input max-w-24 text-center" aria-label="邮件 SMTP 端口" /></div></div>
             <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">用户名 / 密码</label><div class="grid gap-2 sm:grid-cols-2"><input v-model="channel.smtpUser" class="input" aria-label="邮件 SMTP 用户名" autocomplete="username" /><input v-model="channel.smtpPassword" type="password" class="input" aria-label="邮件 SMTP 密码" autocomplete="new-password" /></div></div>
             <div class="ios-row-stack"><label class="text-xs font-medium text-surface-400">发件人 / 收件人</label><div class="grid gap-2 sm:grid-cols-2"><input v-model="channel.emailFrom" class="input" aria-label="邮件发件人地址" /><input v-model="channel.emailTo" class="input" aria-label="邮件收件人地址" /></div></div>
             <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">TLS/SSL</div></div><label class="toggle-label"><input v-model="channel.smtpSecure" type="checkbox" aria-label="TLS/SSL" /></label></div>
@@ -123,7 +123,7 @@
       <h2 class="section-title">镜像更新</h2><ImageUpdatePanel />
       <div class="ios-group">
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">定时检查镜像更新</div><div class="ios-row-desc">只查询远端镜像摘要并发送提醒，不会下载镜像或重建容器。</div></div><label class="toggle-label"><input v-model="updates.autoEnabled" type="checkbox" aria-label="定时检查镜像更新" /></label></div>
-        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">检查间隔（小时）</div></div><div class="ios-row-control"><input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input max-w-24! text-center" aria-label="镜像更新检查间隔（小时）" /></div></div>
+        <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">检查间隔（小时）</div></div><div class="ios-row-control"><input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input max-w-24 text-center" aria-label="镜像更新检查间隔（小时）" /></div></div>
       </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" :disabled="savingUpdates" @click="saveUpdates"><Save class="w-4 h-4" />{{ savingUpdates ? '保存中…' : '保存更新策略' }}</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
       <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" aria-label="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>
         <div class="card p-3">
@@ -142,10 +142,10 @@
       </div>
 
       <div v-if="mountPlan" class="grid sm:grid-cols-4 gap-2">
-        <StatCard title="已发现" :value="String(mountPlan.summary?.total || 0)" sub="Compose 项目" />
-        <StatCard title="已纳管" :value="String(mountPlan.summary?.managed || 0)" sub="由你明确授权" />
-        <StatCard title="Compose 就绪" :value="String(mountPlan.summary?.operable || 0)" sub="可编辑、拉取和创建" />
-        <StatCard title="已选 Compose" :value="String(mountPlan.projects.filter((project) => project.managed && project.mountEnabled).length)" sub="按需精确挂载" />
+        <MetricTile title="已发现" :value="String(mountPlan.summary?.total || 0)" sub="Compose 项目" />
+        <MetricTile title="已纳管" :value="String(mountPlan.summary?.managed || 0)" sub="由你明确授权" />
+        <MetricTile title="Compose 就绪" :value="String(mountPlan.summary?.operable || 0)" sub="可编辑、拉取和创建" />
+        <MetricTile title="已选 Compose" :value="String(mountPlan.projects.filter((project) => project.managed && project.mountEnabled).length)" sub="按需精确挂载" />
       </div>
 
       <div v-if="mountPlan" class="space-y-2">
@@ -155,7 +155,7 @@
         </div>
         <p v-if="selectionDirty" class="alert-warning">当前选择尚未应用；保存前不会改变项目权限或 Compose 目录范围。</p>
         <EmptyState v-if="!mountPlan.projects.length" icon="FolderCog" title="暂未发现 Compose 项目" description="重新扫描以发现新的 Docker Compose 项目" action-label="重新扫描" action-icon="RefreshCw" :action-disabled="mountLoading" @action="loadMountPlan" />
-        <div v-for="project in mountPlan.projects" :key="project.id" class="card p-3 flex items-start gap-3" :class="{ 'ring-1 ring-amber-500/70': highlightedProjectId === project.id }">
+        <div v-for="project in mountPlan.projects" :key="project.id" class="card p-3 flex items-start gap-3" :class="{ 'ring-1 ring-status-warn/70': highlightedProjectId === project.id }">
           <div class="flex flex-col gap-2 pt-0.5">
             <label class="toggle-label text-xs whitespace-nowrap" title="允许控制该项目的现有容器"><input v-model="selectedProjectIds" type="checkbox" :value="project.id" class="accent-accent" />纳管</label>
             <label class="toggle-label text-xs whitespace-nowrap" :class="{ 'opacity-40 pointer-events-none': !selectedProjectIds.includes(project.id) }" title="选择后生成同路径目录挂载"><input v-model="selectedMountProjectIds" type="checkbox" :value="project.id" class="accent-accent" :disabled="!selectedProjectIds.includes(project.id)" />Compose</label>
@@ -184,16 +184,16 @@
         <button class="btn-primary" @click="openHostEditor()"><Server class="w-4 h-4" />添加远程主机</button>
       </div>
       <div class="grid gap-3 sm:grid-cols-2">
-        <div v-for="host in hostsStore.hosts" :key="host.id" class="card p-3 flex items-start gap-3" :class="{ 'ring-1 ring-emerald-500/60': host.id === hostsStore.activeHostId }">
-          <span class="mt-1.5 w-2.5 h-2.5 shrink-0 rounded-full" :class="host.status === 'online' ? 'bg-emerald-400 shadow-glow-emerald' : host.status === 'offline' ? 'bg-rose-400' : 'bg-surface-600'"></span>
+        <div v-for="host in hostsStore.hosts" :key="host.id" class="card p-3 flex items-start gap-3" :class="{ 'ring-1 ring-status-ok/60': host.id === hostsStore.activeHostId }">
+          <span class="mt-1.5 w-2.5 h-2.5 shrink-0 rounded-full" :class="host.status === 'online' ? 'bg-status-ok shadow-glow-emerald' : host.status === 'offline' ? 'bg-status-error' : 'bg-surface-600'"></span>
           <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2"><strong class="font-mono text-sm">{{ host.name }}</strong><span class="count-badge">{{ host.type.toUpperCase() }}</span><span v-if="host.id === hostsStore.activeHostId" class="count-badge text-emerald-300">当前</span></div>
+            <div class="flex flex-wrap items-center gap-2"><strong class="font-mono text-sm">{{ host.name }}</strong><span class="count-badge">{{ host.type.toUpperCase() }}</span><span v-if="host.id === hostsStore.activeHostId" class="count-badge text-status-ok">当前</span></div>
             <div class="mt-1 text-muted font-mono text-xs">{{ host.type === 'local' ? '本机 Docker Socket' : `${host.host}:${host.port}` }}<template v-if="host.latencyMs"> · {{ host.latencyMs }}ms</template><template v-if="host.version"> · v{{ host.version }}</template><template v-if="host.containerCount != null"> · {{ host.containerCount }} 容器</template></div>
             <div class="mt-1 flex flex-wrap gap-1.5">
               <button class="btn-ghost" :disabled="hostsStore.pinging === host.id" @click="pingHost(host)"><Activity class="w-4 h-4" />{{ hostsStore.pinging === host.id ? '检测中' : '测试连接' }}</button>
               <button v-if="host.id !== hostsStore.activeHostId" class="btn-secondary" @click="activate(host)"><Zap class="w-4 h-4" />切换</button>
               <button v-if="!host.builtin" class="btn-ghost" @click="openHostEditor(host)"><Pencil class="w-4 h-4" />编辑</button>
-              <button v-if="!host.builtin" class="btn-ghost text-rose-300" @click="removeHost(host)"><Trash2 class="w-4 h-4" />删除</button>
+              <button v-if="!host.builtin" class="btn-ghost text-status-error" @click="removeHost(host)"><Trash2 class="w-4 h-4" />删除</button>
             </div>
           </div>
         </div>
@@ -203,7 +203,7 @@
     <BaseModal :show="!!hostEditor" :title="hostEditor?.id ? '编辑远程主机' : '添加远程主机'" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[90vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-3" @close="hostEditor = null">
       <template v-if="hostEditor">
         <div class="form-grid">
-          <label class="md:col-span-2">节点名称<input v-model="hostEditor.name" class="input" required maxlength="80" autocomplete="off" placeholder="例如 K8s Worker / 生产机" /></label>
+          <label class="md:col-span-2">节点名称<input v-model="hostEditor.name" class="input" required maxlength="80" autocomplete="off" aria-label="例如 K8s Worker / 生产机" placeholder="例如 K8s Worker / 生产机" /></label>
           <label>连接方式<select v-model="hostEditor.type" class="input"><option value="tcp">TCP (Docker API)</option><option value="ssh">SSH</option></select></label>
           <label>端口<input v-model.number="hostEditor.port" type="number" min="1" max="65535" step="1" inputmode="numeric" class="input" :placeholder="hostEditor.type === 'ssh' ? '22' : '2375'" /></label>
           <label>主机地址<input v-model="hostEditor.host" class="input" required autocomplete="off" spellcheck="false" placeholder="192.168.1.10" /></label>
@@ -213,9 +213,9 @@
           <div class="form-grid">
             <label class="md:col-span-2">SSH 密码<input v-model="hostEditor.password" type="password" class="input" :placeholder="hostEditor.hasPassword ? '已配置,留空保持不变' : '…'" /></label>
             <label class="md:col-span-2">私钥(可选)<textarea v-model="hostEditor.privateKey" rows="4" class="input font-mono" :placeholder="hostEditor.hasPrivateKey ? '已配置,留空保持不变' : '-----BEGIN OPENSSH PRIVATE KEY-----…'"></textarea></label>
-            <label class="md:col-span-2">SSH 主机密钥指纹（推荐）<input v-model="hostEditor.hostFingerprint" maxlength="128" class="input font-mono" spellcheck="false" placeholder="SHA256:… 或 64 位 SHA-256 十六进制" /></label>
+            <label class="md:col-span-2">SSH 主机密钥指纹（推荐）<input v-model="hostEditor.hostFingerprint" maxlength="128" class="input font-mono" spellcheck="false" aria-label="SHA256:… 或 64 位 SHA-256 十六进制" placeholder="SHA256:… 或 64 位 SHA-256 十六进制" /></label>
           </div>
-          <p class="text-xs text-amber-300/90">请通过可信渠道核对服务器指纹。配置后会校验 SSH 主机身份并拒绝不匹配的主机；留空仅为兼容旧节点，不启用主机指纹锁定。</p>
+          <p class="text-xs text-status-warn/90">请通过可信渠道核对服务器指纹。配置后会校验 SSH 主机身份并拒绝不匹配的主机；留空仅为兼容旧节点，不启用主机指纹锁定。</p>
         </template>
         <template v-else>
           <details class="text-sm"><summary class="cursor-pointer text-surface-300">TLS 客户端证书(可选)</summary>
@@ -226,7 +226,7 @@
             </div>
           </details>
         </template>
-        <p v-if="hostEditor.pingResult" class="text-sm" :role="hostEditor.pingResult.ok ? 'status' : 'alert'" :aria-live="hostEditor.pingResult.ok ? 'polite' : 'assertive'" aria-atomic="true" :class="hostEditor.pingResult.ok ? 'text-emerald-400' : 'text-rose-400'">{{ hostEditor.pingResult.ok ? `连接成功 · ${hostEditor.pingResult.latencyMs}ms · v${hostEditor.pingResult.version} · ${hostEditor.pingResult.containerCount} 容器` : `连接失败:${hostEditor.pingResult.message}` }}</p>
+        <p v-if="hostEditor.pingResult" class="text-sm" :role="hostEditor.pingResult.ok ? 'status' : 'alert'" :aria-live="hostEditor.pingResult.ok ? 'polite' : 'assertive'" aria-atomic="true" :class="hostEditor.pingResult.ok ? 'text-status-ok' : 'text-status-error'">{{ hostEditor.pingResult.ok ? `连接成功 · ${hostEditor.pingResult.latencyMs}ms · v${hostEditor.pingResult.version} · ${hostEditor.pingResult.containerCount} 容器` : `连接失败:${hostEditor.pingResult.message}` }}</p>
       </template>
       <template #footer>
         <button class="btn-secondary" :disabled="hostEditor?.pinging" @click="testHostConnection"><Activity class="w-4 h-4" />{{ hostEditor?.pinging ? '检测中…' : '测试连接' }}</button>
@@ -255,20 +255,20 @@
         </div>
         <div class="space-y-2 rounded-xl border border-surface-800 bg-surface-950/40 p-3 text-xs">
           <div class="space-y-1.5">
-            <p class="text-surface-300">Streamable HTTP(现行标准,推荐):<code class="font-mono text-accent">POST {{ mcp.httpUrl }}</code><span class="ml-2 text-surface-600">Codex CLI / Gemini CLI / 新版 harness</span></p>
-            <p class="text-surface-300">SSE(经典传输):<code class="font-mono text-accent">{{ mcp.sseUrl }}</code><span class="ml-2 text-surface-600">Claude Desktop / Cursor</span></p>
-            <p class="text-surface-300">stdio 桥(仅 stdio 的客户端):<code class="font-mono text-accent">node mcp/stdio-bridge.mjs</code><span class="ml-2 text-surface-600">环境变量 COMPOSEOPS_URL / COMPOSEOPS_TOKEN</span></p>
+            <p class="text-surface-300">Streamable HTTP(现行标准,推荐):<code class="font-mono text-status-info">POST {{ mcp.httpUrl }}</code><span class="ml-2 text-surface-400">Codex CLI / Gemini CLI / 新版 harness</span></p>
+            <p class="text-surface-300">SSE(经典传输):<code class="font-mono text-status-info">{{ mcp.sseUrl }}</code><span class="ml-2 text-surface-400">Claude Desktop / Cursor</span></p>
+            <p class="text-surface-300">stdio 桥(仅 stdio 的客户端):<code class="font-mono text-status-info">node mcp/stdio-bridge.mjs</code><span class="ml-2 text-surface-400">环境变量 COMPOSEOPS_URL / COMPOSEOPS_TOKEN</span></p>
           </div>
-          <p class="text-surface-500">认证:Authorization: Bearer &lt;token&gt;(HTTP 端点也可 ?token=)· 会话数:{{ mcp.sessionCount }} · 协议:{{ mcp.protocolVersion || '2026-07-28' }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
-          <p class="text-surface-500">高危工具(重建容器、改 Compose、回滚等)在 MCP 通道必须由调用方显式传 <code class="font-mono text-surface-400">confirm: true</code> 才会执行——这条通道没有确认弹窗,用显式开关代替。</p>
+          <p class="text-surface-400">认证:Authorization: Bearer &lt;token&gt;(HTTP 端点也可 ?token=)· 会话数:{{ mcp.sessionCount }} · 协议:{{ mcp.protocolVersion || '2026-07-28' }} · critical 级工具(清理/部署)任何模式下都不经 MCP 暴露。</p>
+          <p class="text-surface-400">高危工具(重建容器、改 Compose、回滚等)在 MCP 通道必须由调用方显式传 <code class="font-mono text-surface-400">confirm: true</code> 才会执行——这条通道没有确认弹窗,用显式开关代替。</p>
           <div class="flex flex-wrap items-center gap-2">
-            <button class="btn-secondary py-1.5! text-xs" @click="copyMcpConfig">复制客户端配置</button>
-            <button class="btn-secondary py-1.5! text-xs" :disabled="resettingMcpToken" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': resettingMcpToken }" />{{ resettingMcpToken ? '重置中…' : '重置 Token' }}</button>
-            <button class="btn-secondary py-1.5! text-xs" @click="showMcpToken">查看 Token</button>
+            <button class="btn-secondary btn-sm" @click="copyMcpConfig">复制客户端配置</button>
+            <button class="btn-secondary btn-sm" :disabled="resettingMcpToken" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': resettingMcpToken }" />{{ resettingMcpToken ? '重置中…' : '重置 Token' }}</button>
+            <button class="btn-secondary btn-sm" @click="showMcpToken">查看 Token</button>
           </div>
         </div>
       </template>
-      <p v-else class="text-sm text-surface-500">启用后,外部 MCP 客户端可以用独立 Token 安全调用面板工具(默认只读:状态查询、日志、巡检等)。</p>
+      <p v-else class="text-sm text-surface-400">启用后,外部 MCP 客户端可以用独立 Token 安全调用面板工具(默认只读:状态查询、日志、巡检等)。</p>
     </section>
     <section v-if="tab === 'about'" class="settings-section">
       <h2 class="section-title">ComposeOps <span class="count-badge">v{{ capabilities.version || '?' }}</span></h2>
@@ -279,7 +279,7 @@
         <a class="btn-secondary inline-flex" href="https://github.com/StanlySGY/ComposeOps" target="_blank" rel="noopener noreferrer"><Github class="w-4 h-4" />项目仓库</a>
         <a class="btn-primary inline-flex" href="https://github.com/StanlySGY/ComposeOps/stargazers" target="_blank" rel="noopener noreferrer" title="去 GitHub 给项目点个 Star"><Star class="w-4 h-4" />觉得有用就点个 Star</a>
       </div>
-      <p class="mt-2 text-xs text-surface-500">遇到问题或有功能建议,欢迎到仓库提 Issue;如果 ComposeOps 帮到了你,一个 Star 就是最好的鼓励。</p>
+      <p class="mt-2 text-xs text-surface-400">遇到问题或有功能建议,欢迎到仓库提 Issue;如果 ComposeOps 帮到了你,一个 Star 就是最好的鼓励。</p>
     </section>
   </div>
 </template>
@@ -291,7 +291,7 @@ import { computed, markRaw, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, Bell, Bot, Download, FolderCog, Github, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Star, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
-import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import StatCard from '../components/StatCard.vue';
+import { api } from '../api/client.js'; import { useAiStore } from '../stores/ai.js'; import { useHostsStore } from '../stores/hosts.js'; import MetricTile from '../components/common/MetricTile.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import StoragePruneModal from '../components/settings/StoragePruneModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';

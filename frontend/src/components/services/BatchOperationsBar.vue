@@ -1,6 +1,6 @@
 <template>
   <div class="bulk-bar">
-    <div class="flex min-w-0 items-center gap-2"><CheckSquare2 class="h-4 w-4 text-accent" /><span class="text-sm font-medium">已选择 {{ selectedCount }} 个项目</span><span class="hidden text-muted sm:inline">批量操作将按顺序执行</span></div>
+    <div class="flex min-w-0 items-center gap-2"><CheckSquare2 class="h-4 w-4 text-status-info" /><span class="text-sm font-medium">已选择 {{ selectedCount }} 个项目</span><span class="hidden text-muted sm:inline">批量操作将按顺序执行</span></div>
     <div class="flex flex-wrap gap-2 sm:ml-auto">
       <button class="btn-primary" :disabled="busy" @click="$emit('run', 'up')"><Play class="h-4 w-4" />启动</button>
       <button class="btn-secondary" :disabled="busy" @click="$emit('run', 'restart')"><RotateCw class="h-4 w-4" />重启</button>

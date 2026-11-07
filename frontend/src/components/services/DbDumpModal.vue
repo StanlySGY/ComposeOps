@@ -1,7 +1,7 @@
 <template>
   <BaseModal :show="true" :title="`备份数据库 · ${project.projectName}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-lg flex max-h-[88vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4 space-y-3" @close="close">
     <template #header-actions>
-      <Database class="w-4 h-4 text-emerald-300" />
+      <Database class="w-4 h-4 text-status-ok" />
     </template>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="text-sm text-surface-400" role="status" aria-live="polite">正在读取可备份的数据库容器…</p>
@@ -75,7 +75,7 @@ async function dump() {
     close();
   } catch (e) {
     error.value = e.message;
-    toast.error(e.message);
+    toast.error(e);
   } finally {
     dumping.value = false;
   }

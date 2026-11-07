@@ -31,8 +31,8 @@
         <label class="search-field w-44"><Filter class="h-4 w-4" /><input v-model="containerQuery" aria-label="过滤容器列表" :placeholder="aggregateMode ? '过滤容器(可多选)' : '过滤容器(支持缩写)'" /></label>
         <span class="text-[11px] text-muted">{{ aggregateMode ? (selectedContainers.length ? `已选 ${selectedContainers.length} 个容器` : '未选择时聚合全部容器') : '点击容器切换日志源' }}</span>
         <template v-if="aggregateMode">
-          <button class="btn-secondary min-h-7! px-2! py-0.5! text-[11px]!" @click="selectVisibleContainers">全选可见</button>
-          <button class="btn-secondary min-h-7! px-2! py-0.5! text-[11px]!" :disabled="!selectedContainers.length" @click="selectedContainers = []">清空</button>
+          <button class="btn-secondary btn-sm" @click="selectVisibleContainers">全选可见</button>
+          <button class="btn-secondary btn-sm" :disabled="!selectedContainers.length" @click="selectedContainers = []">清空</button>
         </template>
       </div>
       <div class="flex flex-wrap gap-1.5">
@@ -45,7 +45,7 @@
           :aria-pressed="aggregateMode ? selectedContainers.includes(c.id) : c.id === containerId"
           @click="pickContainer(c)"
         >
-          <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="c.state === 'running' ? 'bg-emerald-400' : 'bg-surface-600'"></span>
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="c.state === 'running' ? 'bg-status-ok' : 'bg-surface-600'"></span>
           <span class="min-w-0 max-w-40 truncate">{{ c.name }}</span>
           <span v-if="liveStats[c.id]" class="metric-chip">{{ liveStats[c.id] }}</span>
         </button>
@@ -56,15 +56,15 @@
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
-    <p v-if="pausedDropped" class="text-xs text-amber-400" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
+    <p v-if="pausedDropped" class="text-xs text-status-warn" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
     <div class="flex flex-wrap items-center gap-3 text-muted">
-      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-emerald-400' : reconnecting ? 'bg-amber-400 animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
+      <span role="status" aria-live="polite" aria-atomic="true" :class="connected ? 'text-status-ok' : reconnecting ? 'text-status-warn' : ''"><span aria-hidden="true" class="status-dot" :class="connected ? 'bg-status-ok' : reconnecting ? 'bg-status-warn animate-pulse' : 'bg-surface-600'"></span>{{ connected ? '已连接' : reconnecting ? '重连中…' : streamEnded ? '日志已结束' : '未连接' }}</span>
       <span>{{ filtered.length }} 条</span>
       <span v-if="splitMode" class="text-surface-400">{{ panes.length }} 栏</span>
-      <span v-if="levelCounts.error" class="text-rose-400">ERROR {{ levelCounts.error }}</span>
-      <span v-if="levelCounts.warn" class="text-amber-400">WARN {{ levelCounts.warn }}</span>
-      <span v-if="paused" class="text-amber-400">已暂停 · {{ pending.length }} 条待显示</span>
-      <span v-if="sawError && !paused" class="text-rose-300">当前保留 {{ retainedCount }} 行异常日志</span>
+      <span v-if="levelCounts.error" class="text-status-error">ERROR {{ levelCounts.error }}</span>
+      <span v-if="levelCounts.warn" class="text-status-warn">WARN {{ levelCounts.warn }}</span>
+      <span v-if="paused" class="text-status-warn">已暂停 · {{ pending.length }} 条待显示</span>
+      <span v-if="sawError && !paused" class="text-status-error">当前保留 {{ retainedCount }} 行异常日志</span>
       <label class="toggle-label ml-auto"><input v-model="autoScroll" type="checkbox" />自动滚动</label>
     </div>
 

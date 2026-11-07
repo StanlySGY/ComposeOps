@@ -2,7 +2,7 @@
   <div v-if="project" class="drawer-backdrop z-55" @click.self="$emit('close')">
     <aside ref="activityDialog" class="activity-drawer z-51" role="dialog" aria-modal="true" aria-labelledby="project-activity-title" tabindex="-1" @keydown="trapActivityTab">
       <header class="flex items-start gap-3 border-b border-surface-800 px-4 py-4">
-        <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent"><History class="h-5 w-5" /></div>
+        <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/15 text-status-info"><History class="h-5 w-5" /></div>
         <div class="min-w-0 flex-1"><h2 id="project-activity-title" class="truncate font-mono text-base font-semibold text-surface-100">{{ project.projectName }}</h2><p class="mt-0.5 text-muted">活动记录与配置版本</p></div>
         <button class="icon-btn" title="关闭" aria-label="关闭项目活动" @click="$emit('close')"><X class="h-4 w-4" /></button>
       </header>
@@ -11,7 +11,7 @@
         <button :class="{ active: tab === 'versions' }" @click="tab = 'versions'"><FileClock class="h-4 w-4" />配置版本 <span class="count-badge">{{ backups.length }}</span></button>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto p-4">
-        <div v-if="loading" class="flex min-h-32 flex-col items-center justify-center gap-3 text-surface-500">
+        <div v-if="loading" class="flex min-h-32 flex-col items-center justify-center gap-3 text-surface-400">
         <span class="loading-mark" aria-hidden="true"></span><span class="text-sm" role="status" aria-live="polite" aria-atomic="true">正在加载项目活动...</span>
       </div>
         <div v-else-if="error" class="alert-error" role="alert">{{ error }}</div>
@@ -19,13 +19,13 @@
           <button v-for="item in operations" :key="item.id" class="activity-item" @click="selectedOperation = item">
             <span class="timeline-dot" :class="item.status === 'success' ? 'success' : 'failed'"></span>
             <span class="min-w-0 flex-1"><span class="flex items-center justify-between gap-3"><strong>{{ actionLabel(item.action) }}</strong><time>{{ formatRelative(item.createdAt) }}</time></span><small>{{ operationSummary(item) }}</small></span>
-            <ChevronRight class="h-4 w-4 shrink-0 text-surface-600" />
+            <ChevronRight class="h-4 w-4 shrink-0 text-surface-400" />
           </button>
           <EmptyState v-if="!operations.length" icon="History" compact title="该项目暂无操作记录" description="对项目执行启动、停止等操作后会显示在这里" />
         </div>
         <div v-else class="space-y-3">
           <article v-for="backup in backups" :key="backup.id" class="version-card">
-            <div class="flex items-start gap-3"><span class="version-icon"><FileCode2 class="h-4 w-4" /></span><div class="min-w-0 flex-1"><strong>{{ reasonLabel(backup.reason) }}</strong><p class="mt-1 truncate font-mono text-muted" :title="backup.filePath">{{ backup.filePath }}</p><p class="mt-1 text-xs text-surface-600">{{ formatTime(backup.createdAt) }} · {{ backup.size }} 字符</p></div></div>
+            <div class="flex items-start gap-3"><span class="version-icon"><FileCode2 class="h-4 w-4" /></span><div class="min-w-0 flex-1"><strong>{{ reasonLabel(backup.reason) }}</strong><p class="mt-1 truncate font-mono text-muted" :title="backup.filePath">{{ backup.filePath }}</p><p class="mt-1 text-xs text-surface-400">{{ formatTime(backup.createdAt) }} · {{ backup.size }} 字符</p></div></div>
             <div class="mt-3 flex justify-end gap-2"><router-link class="btn-ghost" :to="deepLink('/compose', { projectId: project.id, from: 'services' })" @click="$emit('close')"><Eye class="h-4 w-4" />打开编辑器</router-link><button class="btn-secondary" :disabled="restoring || !project.editable" :title="project.editable ? '恢复到该版本' : '项目未启用 Compose 编辑能力'" @click="restore(backup)"><Undo2 class="h-4 w-4" />恢复</button></div>
           </article>
           <EmptyState v-if="!backups.length" icon="FileClock" compact title="暂无配置备份" description="保存配置后会自动生成版本历史" />

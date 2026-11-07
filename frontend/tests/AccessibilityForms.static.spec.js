@@ -188,7 +188,7 @@ describe('跨页面表单可访问性契约', () => {
     const historyNodes = templateNodes('../src/views/AgentExecutionHistoryView.vue');
     expect(historyNodes.some((node) => node.tag === 'div' && hasClassToken(node, 'card') && hasAttr(node, 'role', 'alert'))).toBe(true);
     const costNodes = templateNodes('../src/views/CostAnalysisView.vue');
-    expect(costNodes.some((node) => hasClassToken(node, 'error-state') && hasAttr(node, 'role', 'alert'))).toBe(true);
+    expect(costNodes.some((node) => hasClassToken(node, 'alert-error') && hasAttr(node, 'role', 'alert'))).toBe(true);
 
     const upgradeNodes = templateNodes('../src/components/services/ProjectUpgradeModal.vue');
     expect(upgradeNodes.some((node) => hasAttr(node, 'role', 'status') && hasAttr(node, 'aria-live', 'polite'))).toBe(true);

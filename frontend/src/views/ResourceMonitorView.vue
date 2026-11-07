@@ -51,9 +51,9 @@
             <span class="block text-xs font-medium text-surface-400">{{ m.label }}</span>
             <strong class="mt-1 block truncate text-lg font-semibold tabular-nums text-surface-100">{{ formatMetricValue(metricsData[m.key]) }}</strong>
             <span class="mt-1 flex items-center gap-1 text-xs">
-              <TrendingUp v-if="metricsData[m.key]?.trend === 'increasing'" class="h-3 w-3 text-rose-400" />
-              <TrendingDown v-else-if="metricsData[m.key]?.trend === 'decreasing'" class="h-3 w-3 text-emerald-400" />
-              <Minus v-else class="h-3 w-3 text-surface-500" />
+              <TrendingUp v-if="metricsData[m.key]?.trend === 'increasing'" class="h-3 w-3 text-status-error" />
+              <TrendingDown v-else-if="metricsData[m.key]?.trend === 'decreasing'" class="h-3 w-3 text-status-ok" />
+              <Minus v-else class="h-3 w-3 text-surface-400" />
               <span :class="trendColor(metricsData[m.key]?.trend)">{{ metricsData[m.key]?.trend === 'stable' ? '稳定' : metricsData[m.key]?.trend === 'increasing' ? '上升' : '下降' }}</span>
             </span>
           </span>
@@ -72,12 +72,12 @@
                     type="button"
                     :aria-pressed="period === p.key"
                     @click="period = p.key; loadMetrics()"
-                    :class="period === p.key ? 'btn-primary min-h-8! px-2.5! py-1! text-xs!' : 'btn-secondary min-h-8! px-2.5! py-1! text-xs!'">
+                    :class="period === p.key ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'">
               {{ p.label }}
             </button>
           </div>
         </div>
-        <p v-if="!loading && !chartData.length" class="rounded-xl border border-dashed border-surface-700 px-4 py-8 text-center text-sm text-surface-400" role="status">当前时间范围暂无历史数据。缩短时间范围或等待下一轮指标采集后再查看趋势。</p>
+        <EmptyState v-if="!loading && !chartData.length" compact icon="History" title="当前时间范围暂无历史数据" description="缩短时间范围或等待下一轮指标采集后再查看趋势。" />
         <div v-else class="history-chart-frame min-w-0 w-full">
           <InteractiveChart :data="chartData"
             :color="metricTypes.find(m => m.key === selectedMetric)?.chartColor || '#38BDF8'"
@@ -106,7 +106,7 @@
                 <div class="mt-0.5 text-xs text-surface-400">阈值：{{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : ' 次' }}</div>
               </div>
             </div>
-            <button @click="deleteAlertRule(alert.id)" class="btn-ghost min-h-8! px-2.5! py-1! text-xs! text-rose-300 hover:text-rose-200">删除</button>
+            <button @click="deleteAlertRule(alert.id)" class="btn-ghost text-status-error hover:text-status-error btn-sm">删除</button>
           </div>
         </div>
       </section>
@@ -258,9 +258,9 @@ watch(showAlertModal, async (visible) => {
 
 const metricTypes = [
   { key: 'cpu', label: 'CPU', icon: Cpu, color: 'text-cyan-400', chartColor: '#06B6D4', unit: '%' },
-  { key: 'memory', label: '内存', icon: Database, color: 'text-emerald-400', chartColor: '#10B981', unit: '%' },
-  { key: 'network', label: '网络', icon: Network, color: 'text-amber-400', chartColor: '#F59E0B', unit: 'bytes' },
-  { key: 'disk', label: '磁盘 I/O', icon: HardDrive, color: 'text-rose-400', chartColor: '#EF4444', unit: 'bytes' }
+  { key: 'memory', label: '内存', icon: Database, color: 'text-status-ok', chartColor: '#10B981', unit: '%' },
+  { key: 'network', label: '网络', icon: Network, color: 'text-status-warn', chartColor: '#F59E0B', unit: 'bytes' },
+  { key: 'disk', label: '磁盘 I/O', icon: HardDrive, color: 'text-status-error', chartColor: '#EF4444', unit: 'bytes' }
 ];
 
 const periods = [
@@ -318,16 +318,16 @@ function periodMs(value) {
 }
 
 function trendColor(trend) {
-  if (trend === 'increasing') return 'text-rose-400';
-  if (trend === 'decreasing') return 'text-emerald-400';
-  return 'text-surface-500';
+  if (trend === 'increasing') return 'text-status-error';
+  if (trend === 'decreasing') return 'text-status-ok';
+  return 'text-surface-400';
 }
 
 function getAlertColor(metric) {
   const colors = {
     cpu: 'text-cyan-400',
-    memory: 'text-emerald-400',
-    restart_count: 'text-amber-400'
+    memory: 'text-status-ok',
+    restart_count: 'text-status-warn'
   };
   return colors[metric] || 'text-surface-400';
 }
@@ -427,7 +427,7 @@ async function createAlertRule() {
     await loadAlerts();
     useToastStore().success('告警规则已创建');
   } catch (err) {
-    useToastStore().error(`创建告警规则失败:${err.message}`);
+    useToastStore().error(`创建告警规则失败：${err.message}`);
   }
 }
 
@@ -437,7 +437,7 @@ async function deleteAlertRule(ruleId) {
     await loadAlerts();
     useToastStore().success('告警规则已删除');
   } catch (err) {
-    useToastStore().error(`删除告警失败:${err.message}`);
+    useToastStore().error(`删除告警失败：${err.message}`);
   }
 }
 

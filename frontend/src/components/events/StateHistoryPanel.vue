@@ -5,11 +5,11 @@
 
     <!-- 窗口摘要 -->
     <div class="metric-grid">
-      <div class="metric-tile"><span class="metric-icon text-blue-300"><Boxes class="h-5 w-5" /></span><span><strong>{{ summary.containers || 0 }}</strong><small>容器数</small></span><span class="metric-meta">{{ rangeLabel }}</span></div>
+      <MetricTile title="容器数" :value="summary.containers || 0" :sub="rangeLabel" :icon="Boxes" tone="text-blue-300" />
       <div class="metric-tile"><span class="metric-icon" :class="availabilityTone(summary.availability)"><Gauge class="h-5 w-5" /></span><span><strong>{{ availabilityText(summary.availability) }}</strong><small>整体可用率</small></span><span class="metric-meta">未知时长不计入分母</span></div>
-      <div class="metric-tile"><span class="metric-icon text-rose-300"><CircleX class="h-5 w-5" /></span><span><strong>{{ summary.abnormalExits || 0 }}</strong><small>异常退出</small></span><span class="metric-meta">退出码非 0</span></div>
-      <div class="metric-tile"><span class="metric-icon text-violet-300"><ArrowRightLeft class="h-5 w-5" /></span><span><strong>{{ summary.transitions || 0 }}</strong><small>状态转换</small></span><span class="metric-meta">共 {{ summary.exits || 0 }} 次退出</span></div>
-      <div class="metric-tile"><span class="metric-icon text-amber-300"><Clock3 class="h-5 w-5" /></span><span><strong>{{ formatSeconds(summary.unknownSeconds) }}</strong><small>状态未知</small></span><span class="metric-meta">运行 {{ formatSeconds(summary.upSeconds) }}</span></div>
+      <MetricTile title="异常退出" :value="summary.abnormalExits || 0" sub="退出码非 0" :icon="CircleX" tone="text-status-error" />
+      <MetricTile title="状态转换" :value="summary.transitions || 0" :sub="`共 ${summary.exits || 0} 次退出`" :icon="ArrowRightLeft" tone="text-violet-300" />
+      <MetricTile title="状态未知" :value="formatSeconds(summary.unknownSeconds)" :sub="`运行 ${formatSeconds(summary.upSeconds)}`" :icon="Clock3" tone="text-status-warn" />
     </div>
 
     <!-- 过滤器 -->
@@ -86,8 +86,8 @@
               <td class="text-right whitespace-nowrap">{{ item.transitions }}</td>
               <td class="whitespace-nowrap">
                 <span class="count-badge" :class="actionTone(item.lastAction)">{{ actionLabel(item.lastAction) }}</span>
-                <span v-if="item.lastExitCode !== null && item.lastExitCode !== undefined" class="count-badge ml-1.5" :class="item.abnormalExits ? 'text-rose-300' : 'text-emerald-300'">exit {{ item.lastExitCode }}</span>
-                <span v-if="item.destroyed" class="count-badge ml-1.5 text-surface-500">已销毁</span>
+                <span v-if="item.lastExitCode !== null && item.lastExitCode !== undefined" class="count-badge ml-1.5" :class="item.abnormalExits ? 'text-status-error' : 'text-status-ok'">exit {{ item.lastExitCode }}</span>
+                <span v-if="item.destroyed" class="count-badge ml-1.5 text-surface-400">已销毁</span>
               </td>
             </tr>
           </tbody>
@@ -104,9 +104,9 @@
       </div>
       <div class="space-y-1.5">
         <div v-for="exit in visibleExits" :key="`${exit.containerId}-${exit.timestamp}`" class="flex flex-wrap items-center gap-2 rounded-xl border border-surface-800 bg-surface-950/40 px-3 py-2">
-          <span class="count-badge shrink-0" :class="exit.abnormal ? 'text-rose-300' : 'text-emerald-300'">exit {{ exit.exitCode ?? '未知' }}</span>
+          <span class="count-badge shrink-0" :class="exit.abnormal ? 'text-status-error' : 'text-status-ok'">exit {{ exit.exitCode ?? '未知' }}</span>
           <span class="text-sm font-medium text-surface-100">{{ exit.containerName }}</span>
-          <span v-if="exit.projectName" class="truncate text-xs text-surface-500">{{ exit.projectName }}</span>
+          <span v-if="exit.projectName" class="truncate text-xs text-surface-400">{{ exit.projectName }}</span>
           <span class="ml-auto font-mono text-xs tabular-nums text-surface-400">{{ formatTime(exit.timestamp) }}</span>
           <span class="count-badge shrink-0">存活 {{ formatSeconds(exit.execDuration) }}</span>
         </div>
@@ -130,11 +130,11 @@
             <div class="flex flex-wrap items-center gap-2">
               <span class="count-badge shrink-0" :class="actionTone(item.action)">{{ actionLabel(item.action) }}</span>
               <span v-if="item.healthStatus" class="count-badge shrink-0 text-sky-300">{{ item.healthStatus }}</span>
-              <span v-if="item.action === 'die'" class="count-badge shrink-0" :class="item.exitCode ? 'text-rose-300' : 'text-emerald-300'">exit {{ item.exitCode ?? '未知' }}</span>
+              <span v-if="item.action === 'die'" class="count-badge shrink-0" :class="item.exitCode ? 'text-status-error' : 'text-status-ok'">exit {{ item.exitCode ?? '未知' }}</span>
               <span class="text-sm font-medium text-surface-100">{{ item.containerName }}</span>
               <span class="ml-auto font-mono text-xs tabular-nums text-surface-400">{{ formatTime(item.timestamp) }}</span>
             </div>
-            <p v-if="item.projectName" class="mt-1 truncate text-xs text-surface-500">{{ item.projectName }}</p>
+            <p v-if="item.projectName" class="mt-1 truncate text-xs text-surface-400">{{ item.projectName }}</p>
           </div>
         </div>
         <p v-if="filteredHistory.length > visibleHistory.length" class="text-muted">仅显示前 {{ visibleHistory.length }} 条,缩小窗口可看到更完整的流水。</p>
@@ -144,6 +144,7 @@
 </template>
 
 <script setup>
+import MetricTile from '../common/MetricTile.vue';
 // uptime-kuma 式服务端状态历史的只读视图:可用率、宕机明细、转换流水,嵌入事件中心 tab
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../../composables/usePullRefresh.js';
@@ -184,10 +185,10 @@ const ACTION_LABELS = {
 
 function actionLabel(action) { return ACTION_LABELS[action] || action || '未知'; }
 function actionTone(action) {
-  return { start: 'text-emerald-300', restart: 'text-emerald-300', unpause: 'text-emerald-300', die: 'text-rose-300', kill: 'text-rose-300', stop: 'text-amber-300', pause: 'text-amber-300', destroy: 'text-surface-400', health_status: 'text-sky-300' }[action] || 'text-surface-400';
+  return { start: 'text-status-ok', restart: 'text-status-ok', unpause: 'text-status-ok', die: 'text-status-error', kill: 'text-status-error', stop: 'text-status-warn', pause: 'text-status-warn', destroy: 'text-surface-400', health_status: 'text-sky-300' }[action] || 'text-surface-400';
 }
 function actionDot(action) {
-  return { start: 'border-emerald-400 bg-emerald-400', restart: 'border-emerald-400 bg-emerald-400', unpause: 'border-emerald-400 bg-emerald-400', die: 'border-rose-400 bg-rose-400', kill: 'border-rose-400 bg-rose-400', stop: 'border-amber-400 bg-amber-400', pause: 'border-amber-400 bg-amber-400', destroy: 'border-surface-600 bg-surface-600', health_status: 'border-sky-400 bg-sky-400' }[action] || 'border-surface-500 bg-surface-500';
+  return { start: 'border-status-ok bg-status-ok', restart: 'border-status-ok bg-status-ok', unpause: 'border-status-ok bg-status-ok', die: 'border-status-error bg-status-error', kill: 'border-status-error bg-status-error', stop: 'border-status-warn bg-status-warn', pause: 'border-status-warn bg-status-warn', destroy: 'border-surface-600 bg-surface-600', health_status: 'border-sky-400 bg-sky-400' }[action] || 'border-surface-500 bg-surface-500';
 }
 
 function availabilityText(value) {
@@ -196,16 +197,16 @@ function availabilityText(value) {
   return `${Number(value).toFixed(2)}%`;
 }
 function availabilityTone(value) {
-  if (value === null || value === undefined) return 'text-surface-500';
-  if (value >= 99) return 'text-emerald-300';
-  if (value >= 90) return 'text-amber-300';
-  return 'text-rose-300';
+  if (value === null || value === undefined) return 'text-surface-400';
+  if (value >= 99) return 'text-status-ok';
+  if (value >= 90) return 'text-status-warn';
+  return 'text-status-error';
 }
 function availabilityBarTone(value) {
   if (value === null || value === undefined) return 'bg-surface-600';
-  if (value >= 99) return 'bg-emerald-400';
-  if (value >= 90) return 'bg-amber-400';
-  return 'bg-rose-400';
+  if (value >= 99) return 'bg-status-ok';
+  if (value >= 90) return 'bg-status-warn';
+  return 'bg-status-error';
 }
 
 function formatSeconds(value) {

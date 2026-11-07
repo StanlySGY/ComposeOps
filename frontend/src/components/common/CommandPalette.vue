@@ -5,7 +5,7 @@
         <Transition name="modal-pop" appear>
           <div ref="dialogRef" class="command-palette" role="dialog" aria-modal="true" aria-label="快速跳转与操作" @keydown.tab.prevent="moveFocus">
             <div class="command-input-wrapper">
-              <Search class="h-4 w-4 text-surface-500" />
+              <Search class="h-4 w-4 text-surface-400" />
               <input
                 ref="inputRef"
                 v-model="query"
@@ -42,12 +42,12 @@
                 <component :is="item.icon" class="h-4 w-4 shrink-0" :class="item.iconClass || 'text-cyan-400'" />
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-medium text-surface-200">{{ item.label }}</p>
-                  <p v-if="item.description" class="truncate text-xs text-surface-500">{{ item.description }}</p>
+                  <p v-if="item.description" class="truncate text-xs text-surface-400">{{ item.description }}</p>
                 </div>
                 <kbd v-if="item.shortcut" class="shortcut-key text-[10px]">{{ item.shortcut }}</kbd>
               </div>
             </div>
-            <div v-if="!filtered.length" class="px-4 py-8 text-center text-sm text-surface-500">
+            <div v-if="!filtered.length" class="px-4 py-8 text-center text-sm text-surface-400">
               未找到匹配的命令,试试项目名、日志或监控
             </div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-surface-800 px-4 py-2 text-[11px] text-surface-400">

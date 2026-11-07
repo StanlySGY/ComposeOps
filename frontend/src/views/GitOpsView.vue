@@ -11,22 +11,22 @@
     </div>
 
     <!-- 漂移状态条：加载失败不能静默等同于“无漂移” -->
-    <div v-if="(drift && drift.repos?.length) || driftLoading || driftError" class="section-panel py-3! flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div v-if="(drift && drift.repos?.length) || driftLoading || driftError" class="section-panel py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex min-w-0 flex-col gap-2">
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <span class="font-medium text-surface-300">漂移检测</span>
           <template v-if="drift && drift.repos?.length">
-            <span class="count-badge text-emerald-300">一致 {{ drift.counts?.clean || 0 }}</span>
-            <span class="count-badge text-amber-300">有差异 {{ drift.counts?.diverged || 0 }}</span>
+            <span class="count-badge text-status-ok">一致 {{ drift.counts?.clean || 0 }}</span>
+            <span class="count-badge text-status-warn">有差异 {{ drift.counts?.diverged || 0 }}</span>
             <span class="count-badge text-sky-300">落后远端 {{ drift.counts?.behind || 0 }}</span>
-            <span v-if="drift.counts?.detached" class="count-badge text-rose-300">游离提交 {{ drift.counts.detached }}</span>
-            <span v-if="drift.scannedAt" class="text-surface-500">扫描于 {{ new Date(drift.scannedAt).toLocaleString('zh-CN') }}</span>
+            <span v-if="drift.counts?.detached" class="count-badge text-status-error">游离提交 {{ drift.counts.detached }}</span>
+            <span v-if="drift.scannedAt" class="text-surface-400">扫描于 {{ new Date(drift.scannedAt).toLocaleString('zh-CN') }}</span>
           </template>
         </div>
         <p v-if="driftLoading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在检测 GitOps 漂移状态</p>
         <p v-if="driftError" class="alert-error" role="alert">漂移检测失败：{{ driftError }}。现有结果可能已过期。</p>
       </div>
-      <button class="btn-secondary py-1.5! text-xs" :disabled="driftLoading" :aria-label="driftLoading ? '正在检测 GitOps 漂移状态' : '重新检测 GitOps 漂移状态'" @click="loadDrift">
+      <button class="btn-secondary btn-sm" :disabled="driftLoading" :aria-label="driftLoading ? '正在检测 GitOps 漂移状态' : '重新检测 GitOps 漂移状态'" @click="loadDrift">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': driftLoading }" />{{ driftLoading ? '检测中…' : '重新检测' }}
       </button>
     </div>
@@ -64,45 +64,45 @@
           </p>
           <div v-if="driftMap[repo.id].drifts?.length" class="space-y-1">
             <p v-for="item in driftMap[repo.id].drifts.slice(0, 5)" :key="item.file"
-              class="flex items-center gap-2 truncate font-mono text-[11px]" :class="item.type === 'deleted' ? 'text-rose-400' : 'text-amber-300'">
+              class="flex items-center gap-2 truncate font-mono text-[11px]" :class="item.type === 'deleted' ? 'text-status-error' : 'text-status-warn'">
               <span class="shrink-0 rounded-sm border border-current/20 px-1">{{ item.type === 'deleted' ? '删除' : '修改' }}</span>
               <span class="truncate">{{ item.file }}</span>
             </p>
-            <p v-if="driftMap[repo.id].drifts.length > 5" class="text-[11px] text-surface-500">等共 {{ driftMap[repo.id].drifts.length }} 处</p>
+            <p v-if="driftMap[repo.id].drifts.length > 5" class="text-[11px] text-surface-400">等共 {{ driftMap[repo.id].drifts.length }} 处</p>
           </div>
           <div v-if="driftMap[repo.id].behind > 0" class="text-[11px] text-sky-300">
             落后远端 {{ driftMap[repo.id].behind }} 个提交,执行同步可拉齐
           </div>
           <div v-if="driftMap[repo.id].repairs?.length" class="flex flex-wrap gap-1.5">
             <span v-for="(repair, index) in driftMap[repo.id].repairs" :key="index"
-              class="count-badge text-[11px]!">{{ repair.action === 'none' ? '无需处理' : repair.action }}</span>
+              class="count-badge text-[11px]">{{ repair.action === 'none' ? '无需处理' : repair.action }}</span>
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3 text-xs">
           <div>
-            <p class="text-surface-500">分支</p>
+            <p class="text-surface-400">分支</p>
             <p class="mt-1 font-medium text-surface-300">{{ repo.branch || 'main' }}</p>
           </div>
           <div>
-            <p class="text-surface-500">自动同步</p>
+            <p class="text-surface-400">自动同步</p>
             <p class="mt-1 font-medium text-surface-300">{{ repo.autoSync ? '开启' : '关闭' }}</p>
           </div>
         </div>
 
-        <div v-if="repo.lastSync" class="text-xs text-surface-500">
+        <div v-if="repo.lastSync" class="text-xs text-surface-400">
           最后同步:{{ new Date(repo.lastSync).toLocaleString('zh-CN') }}
         </div>
 
         <div class="mt-auto flex flex-wrap gap-2 border-t border-surface-800 pt-3">
-          <button class="btn-secondary px-2.5! py-1.5! text-xs flex-1" :disabled="syncingId === repo.id" @click="syncRepo(repo.id)">
+          <button class="btn-secondary flex-1 btn-sm" :disabled="syncingId === repo.id" @click="syncRepo(repo.id)">
             <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncingId === repo.id }" />同步
           </button>
-          <button class="btn-secondary px-2.5! py-1.5! text-xs flex-1" @click="loadHistory(repo.id)">
+          <button class="btn-secondary flex-1 btn-sm" @click="loadHistory(repo.id)">
             <History class="h-3.5 w-3.5" />历史
           </button>
-          <button class="btn-secondary px-2.5! py-1.5! text-xs" @click="openEditModal(repo)">编辑</button>
-          <button class="btn-danger px-2.5! py-1.5! text-xs" @click="deleteRepo(repo.id)">删除</button>
+          <button class="btn-secondary btn-sm" @click="openEditModal(repo)">编辑</button>
+          <button class="btn-danger btn-sm" @click="deleteRepo(repo.id)">删除</button>
         </div>
       </article>
     </div>
@@ -111,14 +111,14 @@
     <BaseModal
       :show="showAddModal || showEditModal"
       :title="showAddModal ? '添加仓库' : '编辑仓库'"
-      size-class="max-w-lg!"
+      size-class="sm:max-w-lg"
       body-class="p-6"
       @close="showAddModal = showEditModal = false"
     >
       <form @submit.prevent="showAddModal ? addRepo() : updateRepo()" class="space-y-4">
         <label class="block">
           <span class="text-xs font-medium text-surface-400">仓库名称</span>
-          <input v-model="formData.name" required maxlength="200" class="input mt-1.5 w-full" placeholder="例:my-app" />
+          <input v-model="formData.name" required maxlength="200" class="input mt-1.5 w-full" aria-label="例:my-app" placeholder="例:my-app" />
         </label>
 
         <label class="block">
@@ -166,7 +166,7 @@
     <BaseModal
       :show="showHistoryModal"
       :title="`提交历史 · ${currentRepo?.name || ''}`"
-      size-class="max-w-2xl!"
+      size-class="sm:max-w-2xl"
       body-class="flex h-[65vh] flex-col overflow-hidden p-0"
       @close="showHistoryModal = false"
     >
@@ -176,26 +176,27 @@
           提交历史加载失败：{{ historyError }}
           <button type="button" class="ml-2 underline underline-offset-2" @click="loadHistory(currentRepo?.id)">重试</button>
         </p>
+        <HistoryControls v-model:page="page" v-model:sort-key="sortKey" v-model:descending="descending" :total="total" :page-size="pageSize" :options="sortOptions" label="提交历史" />
         <EmptyState v-if="!historyLoading && !historyError && commitHistory.length === 0" compact icon="History" title="暂无提交历史" description="仓库尚未克隆或没有任何提交记录。" />
 
         <div v-else-if="!historyLoading && !historyError && commitHistory.length > 0" class="space-y-3">
-          <article v-for="commit in commitHistory" :key="commit.hash" class="flex items-start gap-4 rounded-lg border border-surface-800 bg-surface-950/40 p-4">
+          <article v-for="commit in pagedRows" :key="commit.hash" class="flex items-start gap-4 rounded-lg border border-surface-800 bg-surface-950/40 p-4">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <code class="rounded-sm bg-surface-800 px-2 py-0.5 text-xs font-mono text-accent">{{ commit.hash.substring(0, 7) }}</code>
-                <span class="text-xs text-surface-500">{{ commit.date }}</span>
+                <code class="rounded-sm bg-surface-800 px-2 py-0.5 text-xs font-mono text-status-info">{{ commit.hash.substring(0, 7) }}</code>
+                <span class="text-xs text-surface-400">{{ commit.date }}</span>
               </div>
               <p class="mt-2 text-sm text-surface-300">{{ commit.message }}</p>
-              <p class="mt-1 text-xs text-surface-500">{{ commit.author }}</p>
+              <p class="mt-1 text-xs text-surface-400">{{ commit.author }}</p>
             </div>
             <button
               v-if="commit.hash !== currentRepo?.lastCommit"
-              class="btn-secondary flex-none px-2.5! py-1.5! text-xs text-amber-300"
+              class="btn-secondary flex-none text-status-warn btn-sm"
               @click="rollback(commit.hash)"
             >
               回滚
             </button>
-            <span v-else class="status-badge flex-none bg-emerald-500/10 text-emerald-400">当前</span>
+            <span v-else class="status-badge flex-none bg-status-ok/10 text-status-ok">当前</span>
           </article>
         </div>
       </div>
@@ -210,6 +211,8 @@
 </template>
 
 <script setup>
+import { usePagedRows } from '../composables/usePagedRows.js';
+import HistoryControls from '../components/common/HistoryControls.vue';
 import { useRoute } from 'vue-router';
 const route = useRoute();
 import { computed, ref, onActivated, onMounted } from 'vue';
@@ -244,12 +247,12 @@ const driftMap = computed(() => {
 });
 function driftDotClass(status) {
   return {
-    clean: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-emerald-400',
+    clean: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-status-ok',
     behind: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-sky-400',
-    diverged: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-amber-400',
-    detached: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-rose-400',
+    diverged: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-status-warn',
+    detached: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-status-error',
     not_cloned: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-surface-500',
-    error: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-rose-400',
+    error: 'w-2 h-2 rounded-full shrink-0 mt-1 bg-status-error',
   }[status] || 'w-2 h-2 rounded-full shrink-0 mt-1 bg-surface-500';
 }
 async function loadDrift() {
@@ -398,7 +401,7 @@ async function loadHistory(id) {
   historyLoading.value = true;
   showHistoryModal.value = true;
   try {
-    const data = await api.getGitOpsHistory(id, 50);
+    const data = await api.getGitOpsHistory(id, 200);
     if (requestId !== historyRequestId || currentRepo.value?.id !== id) return;
     commitHistory.value = data.commits || [];
   } catch (err) {
@@ -429,10 +432,10 @@ async function confirmRollback() {
 function getStatusColor(status) {
   // 与 StatusBadge 语义对齐:pending 是等待态用中性灰,error 才是红。
   const colors = {
-    synced: 'bg-emerald-500/10 text-emerald-400',
-    rolled_back: 'bg-amber-500/10 text-amber-300',
+    synced: 'bg-status-ok/10 text-status-ok',
+    rolled_back: 'bg-status-warn/10 text-status-warn',
     pending: 'bg-surface-800/40 text-surface-400',
-    error: 'bg-rose-500/10 text-rose-400',
+    error: 'bg-status-error/10 text-status-error',
   };
   return colors[status] || 'bg-surface-800 text-surface-400';
 }
@@ -456,4 +459,7 @@ onMounted(() => {
 let activatedOnce = false;
 onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void loadProjects(); void loadRepos(); void loadDrift(); });
 
+
+const { rows: pagedRows, page, pageSize, total, sortKey, descending } = usePagedRows(commitHistory, { date: item => Date.parse(item.date) || 0, author: item => item.author, message: item => item.message }, 'date');
+const sortOptions = [{ key: 'date', label: '提交时间' }, { key: 'author', label: '作者' }, { key: 'message', label: '提交摘要' }];
 </script>

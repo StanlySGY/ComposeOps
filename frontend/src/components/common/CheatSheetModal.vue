@@ -1,11 +1,11 @@
 <template>
   <BaseModal :show="open" title="快捷键速查表" size-class="max-w-[calc(100vw-2rem)] sm:max-w-xl flex max-h-[85vh] flex-col" body-class="min-h-0 flex-1 overflow-y-auto p-4" @close="close">
     <template #header-actions>
-      <Keyboard class="w-4 h-4 text-accent" />
+      <Keyboard class="w-4 h-4 text-status-info" />
     </template>
     <div class="grid gap-4 sm:grid-cols-2">
       <div v-for="(group, gi) in groups" :key="gi">
-        <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-500">{{ group.label }}</p>
+        <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-400">{{ group.label }}</p>
         <div v-for="(item, ii) in group.items" :key="ii" class="flex items-center justify-between gap-3 py-1 text-sm">
           <span class="text-surface-300">{{ item.label }}</span>
           <span class="flex flex-wrap justify-end gap-1"><kbd v-for="(key, ki) in item.keys" :key="ki" class="shortcut-key">{{ key }}</kbd></span>

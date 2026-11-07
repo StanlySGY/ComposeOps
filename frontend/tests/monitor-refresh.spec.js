@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { nextTick } from 'vue';
 
-const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getMetrics', 'getDockerUsage', 'getCapabilities', 'getPreferences', 'getHosts'].map(name => [name, vi.fn()])) }));
+const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getMetrics', 'getDockerUsage', 'getCapabilities', 'getPreferences', 'getHosts', 'getProjects'].map(name => [name, vi.fn()])) }));
 vi.mock('../src/api/client.js', () => ({ api }));
 import MonitorView from '../src/views/MonitorView.vue';
 
@@ -18,6 +18,7 @@ describe('实时监控刷新与生命周期', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    api.getProjects.mockResolvedValue({ projects: [] });
     api.getHosts.mockResolvedValue({ hosts: [] });
     api.getMetrics.mockResolvedValue(metrics());
     api.getDockerUsage.mockResolvedValue(usage);
@@ -37,6 +38,24 @@ describe('实时监控刷新与生命周期', () => {
     await start();
     expect(wrapper.text()).toContain('23%');
     expect(wrapper.text()).toContain('磁盘统计不可用');
+  });
+
+  it('慢指标请求期间先显示容器名称和镜像，不伪报 CPU 为零', async () => {
+    const pending = deferred();
+    api.getMetrics.mockReturnValueOnce(pending.promise);
+    api.getProjects.mockResolvedValue({ projects: [{ id: 'p1', hostId: 'local', containers: [{ id: 'c1', name: 'web-first-paint', image: 'nginx:stable' }] }] });
+    await start();
+    expect(wrapper.text()).toContain('web-first-paint');
+    expect(wrapper.text()).toContain('nginx:stable');
+    expect(wrapper.text()).toContain('等待指标');
+    pending.resolve(metrics()); await flushPromises();
+  });
+
+  it('存储请求未完成也立即渲染已到达的指标', async () => {
+    const pending = deferred(); api.getDockerUsage.mockReturnValueOnce(pending.promise);
+    await start();
+    expect(wrapper.text()).toContain('23%');
+    pending.resolve(usage); await flushPromises();
   });
 
   it('能力或偏好加载失败仍可查看实时数据', async () => {
