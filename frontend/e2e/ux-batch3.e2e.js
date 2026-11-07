@@ -25,14 +25,15 @@ test('监控冷进入 3 秒内显示静态容器，慢存储不阻塞实时指�
   await patchFixtureFetch(page, 'slow');
   const start = Date.now();
   await page.goto('./#/monitor');
-  await expect(page.getByRole('heading', { name: '容器资源', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: '容器资源', exact: true })).toBeVisible();
   await expect(page.locator('tbody').getByText('wiki-api', { exact: true })).toBeVisible({ timeout: 3000 });
   const firstPaint = Date.now() - start;
   expect(firstPaint).toBeLessThanOrEqual(3000);
   console.log(`monitor static first paint: ${firstPaint}ms`);
   await expect(page.getByText('等待指标').first()).toBeVisible();
+  await page.getByRole('button', { name: '展开指标', exact: true }).click();
   await expect(page.locator('.metric-tile').filter({ hasText: '环境 CPU' })).toContainText('18%', { timeout: 5000 });
-  await expect(page.getByRole('heading', { name: 'Docker 存储', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /^Docker 存储/ })).toHaveCount(0);
 });
 
 test('单项目自动选择，手动清除后刷新仍尊重用户选择', async ({ page }) => {
