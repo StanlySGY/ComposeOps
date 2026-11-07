@@ -109,6 +109,8 @@
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router';
+const route = useRoute();
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Clock3, DatabaseBackup, Bot, Play, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-vue-next';
@@ -157,7 +159,7 @@ async function load() {
     const data = await api.listCronJobs();
     jobs.value = data.jobs || [];
     types.value = data.types || {};
-    history.value = (await api.getCronHistory()).history || [];
+    history.value = ((await api.getCronHistory()).history || []).filter(item => !route.query.job || item.jobId === route.query.job);
   } catch (e) {
     error.value = e.message;
   } finally {

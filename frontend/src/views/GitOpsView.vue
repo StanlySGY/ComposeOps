@@ -210,6 +210,8 @@
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router';
+const route = useRoute();
 import { computed, ref, onActivated, onMounted } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { History, Plus, RefreshCw } from 'lucide-vue-next';
@@ -305,6 +307,7 @@ async function loadRepos() {
     const data = await api.getGitOpsRepos();
     if (requestId !== reposRequestId) return;
     repos.value = data.repositories || [];
+    if (route.query.repo && !showHistoryModal.value && repos.value.some(repo => repo.id === route.query.repo)) void loadHistory(String(route.query.repo));
   } catch (err) {
     if (requestId !== reposRequestId) return;
     repoError.value = err?.message || '未知错误';

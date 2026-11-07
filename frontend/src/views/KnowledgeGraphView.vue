@@ -114,7 +114,7 @@
                 </div>
                 <p class="text-[11px] text-surface-400 mt-0.5 truncate">{{ p.workingDir || '标准项目路径' }}</p>
               </div>
-              <router-link :to="`/services?focus=${encodeURIComponent(p.id)}`" class="icon-btn text-surface-400 hover:text-surface-100" title="进入服务">
+              <router-link :to="deepLink('/services', { focus: p.id, from: 'services' })" class="icon-btn text-surface-400 hover:text-surface-100" title="进入服务">
                 <ChevronRight class="w-4 h-4" />
               </router-link>
             </div>
@@ -185,6 +185,7 @@
 </template>
 
 <script setup>
+import { deepLink } from '../lib/deep-links.js';
 const props = defineProps({ embedded: { type: Boolean, default: false } });
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';

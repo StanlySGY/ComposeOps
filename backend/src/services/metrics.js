@@ -428,3 +428,10 @@ export function evaluateAlertRules(containerId, hostId) {
 
   return alerts;
 }
+
+export function previewRetentionPolicy(now = Date.now()) {
+  const day = 24 * 3600 * 1000;
+  const deleted30d = db.prepare('SELECT COUNT(*) AS n FROM container_metrics WHERE timestamp < ?').get(now - 30 * day).n;
+  const compactedRows = db.prepare('SELECT COUNT(*) AS n FROM container_metrics WHERE timestamp >= ? AND timestamp < ?').get(now - 30 * day, now - 7 * day).n;
+  return { deleted30d, compactedRows, rawDays: 7, totalDays: 30, aggregateSeconds: 300 };
+}

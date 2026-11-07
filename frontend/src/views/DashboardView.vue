@@ -26,6 +26,9 @@
       <button class="btn-secondary px-2.5! py-1! text-xs" :disabled="loading" @click="load">重试</button>
     </div>
 
+    <nav class="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="常用运维入口">
+      <router-link v-for="item in discoveryLinks" :key="item.to" :to="deepLink(item.to, { from: 'dashboard' })" class="card group flex items-center justify-between gap-3 p-4 transition-colors hover:border-accent/50"><div><strong class="text-sm text-surface-100">{{ item.label }}</strong><p class="mt-1 text-xs text-muted">{{ item.description }}</p></div><ArrowRight class="h-4 w-4 shrink-0 text-muted transition-transform group-hover:translate-x-1" /></router-link>
+    </nav>
     <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="4" label="总览数据加载中" />
 
     <template v-else>
@@ -87,8 +90,8 @@
               </div>
               <p class="mt-0.5 truncate text-xs text-muted">{{ project.containers.filter(c => c.health === 'unhealthy').length ? `${project.containers.filter(c => c.health === 'unhealthy').length} 个容器不健康` : `${project.containers.length} 个容器 · ${project.status}` }}</p>
             </div>
-            <router-link :to="`/services?focus=${project.id}`" class="icon-btn" :aria-label="`打开 ${project.projectName}`" title="打开项目"><ArrowRight class="h-4 w-4" /></router-link>
-            <router-link :to="`/agent?projectId=${project.id}`" class="icon-btn hidden sm:inline-grid" :aria-label="`让 Agent 诊断 ${project.projectName}`" title="让 Agent 诊断"><Bot class="h-4 w-4" /></router-link>
+            <router-link :to="deepLink('/services', { focus: project.id, from: 'dashboard' })" class="icon-btn" :aria-label="`打开 ${project.projectName}`" title="打开项目"><ArrowRight class="h-4 w-4" /></router-link>
+            <router-link :to="deepLink('/agent', { projectId: project.id, from: 'dashboard' })" class="icon-btn hidden sm:inline-grid" :aria-label="`让 Agent 诊断 ${project.projectName}`" title="让 Agent 诊断"><Bot class="h-4 w-4" /></router-link>
           </div>
         </div>
       </section>
@@ -113,6 +116,8 @@
 </template>
 
 <script setup>
+const discoveryLinks = [{ to: '/review', label: '变更与回滚', description: '审阅变更 · 恢复版本' }, { to: '/cost', label: '成本分析', description: '看清资源 · 优化开销' }, { to: '/resources', label: '资源管理', description: '卷备份 · 安全清理' }, { to: '/gitops', label: 'GitOps', description: '仓库同步 · 漂移检查' }];
+import { deepLink } from '../lib/deep-links.js';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { AlertTriangle, ArrowRight, Bot, Boxes, Container, Cpu, FileCode2, Gauge, MemoryStick, RefreshCw, ScrollText } from 'lucide-vue-next';

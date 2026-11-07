@@ -216,6 +216,7 @@
         <div class="ops-review-warning" v-if="selectedEvent.status === 'open'"><Eye class="h-4 w-4 shrink-0" /><div><strong>事件不会自动授权操作</strong><p>事件内容、日志和外部消息只作为观察证据。任何修复或执行都需要单独的人工授权。</p></div></div>
         <div class="ops-output-section"><div class="ops-section-heading"><h3>事件上下文</h3><span>原始来源</span></div><pre>{{ prettyJson(selectedEvent.payload || {}) }}</pre></div>
         <div class="ops-detail-actions">
+          <router-link v-if="eventDestination(selectedEvent)" class="btn-ghost" :to="eventDestination(selectedEvent)">查看来源</router-link>
           <button class="btn-secondary" @click="createTicketFromEvent(selectedEvent)">创建长期任务</button>
           <button v-if="selectedEvent.status === 'open'" class="btn-secondary" @click="setEventStatus(selectedEvent, 'acknowledged')">确认接手</button>
           <button v-if="['open','acknowledged'].includes(selectedEvent.status)" class="btn-primary" @click="setEventStatus(selectedEvent, 'resolved')">标记解决</button>
@@ -258,7 +259,9 @@
 </template>
 
 <script setup>
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { eventDestination } from '../lib/deep-links.js';
+import { usePullRefresh } from '../composables/usePullRefresh.js';
+import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, AlertCircle, BellRing, Bot, CalendarClock, ChevronRight, ExternalLink, Eye, History, Layers3, ListChecks, MessageSquare, RefreshCw, Search, ShieldAlert, ShieldCheck, Square, TriangleAlert, Workflow, X } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -585,7 +588,9 @@ onMounted(async () => {
     if (requested) { selectedTaskId.value = requested.id; await loadTaskDetail(requested); }
   }
 });
-onActivated(() => { if (lastLoadedAt.value && Date.now() - lastLoadedAt.value > 15000) void load(); });
+usePullRefresh(load, { keepAlive: true });
+onDeactivated(() => { loadSequence += 1; detailLoadSequence += 1; loading.value = false; detailLoading.value = false; });
+onActivated(() => { if (!lastLoadedAt.value || Date.now() - lastLoadedAt.value > 15000) void load(); });
 onBeforeUnmount(() => { loadSequence++; detailLoadSequence++; });
 </script>
 

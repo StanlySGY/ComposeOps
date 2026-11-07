@@ -121,7 +121,7 @@ async function applyAgentAlertAction(rule, project, container, current) {
     title,
     detail: `${project.projectName} / ${container.name} · ${rule.metric}=${current} (阈值 ${rule.threshold})`,
     priority: 'warning',
-    to: `/services?focus=${project.id}`,
+    to: '/logs?' + new URLSearchParams({ projectId: project.id, containerId: container.id, hostId: project.hostId || 'local', from: 'events' }),
   });
   await sendNotification(title, body).catch(() => {});
 
@@ -216,7 +216,7 @@ async function poll() {
                   title: 'ComposeOps:容器内存告警',
                   detail: `${project.projectName} / ${item.name}: ${percent.toFixed(1)}%`,
                   priority: 'warning',
-                  to: `/services?focus=${project.id}`,
+                  to: '/logs?' + new URLSearchParams({ projectId: project.id, containerId: item.id, hostId: project.hostId || 'local', from: 'events' }),
                 });
                 await sendNotification('ComposeOps：容器内存告警', `${project.projectName} / ${item.name}: ${percent.toFixed(1)}%`)
                   .catch(() => {});

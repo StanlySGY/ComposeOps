@@ -1,9 +1,10 @@
+import { createPinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { nextTick } from 'vue';
 
-const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getMetrics', 'getDockerUsage', 'getCapabilities', 'getPreferences'].map(name => [name, vi.fn()])) }));
+const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getMetrics', 'getDockerUsage', 'getCapabilities', 'getPreferences', 'getHosts'].map(name => [name, vi.fn()])) }));
 vi.mock('../src/api/client.js', () => ({ api }));
 import MonitorView from '../src/views/MonitorView.vue';
 
@@ -17,6 +18,7 @@ describe('实时监控刷新与生命周期', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    api.getHosts.mockResolvedValue({ hosts: [] });
     api.getMetrics.mockResolvedValue(metrics());
     api.getDockerUsage.mockResolvedValue(usage);
     api.getCapabilities.mockResolvedValue({ hostMetricsScope: 'host' });
@@ -26,7 +28,7 @@ describe('实时监控刷新与生命周期', () => {
   async function start(path = '/monitor') {
     router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/monitor', component: MonitorView }] });
     await router.push(path);
-    wrapper = mount(MonitorView, { global: { plugins: [router], stubs: { ResourceMonitorView: true } } });
+    wrapper = mount(MonitorView, { global: { plugins: [router, createPinia()], stubs: { ResourceMonitorView: true } } });
     await flushPromises();
   }
 

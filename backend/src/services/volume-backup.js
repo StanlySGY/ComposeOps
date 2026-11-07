@@ -1,3 +1,4 @@
+import { recordEvent } from './event-center.js';
 /**
  * 数据卷备份:用一次性 helper 容器(busybox)把项目的命名卷打包为 tar.gz。
  *
@@ -312,6 +313,7 @@ export async function createVolumeBackup(project, volumeName) {
       throw error;
     }
     addOperation({ action: 'volume.backup', status: 'success', detail: `${project.projectName}/${volumeName} → ${file}` });
+    recordEvent({ eventType: 'backup', source: 'volume-backup', title: `卷备份完成 · ${volumeName}`, status: 'resolved', payload: { backupId: id, projectId: project.id, hostId, to: `/resources?tab=backups&projectId=${project.id}&hostId=${encodeURIComponent(hostId)}&from=ops-center` } });
     // 清理同卷超限的旧备份(记录+文件)
     for (const stale of pruneVolumeBackups(project.id, volumeName, { host: hostId })) {
       try {
@@ -440,6 +442,7 @@ export async function verifyVolumeBackup(id) {
     const started = Date.now();
     const fail = (message) => {
       updateVolumeBackupVerify(record.id, { status: 'failed', files: null });
+      recordEvent({ eventType: 'alert', source: 'volume-verify', title: `备份演练失败 · ${record.volume}`, detail: message, severity: 'danger', payload: { backupId: record.id, projectId: record.projectId, hostId: record.host, to: `/resources?tab=backups&projectId=${record.projectId}&hostId=${encodeURIComponent(record.host)}&from=events` } });
       addOperation({ action: 'volume.verify', status: 'failed', detail: `${record.projectName}/${record.volume} ← ${record.file}: ${message}` });
       return Object.assign(new Error(message), { statusCode: 502 });
     };
@@ -472,6 +475,7 @@ export async function verifyVolumeBackup(id) {
     const sizeHuman = lines[lines.length - 1] || '';
     const status = files > 0 ? 'verified' : 'empty';
     updateVolumeBackupVerify(record.id, { status, files });
+    recordEvent({ eventType: 'backup', source: 'volume-verify', title: `备份演练完成 · ${record.volume}`, detail: `${files} 个文件`, status: 'resolved', payload: { backupId: record.id, to: `/resources?tab=backups&from=events` } });
     addOperation({ action: 'volume.verify', status: 'success', detail: `${record.projectName}/${record.volume} ← ${file}:${files} 个文件` });
     return { ok: true, status, entries, files, sizeHuman, durationMs: Date.now() - started };
     } finally {

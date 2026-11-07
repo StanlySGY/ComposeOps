@@ -5,7 +5,7 @@ import AIDiagnosisModal from '../src/components/services/AIDiagnosisModal.vue';
 const streamSse = vi.hoisted(() => vi.fn());
 vi.mock('../src/api/client.js', () => ({ streamSse }));
 vi.mock('../src/stores/toast.js', () => ({ useToastStore: () => ({ success: vi.fn(), error: vi.fn() }) }));
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('vue-router', () => ({ useRoute: () => ({ name: 'logs', query: {} }), useRouter: () => ({ push: vi.fn() }) }));
 
 let wrapper;
 afterEach(() => {

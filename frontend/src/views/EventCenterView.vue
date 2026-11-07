@@ -65,7 +65,11 @@
               <p v-if="event.detail" class="mt-1 text-xs text-surface-400">{{ event.detail }}</p>
               <p class="mt-1 text-[11px] text-surface-600">{{ formatTime(event.createdAt) }} · {{ event.source }}</p>
             </div>
-            <div class="flex shrink-0 items-center gap-2">
+            <div class="flex shrink-0 flex-wrap items-center gap-2">
+              <router-link v-if="eventDestination(event)" class="btn-ghost" :to="eventDestination(event)">查看来源</router-link>
+              <router-link v-if="eventContainerLink(event, '/logs')" class="btn-ghost" :to="eventContainerLink(event, '/logs')">日志</router-link>
+              <router-link v-if="eventContainerLink(event, '/monitor')" class="btn-ghost" :to="eventContainerLink(event, '/monitor')">监控</router-link>
+              <router-link class="btn-ghost" :to="deepLink('/tickets', { create: 1, sourceType: 'event', sourceId: event.id, title: event.title, description: event.detail, projectId: event.payload?.projectId, from: 'events' })">建工单</router-link>
               <button class="btn-secondary px-2! py-1! text-xs" @click="setStatus(event, 'resolved')">解决</button>
               <button class="btn-secondary px-2! py-1! text-xs" @click="setStatus(event, 'closed')">关闭</button>
             </div>
@@ -82,6 +86,7 @@
 </template>
 
 <script setup>
+import { deepLink, eventDestination, eventContainerLink } from '../lib/deep-links.js';
 import { computed, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
@@ -120,7 +125,7 @@ const typeFilters = [
   { value: 'rollback', label: '回滚' },
   { value: 'agent', label: 'Agent' },
   { value: 'gitops', label: 'GitOps' },
-  { value: 'workflow', label: '工作流' },
+  { value: 'workflow', label: '工作流' }, { value: 'cron', label: '定时任务' }, { value: 'backup', label: '备份' },
 ];
 
 const events = computed(() => store.events);
@@ -129,7 +134,7 @@ const loading = computed(() => store.loading);
 const error = computed(() => store.error);
 
 function typeLabel(type) {
-  return { alert: '告警', inspection: '巡检', deployment: '部署', rollback: '回滚', agent: 'Agent', gitops: 'GitOps', workflow: '工作流', system: '系统' }[type] || type;
+  return { alert: '告警', inspection: '巡检', deployment: '部署', rollback: '回滚', agent: 'Agent', gitops: 'GitOps', workflow: '工作流', system: '系统', cron: '定时任务', backup: '备份' }[type] || type;
 }
 function typeTone(type) {
   return { alert: 'text-rose-300', inspection: 'text-sky-300', deployment: 'text-emerald-300', rollback: 'text-amber-300', agent: 'text-violet-300', gitops: 'text-cyan-300', workflow: 'text-indigo-300' }[type] || 'text-surface-300';

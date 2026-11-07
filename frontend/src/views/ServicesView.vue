@@ -229,6 +229,15 @@ const sortComparators = { name: (a, b) => a.projectName.localeCompare(b.projectN
 function resetFilters() { searchQuery.value = ''; filter.value = 'all'; sort.value = 'priority'; }
 function toggleSelection(projectId) { selectedIds.value = selectedIds.value.includes(projectId) ? selectedIds.value.filter((id) => id !== projectId) : [...selectedIds.value, projectId]; }
 function toggleAllVisible() { const visibleIds = visibleManagedProjects.value.map((project) => project.id); selectedIds.value = allVisibleSelected.value ? selectedIds.value.filter((id) => !visibleIds.includes(id)) : [...new Set([...selectedIds.value, ...visibleIds])]; }
+const seenProjectCards = new Set();
+watch(() => store.projects, (projects) => {
+  const next = new Set(expandedIds.value);
+  for (const project of projects) {
+    if (!seenProjectCards.has(project.id) && project.containers.length === 1) next.add(project.id);
+    seenProjectCards.add(project.id);
+  }
+  expandedIds.value = next;
+}, { immediate: true });
 function toggleExpanded(projectId) { const next = new Set(expandedIds.value); if (next.has(projectId)) next.delete(projectId); else next.add(projectId); expandedIds.value = next; }
 function actionLabel(action) { return ({ up: '启动', restart: '重启', stop: '停止', pull: '拉取', ps: '状态', 'env.apply': '应用环境变量', 'env.save': '保存环境变量' })[action] || action; }
 async function run(project, action) {
@@ -379,6 +388,14 @@ async function openEnvFromQuery() {
   envProject.value = project;
 }
 watch(() => route.query.env, openEnvFromQuery);
+watch([() => route.query.upgrade, () => store.projects], ([id]) => {
+  if (route.name !== 'services' || !id) return;
+  const project = store.projects.find(item => item.id === id);
+  if (!project) return;
+  upgradeProject.value = project;
+  const query = { ...route.query }; delete query.upgrade;
+  void router.replace({ query });
+}, { immediate: true });
 
 // WebSocket 实例只在 setup 顶层创建一次;autoRefresh 切换仅负责连接/断开。
 const containerSocket = useWebSocket(
@@ -454,7 +471,7 @@ async function handleKbAction(action) {
   if (action === 'expand') { toggleExpanded(project.id); return; }
   if (action === 'l') { router.push({ path: '/logs', query: { projectId: project.id, from: 'services' } }); return; }
   if (action === 'e') { envProject.value = project; return; }
-  if (action === 'c') { router.push({ path: '/compose', query: { projectId: project.id } }); return; }
+  if (action === 'c') { router.push({ path: '/compose', query: { projectId: project.id, from: 'services' } }); return; }
   if (action === 'r') {
     restartTarget.value = project;
     return;

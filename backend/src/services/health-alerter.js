@@ -133,7 +133,7 @@ async function poll() {
           title,
           detail: `${project.projectName} / ${container.name} · ${container.statusText || ''}`,
           priority: event === 'crashloop' ? 'warning' : 'danger',
-          to: `/services?focus=${project.id}`,
+          to: '/logs?' + new URLSearchParams({ projectId: project.id, containerId: container.id, hostId: project.hostId || 'local', from: 'events' }),
           logs,
         });
         await sendNotification(title, body).catch(() => {});

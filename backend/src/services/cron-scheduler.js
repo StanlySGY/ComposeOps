@@ -1,3 +1,4 @@
+import { recordEvent } from './event-center.js';
 import { readFile } from 'fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
@@ -237,6 +238,7 @@ async function recordRun(job, status, error = '', duration) {
   });
   history = history.slice(0, 200);
   await persist();
+  recordEvent({ eventType: 'cron', source: 'cron', title: `定时任务${status === 'success' ? '完成' : '失败'} · ${job.name}`, detail: error || `${Math.round(duration)} ms`, severity: status === 'success' ? 'info' : 'warning', status: status === 'success' ? 'resolved' : 'open', payload: { jobId: job.id, runId: history[0].id, to: `/cron?job=${encodeURIComponent(job.id)}&from=ops-center` } });
   // 失败告警:通过既有通知渠道
   if (status === 'failed') {
     try {

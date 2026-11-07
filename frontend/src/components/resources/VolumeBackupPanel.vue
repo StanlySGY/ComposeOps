@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { Ban, Download, HardDriveDownload, RefreshCw, ShieldCheck, Trash2, Undo2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import { useToastStore } from '../../stores/toast.js';
@@ -81,7 +81,9 @@ import ConfirmDialog from '../common/ConfirmDialog.vue';
 
 const toast = useToastStore();
 const projects = ref([]);
+const props = defineProps({ initialProjectId: { type: String, default: '' } });
 const projectId = ref('');
+watch(() => props.initialProjectId, value => { if (projects.value.some(project => project.id === value)) { projectId.value = value; void loadVolumes(); } });
 const filterProjectId = ref('');
 const volumes = ref([]);
 const selected = ref([]);
@@ -227,6 +229,7 @@ onMounted(async () => {
   try {
     projects.value = ((await api.getProjects(true)).projects || []).filter((project) => project.managed);
   } catch { projects.value = []; }
+  if (projects.value.some(project => project.id === props.initialProjectId)) { projectId.value = props.initialProjectId; await loadVolumes(); }
   await loadBackups();
 });
 </script>

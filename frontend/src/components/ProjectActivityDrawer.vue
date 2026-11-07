@@ -26,7 +26,7 @@
         <div v-else class="space-y-3">
           <article v-for="backup in backups" :key="backup.id" class="version-card">
             <div class="flex items-start gap-3"><span class="version-icon"><FileCode2 class="h-4 w-4" /></span><div class="min-w-0 flex-1"><strong>{{ reasonLabel(backup.reason) }}</strong><p class="mt-1 truncate font-mono text-muted" :title="backup.filePath">{{ backup.filePath }}</p><p class="mt-1 text-xs text-surface-600">{{ formatTime(backup.createdAt) }} · {{ backup.size }} 字符</p></div></div>
-            <div class="mt-3 flex justify-end gap-2"><router-link class="btn-ghost" :to="`/compose?projectId=${project.id}`" @click="$emit('close')"><Eye class="h-4 w-4" />打开编辑器</router-link><button class="btn-secondary" :disabled="restoring || !project.editable" :title="project.editable ? '恢复到该版本' : '项目未启用 Compose 编辑能力'" @click="restore(backup)"><Undo2 class="h-4 w-4" />恢复</button></div>
+            <div class="mt-3 flex justify-end gap-2"><router-link class="btn-ghost" :to="deepLink('/compose', { projectId: project.id, from: 'services' })" @click="$emit('close')"><Eye class="h-4 w-4" />打开编辑器</router-link><button class="btn-secondary" :disabled="restoring || !project.editable" :title="project.editable ? '恢复到该版本' : '项目未启用 Compose 编辑能力'" @click="restore(backup)"><Undo2 class="h-4 w-4" />恢复</button></div>
           </article>
           <EmptyState v-if="!backups.length" icon="FileClock" compact title="暂无配置备份" description="保存配置后会自动生成版本历史" />
         </div>
@@ -47,6 +47,7 @@
 </template>
 
 <script setup>
+import { deepLink } from '../lib/deep-links.js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { Activity, ChevronRight, Eye, FileClock, FileCode2, History, RefreshCw, Undo2, X } from 'lucide-vue-next';

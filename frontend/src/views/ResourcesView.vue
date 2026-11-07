@@ -43,7 +43,7 @@
     <Skeleton v-if="loading && !data && activeTab !== 'backups'" variant="table" :rows="6" label="资源清单加载中" />
 
     <section v-if="activeTab === 'backups'" class="section-panel flex-1 mt-4">
-      <VolumeBackupPanel />
+      <VolumeBackupPanel :initial-project-id="String(route.query.projectId || '')" />
     </section>
 
     <section v-if="data && activeTab !== 'backups'" class="section-panel flex-1 mt-4">
@@ -92,6 +92,8 @@
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router';
+const route = useRoute();
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { RefreshCw, Trash2 } from 'lucide-vue-next';
@@ -104,7 +106,8 @@ const data = ref(null);
 const loading = ref(false);
 const error = ref('');
 const flash = ref('');
-const activeTab = ref('images');
+const activeTab = ref(['images', 'volumes', 'networks', 'backups'].includes(route.query.tab) ? route.query.tab : 'images');
+watch(() => route.query.tab, value => { if (['images', 'volumes', 'networks', 'backups'].includes(value)) switchTab(value); });
 const pendingKey = ref('');
 const busy = ref(false);
 const selected = ref([]);

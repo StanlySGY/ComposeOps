@@ -26,9 +26,13 @@
         <ChevronDown class="w-4 h-4 text-surface-500 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
       </button>
       <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden md:inline-flex" />
-      <button v-if="updateInfo?.hasUpdate" class="update-badge shrink-0" title="检测到镜像可更新,点击一键升级" @click.stop="$emit('upgrade')"><Sparkles class="w-3.5 h-3.5" />Update Available</button>
+      <ImageUpdatePanel :project="project" compact @result="updateInfo = $event" @open="$emit('upgrade')" />
       <button class="icon-btn" title="编辑备注" aria-label="编辑备注" @click="editNote(project)"><Pencil class="w-4 h-4" /></button>
     </header>
+    <nav class="flex flex-wrap items-center gap-1 border-t border-surface-800/50 px-3 py-2" :aria-label="`${project.projectName} 快捷操作`">
+      <router-link v-for="action in quickActions" :key="action.label" class="btn-ghost gap-1.5 text-xs" :class="{ 'pointer-events-none opacity-40': !project.managed }" :aria-disabled="!project.managed || undefined" :tabindex="project.managed ? 0 : -1" :to="action.to" @click="!project.managed && $event.preventDefault()"><component :is="action.icon" class="h-3.5 w-3.5" />{{ action.label }}</router-link>
+      <span class="ml-auto text-xs text-muted">{{ project.containers.length }} 个容器</span>
+    </nav>
 
     <div v-if="expanded" class="border-t border-surface-800 p-3 md:p-4 space-y-3">
       <div class="flex flex-col lg:flex-row lg:items-center gap-2">
@@ -56,7 +60,7 @@
         <button class="btn-ghost" :disabled="!project.managed || locked" @click="trigger('ps')"><ListTree class="w-4 h-4" />状态</button>
         <button class="btn-secondary" :disabled="!project.editable || locked" title="需在项目纳管中勾选 Compose" @click="trigger('pull')"><Download class="w-4 h-4" :class="{ 'animate-spin': actionRunning === 'pull' }" />拉取</button>
         <button v-if="updateInfo?.hasUpdate" class="btn-secondary" :disabled="!project.editable || locked" title="一键平滑升级到最新镜像" @click="$emit('upgrade')"><Sparkles class="w-4 h-4" />平滑升级</button>
-        <router-link class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :to="`/compose?projectId=${project.id}`"><FileCode2 class="w-4 h-4" />配置</router-link>
+        <router-link class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :to="deepLink('/compose', { projectId: project.id, from: 'services' })"><FileCode2 class="w-4 h-4" />配置</router-link>
         <button class="btn-ghost" :class="{ 'pointer-events-none opacity-40': !project.editable }" :disabled="!project.editable || busy" title="编辑项目环境变量 (.env)" @click="$emit('env')"><KeyRound class="w-4 h-4" />环境变量</button>
         <button class="btn-ghost" :disabled="!project.managed || busy" @click="$emit('activity')"><History class="h-4 w-4" />活动</button>
         <button v-if="dbContainers.length" class="btn-ghost" :disabled="!project.managed || busy" title="一键导出数据库备份并下载" @click="$emit('db-dump')"><Database class="h-4 w-4 text-emerald-300" />备份数据库</button>
@@ -91,8 +95,8 @@
             <SparklineChart v-if="metrics[container.id]?.history && metrics[container.id].history.length >= 2" :cpu="metrics[container.id].history.map((point) => point.cpuPercent)" :mem="metrics[container.id].history.map((point) => point.memPercent)" class="hidden sm:block" />
             <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="实时日志" :to="{ path: '/logs', query: { projectId: project.id, containerId: container.id, from: 'services' } }"><ScrollText class="w-4 h-4" /></router-link>
             <router-link v-if="dbContainers.length" class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="聚合日志(所有容器)" :to="{ path: '/logs', query: { projectId: project.id, from: 'services' } }"><Layers class="w-4 h-4 text-emerald-300" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="`/shell?projectId=${project.id}&containerId=${container.id}`"><TerminalSquare class="w-4 h-4" /></router-link>
-            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"><Bot class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="容器终端" :to="deepLink('/shell', { projectId: project.id, containerId: container.id, from: 'services' })"><TerminalSquare class="w-4 h-4" /></router-link>
+            <router-link class="icon-btn" :class="{ 'pointer-events-none opacity-40': !project.managed }" title="AI 诊断" :to="deepLink('/agent', { projectId: project.id, containerId: container.id, diagnose: '1', from: 'services' })"><Bot class="w-4 h-4" /></router-link>
           </div>
 
           <!-- 移动端触控友好卡片模式 -->
@@ -113,7 +117,7 @@
             <!-- 异常时的一键 Agent 诊断 -->
             <router-link
               v-if="container.state !== 'running' && project.managed"
-              :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"
+              :to="deepLink('/agent', { projectId: project.id, containerId: container.id, diagnose: '1', from: 'services' })"
               class="flex items-center justify-center gap-1.5 rounded-lg bg-amber-950/40 border border-amber-500/30 px-3 py-1.5 text-xs text-amber-300 font-medium active:scale-98"
             >
               <Bot class="w-3.5 h-3.5" />
@@ -130,7 +134,7 @@
                 <span>日志</span>
               </router-link>
               <router-link
-                :to="`/shell?projectId=${project.id}&containerId=${container.id}`"
+                :to="deepLink('/shell', { projectId: project.id, containerId: container.id, from: 'services' })"
                 class="flex items-center justify-center gap-1 rounded-lg bg-surface-800/80 py-1.5 text-xs text-surface-200 active:bg-surface-700"
                 :class="{ 'pointer-events-none opacity-40': !project.managed }"
               >
@@ -138,7 +142,7 @@
                 <span>终端</span>
               </router-link>
               <router-link
-                :to="`/agent?projectId=${project.id}&containerId=${container.id}&diagnose=1`"
+                :to="deepLink('/agent', { projectId: project.id, containerId: container.id, diagnose: '1', from: 'services' })"
                 class="flex items-center justify-center gap-1 rounded-lg bg-accent/20 border border-accent/40 py-1.5 text-xs text-blue-300 active:bg-accent/30"
                 :class="{ 'pointer-events-none opacity-40': !project.managed }"
               >
@@ -155,8 +159,10 @@
 </template>
 
 <script setup>
+import { deepLink } from '../../lib/deep-links.js';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { Bot, ChevronDown, Database, Download, FileCode2, FolderCog, GitBranch, History, KeyRound, Layers, ListTree, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
+import ImageUpdatePanel from './ImageUpdatePanel.vue';
 import StatusBadge from '../common/StatusBadge.vue';
 import WebUiLauncher from './WebUiLauncher.vue';
 import SparklineChart from '../common/SparklineChart.vue';
@@ -173,6 +179,11 @@ const props = defineProps({
   lastResults: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['toggle-expand', 'toggle-select', 'action', 'activity', 'env', 'db-dump', 'upgrade', 'refresh']);
+const quickActions = computed(() => [
+  { label: '聚合日志', icon: ScrollText, to: deepLink('/logs', { projectId: props.project.id, from: 'services' }) },
+  { label: '终端', icon: TerminalSquare, to: deepLink('/shell', { projectId: props.project.id, containerId: props.project.containers.find(c => c.state === 'running')?.id, from: 'services' }) },
+  { label: 'AI 诊断', icon: Bot, to: deepLink('/agent', { projectId: props.project.id, from: 'services', diagnose: 1 }) },
+]);
 const stopConfirm = ref(false);
 
 const metrics = ref({});
@@ -188,8 +199,8 @@ watch(() => props.expanded, (expanded) => {
   if (!expanded) { closeStats(); return; }
   openStats();
 });
-watch(() => props.project.id, () => { closeStats(); checkUpdates(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
-onMounted(() => { checkUpdates(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
+watch(() => props.project.id, () => { closeStats(); loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
+onMounted(() => { loadWebUi(); loadDependencies(); loadEnvPreview(); if (props.expanded) openStats(); });
 let activatedBefore = false;
 onActivated(() => {
   if (!activatedBefore) { activatedBefore = true; return; }
@@ -198,15 +209,7 @@ onActivated(() => {
 onDeactivated(closeStats);
 onBeforeUnmount(closeStats);
 
-async function checkUpdates() {
-  updateInfo.value = null;
-  if (!props.project.managed) return;
-  try {
-    updateInfo.value = await api.getProjectUpdates(props.project.id);
-  } catch {
-    updateInfo.value = null; // 检测失败静默,不打断列表
-  }
-}
+
 
 async function loadWebUi() {
   webuiLinks.value = [];

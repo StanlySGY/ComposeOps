@@ -1,22 +1,12 @@
+import { notifyDataChanged } from '../lib/data-changes.js';
 import { getCurrentInstance, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useEscapeKey } from './useEscapeKey.js';
 import { api } from '../api/client.js';
 import { stripAgentProtocol } from '../lib/agent-text.js';
 
-/**
- * Agent 会话流逻辑。工作台与"页面 Agent"抽屉各用一个 channel,状态完全隔离。
- *
- * 为什么要分 channel:此前工作台和抽屉共用同一份模块级状态,在别的页面点开
- * "页面 Agent"会直接续上 AI 助手工作台里那段会话 —— 用户看到的是别人的上下文,
- * 这是串台,不是特性。参考 Pebrel(全新标签页 = 全新 session id)的做法,
- * 这里把"会话"收敛成 channel 维度:每个入口有自己的 messages/sessionId/中断控制器。
- *
- * - 会话历史以服务端 DB 为单一通道,前端不回传 history(有 sessionId 时后端只读 DB)。
- * - token 分片由服务端保证干净,这里原样追加;done 用后端最终全文覆盖自愈。
- * - onEventExtra/onApproval 供各界面挂自己的展示逻辑(执行动态面板等),按 channel 派发。
- */
+/** 抽屉与工作台共享会话、输入草稿和执行状态；只有显式新建会话才重置。 */
 export const WORKBENCH_CHANNEL = 'workbench';
-export const PAGE_DRAWER_CHANNEL = 'page-drawer';
+export const PAGE_DRAWER_CHANNEL = WORKBENCH_CHANNEL;
 
 // 单轮思考文本上限,与后端 MAX_REASONING_CHARS 对齐。
 const REASONING_LIMIT = 120000;
@@ -63,8 +53,6 @@ function resetChannel(state) {
 export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null, onApproval = null } = {}) {
   const instance = getCurrentInstance();
   const state = channelState(channel);
-  // 非组件调用(例如单测或一次性脚本)没有卸载钩子,避免共享状态污染下一次独立调用。
-  if (!instance && !state.running.value) resetChannel(state);
   const messages = state.messages;
   const input = state.input;
   const running = state.running;
@@ -124,9 +112,8 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   function nextMessageId() { return ++state.nextId; }
 
   function resetSession() {
-    messages.value = [];
-    sessionId.value = null;
-    state.nextId = 0;
+    resetChannel(state);
+    approvalMode.value = 'ask';
     state.controller?.abort();
     state.controller = null;
     // 队列残留消息若不清,会在新会话里被 sendMessage 的"自动发送下一条"带出去,
@@ -271,7 +258,10 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       assistant.confirmation = { ...event, busy: false, error: '' };
     } else if (event.type === 'context_data' && event.kind === 'projects') assistant.projects = event.projects;
     else if (event.type === 'context_data' && event.kind === 'search_sources') assistant.searchSources = event.sources;
-    else if (event.type === 'action_completed' && event.kind === 'cron_created') window.dispatchEvent(new CustomEvent('composeops:cron-agent-created', { detail: event.result || {} }));
+    else if (event.type === 'action_completed') {
+      notifyDataChanged({ source: 'agent', tool: event.tool, projectId: event.projectId, hostId: event.hostId });
+      if (event.kind === 'cron_created') window.dispatchEvent(new CustomEvent('composeops:cron-agent-created', { detail: event.result || {} }));
+    }
     else if (event.type.startsWith('channel_')) {
       const sameChannel = event.type === 'channel_selected' && assistant.aiChannel?.name === event.channelName && assistant.aiChannel?.model === event.model;
       if (!sameChannel) assistant.taskNotices = [...(assistant.taskNotices || []), event.content || ''].slice(-40);

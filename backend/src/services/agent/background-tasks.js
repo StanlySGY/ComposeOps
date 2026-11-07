@@ -1,3 +1,4 @@
+import { emitEvent as emitDataEvent } from '../events.js';
 /**
  * 持久化 Agent 后台任务管理器。
  * SQLite 保存任务事实，内存只保存当前进程的执行句柄/Promise；进程重启后不盲目重放
@@ -121,6 +122,7 @@ function stopTimers(task) {
 
 function notifyTerminal(task) {
   emit(task, 'settled');
+  emitDataEvent({ type: 'data_changed', source: 'background-task', projectId: task.projectId, hostId: task.hostId, taskId: task.id });
   // 同时落入事件中心：用户不必重新打开原 Agent 会话才能看到后台任务结果。
   void import('../event-center.js').then(({ recordEvent }) => recordEvent({
     eventType: 'agent_task',
@@ -205,6 +207,7 @@ export function createBackgroundTask({ id, sessionId = 0, projectId = null, host
       flushOutput(task);
       persist(task, { finishedAt: task.finishedAt });
       emit(task, 'settled');
+  emitDataEvent({ type: 'data_changed', source: 'background-task', projectId: task.projectId, hostId: task.hostId, taskId: task.id });
       task.resolveSettled?.();
       notifyTerminal(task);
       pruneExpired();

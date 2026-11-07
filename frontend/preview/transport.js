@@ -37,7 +37,7 @@ function agentStream(body, signal) {
       emit({ type: 'token', content: intro });
       emit({ type: 'confirmation_required', executionId, toolCallId: 'demo-repair', tool: 'compose.up', risk: 'critical', description: '模拟修正 knowledge-base 的 DB_HOST 并重建 wiki-api。仅更新演示数据。', params: { projectId: 'knowledge-base', services: ['wiki-api'] } });
       pending.set(executionId, approved => {
-        if (approved) repair();
+        if (approved) { repair(); emit({ type: 'action_completed', kind: 'mutation', tool: 'compose.up', projectId: projects[0].id, hostId: 'local' }); }
         const ending = approved ? '\n\n模拟修复完成：wiki-api 已恢复运行，数据库连接检查通过。' : '\n\n已拒绝模拟操作，配置与服务状态保持原样。';
         emit({ type: 'token', content: ending });
         emit({ type: 'done', status: approved ? 'completed' : 'cancelled' });
@@ -79,6 +79,8 @@ export async function previewFetch(input, options = {}) {
     '/ops/blueprints': { blueprints: [] },
     '/ops/guardian': { enabled: false },
     '/ops/inspection/overview': inspection,
+    '/ops/inspection/reports': { reports: inspection.reports || [] },
+    '/metrics/retention-policy': { preview: { deleted30d: 0, compactedRows: 0, rawDays: 7, totalDays: 30 } },
     '/ops/alert-events': { events: alerts },
     '/ops/storage/df': storage,
     '/ops/storage/resources': { counts: { danglingImages: 0, orphanVolumes: 0, unusedNetworks: 0 }, images: [], containers: [], volumes: [{ name: 'cache_data', driver: 'local', size: 1048576, usedBy: ['redis'], inUse: true }], networks: [] },
@@ -114,7 +116,7 @@ export async function previewFetch(input, options = {}) {
       if (path.endsWith('/compose')) return json({ content: compose.get(pid), filePath: project.composeFiles[0], path: project.composeFiles[0], fileIndex: 0 });
       if (path.endsWith('/backups')) return json({ backups: [] });
       if (path.endsWith('/activity')) return json({ activity: [], operations: [], backups: [] });
-      if (path.endsWith('/updates')) return json({ results: [], updates: [], hasUpdates: false });
+      if (path.endsWith('/updates')) return json({ results: [], updates: [], images: [], hasUpdate: false });
       if (path.endsWith('/webui')) return json({ links: [], urls: [] });
       if (path.endsWith('/env/files')) return json({ files: [{ name: '.env', path: project.workingDir + '/.env' }] });
       if (path.endsWith('/env')) return json({ content: 'TZ=Asia/Shanghai\n', exists: true, file: '.env', path: project.workingDir + '/.env', variables: [] });

@@ -84,3 +84,23 @@ describe('下拉刷新订阅器 usePullRefresh', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('写后刷新与编辑保护', () => {
+  it('合并密集 mutation，未保存表单不被覆盖，卸载后取消排队', async () => {
+    vi.useFakeTimers();
+    const { notifyDataChanged } = await import('../src/lib/data-changes.js');
+    const handler = vi.fn(); const enabled = ref(false);
+    const wrapper = mount(PullRefreshProbe, { props: { handler, enabled } });
+    try {
+      notifyDataChanged(); await vi.advanceTimersByTimeAsync(200);
+      expect(handler).not.toHaveBeenCalled();
+      enabled.value = true;
+      notifyDataChanged(); notifyDataChanged(); notifyDataChanged();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(handler).toHaveBeenCalledTimes(1);
+      notifyDataChanged(); wrapper.unmount();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+});

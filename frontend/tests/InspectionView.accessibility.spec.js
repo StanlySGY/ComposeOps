@@ -1,8 +1,10 @@
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 
 const api = vi.hoisted(() => ({
   getInspectionOverview: vi.fn(),
+  listInspectionReports: vi.fn(),
   runInspection: vi.fn(),
   saveInspectionSchedule: vi.fn(),
   pruneInspections: vi.fn(),
@@ -31,6 +33,7 @@ const report = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.listInspectionReports.mockResolvedValue({ reports: [{ ...report }] });
   api.getInspectionOverview.mockResolvedValue({
     latest: null,
     reports: [{ ...report }],

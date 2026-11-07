@@ -55,8 +55,8 @@ test('公开 Agent 事件保留用户需要的上下文和完成通知', () => {
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'project.list_managed', result: { result: [{ id: 'p1' }] } }), {
     type: 'context_data', kind: 'projects', projects: [{ id: 'p1' }],
   });
-  assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'cron.create', result: { result: { name: 'backup' } } }), {
-    type: 'action_completed', kind: 'cron_created', result: { name: 'backup' },
+  assert.deepEqual(toPublicAgentEvent({ type: 'action_completed', kind: 'cron_created', tool: 'cron.create', result: { name: 'backup' } }), {
+    type: 'action_completed', kind: 'cron_created', tool: 'cron.create', projectId: null, hostId: null, result: { name: 'backup' },
   });
   // 通用工具结果只透出工具名/成败/耗时,结果体不外带;空结果给一句人话兜底,避免展开是空白
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'compose.ps', result: { success: true, result: {}, durationMs: 120 } }), {

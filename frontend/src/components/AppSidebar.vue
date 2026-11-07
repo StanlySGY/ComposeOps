@@ -66,7 +66,7 @@
 import { nextTick, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { ChevronDown, CircleHelp, Boxes, Clock3, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, Workflow, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
+import { ChevronDown, CircleHelp, Boxes, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, ServerCog, Database, BellRing, History } from 'lucide-vue-next';
 const primaryItems = [
   { to: '/dashboard', icon: Activity, label: '总览' },
   { to: '/services', icon: Boxes, label: '服务' },
@@ -89,10 +89,6 @@ const navGroups = [
     label: '自动化',
     items: [
       { to: '/ops-center', icon: ClipboardList, label: '任务中心' },
-      { to: '/tickets', icon: ClipboardList, label: '长期任务' },
-      { to: '/maintenance-plan', icon: Clock3, label: '运维计划' },
-      { to: '/workflows', icon: Workflow, label: '工作流' },
-      { to: '/cron', icon: Clock3, label: '定时任务' },
       { to: '/gitops', icon: GitBranch, label: 'GitOps' },
       { to: '/review', icon: FileSearch, label: '变更与回滚' },
     ],
@@ -117,7 +113,7 @@ const navGroups = [
 ];
 const desktopGroups = navGroups;
 const route = useRoute();
-const expandedGroups = ref({ '观测': true, '自动化': false, '资源': false, '系统': true });
+const expandedGroups = ref({ '观测': true, '自动化': true, '资源': true, '系统': true });
 try {
   const stored = JSON.parse(localStorage.getItem('composeops:nav-groups') || '{}');
   for (const group of navGroups) if (typeof stored[group.label] === 'boolean') expandedGroups.value[group.label] = stored[group.label];

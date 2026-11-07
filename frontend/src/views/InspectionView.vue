@@ -164,7 +164,7 @@
                 <p v-if="item.advice" class="mt-1.5 text-xs leading-5 text-muted">建议:{{ item.advice }}</p>
               </div>
               <div v-if="item.tool" class="flex shrink-0 flex-col items-end gap-1.5">
-                <span class="count-badge text-accent">{{ item.tool }}</span>
+                <button class="count-badge text-accent hover:underline" @click="handoffToAgent(item)">{{ item.tool }}</button>
                 <button class="btn-secondary px-2! py-1! text-xs" @click="handoffToAgent(item)"><Bot class="h-3.5 w-3.5" />让 Agent 处理</button>
               </div>
             </div>
@@ -178,6 +178,8 @@
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router';
+const route = useRoute();
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, CheckCircle2, CircleAlert, CircleX, FileText, Hourglass, Info, Play, RefreshCw, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next';
@@ -282,7 +284,7 @@ async function load() {
     const data = await api.getInspectionOverview(20);
     overview.value = data;
     latest.value = data.latest;
-    reports.value = data.reports || [];
+    reports.value = (await api.listInspectionReports(100)).reports || [];
     schedule.value = { ...(data.schedule || { enabled: false, intervalHours: 24, lastRunAt: 0 }) };
     intervalHours.value = schedule.value.intervalHours || 24;
   } catch (loadError) {
@@ -352,7 +354,7 @@ function buildAgentPrompt(item) {
 function handoffToAgent(item) {
   updateAgentContext({ page: 'AI 巡检中心', mode: 'inspection-fix', summary: '来自巡检报告的一条建议,请分析并给出处置', state: JSON.stringify({ title: item.title, detail: item.detail, advice: item.advice, tool: item.tool }) });
   openAgent();
-  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: buildAgentPrompt(item) } }));
+  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: buildAgentPrompt(item) + (item.tool === 'volume.backup' ? '\n请先生成 type=volume-backup 的每日定时备份 cron 草案，说明作用范围与执行时间，经我确认后调用 cron.create；不要现在执行备份。' : '') } }));
 }
 function askAgent() {
   updateAgentContext({ page: 'AI 巡检中心', mode: 'inspection-review', summary: '请分析最新一次巡检结论' });
@@ -371,7 +373,7 @@ function handleHostChanged() { void load(); }
 
 usePullRefresh(load);
 onMounted(() => {
-  void load();
+  void load().then(() => { if (route.query.report) void openDetail(route.query.report); });
   window.addEventListener('composeops:host-changed', handleHostChanged);
 });
 onBeforeUnmount(() => {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { api } from '../api/client.js';
+import { api, bumpHostEpoch } from '../api/client.js';
 
 export const useHostsStore = defineStore('hosts', () => {
   const hosts = ref([]);
@@ -44,7 +44,7 @@ export const useHostsStore = defineStore('hosts', () => {
     try {
       const result = await api.pingHost(id);
       const index = hosts.value.findIndex((host) => host.id === id);
-      if (index >= 0 && result.host) hosts.value[index] = result.host;
+      if (index >= 0 && result.host) hosts.value[index] = { ...result.host, group: hosts.value[index].group };
       return result;
     } finally {
       pinging.value = '';
@@ -65,10 +65,17 @@ export const useHostsStore = defineStore('hosts', () => {
 
   async function switchHost(id) {
     const result = await api.setActiveHost(id);
+    bumpHostEpoch();
     activeHostId.value = result.activeHostId;
     hosts.value.forEach((host) => { host.active = host.id === result.activeHostId; });
+    window.dispatchEvent(new CustomEvent('composeops:host-changed'));
     return result;
   }
 
-  return { hosts, activeHostId, active, loading, error, pinging, load, ping, addOrUpdate, remove, switchHost };
+  async function assignGroup(id, group) {
+    const saved = await api.setHostGroup(id, group);
+    const host = hosts.value.find(item => item.id === id);
+    if (host) host.group = saved.group;
+  }
+  return { assignGroup, hosts, activeHostId, active, loading, error, pinging, load, ping, addOrUpdate, remove, switchHost };
 });

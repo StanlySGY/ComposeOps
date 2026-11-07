@@ -1,3 +1,4 @@
+import { recordAlertEventAndNotify } from './events.js';
 /**
  * GitOps drift 检测:只读对比"生产状态"与"Git 远端"的差异,不执行任何变更。
  *
@@ -74,6 +75,7 @@ export async function scanRepoDrift(repo) {
     result.status = 'not_cloned';
     result.summary = '本地仓库尚未克隆,首次执行同步后即可参与漂移检测。';
     result.scannedAt = new Date().toISOString();
+  if (result.status !== 'clean') recordAlertEventAndNotify({ key: `gitops-drift:${repo.id}`, title: `GitOps 漂移 · ${repo.name}`, detail: result.summary, priority: 'warning', to: `/gitops?repo=${encodeURIComponent(repo.id)}&from=events` });
     return result;
   }
 
@@ -122,6 +124,7 @@ export async function scanRepoDrift(repo) {
         : 'clean';
   result.summary = summarizeDrift(result);
   result.scannedAt = new Date().toISOString();
+  if (result.status !== 'clean') recordAlertEventAndNotify({ key: `gitops-drift:${repo.id}`, title: `GitOps 漂移 · ${repo.name}`, detail: result.summary, priority: 'warning', to: `/gitops?repo=${encodeURIComponent(repo.id)}&from=events` });
   return result;
 }
 

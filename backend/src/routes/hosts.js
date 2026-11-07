@@ -1,5 +1,6 @@
 import {
   listHosts,
+  setHostGroup,
   upsertHost,
   deleteHost,
   pingHost,
@@ -104,6 +105,8 @@ export default async function hostRoutes(fastify) {
       return reply.code(error.statusCode || 400).send({ error: 'host_switch_failed', message: error.message });
     }
   });
+
+  fastify.patch('/:id/group', { schema: { params: idParams, body: { type: 'object', required: ['group'], additionalProperties: false, properties: { group: { type: 'string', enum: ['production', 'staging', 'edge'] } } } } }, async (request) => setHostGroup(request.params.id, request.body.group));
 
   fastify.get('/active', async () => ({ activeHostId: getActiveHostId() }));
 }

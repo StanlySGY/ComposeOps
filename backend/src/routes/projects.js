@@ -95,6 +95,8 @@ export default async function projectRoutes(fastify) {
 
   fastify.get('/mount-plan', async () => buildMountPlan(await scanProjects()));
 
+  fastify.get('/management', async () => buildMountPlan(await scanProjects()));
+
   fastify.put('/management', {
     schema: {
       body: {

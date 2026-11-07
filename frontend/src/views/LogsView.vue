@@ -103,6 +103,7 @@
 </template>
 
 <script setup>
+import { returnTarget as resolveReturnTarget } from '../lib/deep-links.js';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
@@ -117,7 +118,7 @@ import { useWebSocket } from '../composables/useWebSocket.js';
 
 const route = useRoute();
 const router = useRouter();
-const logSourceRoute = ref(['services', 'topology'].includes(String(route.query.from || '')) ? String(route.query.from) : '');
+const logSourceRoute = ref(resolveReturnTarget(route.query.from) ? String(route.query.from) : '');
 const projects = ref([]);
 const projectId = ref(route.query.projectId || '');
 const containerId = ref(route.query.containerId || '');
@@ -181,10 +182,7 @@ const containers = computed(() => projects.value.find((p) => p.id === projectId.
 const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
 const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
-const returnTarget = computed(() => ({
-  services: { path: '/services', label: '返回服务列表' },
-  topology: { path: '/topology', label: '返回拓扑' },
-})[logSourceRoute.value] || null);
+const returnTarget = computed(() => resolveReturnTarget(logSourceRoute.value));
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
@@ -274,7 +272,7 @@ watch(() => [route.query.projectId, route.query.containerId], ([nextProject, nex
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();
 });
 watch(() => route.query.from, (source) => {
-  if (['services', 'topology'].includes(String(source || ''))) logSourceRoute.value = String(source);
+  if (resolveReturnTarget(source)) logSourceRoute.value = String(source);
 });
 function syncRouteContext() {
   const query = {};

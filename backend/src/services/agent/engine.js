@@ -1,3 +1,5 @@
+import { MUTATION_TOOLS } from '../../lib/mutation-tools.js';
+import { emitEvent as emitDataEvent } from '../events.js';
 import { getAiConfig, callOpenAI, UNTRUSTED_GUARD, fenceUntrusted } from '../ai.js';
 import { buildRuntimeSnapshot } from '../runtime-context.js';
 import {
@@ -944,6 +946,12 @@ export class OperationsAgent {
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: truncateToolResult(resultPayload) });
 
               onEvent({ type: 'tool_result', tool: toolName, result });
+              if (result.success && MUTATION_TOOLS.has(toolName)) {
+                const change = { type: 'action_completed', kind: toolName === 'cron.create' ? 'cron_created' : 'mutation', tool: toolName, projectId: context.project?.id || effectiveParams.projectId || null, hostId: context.project?.hostId || null };
+                if (toolName === 'cron.create') change.result = result.result;
+                onEvent(change);
+                emitDataEvent({ ...change, type: 'data_changed' });
+              }
               publishTrace('tool_executed', `${toolName} 执行完成`, { success: result.success });
 
             } catch (error) {

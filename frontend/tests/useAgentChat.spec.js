@@ -26,6 +26,7 @@ describe('useAgentChat', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    useAgentChat().resetSession();
     apiMock.createAgentSession.mockResolvedValue({ sessionId: 7 });
   });
 
@@ -110,27 +111,33 @@ describe('useAgentChat', () => {
     expect(rejecting.content).toBe('准备执行');
   });
 
-  it('抽屉频道与工作台频道完全隔离,互不串会话', async () => {
+  it('抽屉与工作台共享草稿、会话和工具结果，切换视图不重建会话', async () => {
     const workbench = useAgentChat({ channel: WORKBENCH_CHANNEL });
-    apiMock.agentExecuteStream.mockImplementation(async (payload, onEvent) => {
-      onEvent({ type: 'token', content: '工作台的回答' });
-    });
-    await workbench.sendMessage('工作台的问题');
-
+    apiMock.agentExecuteStream.mockImplementation(async (_payload, onEvent) => onEvent({ type: 'token', content: '已检查' }));
+    await workbench.sendMessage('检查容器');
+    workbench.input.value = '继续查看日志';
     const drawer = useAgentChat({ channel: PAGE_DRAWER_CHANNEL });
-    // 抽屉此时必须是干净的:既没有工作台的消息,也没有它的 sessionId
-    expect(drawer.messages.value).toHaveLength(0);
-    expect(drawer.sessionId.value).toBeNull();
+    expect(drawer.messages).toBe(workbench.messages);
+    expect(drawer.sessionId.value).toBe(7);
+    expect(drawer.input.value).toBe('继续查看日志');
+    await drawer.sendMessage(drawer.input.value);
+    expect(apiMock.createAgentSession).toHaveBeenCalledTimes(1);
+    expect(workbench.messages.value).toHaveLength(4);
+  });
 
-    apiMock.createAgentSession.mockResolvedValue({ sessionId: 99 });
-    apiMock.agentExecuteStream.mockImplementation(async (payload, onEvent) => {
-      expect(payload.sessionId).toBe(99);
-      onEvent({ type: 'token', content: '抽屉的回答' });
+  it('mutation 完成会广播数据变化，普通工具结果不触发刷新', async () => {
+    const listener = vi.fn();
+    window.addEventListener('composeops:data-changed', listener);
+    const chat = useAgentChat();
+    apiMock.agentExecuteStream.mockImplementation(async (_payload, onEvent) => {
+      onEvent({ type: 'tool_result', tool: 'compose.ps', success: true });
+      expect(listener).not.toHaveBeenCalled();
+      onEvent({ type: 'action_completed', kind: 'mutation', tool: 'compose.restart', projectId: 'p1', hostId: 'h1' });
     });
-    await drawer.sendMessage('抽屉的问题', { pageContext: { page: '服务' } });
-
-    expect(drawer.messages.value.map((m) => m.content)).toEqual(['抽屉的问题', '抽屉的回答']);
-    expect(workbench.messages.value.map((m) => m.content)).toEqual(['工作台的问题', '工作台的回答']);
+    await chat.sendMessage('重启');
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0].detail.projectId).toBe('p1');
+    window.removeEventListener('composeops:data-changed', listener);
   });
 
   it('思考过程按轮次增量累积,done 之后仍然保留', async () => {

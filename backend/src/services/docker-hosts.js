@@ -59,7 +59,7 @@ function writeHosts(hosts) {
 export function listHosts() {
   const hosts = [...DEFAULT_HOSTS, ...readHosts().map((item) => sanitizeHost(item))];
   const activeId = getActiveHostId();
-  return hosts.map((host) => ({ ...host, active: host.id === activeId }));
+  return hosts.map((host) => ({ ...host, group: getSetting(`docker.host-group.${host.id}`, 'production'), active: host.id === activeId }));
 }
 
 export function listHostsInternal() {
@@ -335,4 +335,11 @@ export async function pingHost(id, probe = null) {
 
 export function getActiveHostType() {
   return getActiveHost().type;
+}
+
+export function setHostGroup(id, group) {
+  if (!getHost(id)) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
+  if (!['production', 'staging', 'edge'].includes(group)) throw Object.assign(new Error('节点分组无效'), { statusCode: 400 });
+  setSetting(`docker.host-group.${id}`, group);
+  return { id, group };
 }

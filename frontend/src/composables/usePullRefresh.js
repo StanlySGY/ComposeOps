@@ -1,3 +1,4 @@
+import { DATA_CHANGED_EVENT, dataRevision } from '../lib/data-changes.js';
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted } from 'vue';
 
 /** App.vue 在移动端下拉到阈值时派发的全局刷新事件名。 */
@@ -22,11 +23,19 @@ function isEnabled(enabled) {
  * @param {boolean | import('vue').Ref<boolean> | (() => boolean)} [opts.enabled] 附加条件,如"编辑器有未保存改动时不刷新"
  * @param {boolean} [opts.keepAlive=false]                  页面是否在 App.vue 的 keep-alive 白名单内
  */
-export function usePullRefresh(handler, { enabled, keepAlive = false } = {}) {
+export function usePullRefresh(handler, { enabled, keepAlive = false, refreshOnActivate = false } = {}) {
   let active = false;
+  let timer;
+  let seen = dataRevision();
+  let mounted = false;
+  function onDataChanged() {
+    clearTimeout(timer);
+    timer = setTimeout(onPullRefresh, 180);
+  }
 
   function onPullRefresh() {
     if (!active || !isEnabled(enabled)) return;
+    seen = dataRevision();
     try {
       const result = handler();
       // loader 抛错不应影响同页其它监听,也不留下未处理的 rejection。
@@ -40,18 +49,27 @@ export function usePullRefresh(handler, { enabled, keepAlive = false } = {}) {
     if (active) return;
     active = true;
     window.addEventListener(PULL_REFRESH_EVENT, onPullRefresh);
+    window.addEventListener(DATA_CHANGED_EVENT, onDataChanged);
+    window.addEventListener('composeops:projects-changed', onDataChanged);
   }
 
   function unsubscribe() {
     if (!active) return;
     active = false;
+    clearTimeout(timer);
     window.removeEventListener(PULL_REFRESH_EVENT, onPullRefresh);
+    window.removeEventListener(DATA_CHANGED_EVENT, onDataChanged);
+    window.removeEventListener('composeops:projects-changed', onDataChanged);
   }
 
   onMounted(subscribe);
   onBeforeUnmount(unsubscribe);
   if (keepAlive) {
-    onActivated(subscribe);
+    onActivated(() => {
+      subscribe();
+      if (mounted && (refreshOnActivate || seen !== dataRevision())) onPullRefresh();
+      mounted = true;
+    });
     onDeactivated(unsubscribe);
   }
 

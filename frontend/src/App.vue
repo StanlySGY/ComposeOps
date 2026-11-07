@@ -16,6 +16,8 @@
           <RefreshCw v-else class="w-4 h-4" :class="{ 'rotate-180': pullY >= pullThreshold }" />
         </div>
         <div class="content-outer mx-auto h-full min-h-full w-full">
+          <ReturnLink v-if="!['logs', 'compose'].includes(route.name)" />
+          <div v-if="['ops-center', 'ops-tickets', 'maintenance-plan', 'workflows', 'cron'].includes(route.name)" class="px-4 pt-4 sm:px-6"><TaskNavigation /></div>
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in" @after-enter="restoreRouteScroll">
               <keep-alive :include="keepAliveViews">
@@ -41,6 +43,8 @@
 <script setup>
 import { onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import TaskNavigation from './components/common/TaskNavigation.vue';
+import ReturnLink from './components/common/ReturnLink.vue';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
@@ -53,6 +57,8 @@ import { useAuthStore } from './stores/auth.js';
 import { useServicesStore } from './stores/services.js';
 import { useToastStore } from './stores/toast.js';
 import { useAgentConsole } from './composables/useAgentConsole.js';
+import { notifyDataChanged } from './lib/data-changes.js';
+import { usePullRefresh } from './composables/usePullRefresh.js';
 import { preloadRouteChunks } from './router.js';
 
 // keep-alive 白名单(SFC 文件名即组件名):
@@ -62,7 +68,7 @@ const keepAliveViews = [
   'ServicesView', 'LogsView', 'TopologyView',
   'ComposeView', 'AgentExecutionHistoryView',
   'SettingsView', 'MarketplaceView', 'GitOpsView', 'CostAnalysisView',
-  'ResourcesView', 'CMDBView', 'WorkflowCenterView',
+  'ResourcesView', 'CMDBView', 'WorkflowCenterView', 'AutonomousOpsView',
 ];
 
 const auth = useAuthStore();
@@ -70,6 +76,7 @@ const route = useRoute();
 const router = useRouter();
 const servicesStore = useServicesStore();
 const toast = useToastStore();
+usePullRefresh(() => auth.authenticated && servicesStore.refresh(true));
 const { openAgent, startPageTracking, stopPageTracking } = useAgentConsole();
 const cheatSheet = ref(false);
 /* ---- 下拉刷新(移动端触屏)与头部大标题收缩 ---- */
@@ -120,6 +127,7 @@ function applyDensity() {
   localStorage.setItem('composeops:density', value);
 }
 const expire = () => auth.expire();
+const onProjectsChanged = () => notifyDataChanged({ source: 'projects' });
 const refreshOnHostChange = () => { void servicesStore.refreshForHost(); };
 
 // Keep the shared app scroller position per route while pages are cached.
@@ -169,6 +177,7 @@ onMounted(() => {
   window.addEventListener('composeops:operation-started', onOperationStarted);
   window.addEventListener('composeops:unauthorized', expire);
   window.addEventListener('composeops:host-changed', refreshOnHostChange);
+  window.addEventListener('composeops:projects-changed', onProjectsChanged);
   window.addEventListener('keydown', onGlobalKeydown, { capture: true });
   window.addEventListener('composeops:open-cheatsheet', openCheatSheet);
   auth.check();
@@ -179,6 +188,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('composeops:operation-started', onOperationStarted);
   window.removeEventListener('composeops:unauthorized', expire);
   window.removeEventListener('composeops:host-changed', refreshOnHostChange);
+  window.removeEventListener('composeops:projects-changed', onProjectsChanged);
   window.removeEventListener('keydown', onGlobalKeydown, { capture: true });
   window.removeEventListener('composeops:open-cheatsheet', openCheatSheet);
 });

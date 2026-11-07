@@ -58,6 +58,7 @@ function collectPageSnapshot() {
 
 function syncPageContext() {
   const route = currentRoute();
+  if (route === '/agent') open.value = false;
   const snapshot = collectPageSnapshot();
   autoContext.value = {
     page: PAGE_LABELS[route] || route,
@@ -86,7 +87,10 @@ export function useAgentConsole() {
     syncPageContext();
     manualContext.value = { ...manualContext.value, ...nextContext };
     context.value = { ...autoContext.value, ...manualContext.value };
-    open.value = true;
+    if (currentRoute() === '/agent') {
+      open.value = false;
+      window.dispatchEvent(new CustomEvent('composeops:agent-focus'));
+    } else open.value = true;
   }
 
   function updateAgentContext(nextContext = {}) {

@@ -513,7 +513,7 @@ function toolProjectId(tool) {
 function inspectToolProject(tool) {
   const id = toolProjectId(tool);
   if (!id) return;
-  router.push({ path: '/services', query: { focus: id } });
+  router.push({ path: '/services', query: { focus: id, from: 'agent' } });
 }
 function diagnoseTool(tool) {
   const id = toolProjectId(tool);
@@ -704,40 +704,30 @@ async function applyRouteContext() {
   if (requestedContainerId) containerId.value = requestedContainerId;
   if (route.query.diagnose && requestedProjectId) {
     try {
-      let diagnosisPrompt = '';
-      const stored = sessionStorage.getItem('composeops:agent-diagnosis-prompt');
-      if (stored) {
-        try {
-          const payload = JSON.parse(stored);
-          const age = Date.now() - Number(payload.createdAt || 0);
-          if (payload.projectId === requestedProjectId && age >= 0 && age < 5 * 60 * 1000) diagnosisPrompt = String(payload.prompt || '');
-        } finally {
-          sessionStorage.removeItem('composeops:agent-diagnosis-prompt');
-        }
-      }
       if (requestedContainerId) {
         const result = await api.getProjectLogs(requestedProjectId, requestedContainerId, 200);
         onAttach({ text: result.logs || '', count: result.count || 0 });
       }
       const failure = route.query.failure ? JSON.parse(decodeURIComponent(String(route.query.failure))) : null;
-      input.value = diagnosisPrompt || (failure ? '刚才 Agent 执行 ' + (failure.tool || '运维操作') + ' 失败。请结合当前项目状态与失败证据分析根因，给出修复方案；如需要修改系统状态，先提出计划并等待我的确认。' + '\n\n失败摘要：' + (failure.error || failure.summary || '未知错误') : '请分析已挂载的容器日志，判断异常原因并给出修复建议');
+      input.value ||= (failure ? '刚才 Agent 执行 ' + (failure.tool || '运维操作') + ' 失败。请结合当前项目状态与失败证据分析根因，给出修复方案；如需要修改系统状态，先提出计划并等待我的确认。' + '\n\n失败摘要：' + (failure.error || failure.summary || '未知错误') : '请分析已挂载的容器日志，判断异常原因并给出修复建议');
     } catch (error) {
       toast.error('加载诊断上下文失败:' + error.message);
     }
   }
 }
-onMounted(async () => {
-  await Promise.all([loadProjects(), loadSessions(), loadMemories(), loadWorkerRoles()]);
-  await applyRouteContext();
-  const requestedSessionId = String(route.query.sessionId || '');
-  const requestedSession = requestedSessionId ? sessions.value.find((session) => String(session.sessionId) === requestedSessionId) : null;
-  if (!sessionId.value && requestedSession) await openSession(requestedSession.sessionId);
-  else if (!sessionId.value && sessions.value.length) await openSession(sessions.value[0].sessionId);
-  else if (!messages.value.length) focusInput();
-
-  // Ctrl/Cmd+K 归全局命令面板(AppHeader 注册),这里不再抢同一个键,
-  // 否则一次按键同时开面板又聚焦输入框。
-  const handleKeydown = (e) => {
+function onAgentPrompt(event) {
+  if (event.detail?.prompt) input.value = String(event.detail.prompt);
+  focusInput();
+}
+onMounted(() => {
+  window.addEventListener('composeops:agent-prompt', onAgentPrompt);
+  window.addEventListener('composeops:agent-focus', focusInput);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('composeops:agent-prompt', onAgentPrompt);
+  window.removeEventListener('composeops:agent-focus', focusInput);
+});
+const handleKeydown = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       if (input.value.trim()) sendMessage(input.value.trim(), { role: workerRole.value, projectId: projectId.value || undefined, containerId: containerId.value || undefined, webSearchEnabled: webSearchEnabled.value, attachedLogs: attachedLogs.value || undefined });
@@ -746,8 +736,21 @@ onMounted(async () => {
       interrupt();
     }
   };
+onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
+onMounted(async () => {
+  await Promise.all([loadProjects(), loadSessions(), loadMemories(), loadWorkerRoles()]);
+  await applyRouteContext();
+  const requestedSessionId = String(route.query.sessionId || '');
+  const requestedSession = requestedSessionId ? sessions.value.find((session) => String(session.sessionId) === requestedSessionId) : null;
+  if (!sessionId.value && !input.value && requestedSession) await openSession(requestedSession.sessionId);
+  else if (!sessionId.value && !input.value && sessions.value.length) await openSession(sessions.value[0].sessionId);
+  else if (!messages.value.length) focusInput();
+
+  // Ctrl/Cmd+K 归全局命令面板(AppHeader 注册),这里不再抢同一个键,
+  // 否则一次按键同时开面板又聚焦输入框。
+
   window.addEventListener('keydown', handleKeydown);
-  onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
+
 });
 // 订阅者始终有效(本页面不在 keep-alive 白名单,卸载即停止累积):
 // 之前 onDeactivated 会把订阅者静音,那一轮的执行动态就整段丢了,

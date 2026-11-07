@@ -1,3 +1,4 @@
+import { recordEvent } from './event-center.js';
 /**
  * GitOps 集成服务
  * 
@@ -117,6 +118,13 @@ function withRepoOperation(repoId, operation, fn) {
   activeOperations.set(repoId, operation);
   return Promise.resolve()
     .then(fn)
+    .then((result) => {
+      recordEvent({ eventType: 'gitops', source: 'gitops', title: `GitOps ${operation}完成`, detail: result.message || '', status: 'resolved', payload: { repoId, commit: result.commit, to: `/gitops?repo=${encodeURIComponent(repoId)}&from=ops-center` } });
+      return result;
+    }, (error) => {
+      recordEvent({ eventType: 'gitops', source: 'gitops', title: `GitOps ${operation}失败`, detail: error.message, severity: 'warning', payload: { repoId, to: `/gitops?repo=${encodeURIComponent(repoId)}&from=ops-center` } });
+      throw error;
+    })
     .finally(() => {
       if (activeOperations.get(repoId) === operation) activeOperations.delete(repoId);
     });

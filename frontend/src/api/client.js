@@ -1,3 +1,4 @@
+import { notifyDataChanged, DATA_CHANGED_EVENT } from '../lib/data-changes.js';
 // 统一 API 客户端,基于 fetch 封装
 import { normalizeBackgroundJob, normalizeCostReport, normalizeDockerUsage, normalizeJobsResponse, normalizeMetrics, normalizeMountPlan, normalizeStorageDf } from '../lib/api-normalizers.js';
 
@@ -72,6 +73,7 @@ async function request(path, opts = {}) {
     const data = await doFetch(path, opts);
     // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
     invalidateSwr('/');
+    if (!/^\/(auth|ai\/agent\/(sessions|approval|feedback|compact))/.test(path) && !/\/(ping|check|preview|validate|anomalies|test)(?:[/?]|$)/.test(path)) notifyDataChanged({ source: 'api', path });
     return data;
   }
   const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
@@ -115,6 +117,9 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
+  previewRetentionPolicy: () => request('/metrics/retention-policy'),
+  listInspectionReports: (limit = 100) => request(`/ops/inspection/reports?limit=${limit}`),
+  setHostGroup: (id, group) => request(`/hosts/${encodeURIComponent(id)}/group`, { method: 'PATCH', body: JSON.stringify({ group }) }),
   getAuthStatus: () => request('/auth/status'),
   // setupToken:服务端设置 SETUP_TOKEN 环境变量时,首次初始化必须携带该引导令牌
   setup: (password, setupToken = '') => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password, setupToken }) }),
@@ -124,8 +129,6 @@ export const api = {
   getProjects: (force = false) => request('/projects', { force }),
   getMountPlan: async () => normalizeMountPlan(await request('/projects/mount-plan')),
   saveProjectManagement: (projectIds, mountProjectIds = []) => request('/projects/management', { method: 'PUT', body: JSON.stringify({ projectIds, mountProjectIds }) }),
-  saveProjectMounts: (projectIds) => request('/projects/mounts', { method: 'PUT', body: JSON.stringify({ projectIds }) }),
-  getProject: (id) => request(`/projects/${id}`),
   getProjectActivity: (id) => request(`/projects/${id}/activity`),
   listJobs: async (limit = 20) => normalizeJobsResponse(await request(`/jobs?limit=${limit}`, { cacheable: true })),
   getJob: async (id) => normalizeBackgroundJob(await request(`/jobs/${id}`)),
@@ -163,7 +166,6 @@ export const api = {
   getProjectEnv: (projectId, file = '', force = false) => request(`/projects/${projectId}/env?${new URLSearchParams({ ...(file ? { file } : {}), ...(force ? { force: '1' } : {}) })}`),
   getProjectEnvFiles: (projectId) => request(`/projects/${projectId}/env/files`),
   saveProjectEnv: (projectId, payload) => request(`/projects/${projectId}/env`, { method: 'PUT', body: JSON.stringify(payload) }),
-  streamApplyEnv: (projectId, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/env/apply`, { restart: true }, signal),
   getBackups: (projectId) => request(`/projects/${projectId}/backups`),
   getBackup: (projectId, backupId) => request(`/projects/${projectId}/backups/${backupId}`),
   restoreBackup: (projectId, backupId) => request(`/projects/${projectId}/backups/${backupId}/restore`, { method: 'POST' }),
@@ -175,7 +177,6 @@ export const api = {
   deleteHost: (id) => request(`/hosts/${id}`, { method: 'DELETE' }),
   pingHost: (id, probe) => request(`/hosts/${id}/ping`, { method: 'POST', body: JSON.stringify(probe ? { probe } : {}) }),
   setActiveHost: (hostId) => request('/hosts/active', { method: 'PUT', body: JSON.stringify({ hostId }) }),
-  getActiveHost: () => request('/hosts/active'),
   // image update radar
   getProjectUpdates: (projectId, force = false) => request(`/projects/${projectId}/updates?force=${force ? '1' : '0'}`),
   getProjectWebUi: (projectId) => request(`/projects/${projectId}/webui`),
@@ -252,9 +253,7 @@ export const api = {
   renameAgentSession: (sessionId, title) => request(`/ai/agent/sessions/${encodeURIComponent(sessionId)}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   getAiMemories: (limit = 20, query = '') => request(`/ai/agent/memories?limit=${limit}${query ? `&query=${encodeURIComponent(query)}` : ''}`),
   compactAgentSession: (sessionId, keepRecent = 6) => request('/ai/agent/compact', { method: 'POST', body: JSON.stringify({ sessionId, keepRecent }) }),
-  getAgentCompaction: (sessionId) => request(`/ai/agent/sessions/${encodeURIComponent(sessionId)}/compaction`),
   getAgentUsage: (days = 30) => request(`/ai/agent/usage?days=${encodeURIComponent(days)}`),
-  getAgentFeedback: (limit = 50) => request(`/ai/agent/feedback?limit=${encodeURIComponent(limit)}`),
   clearAiHistory: (sessionId) => request(`/ai/history${sessionId ? `?sessionId=${sessionId}` : ''}`, { method: 'DELETE' }),
   clearAiSessions: (sessionIds) => request('/ai/history/batch-delete', { method: 'POST', body: JSON.stringify({ sessionIds }) }),
   truncateAiHistory: (sessionId, fromMessageId) => request('/ai/history/truncate', { method: 'POST', body: JSON.stringify({ sessionId, fromMessageId }) }),
@@ -295,7 +294,6 @@ export const api = {
   getDockerUsage: async () => normalizeDockerUsage(await request('/personal/maintenance/usage')),
   getCostAnalysisReport: async () => normalizeCostReport(await request('/cost-analysis/report')),
   getCostSuggestions: () => request('/cost-analysis/suggestions'),
-  pruneDocker: (payload) => request('/personal/maintenance/prune', { method: 'POST', body: JSON.stringify(payload) }),
   getUpdateSettings: () => request('/personal/updates'),
   saveUpdateSettings: (payload) => request('/personal/updates', { method: 'PUT', body: JSON.stringify(payload) }),
   checkUpdates: () => request('/personal/updates/check', { method: 'POST' }),
@@ -317,7 +315,6 @@ export const api = {
   deleteMarketplaceTemplate: (id) => request(`/marketplace/templates/custom/${id}`, { method: 'DELETE' }),
   // CMDB 统一资产中心
   getCmdbAssets: (params = {}) => request(`/cmdb/assets?${new URLSearchParams(params)}`, { cacheable: true }),
-  getCmdbAsset: (id) => request(`/cmdb/assets/${encodeURIComponent(id)}`),
   deleteCmdbAsset: (id) => request(`/cmdb/assets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   syncCmdbAssets: () => request('/cmdb/assets/sync', { method: 'POST' }),
   getCmdbTopology: () => request('/cmdb/topology', { cacheable: true }),
@@ -330,7 +327,6 @@ export const api = {
   pruneEvents: (days = 30) => request('/events/events/prune', { method: 'POST', body: JSON.stringify({ days }) }),
   // 工作流中心
   getWorkflowDefinitions: (force = false) => request('/workflows/definitions', { cacheable: true, force }),
-  getWorkflowDefinition: (id) => request(`/workflows/definitions/${id}`),
   createWorkflowDefinition: (payload) => request('/workflows/definitions', { method: 'POST', body: JSON.stringify(payload) }),
   updateWorkflowDefinition: (id, payload) => request(`/workflows/definitions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteWorkflowDefinition: (id) => request(`/workflows/definitions/${id}`, { method: 'DELETE' }),
@@ -359,7 +355,6 @@ export const api = {
   // 容器状态历史(uptime-kuma 式服务端持久化):分析型视图,读取频率低但必须实时,
   // 因此不走 SWR 缓存 —— 下拉刷新要看到新数据,不能先回缓存再后台重验。
   getStateHistory: (params = {}) => request(`/state/history?${new URLSearchParams(params)}`),
-  getStateContainers: (params = {}) => request(`/state/containers?${new URLSearchParams(params)}`),
   getStateUptime: (params = {}) => request(`/state/uptime?${new URLSearchParams(params)}`),
   getStateExits: (params = {}) => request(`/state/exits?${new URLSearchParams(params)}`),
   pruneStateHistory: (days = 90) => request('/state/prune', { method: 'POST', body: JSON.stringify({ days }) }),
@@ -488,8 +483,6 @@ export const metricsApi = {
     return request(`/metrics/historical?${params.toString()}`);
   },
   
-  getMetricsStats: (containerId, metricType, hours = 24) => 
-    request(`/metrics/stats/${containerId}/${metricType}?hours=${hours}`),
   
   detectAnomalies: ({ containerId, metricType, hours = 24, startTime, endTime, algorithms = ['z_score', 'moving_average', 'trend'] }) =>
     request('/metrics/anomalies', { 
@@ -503,3 +496,5 @@ export const metricsApi = {
   applyRetentionPolicy: () => 
     request('/metrics/retention-policy', { method: 'POST' }),
 };
+
+if (typeof window !== 'undefined') window.addEventListener(DATA_CHANGED_EVENT, () => invalidateSwr('/'));

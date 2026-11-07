@@ -8,7 +8,7 @@
       </button>
       <header class="agent-drawer-head">
         <div class="flex min-w-0 items-center gap-2"><Bot class="h-4 w-4 text-accent" /><div class="min-w-0"><strong class="block truncate">页面 Agent</strong><small class="block truncate">{{ pageContext.page || '当前页面' }} · {{ pageContext.mode || '运维问答与操作' }}</small></div></div>
-        <div class="flex items-center gap-1"><button class="icon-btn" title="新建会话(清空当前上下文)" aria-label="新建会话" @click="startFreshSession"><MessageSquarePlus class="h-4 w-4" /></button><button class="icon-btn" title="中断执行" :disabled="!running" @click="interrupt"><Square class="h-4 w-4" /></button><button class="icon-btn" title="关闭 Agent" aria-label="关闭 Agent" @click="closeAgent"><X class="h-4 w-4" /></button></div>
+        <div class="flex items-center gap-1"><button class="icon-btn" title="新建会话(清空当前上下文)" aria-label="新建会话" :disabled="running" @click="startFreshSession"><MessageSquarePlus class="h-4 w-4" /></button><button class="icon-btn" title="中断执行" :disabled="!running" @click="interrupt"><Square class="h-4 w-4" /></button><button class="icon-btn" title="关闭 Agent" aria-label="关闭 Agent" @click="closeAgent"><X class="h-4 w-4" /></button></div>
       </header>
       <div class="agent-drawer-context"><span>已携带当前页面上下文</span><small>{{ contextSummary }}</small></div>
       <div ref="scrollEl" class="agent-drawer-messages" @scroll="onScroll" @click="handleRichBlockClick">
@@ -42,9 +42,8 @@ import { useEscapeKey } from '../composables/useEscapeKey.js';
 import AgentMarkdown from './common/AgentMarkdown.vue';
 import AgentThinking from './agent/AgentThinking.vue';
 
-const { open, context, closeAgent } = useAgentConsole();
-// 抽屉用自己的 channel:与 AI 助手工作台的状态彻底隔离。
-// 在别的页面点"页面 Agent"应该是全新会话,而不是续上工作台里那段对话。
+const { open, context, closeAgent, openAgent } = useAgentConsole();
+// 两种视图使用同一会话；收起、切页不会中断执行或清空草稿。
 const chat = useAgentChat({ channel: PAGE_DRAWER_CHANNEL });
 // onScroll 必须绑定到消息容器:此前漏绑导致 atBottom 恒为 true,
 // 流式期间用户向上回看会被滚动跟随持续拽回底部。
@@ -137,16 +136,16 @@ function trapDrawerTab(event) {
   }
 }
 
-// 页面通过"交给 Agent"按钮携带一段预填 prompt 打开抽屉:事件可能早于
-// open 的 watch 派发,先暂存,startFreshSession 清空输入后再写入。
-let pendingPrompt = '';
-function handleAgentPrompt(event) { pendingPrompt = String(event.detail?.prompt || ''); }
-// 抽屉每次打开都是一段独立会话;用户也可以在不关闭抽屉的情况下手动开新会话。
+function handleAgentPrompt(event) {
+  const prompt = String(event.detail?.prompt || '').trim();
+  if (!prompt) return;
+  input.value = prompt;
+  openAgent(event.detail?.context || {});
+  if (open.value) focusInput();
+}
 function startFreshSession() {
-  if (running.value) { interrupt(); }
+  if (running.value) return;
   resetSession();
-  input.value = '';
-  if (pendingPrompt) { input.value = pendingPrompt; pendingPrompt = ''; }
   focusInput();
 }
 const pageContext = computed(() => ({ page: context.value.page || '当前页面', route: window.location.hash.replace(/^#/, '') || '/', mode: context.value.mode || '运维问答与操作', summary: context.value.summary || '', state: context.value.state || '' }));
@@ -172,12 +171,12 @@ watch(open, (value) => {
     return;
   }
   captureDrawerOpener();
-  startFreshSession();
+  focusInput();
 });
 onMounted(() => {
   if (open.value) {
     captureDrawerOpener();
-    startFreshSession();
+    focusInput();
   }
   window.addEventListener('composeops:agent-prompt', handleAgentPrompt);
 });
@@ -209,7 +208,7 @@ function approveWithParams(message, remember = null) {
   }
   void approve(message, inputOverride, remember);
 }
-onBeforeUnmount(() => interrupt());
+
 </script>
 
 <style scoped>

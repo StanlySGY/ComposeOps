@@ -57,11 +57,13 @@ export function toPublicAgentEvent(event) {
       description: cleanText(event.description) || '该操作会修改系统状态,请确认是否继续。',
     };
   }
+  if (event.type === 'action_completed') {
+    return { type: 'action_completed', kind: event.kind, tool: String(event.tool || ''), projectId: event.projectId || null, hostId: event.hostId || null, ...(event.kind === 'cron_created' ? { result: redactSecretValue(event.result || {}) } : {}) };
+  }
   if (event.type === 'tool_result') {
     const result = redactSecretValue(event.result?.result);
     if (event.tool === 'project.list_managed' && Array.isArray(result)) return { type: 'context_data', kind: 'projects', projects: result };
     if (event.tool === 'web.search' && Array.isArray(result?.sources)) return { type: 'context_data', kind: 'search_sources', sources: result.sources };
-    if (event.tool === 'cron.create') return { type: 'action_completed', kind: 'cron_created', result: result || {} };
     // 通用工具结果:只透出成败、耗时与脱敏摘要,不把完整结果体交给前端。
     // 失败摘要优先给可读的错误原因,绝不把 durationMs 等内部计时字段伪装成错误正文。
     // 成功结果摘要最多 600 字符,避免列表类工具被过早截断。

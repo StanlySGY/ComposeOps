@@ -126,14 +126,14 @@
               <!-- 快捷操作栏 -->
               <div class="mt-4 pt-3 border-t border-white/10 flex items-center gap-2">
                 <router-link
-                  :to="`/logs?projectId=${encodeURIComponent(selectedSvcData.projectId || selectedProjectId)}&from=topology`"
+                  :to="deepLink('/logs', { projectId: selectedSvcData.projectId || selectedProjectId, from: 'topology' })"
                   class="btn-secondary text-xs! py-1.5! px-3!"
                 >
                   <ScrollText class="w-3.5 h-3.5" />
                   实时日志
                 </router-link>
                 <router-link
-                  :to="`/services?focus=${encodeURIComponent(selectedSvcData.projectId || selectedProjectId)}`"
+                  :to="deepLink('/services', { focus: selectedSvcData.projectId || selectedProjectId, from: 'topology' })"
                   class="btn-secondary text-xs! py-1.5! px-3!"
                 >
                   <Sliders class="w-3.5 h-3.5" />
@@ -204,6 +204,7 @@
 </template>
 
 <script setup>
+import { deepLink } from '../lib/deep-links.js';
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { ArrowDownLeft, ArrowUpRight, Boxes, Container, GitBranch, HardDrive, Network, RefreshCw, ScrollText, Sliders, X } from 'lucide-vue-next';
@@ -350,7 +351,7 @@ async function loadProject() {
   }
 }
 
-usePullRefresh(loadProject);
+usePullRefresh(loadProject, { keepAlive: true, refreshOnActivate: true });
 onMounted(async () => {
   await store.refresh(false);
   if (!selectedProjectId.value && !crossProject.value && composeProjects.value.length) {

@@ -14,7 +14,8 @@
         <button class="icon-btn" title="刷新节点状态" aria-label="刷新节点状态" :disabled="store.loading" @click="reload"><RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': store.loading }" /></button>
       </header>
       <div class="max-h-72 overflow-y-auto p-1.5">
-        <button v-for="host in store.hosts" :key="host.id" class="host-item" :class="{ active: host.id === store.activeHostId }" :aria-current="host.id === store.activeHostId ? 'true' : undefined" @click="select(host)">
+        <template v-for="group in hostGroups" :key="group.id"><p class="px-3 pb-1 pt-3 text-xs text-muted">{{ group.label }}</p>
+        <button v-for="host in group.hosts" :key="host.id" class="host-item" :class="{ active: host.id === store.activeHostId }" :aria-current="host.id === store.activeHostId ? 'true' : undefined" @click="select(host)">
           <span class="w-2 h-2 rounded-full shrink-0" :class="host.status === 'online' ? 'bg-emerald-400' : host.status === 'offline' ? 'bg-rose-400' : 'bg-surface-500'"></span>
           <span class="min-w-0 flex-1 text-left">
             <strong class="block truncate text-sm font-medium text-surface-200">{{ host.name }}</strong>
@@ -22,6 +23,7 @@
           </span>
           <CircleCheck v-if="host.id === store.activeHostId" class="w-4 h-4 shrink-0 text-emerald-400" />
         </button>
+        </template>
         <button class="host-item" @click="goManage">
           <Settings class="w-4 h-4 shrink-0 text-surface-400" />
           <span class="flex-1 text-left text-sm text-surface-300">节点管理</span>
@@ -54,6 +56,7 @@ watch(open, (isOpen) => {
   if (previousTriggerFocus?.isConnected) previousTriggerFocus.focus({ preventScroll: true });
   previousTriggerFocus = null;
 });
+const hostGroups = computed(() => [{ id: 'production', label: '生产组' }, { id: 'staging', label: '测试组' }, { id: 'edge', label: '边缘组' }].map(group => ({ ...group, hosts: store.hosts.filter(host => (host.group || 'production') === group.id) })).filter(group => group.hosts.length));
 const active = computed(() => store.active);
 
 async function toggle() {
@@ -67,7 +70,6 @@ async function select(host) {
     await store.switchHost(host.id);
     toast.success(`已切换到节点 ${host.name},项目列表正在刷新`);
     open.value = false;
-    window.dispatchEvent(new CustomEvent('composeops:host-changed'));
   } catch (e) {
     toast.error(e.message);
   }

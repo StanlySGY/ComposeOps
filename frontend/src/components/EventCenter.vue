@@ -31,6 +31,7 @@
           <div v-if="expandedDiagnosisId === event.id" class="w-full basis-full rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5">
             <p class="mb-1 flex items-center gap-1 text-[11px] font-medium text-violet-300"><Sparkles class="h-3 w-3" />AI 诊断(守护模式)</p>
             <pre class="max-h-56 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-surface-200">{{ event.diagnosis || '正在诊断...' }}</pre>
+            <div v-if="eventContainerLink({ target: event.to }, '/logs')" class="mt-2 flex gap-3 text-xs text-accent"><router-link :to="eventContainerLink({ target: event.to }, '/logs')" @click="closePanel">去日志</router-link><router-link :to="eventContainerLink({ target: event.to }, '/monitor')" @click="closePanel">去监控</router-link></div>
             <button v-if="event.diagnosis" class="mt-2 inline-flex items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] text-violet-300 hover:bg-violet-500/20" @click="planRepair(event)"><Wand2 class="h-3 w-3" />一键生成修复计划</button>
           </div>
         </div>
@@ -49,6 +50,8 @@
 </template>
 
 <script setup>
+import { notifyDataChanged } from '../lib/data-changes.js';
+import { deepLink, eventContainerLink } from '../lib/deep-links.js';
 import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -161,6 +164,14 @@ const eventStream = useWebSocket(() => wsUrl('/ws/events'), {
   onMessage: (event) => {
     try {
       const frame = JSON.parse(event.data);
+      if (frame.type === 'event' && frame.data?.type === 'data_changed') {
+        notifyDataChanged(frame.data);
+        return;
+      }
+      if (frame.type === 'event' && frame.data?.type === 'event') {
+        notifyDataChanged({ source: 'event-center' });
+        return;
+      }
       if (frame.type === 'event' && frame.data) {
         alertEvents.value = [frame.data, ...alertEvents.value.filter((item) => item.id !== frame.data.id)].slice(0, 60);
         notifyDesktop(frame.data);
@@ -182,7 +193,7 @@ const derivedEvents = computed(() => {
       key: `job-${job.id}`,
       title: job.status === 'failed' ? '批量任务执行失败' : job.status === 'interrupted' ? '批量任务意外中断' : '批量任务执行中',
       detail: `${job.action} · ${job.completed}/${job.total} 个项目`,
-      to: `/operations?tab=jobs&job=${job.id}`,
+      to: deepLink('/events', { tab: 'operations', job: job.id, from: 'events' }),
       icon: markRaw(abnormal ? CircleX : RefreshCw),
       tone: abnormal ? 'danger' : 'info',
     });
@@ -195,7 +206,7 @@ const derivedEvents = computed(() => {
         key: `project-${project.id}`,
         title: project.projectName,
         detail: unhealthy ? `${unhealthy} 个容器健康检查失败` : stopped ? `${stopped} 个容器未运行` : '项目状态异常',
-        to: `/services?focus=${project.id}`,
+        to: deepLink('/services', { focus: project.id, from: 'events' }),
         icon: markRaw(AlertTriangle),
         tone: project.status === 'stopped' ? 'danger' : 'warning',
       });
@@ -206,7 +217,7 @@ const derivedEvents = computed(() => {
       key: `operation-${item.id}`,
       title: item.projectName || '系统操作失败',
       detail: item.detail || item.action,
-      to: '/operations?status=failed',
+      to: deepLink('/events', { tab: 'operations', status: 'failed' }),
       icon: markRaw(CircleX),
       tone: 'danger',
     });

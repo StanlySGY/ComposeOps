@@ -21,12 +21,13 @@
 </template>
 
 <script setup>
+import { deepLink } from '../../lib/deep-links.js';
 import { computed, ref, watch } from 'vue';
 import { streamSse } from '../../api/client.js';
 import { stripAgentProtocol } from '../../lib/agent-text.js';
 import { useToastStore } from '../../stores/toast.js';
 import { Copy, FileCode2, KeyRound, Sparkles } from 'lucide-vue-next';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import AgentMarkdown from '../common/AgentMarkdown.vue';
 import BaseModal from '../common/BaseModal.vue';
 
@@ -43,6 +44,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['close']);
 const router = useRouter();
+const route = useRoute();
 const toast = useToastStore();
 const text = ref('');
 const fullText = ref('');
@@ -98,17 +100,17 @@ async function copyFix() {
   try { await navigator.clipboard.writeText(fullText.value); toast.success('修复建议已复制到剪贴板'); }
   catch { toast.error('复制失败,请手动选择文本'); }
 }
-function goCompose() { close(); router.push(`/compose?projectId=${props.projectId}`); }
-function goEnv() { close(); router.push(`/services?env=${props.projectId}`); }
-function sendToAgent() {
+function goCompose() { close(); router.push(deepLink('/compose', { projectId: props.projectId, from: route.name })); }
+function goEnv() { close(); router.push(deepLink('/services', { env: props.projectId, from: route.name })); }
+async function sendToAgent() {
   if (!fullText.value || !props.projectId) return;
   const prompt = '这是刚完成的 AI 诊断结果，请基于它制定修复方案。不要直接执行有副作用的操作，先说明计划并等待确认。' + '\n\n' + fullText.value;
 
-  sessionStorage.setItem('composeops:agent-diagnosis-prompt', JSON.stringify({ projectId: props.projectId, prompt, createdAt: Date.now() }));
   close();
-  const query = { projectId: props.projectId, diagnose: '1' };
+  const query = { projectId: props.projectId, diagnose: '1', from: route.name };
   if (props.containerId) query.containerId = props.containerId;
-  router.push({ path: '/agent', query });
+  await router.push({ path: '/agent', query });
+  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt } }));
 
 }
 </script>

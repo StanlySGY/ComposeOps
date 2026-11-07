@@ -4,7 +4,7 @@
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
       <div class="page-actions compose-toolbar-actions">
         <div class="compose-toolbar-group" role="group" aria-label="项目与配置文件">
-        <button class="btn-secondary" title="返回服务总览" @click="router.push('/services')"><ArrowLeft class="w-4 h-4" />返回</button>
+        <button class="btn-secondary" :title="returnTarget(route.query.from)?.label || '返回服务总览'" @click="router.push(returnTarget(route.query.from)?.path || '/services')"><ArrowLeft class="w-4 h-4" />返回</button>
         <select v-model="projectId" class="input min-w-52" aria-label="选择 Compose 项目" @change="selectProject"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
         <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" @click="projectId = ''; selectProject()"><X class="w-4 h-4" /></button>
         <select v-if="project?.composeFiles.length > 1" v-model.number="fileIndex" class="input" aria-label="选择 Compose 配置文件" @change="load"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
@@ -172,6 +172,7 @@
 </template>
 
 <script setup>
+import { returnTarget } from '../lib/deep-links.js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
@@ -282,7 +283,7 @@ const toast = useToastStore();
 usePullRefresh(async () => {
   await reloadProjects();
   if (projectId.value) await load();
-}, { keepAlive: true, enabled: () => !dirty.value });
+}, { keepAlive: true, refreshOnActivate: true, enabled: () => !dirty.value });
 onMounted(async () => {
   await Promise.all([reloadProjects(), loadTemplates()]);
   projectsLoaded.value = true;

@@ -28,9 +28,7 @@
       <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchInspection">
         <ShieldCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'inspection' }" />巡检(当前节点项目)
       </button>
-      <button class="btn-secondary py-1.5! text-xs" :disabled="batchBusy || !hosts.length" @click="runBatchUpdateCheck">
-        <SearchCheck class="h-3.5 w-3.5" :class="{ 'animate-spin': batchBusy === 'updates' }" />镜像更新检查(全部项目)
-      </button>
+      <ImageUpdatePanel />
       <span class="ml-auto text-xs text-surface-500">巡检作用于当前活跃节点:{{ activeHost?.name || '—' }}</span>
     </div>
 
@@ -97,18 +95,17 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { ArrowLeftRight, RefreshCw, SearchCheck, ShieldCheck } from 'lucide-vue-next';
+import { ArrowLeftRight, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.vue';
-import { buildImageUpdateSummary } from '../lib/image-update-summary.js';
+import ImageUpdatePanel from '../components/services/ImageUpdatePanel.vue';
 
 const hostsStore = useHostsStore();
 const toast = useToastStore();
 const loading = ref(false);
 const error = ref('');
-const groupAssignments = ref({});
 const batchBusy = ref('');
 const inspectionScore = ref(null);
 
@@ -130,14 +127,13 @@ function groupHosts(groupId) {
   return hosts.value.filter((host) => groupOf(host.id) === groupId);
 }
 function groupOf(hostId) {
-  return groupAssignments.value[hostId] || 'production';
+  return hosts.value.find(host => host.id === hostId)?.group || 'production';
 }
-function assignGroup(host, groupId) {
-  groupAssignments.value = { ...groupAssignments.value, [host.id]: groupId };
-  try { localStorage.setItem('composeops:node-groups', JSON.stringify(groupAssignments.value)); } catch {
-    // 节点分组仍保留在当前会话,仅无法持久化到下次访问。
-  }
-  toast.success(`已将节点 ${host.name} 加入${groups.find((g) => g.id === groupId)?.label}`);
+async function assignGroup(host, groupId) {
+  try {
+    await hostsStore.assignGroup(host.id, groupId);
+    toast.success(`已将节点 ${host.name} 加入${groups.find(g => g.id === groupId)?.label}`);
+  } catch (e) { toast.error(`分组保存失败：${e.message}`); }
 }
 function switchHost(host) {
   if (host.active) return;
@@ -172,19 +168,7 @@ async function runBatchInspection() {
   }
 }
 
-async function runBatchUpdateCheck() {
-  if (batchBusy.value) return;
-  batchBusy.value = 'updates';
-  try {
-    const result = await api.checkAllUpdates();
-    const projects = result?.projects || [];
-    toast.success(buildImageUpdateSummary(projects));
-  } catch (e) {
-    toast.error(`镜像检查失败:${e.message}`);
-  } finally {
-    batchBusy.value = '';
-  }
-}
+
 
 async function load() {
   if (loading.value) return;
@@ -192,12 +176,6 @@ async function load() {
   error.value = '';
   try {
     await hostsStore.load(true);
-    try {
-      const saved = JSON.parse(localStorage.getItem('composeops:node-groups') || '{}');
-      groupAssignments.value = saved;
-    } catch {
-      // 分组记忆损坏时回退到默认生产组。
-    }
     // 静默并行探测一次,填充容器数/延迟(不阻塞页面)。
     Promise.allSettled(hosts.value.map((host) => hostsStore.ping(host.id))).then(async () => {
       try {

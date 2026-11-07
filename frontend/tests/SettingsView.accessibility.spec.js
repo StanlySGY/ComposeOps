@@ -51,6 +51,7 @@ async function mountSettings() {
   wrapper = mount(SettingsView, {
     global: {
       stubs: {
+        DataMaintenancePanel: true,
         AiChannelsPanel: true,
         StatCard: true,
         EmptyState: true,

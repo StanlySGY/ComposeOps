@@ -1,3 +1,4 @@
+import { recordEvent } from './event-center.js';
 /**
  * 巡检引擎:把散落在各处的只读事实收敛成"结论 + 建议",而不是再堆一页指标。
  *
@@ -468,6 +469,7 @@ export async function runInspection({ source = 'manual', persist = true } = {}) 
       report.id = addInspection({ source, score, grade, findings: report.findings, predictions, summary, stats, diskUsed: disk?.used ?? null, diskTotal: disk?.total ?? null, durationMs: report.durationMs });
       // 手动与自动巡检共用同一个"最近一次"时间戳,调度器据此判断是否到期。
       setSetting('inspection.last_run', String(Date.now()));
+      recordEvent({ eventType: 'inspection', source, title: `巡检完成 · ${score} 分`, detail: summary, severity: grade === 'critical' ? 'danger' : grade === 'healthy' ? 'info' : 'warning', status: grade === 'healthy' ? 'resolved' : 'open', payload: { reportId: report.id, to: `/inspection?report=${report.id}&from=ops-center` } });
     } catch {
       // 落库失败不影响本次结果返回
     }

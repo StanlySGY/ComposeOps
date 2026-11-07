@@ -70,6 +70,7 @@
 </template>
 
 <script setup>
+import { deepLink } from '../lib/deep-links.js';
 import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, Bot, Boxes, ChartNoAxesCombined, ChevronDown, Clock3, FileCode2, FileSearch, BellRing, History, KeyRound, Layers, LogOut, Play, RotateCw, Rows3, ScrollText, Search, Settings, ShieldCheck, Square, Store, TerminalSquare } from 'lucide-vue-next';
@@ -193,7 +194,7 @@ const commands = computed(() => {
     .filter((project) => project.editable)
     .map((project) => ({
       id: `env-${project.id}`,
-      to: `/services?env=${project.id}`,
+      to: deepLink('/services', { env: project.id, from: route.name }),
       label: `Env: ${project.projectName}`,
       description: `编辑 ${project.projectName} 的环境变量 (.env)`,
       icon: KeyRound,
@@ -215,7 +216,7 @@ const commands = computed(() => {
       { id: `run-${project.id}-up`, run: () => void runProjectAction(project, 'up'), label: `启动: ${project.projectName}`, description: '通过 Compose 启动项目', icon: Play, category: `start up 启动 运行 ${project.projectName}` },
       { id: `run-${project.id}-restart`, run: () => void runProjectAction(project, 'restart'), label: `重启: ${project.projectName}`, description: '重启项目所有容器', icon: RotateCw, category: `restart reboot 重启 ${project.projectName}` },
       { id: `run-${project.id}-stop`, run: () => requestProjectAction(project, 'stop'), label: `停止: ${project.projectName}`, description: '停止项目所有容器', icon: Square, category: `stop halt 停止 ${project.projectName}` },
-      { id: `logs-${project.id}`, to: `/logs?projectId=${project.id}`, label: `日志: ${project.projectName}`, description: '查看项目实时日志', icon: ScrollText, category: `logs 日志 ${project.projectName}` },
+      { id: `logs-${project.id}`, to: deepLink('/logs', { projectId: project.id, from: route.name }), label: `日志: ${project.projectName}`, description: '查看项目实时日志', icon: ScrollText, category: `logs 日志 ${project.projectName}` },
     ]));
   return [...baseCommands, ...actionCommands, ...nodeCommands, ...envCommands, ...blueprintCommands].map((item) =>
     item.id ? item : { ...item, id: item.to },
@@ -225,7 +226,7 @@ const commands = computed(() => {
 function goProject(project) {
   projectSwitcherOpen.value = false;
   projectQuery.value = '';
-  router.push(`/services?focus=${project.id}`);
+  router.push(deepLink('/services', { focus: project.id, from: route.name }));
 }
 function toggleProjectSwitcher() {
   projectSwitcherOpen.value = !projectSwitcherOpen.value;

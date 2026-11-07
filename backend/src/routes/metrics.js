@@ -6,6 +6,7 @@ import {
   detectAnomalies,
   evaluateAlertRules,
   applyRetentionPolicy,
+  previewRetentionPolicy,
 } from '../services/metrics.js';
 
 /**
@@ -263,6 +264,8 @@ export default async function metricsRoutes(fastify) {
       };
     }
   );
+
+  fastify.get('/retention-policy', async () => ({ preview: previewRetentionPolicy() }));
 
   // 执行数据保留策略（新增，管理员接口）
   fastify.post(

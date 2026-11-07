@@ -34,11 +34,11 @@ const routes = [
   { path: '/rollback', redirect: { path: '/review', query: { tab: 'rollback' } } },
   { path: '/knowledge', redirect: '/cmdb' },
   { path: '/timeline', redirect: '/events' },
-  { path: '/operations', redirect: '/events' },
+  { path: '/operations', redirect: (to) => ({ path: '/events', query: { ...to.query, tab: 'operations' } }) },
   { path: '/:pathMatch(.*)*', redirect: '/services' },
 ];
 
-export default createRouter({
+const router = createRouter({
   history: createWebHashHistory(),
   routes,
 });
@@ -48,10 +48,25 @@ export default createRouter({
  * 消除"第一次切到某页顿一下"的感知。失败静默,进入页面时仍会正常加载。
  */
 export function preloadRouteChunks() {
-  const excluded = new Set(['shell', 'agent', 'agent-history', 'compose', 'monitor']);
+  const excluded = new Set(['shell', 'agent', 'agent-history', 'compose']);
   for (const route of routes) {
     if (!excluded.has(route.name) && typeof route.component === 'function') {
       route.component().catch(() => {});
     }
   }
 }
+
+// Container alert links may target another node. Switch before loading the destination.
+router.beforeEach(async (to) => {
+  if (!to.query.hostId || !['/logs', '/services', '/shell', '/agent', '/resources'].includes(to.path)) return;
+  const { useHostsStore } = await import('./stores/hosts.js');
+  const { useToastStore } = await import('./stores/toast.js');
+  const store = useHostsStore();
+  await store.load(true);
+  const id = String(to.query.hostId);
+  if (id === store.activeHostId) return;
+  if (!store.hosts.some(host => host.id === id)) { useToastStore().error('目标节点已移除，请返回事件中心核对'); return false; }
+  try { await store.switchHost(id); }
+  catch (error) { useToastStore().error(`无法切换到目标节点：${error.message}`); return false; }
+});
+export default router;
