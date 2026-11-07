@@ -56,6 +56,10 @@ function mountView() {
   });
 }
 
+function mountCachedView(visible) {
+  return mount(defineComponent({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(RollbackView) : h('div', '评审') }) }), { global: { stubs: { BaseModal: true, ConfirmDialog: true } } });
+}
+
 describe('回滚中心加载反馈与执行结果语义', () => {
   it('数据卷备份读取失败时播报错误，不伪装成没有备份', async () => {
     getVolumeBackups.mockRejectedValueOnce(new Error('storage offline'));
@@ -134,7 +138,7 @@ describe('缓存回滚生命周期', () => {
     const visible = ref(true);
     let resolveOld;
     getVolumeBackups.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
-    wrapper = mount(defineComponent({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(RollbackView) : h('div', '评审') }) }), { global: { stubs: { BaseModal: true, ConfirmDialog: true } } });
+    wrapper = mountCachedView(visible);
     await flushPromises();
     visible.value = false; await flushPromises();
     resolveOld({ backups: [{ id: 'old', volume: 'STALE-VOLUME' }] }); await flushPromises();
@@ -155,7 +159,7 @@ it('首次项目刷新期间离开标签，回来后仍加载备份', async () =
   const visible = ref(true);
   let resolveProjects;
   store.refresh.mockReturnValueOnce(new Promise(resolve => { resolveProjects = resolve; }));
-  wrapper = mount(defineComponent({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(RollbackView) : h('div', '评审') }) }), { global: { stubs: { BaseModal: true, ConfirmDialog: true } } });
+  wrapper = mountCachedView(visible);
   visible.value = false; await flushPromises();
   resolveProjects(); await flushPromises();
   expect(getVolumeBackups).not.toHaveBeenCalled();
