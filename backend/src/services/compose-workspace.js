@@ -182,10 +182,10 @@ async function acquireRunner(project) {
 }
 
 async function withRunner(project, callback) {
-  const hostType = getActiveHostType();
+  const hostType = project.host?.type || getActiveHostType();
   if (hostType === 'ssh') {
     try {
-      const host = getActiveHost();
+      const host = project.host || getActiveHost();
       await validateWorkspaceProjectPaths(project, async (remotePath) => {
         const result = await sshExec(host, ['realpath', '-e', '--', remotePath], { timeoutMs: 15000 });
         if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);

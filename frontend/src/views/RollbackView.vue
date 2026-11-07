@@ -149,14 +149,14 @@
       </template>
     </BaseModal>
 
-    <ConfirmDialog :show="!!confirmTarget" :title="confirmTarget?.title" :message="confirmTarget?.message" :tone="confirmTarget?.tone || 'warning'" :confirm-text="confirmTarget?.confirmText || '确认'" @confirm="confirmAction" @cancel="confirmTarget = null" />
+    <ConfirmDialog :show="!!confirmTarget" :title="confirmTarget?.title" :message="confirmTarget?.message" :tone="confirmTarget?.tone || 'warning'" :confirm-text="confirmTarget?.confirmText || '确认'" @confirm="confirmAction" @cancel="cancelConfirmation" />
   </div>
 </template>
 
 <script setup>
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
-import { computed, onMounted, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { FileCode2, GitBranch, HardDrive, History, RefreshCw, RotateCcw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -164,6 +164,7 @@ import { useServicesStore } from '../stores/services.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 
+const emit = defineEmits(['busy']);
 const store = useServicesStore();
 const selectedProjectId = ref('');
 const loading = ref(false);
@@ -181,6 +182,14 @@ let loadRequestId = 0;
 const confirmTarget = ref(null);
 let pendingAction = null;
 let rollbackController = null;
+let active = true;
+let disposed = false;
+let needsReload = false;
+let mountedReady = false;
+let historyVersion = 0;
+watch(busy, value => emit('busy', value), { flush: 'sync' });
+function cancelConfirmation() { pendingAction = null; confirmTarget.value = null; }
+
 
 const rollbackableProjects = computed(() => store.projects.filter((p) => p.managed && p.editable && p.status !== 'running'));
 const rollbackableProjectCount = computed(() => rollbackableProjects.value.length);
@@ -202,6 +211,9 @@ function formatBytes(value = 0) {
 }
 
 async function load() {
+  if (!active || disposed || busy.value) return;
+  needsReload = false;
+  cancelConfirmation();
   const requestId = ++loadRequestId;
   const requestedProjectId = selectedProjectId.value;
   loading.value = true;
@@ -326,15 +338,17 @@ async function doRestoreVolume(backup) {
 }
 
 async function openGitopsHistory(repo) {
+  const version = ++historyVersion;
   currentGitopsRepo.value = repo;
   try {
     const res = await fetch(`/api/v1/gitops/${repo.id}/history?limit=50`);
     if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.message || `HTTP ${res.status}`); }
     const data = await res.json();
+    if (!active || disposed || version !== historyVersion) return;
     gitopsCommits.value = data.commits || [];
     showGitopsHistory.value = true;
   } catch (e) {
-    error.value = e.message;
+    if (active && !disposed && version === historyVersion) error.value = e.message;
   }
 }
 function rollbackGitops(commitHash) {
@@ -359,11 +373,12 @@ async function doRollbackGitops(commitHash) {
       throw new Error(err.message || '回滚失败');
     }
     showGitopsHistory.value = false;
-    await load();
+    needsReload = true;
   } catch (e) {
     error.value = e.message;
   } finally {
     busy.value = false;
+    if (needsReload && active) void load();
   }
 }
 
@@ -407,15 +422,50 @@ async function doRollbackUpgrade(project) {
 }
 
 function confirmAction() {
+  if (!active || disposed || busy.value) return;
   const action = pendingAction;
   pendingAction = null;
   confirmTarget.value = null;
   if (action) void action();
 }
 
-usePullRefresh(load);
+function deactivate() {
+  active = false;
+  loadRequestId += 1;
+  historyVersion += 1;
+  if (loading.value || !mountedReady) needsReload = true;
+  loading.value = false;
+  cancelConfirmation();
+  showGitopsHistory.value = false;
+  output.value.open = false;
+}
+function onHostChanged() {
+  loadRequestId += 1;
+  historyVersion += 1;
+  cancelConfirmation();
+  selectedProjectId.value = '';
+  composeBackups.value = [];
+  volumeBackups.value = [];
+  gitopsRepos.value = [];
+  showGitopsHistory.value = false;
+  needsReload = true;
+  if (active && !busy.value) void load();
+}
+onActivated(() => { active = true; if (mountedReady && needsReload && !loading.value) void load(); });
+onDeactivated(deactivate);
+onBeforeUnmount(() => {
+  disposed = true;
+  deactivate();
+  rollbackController?.abort();
+  window.removeEventListener('composeops:host-changed', onHostChanged);
+  emit('busy', false);
+});
+usePullRefresh(load, { keepAlive: true, enabled: () => !busy.value });
 onMounted(async () => {
+  window.addEventListener('composeops:host-changed', onHostChanged);
   await store.refresh(false);
-  await load();
+  mountedReady = true;
+  needsReload = true;
+  if (!disposed && active) await load();
 });
 </script>

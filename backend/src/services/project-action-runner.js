@@ -25,21 +25,24 @@ export async function prepareProjectAction(project, action) {
       mode: 'compose',
       // options.timeoutMs:后台任务(compose background=true)需要放宽超时,前台保持 5 分钟默认。
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
-        return withProjectOperationLock(project.id, () => new Promise((resolve, reject) => {
-          const child = spawnCompose({ ...project, composeFiles: safeFiles }, action);
-          onChild(child);
-          child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
-          child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
-          const timer = setTimeout(() => {
-            child.kill('SIGTERM');
-            setTimeout(() => child.kill('SIGKILL'), 5000).unref?.();
-          }, options.timeoutMs || 300000);
-          child.on('error', (error) => { clearTimeout(timer); reject(error); });
-          child.on('close', (code, signal) => {
-            clearTimeout(timer);
-            resolve(signal ? 124 : code ?? 1);
+        return withProjectOperationLock(project.id, async () => {
+          await options.beforeRun?.();
+          return new Promise((resolve, reject) => {
+            const child = spawnCompose({ ...project, composeFiles: safeFiles }, action);
+            onChild(child);
+            child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
+            child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
+            const timer = setTimeout(() => {
+              child.kill('SIGTERM');
+              setTimeout(() => child.kill('SIGKILL'), 5000).unref?.();
+            }, options.timeoutMs || 300000);
+            child.on('error', (error) => { clearTimeout(timer); reject(error); });
+            child.on('close', (code, signal) => {
+              clearTimeout(timer);
+              resolve(signal ? 124 : code ?? 1);
+            });
           });
-        })).finally(invalidateScanCache);
+        }).finally(invalidateScanCache);
       },
     };
   }
@@ -49,10 +52,13 @@ export async function prepareProjectAction(project, action) {
     return {
       mode: 'workspace',
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
-        return withProjectOperationLock(project.id, () => runWorkspaceCompose(project, action, onOutput, {
-          timeoutMs: options.timeoutMs,
-          onExec: (handle) => onChild(handle),
-        })).finally(invalidateScanCache);
+        return withProjectOperationLock(project.id, async () => {
+          await options.beforeRun?.();
+          return runWorkspaceCompose(project, action, onOutput, {
+            timeoutMs: options.timeoutMs,
+            onExec: (handle) => onChild(handle),
+          });
+        }).finally(invalidateScanCache);
       },
     };
   }

@@ -65,6 +65,7 @@ jobs:
         run: |
           node scripts/project-workspace-browser.mjs composeops:ci-test
           node scripts/project-workspace-browser.mjs composeops:ci-test --workspace
+          node scripts/reviewed-deployment-integration.mjs
       - name: Fresh installation and online backup restore
         run: node scripts/image-smoke.mjs composeops:ci-test
       - name: Upgrade from supported baseline

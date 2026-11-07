@@ -125,7 +125,7 @@ export async function previewFetch(input, options = {}) {
     if (path.startsWith('/jobs/') && jobs.has(pid)) return json(jobs.get(pid));
     if (project) {
       if (path === '/projects/' + pid) return json(project);
-      if (path.endsWith('/compose')) return json({ content: compose.get(pid), filePath: project.composeFiles[0], path: project.composeFiles[0], fileIndex: 0 });
+      if (path.endsWith('/compose')) return json({ hostId: 'local', content: compose.get(pid), filePath: project.composeFiles[0], path: project.composeFiles[0], fileIndex: 0 });
       if (path.endsWith('/backups')) return json({ backups: [] });
       if (path.endsWith('/activity')) return json({ activity: [], operations: [], backups: [] });
       if (path.endsWith('/updates')) return json({ results: [], updates: [], hasUpdates: false });
@@ -191,7 +191,7 @@ export async function previewFetch(input, options = {}) {
     return json({ valid: !document.errors.length, issues: [...document.errors.map(error => ({ level: 'error', message: error.message })), { level: 'warn', message: '离线预览仅检查 YAML 语法，未运行 docker compose config。' }] });
   }
   if (project && path.endsWith('/compose') && method === 'PUT') { compose.set(pid, body.content); return json({ ok: true, content: body.content }); }
-  if (project && path.endsWith('/compose/preview')) return json({ preview: { added: [], removed: [], changed: [], unchanged: project.containers.map(c => ({ service: c.service })), warnings: ['仅保存演示内存，刷新后重置'] } });
+  if (project && path.endsWith('/compose/preview')) return json({ preview: { added: [], removed: [], changed: [], restarted: [], portConflicts: [], unchanged: project.containers.map(c => ({ service: c.service })), warnings: ['仅保存演示内存，刷新后重置'] } });
   if (project && path.endsWith('/preferences')) { Object.assign(project, body); return json(project); }
   if (path === '/personal/preferences' && method === 'PUT') { Object.assign(preferences, body); return json(preferences); }
   if (path.includes('/volume-backups/') && path.endsWith('/verify') && method === 'POST') { Object.assign(backups[0], { verifyStatus: 'verified', verifyAt: at.slice(0, -1), verifyFiles: 128 }); return json({ ok: true, status: 'verified', files: 128, durationMs: 100, message: '离线模拟校验完成', backup: backups[0] }); }

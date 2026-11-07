@@ -1,41 +1,53 @@
 <template>
-  <div :class="embedded ? '' : 'page-shell'" :aria-busy="loading">
+  <div :class="embedded ? 'space-y-4' : 'page-shell space-y-4'" :aria-busy="loading">
     <div v-if="!embedded" class="page-header">
       <div>
-        <h1 class="page-title">AI 变更评审</h1>
+        <h1 class="page-title">变更评审</h1>
         <p class="page-subtitle">部署前自动审查 Compose 变更,评估影响范围与风险等级</p>
       </div>
       <div class="page-actions">
-        <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
+        <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="deploying" @change="loadProject">
           <option value="">选择项目</option>
           <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
-        <button class="btn-secondary" :disabled="loading" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
+        <button class="btn-secondary" :disabled="loading || deploying || !selectedProjectId" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
       </div>
     </div>
     <!-- embedded 模式(变更与回滚页 tab)没有页头,单独保留选择项目的工具条,否则无法选择项目 -->
     <div v-else class="mb-3 flex flex-wrap items-center justify-end gap-2">
-      <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
+      <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="deploying" @change="loadProject">
         <option value="">选择项目</option>
         <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
       </select>
-      <button class="btn-secondary" :disabled="loading" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
+      <button class="btn-secondary" :disabled="loading || deploying || !selectedProjectId" @click="loadProject"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
     </div>
 
+    <div v-if="deployOutput.projectName" class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-800 bg-surface-900/50 px-4 py-3">
+      <p class="min-w-0 text-sm text-surface-300">{{ deployOutput.projectName }} · {{ deployOutput.running ? '部署执行中' : deployOutput.status === 'completed' ? '部署完成' : deployOutput.status === 'failed' ? '部署失败' : '部署结果未确认' }}</p>
+      <button class="btn-secondary" @click="deployOutput.open = true">查看部署输出</button>
+    </div>
     <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载变更评审</p>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
-    <EmptyState v-if="!selectedProjectId" icon="ShieldCheck" title="选择项目进行变更评审" description="从上方下拉框选择一个 Compose 项目,自动分析当前配置的风险与影响" class="flex-1" />
+    <EmptyState v-if="!selectedProjectId" icon="ShieldCheck" title="选择项目进行变更评审" description="从上方下拉框选择一个 Compose 项目,检查当前配置的风险与影响" class="flex-1" />
+
+    <section v-else-if="!reviewReady" class="section-panel flex min-h-64 flex-col items-center justify-center gap-4 px-5 py-8 text-center" data-testid="review-pending">
+      <div class="grid h-14 w-14 place-items-center rounded-2xl border" :class="loading ? 'border-sky-900/50 bg-sky-950/30 text-sky-300' : 'border-amber-900/50 bg-amber-950/30 text-amber-300'">
+        <RefreshCw v-if="loading" class="h-6 w-6 animate-spin motion-reduce:animate-none" /><ShieldCheck v-else class="h-6 w-6" />
+      </div>
+      <div class="max-w-lg"><h2 class="section-title">{{ loading ? '正在检查当前项目' : '评审尚未完成' }}</h2><p class="mt-2 text-sm leading-6 text-surface-400">{{ loading ? '正在读取配置并检查语义与变更影响，结果就绪后才能确认部署。' : '还没有可用的检查结果。请重新评审，确认项目与影响后再部署。' }}</p></div>
+      <button v-if="!loading" class="btn-secondary" @click="loadProject"><RefreshCw class="h-4 w-4" />重新评审</button>
+    </section>
 
     <template v-else>
       <!-- 风险评分横幅 -->
-      <section class="rounded-3xl border p-6" :class="riskBannerClass">
+      <section class="rounded-3xl border p-4 sm:p-6" :class="riskBannerClass">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div class="flex items-center gap-4">
             <div class="grid h-16 w-16 place-items-center rounded-2xl border font-mono text-2xl font-bold" :class="riskScoreClass">{{ riskScore }}</div>
             <div>
-              <h2 class="text-lg font-semibold text-surface-100">风险等级:{{ riskLabel }}</h2>
-              <p class="mt-1 text-sm text-surface-400">{{ riskSummary }}</p>
+              <p class="mb-1 text-xs text-surface-400">{{ reviewed.projectName }} · 检查于 {{ checkedTime }}</p><h2 class="text-lg font-semibold text-surface-100">规则风险等级:{{ riskLabel }}</h2>
+              <p class="mt-1 text-sm text-surface-400">{{ riskSummary }}</p><p class="mt-1 text-xs text-surface-500">检查范围：首个 Compose 文件；执行时使用项目配置文件组合。</p>
             </div>
           </div>
           <div class="flex gap-3">
@@ -52,19 +64,19 @@
               <div class="text-lg font-semibold text-amber-400">{{ warningCount }}</div>
             </div>
           </div>
-          <button class="btn-primary" :disabled="deploying || errorCount > 0" :title="errorCount > 0 ? '存在语义错误,无法部署' : '按当前配置执行部署'" @click="openDeployConfirm">
-            <Rocket class="w-4 h-4" :class="{ 'animate-pulse': deploying }" />{{ deploying ? '部署中...' : '一键部署' }}
+          <button class="btn-primary" :disabled="!canDeploy" :title="errorCount > 0 ? '存在语义错误,无法部署' : '核对已评审配置后执行部署'" @click="openDeployConfirm">
+            <Rocket class="w-4 h-4" :class="{ 'animate-pulse': deploying }" />{{ deploying ? '部署中...' : '确认部署…' }}
           </button>
         </div>
       </section>
 
       <!-- 部署预演 -->
       <section class="section-panel">
-        <div class="mb-4 flex items-center justify-between">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div><h2 class="section-title">部署预演</h2><p class="mt-1 text-muted">部署将创建、重建、移除的容器,以及受影响的卷与端口</p></div>
           <span class="count-badge" :class="deployImpactCount ? 'text-amber-300' : 'text-emerald-300'">{{ deployImpactCount ? `${deployImpactCount} 项影响` : '无影响' }}</span>
         </div>
-        <div class="grid gap-3 md:grid-cols-2">
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
           <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
             <div class="text-sm font-semibold text-emerald-300">将创建 {{ preview.added.length }}</div>
             <div class="mt-2 flex flex-wrap gap-1.5"><span v-for="item in preview.added" :key="item.service" class="count-badge text-emerald-300">{{ item.service }}</span></div>
@@ -94,9 +106,9 @@
 
       <!-- 部署预言(宿主实况) -->
       <section class="section-panel">
-        <div class="mb-4 flex items-center justify-between">
-          <div><h2 class="section-title">部署预言 · 宿主实况</h2><p class="mt-1 text-muted">对照宿主真实状态推演 up:镜像是否在位、端口是否被占、卷与 bind 路径是否存在、哪些容器会重建</p></div>
-          <button class="btn-secondary" :disabled="hostPreview.loading" @click="runHostPreview"><Telescope class="w-4 h-4" :class="{ 'animate-spin': hostPreview.loading }" />{{ hostPreview.loading ? '推演中...' : '生成预言' }}</button>
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div><h2 class="section-title">宿主检查</h2><p class="mt-1 text-muted">对照宿主真实状态推演 up:镜像是否在位、端口是否被占、卷与 bind 路径是否存在、哪些容器会重建</p></div>
+          <button class="btn-secondary" :disabled="hostPreview.loading || deploying || !reviewReady" @click="runHostPreview"><Telescope class="w-4 h-4" :class="{ 'animate-spin': hostPreview.loading }" />{{ hostPreview.loading ? '推演中...' : '检查宿主' }}</button>
         </div>
         <p v-if="hostPreview.loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在生成宿主实况预演</p>
         <p v-if="hostPreview.error" class="alert-error" role="alert">{{ hostPreview.error }}</p>
@@ -140,7 +152,7 @@
           <p v-if="hostPreview.data.aiSummary" class="mt-3 rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-3 text-sm leading-6 text-emerald-200"><Bot class="mr-1.5 inline h-4 w-4" />{{ hostPreview.data.aiSummary }}</p>
           <p class="mt-2 text-[11px] text-surface-600">静态推演基于 compose config 与宿主实况,容器级最终行为以实际 up 输出为准。</p>
         </template>
-        <div v-else-if="!hostPreview.loading && !hostPreview.error" class="rounded-xl border border-dashed border-surface-700 p-4 text-center text-sm text-surface-500">点击"生成预言"对照宿主实况推演本次部署</div>
+        <div v-else-if="!hostPreview.loading && !hostPreview.error" class="rounded-xl border border-dashed border-surface-700 p-4 text-center text-sm text-surface-500">点击"检查宿主"对照宿主实况推演本次部署</div>
       </section>
 
       <!-- 语义校验 -->
@@ -186,11 +198,11 @@
         </div>
       </section>
 
-      <!-- AI 建议 -->
+      <!-- 规则建议 -->
       <section class="section-panel">
-        <div class="mb-4 flex items-center gap-2"><h2 class="section-title">AI 评审建议</h2><Bot class="h-4 w-4 text-emerald-400" /></div>
+        <div class="mb-4"><h2 class="section-title">规则检查建议</h2><p class="mt-1 text-muted">基于配置语义、容器差异与端口映射生成；分数不代表部署成功率。</p></div>
         <div class="space-y-2">
-          <div v-for="(advice, idx) in aiAdvice" :key="idx" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
+          <div v-for="(advice, idx) in ruleAdvice" :key="idx" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
             <span class="mt-0.5 shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold" :class="advice.tone === 'danger' ? 'bg-rose-500/20 text-rose-300' : advice.tone === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'">{{ advice.tag }}</span>
             <p class="text-sm text-surface-200">{{ advice.text }}</p>
           </div>
@@ -199,8 +211,8 @@
     </template>
 
     <!-- 部署确认门 -->
-    <BaseModal :show="showDeployConfirm" title="确认部署" size-class="max-w-[calc(100vw-2rem)] sm:max-w-lg" body-class="p-4 space-y-3" @close="showDeployConfirm = false">
-      <p class="text-sm text-surface-300">将按当前配置对项目 <b class="text-surface-100">{{ project?.projectName }}</b> 执行部署。预演影响:</p>
+    <BaseModal :show="showDeployConfirm" title="确认部署" size-class="max-w-[calc(100vw-2rem)] sm:max-w-lg" body-class="p-4 space-y-3" @close="closeDeployConfirm">
+      <p class="text-sm text-surface-300">将按当前配置对项目 <b class="text-surface-100">{{ pendingDeploy?.projectName }}</b> 执行部署。预演影响:</p>
       <div class="grid grid-cols-2 gap-2 text-sm">
         <div class="rounded-lg border border-emerald-900/40 bg-emerald-950/20 p-2.5"><span class="text-emerald-300">创建 {{ preview.added.length }}</span></div>
         <div class="rounded-lg border border-amber-900/40 bg-amber-950/20 p-2.5"><span class="text-amber-300">重建 {{ preview.changed.length }}</span></div>
@@ -210,13 +222,13 @@
       <p v-if="preview.removed.length" class="text-xs text-rose-300">有服务将被移除,部署后对应容器会停止。</p>
       <p v-if="preview.portConflicts.length" class="text-xs text-amber-300">存在 {{ preview.portConflicts.length }} 处端口映射,请确认宿主机端口可用。</p>
       <template #footer>
-        <button class="btn-secondary" @click="showDeployConfirm = false">取消</button>
-        <button class="btn-primary" :disabled="deploying" @click="confirmDeploy"><Rocket class="w-4 h-4" />{{ deploying ? '部署中...' : '确认部署' }}</button>
+        <button class="btn-secondary" @click="closeDeployConfirm">取消</button>
+        <button class="btn-primary" :disabled="!canDeploy || !pendingDeploy" @click="confirmDeploy"><Rocket class="w-4 h-4" />{{ deploying ? '部署中...' : '确认部署' }}</button>
       </template>
     </BaseModal>
 
     <!-- 部署输出抽屉 -->
-    <BaseModal :show="deployOutput.open" :title="`部署输出 · ${project?.projectName || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="deployOutput.open = false">
+    <BaseModal :show="deployOutput.open" :title="`部署输出 · ${deployOutput.projectName || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="deployOutput.open = false">
       <template #header-actions>
         <span v-if="deployOutput.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="deployOutput.running ? 'text-sky-300' : deployOutput.status === 'failed' ? 'text-rose-300' : deployOutput.status === 'cancelled' || deployOutput.status === 'unknown' ? 'text-amber-300' : 'text-emerald-300'">{{ deployOutput.running ? '部署执行中' : deployOutput.status === 'failed' ? '部署失败' : deployOutput.status === 'cancelled' ? '部署已中断' : deployOutput.status === 'unknown' ? '部署结果未确认' : '部署完成' }}</span>
       </template>
@@ -231,14 +243,15 @@
 <script setup>
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 defineProps({ embedded: { type: Boolean, default: false } });
-import { computed, onMounted, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { Bot, RefreshCw, Rocket, Telescope } from 'lucide-vue-next';
+import { Bot, RefreshCw, Rocket, ShieldCheck, Telescope } from 'lucide-vue-next';
 import { api, streamComposeControl } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 
+const emit = defineEmits(['busy']);
 const store = useServicesStore();
 const composeProjects = computed(() => store.projects.filter((project) => project.editable));
 const selectedProjectId = ref('');
@@ -252,16 +265,33 @@ const deploying = ref(false);
 const deployOutput = ref({ open: false, text: '', running: false, status: 'completed' });
 let deployController = null;
 const hostPreview = ref({ loading: false, error: '', data: null });
+const reviewed = ref(null);
+const pendingDeploy = ref(null);
+let requestVersion = 0;
+let hostPreviewVersion = 0;
+const active = ref(true);
+let disposed = false;
+const reviewReady = computed(() => !!reviewed.value && reviewed.value.projectId === selectedProjectId.value && !loading.value && !error.value);
+const canDeploy = computed(() => active.value && reviewReady.value && !deploying.value && errorCount.value === 0);
+const checkedTime = computed(() => reviewed.value ? new Date(reviewed.value.checkedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '');
+watch(deploying, value => emit('busy', value), { flush: 'sync' });
+function closeDeployConfirm() { showDeployConfirm.value = false; pendingDeploy.value = null; }
+function current(version, id) { return active.value && !disposed && version === requestVersion && id === selectedProjectId.value; }
+
 
 async function runHostPreview() {
-  if (!selectedProjectId.value || hostPreview.value.loading) return;
+  if (!reviewReady.value || hostPreview.value.loading || deploying.value) return;
+  const snapshot = reviewed.value;
+  const version = ++hostPreviewVersion;
   hostPreview.value = { loading: true, error: '', data: null };
+  const valid = () => active.value && !disposed && version === hostPreviewVersion && reviewed.value === snapshot;
   try {
-    hostPreview.value.data = await api.previewDeploy(selectedProjectId.value, true);
+    const data = await api.previewDeploy(snapshot.projectId, false);
+    if (valid()) hostPreview.value.data = data;
   } catch (e) {
-    hostPreview.value.error = `部署预言失败:${e.message}`;
+    if (valid()) hostPreview.value.error = `宿主检查失败:${e.message}`;
   } finally {
-    hostPreview.value.loading = false;
+    if (valid()) hostPreview.value.loading = false;
   }
 }
 
@@ -299,10 +329,10 @@ const riskSummary = computed(() => {
   if (preview.value.removed.length) parts.push(`${preview.value.removed.length} 个服务将被移除`);
   if (preview.value.changed.length) parts.push(`${preview.value.changed.length} 个服务将重建`);
   if (preview.value.portConflicts.length) parts.push(`${preview.value.portConflicts.length} 处端口映射`);
-  return parts.length ? `检测到:${parts.join('、')}` : '配置健康,可安全部署';
+  return parts.length ? `检测到:${parts.join('、')}` : '规则检查未发现阻断项，请核对部署影响';
 });
 
-const aiAdvice = computed(() => {
+const ruleAdvice = computed(() => {
   const advice = [];
   if (errorCount.value) advice.push({ tone: 'danger', tag: '阻断', text: `存在 ${errorCount.value} 个语义错误,建议修复后再部署,否则可能导致服务无法启动。` });
   if (preview.value.removed.length) advice.push({ tone: 'danger', tag: '删除', text: `${preview.value.removed.length} 个服务将从 Compose 中移除,对应容器会被停止。请确认这些服务不再需要。` });
@@ -310,50 +340,77 @@ const aiAdvice = computed(() => {
   if (preview.value.changed.length) advice.push({ tone: 'warning', tag: '重建', text: `${preview.value.changed.length} 个服务因镜像/环境/卷/端口变化将被重建,期间会有短暂不可用。` });
   if (preview.value.restarted.length) advice.push({ tone: 'warning', tag: '重启', text: `${preview.value.restarted.length} 个运行中容器将重启,建议在低峰期执行。` });
   if (warningCount.value) advice.push({ tone: 'warning', tag: '警告', text: `存在 ${warningCount.value} 个警告,建议检查镜像声明与环境变量定义。` });
-  if (!advice.length) advice.push({ tone: 'success', tag: '通过', text: '未发现明显风险,配置结构健康,可以安全部署。' });
+  if (!advice.length) advice.push({ tone: 'success', tag: '通过', text: '当前规则未发现阻断项。宿主环境与实际启动结果仍需核对。' });
   return advice;
 });
 
 async function loadProject() {
-  if (!selectedProjectId.value) return;
-  loading.value = true;
+  if (!active.value || disposed || deploying.value) return;
+  const id = selectedProjectId.value;
+  const version = ++requestVersion;
+  ++hostPreviewVersion;
+  closeDeployConfirm();
+  reviewed.value = null;
+  loading.value = !!id;
   error.value = '';
   issues.value = [];
   preview.value = { added: [], changed: [], restarted: [], removed: [], portConflicts: [] };
   services.value = [];
   hostPreview.value = { loading: false, error: '', data: null };
+  if (!id) return;
   try {
-    const data = await api.getComposeFile(selectedProjectId.value, 0);
-    const content = data.content || '';
+    const data = await api.getComposeFile(id, 0, true);
+    if (!current(version, id)) return;
+    const content = data.content;
+    if (typeof content !== 'string' || !content.trim()) throw new Error('配置内容为空，请先检查 Compose 文件');
     const [validateResult, previewResult] = await Promise.all([
-      api.validateCompose(selectedProjectId.value, 0, content),
-      api.previewCompose(selectedProjectId.value, content),
+      api.validateCompose(id, 0, content),
+      api.previewCompose(id, content),
     ]);
-    issues.value = validateResult.issues || [];
-    preview.value = previewResult || { added: [], changed: [], restarted: [], removed: [], portConflicts: [] };
+    if (!current(version, id)) return;
+    if (!Array.isArray(validateResult?.issues) || !previewResult || !['added', 'changed', 'restarted', 'removed', 'portConflicts'].every(key => Array.isArray(previewResult[key]))) {
+      throw new Error('检查结果不完整，请重试');
+    }
     const parsed = (await import('yaml')).parse(content);
+    if (!current(version, id)) return;
+    issues.value = validateResult.issues;
+    preview.value = previewResult;
     services.value = Object.entries(parsed?.services || {}).map(([name, cfg]) => ({ name, volumes: cfg?.volumes || [] }));
+    reviewed.value = { projectId: id, projectName: project.value?.projectName || id, content, hostId: data.hostId, checkedAt: Date.now() };
   } catch (e) {
-    error.value = `变更评审失败: ${e.message}`;
+    if (current(version, id)) error.value = `变更评审失败: ${e.message}`;
   } finally {
-    loading.value = false;
+    if (current(version, id)) loading.value = false;
   }
 }
 
 function openDeployConfirm() {
-  if (errorCount.value) return;
+  if (!canDeploy.value) return;
+  pendingDeploy.value = reviewed.value;
   showDeployConfirm.value = true;
 }
+
 async function confirmDeploy() {
-  showDeployConfirm.value = false;
+  if (!canDeploy.value || !pendingDeploy.value || pendingDeploy.value !== reviewed.value) return;
+  const snapshot = pendingDeploy.value;
+  const version = requestVersion;
+  closeDeployConfirm();
   deploying.value = true;
-  deployOutput.value = { open: true, text: '', running: true, status: 'running' };
+  deployOutput.value = { open: true, text: '', running: true, status: 'running', projectName: snapshot.projectName };
   deployController?.abort();
   deployController = new AbortController();
   let exitCode = null;
   let streamReportedError = false;
   try {
-    await streamComposeControl(selectedProjectId.value, 'up', (frame) => {
+    const latest = await api.getComposeFile(snapshot.projectId, 0, true);
+    if (!current(version, snapshot.projectId)) throw new Error('评审上下文已变化，本次未部署。请重新评审。');
+    if (latest.content !== snapshot.content || latest.hostId !== snapshot.hostId) {
+      reviewed.value = null;
+      error.value = '配置或节点已变化，本次未部署。请重新评审。';
+      throw new Error(error.value);
+    }
+    await streamComposeControl(snapshot.projectId, 'up', (frame) => {
+      if (disposed) return;
       if (frame.type === 'stdout' || frame.type === 'stderr') deployOutput.value.text += frame.data;
       else if (frame.type === 'error') {
         streamReportedError = true;
@@ -363,7 +420,7 @@ async function confirmDeploy() {
         exitCode = Number(frame.data?.code);
         deployOutput.value.text += `\n[退出码 ${frame.data.code}]`;
       }
-    }, null, null, deployController.signal);
+    }, null, { action: 'up', expectedHostId: snapshot.hostId, expectedContent: snapshot.content }, deployController.signal);
     if (streamReportedError || exitCode !== 0) {
       deployOutput.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
       if (exitCode === null && !streamReportedError) deployOutput.value.text += '\n[未收到 Compose 退出码，部署结果未确认]';
@@ -375,20 +432,56 @@ async function confirmDeploy() {
       deployOutput.value.text += `\n[部署已完成，但刷新项目状态失败] ${refreshError.message}`;
     }
   } catch (e) {
-    if (e.name === 'AbortError') deployOutput.value.status = 'cancelled';
+    if (e.name === 'AbortError') deployOutput.value.status = 'unknown';
     else {
       if (deployOutput.value.status !== 'completed') deployOutput.value.status = 'failed';
       deployOutput.value.text += `\n[请求失败] ${e.message}`;
     }
   } finally {
     deployController = null;
+    reviewed.value = null;
     deploying.value = false;
     deployOutput.value.running = false;
   }
 }
 
-usePullRefresh(loadProject);
+function invalidateContext() {
+  requestVersion += 1;
+  hostPreviewVersion += 1;
+  closeDeployConfirm();
+  reviewed.value = null;
+  loading.value = false;
+  hostPreview.value = { loading: false, error: '', data: null };
+}
+function onHostChanged() {
+  invalidateContext();
+  selectedProjectId.value = '';
+  error.value = '节点已变化，请重新选择项目进行评审。';
+  deployController?.abort();
+}
+function deactivate() {
+  active.value = false;
+  requestVersion += 1;
+  hostPreviewVersion += 1;
+  closeDeployConfirm();
+  if (loading.value) reviewed.value = null;
+  loading.value = false;
+  hostPreview.value.loading = false;
+  deployOutput.value.open = false;
+}
+onActivated(() => { active.value = true; if (selectedProjectId.value && !reviewed.value && !deploying.value) void loadProject(); });
+onDeactivated(deactivate);
+onBeforeUnmount(() => {
+  disposed = true;
+  deactivate();
+  deployController?.abort();
+  window.removeEventListener('composeops:host-changed', onHostChanged);
+  emit('busy', false);
+});
+usePullRefresh(loadProject, { keepAlive: true, enabled: () => !deploying.value });
 onMounted(async () => {
+  window.addEventListener('composeops:host-changed', onHostChanged);
   await store.refresh(false);
+  if (!disposed && store.error) error.value = `项目列表加载失败: ${store.error}`;
 });
 </script>
