@@ -72,3 +72,8 @@ describe('API response normalizers', () => {
     expect(result.trends[0].totalMemoryMB).toBe(0);
   });
 });
+
+
+it('保留存储的节点范围与不可达节点，避免部分总数被当成完整结果', () => {
+  expect(normalizeDockerUsage({ hostId: 'all', unavailableHosts: ['remote'] })).toMatchObject({ hostId: 'all', unavailableHosts: ['remote'] });
+});

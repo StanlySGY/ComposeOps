@@ -44,8 +44,9 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-async function mountView() {
+async function mountView(props = {}) {
   wrapper = mount(ResourceMonitorView, {
+    props,
     attachTo: document.body,
     global: {
       plugins: [router],
@@ -230,4 +231,16 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
     expect(wrapper.find('.history-chart-panel').exists()).toBe(false);
     expect(metricsApi.getHistoricalMetrics).not.toHaveBeenCalled();
   });
+});
+
+
+it('从实时容器进入历史自动定位同一项目和容器', async () => {
+  api.getProjects.mockResolvedValue({ projects: [
+    { id: 'p1', managed: true, containers: [{ id: 'c1', name: 'one' }] },
+    { id: 'p2', managed: true, containers: [{ id: 'c2', name: 'two' }] },
+  ] });
+  await mountView({ embedded: true, initialContainerId: 'c2' });
+  expect(wrapper.get('#resource-monitor-project').element.value).toBe('p2');
+  expect(wrapper.get('#resource-monitor-container').element.value).toBe('c2');
+  expect(metricsApi.getContainerMetrics).toHaveBeenCalledWith('c2', 'cpu', '5m');
 });

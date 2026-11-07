@@ -15,7 +15,7 @@ export const projects = [
 ];
 export const metrics = {
   host: { hostname: 'homelab-demo', platform: 'linux', arch: 'x64', cpu: { percent: 18, cores: 4, loadavg: [0.6, 0.7, 0.5] }, memory: { total: 8 * GB, used: 3.4 * GB, free: 4.6 * GB, percent: 42.5 }, uptime: 172800 },
-  containers: projects.flatMap(p => p.containers.map((c, i) => ({ id: c.id, name: c.name, projectId: p.id, projectName: p.projectName, state: c.state, cpuPercent: i ? 7 : 2, memoryUsage: 180 * 1024 ** 2, memoryLimit: GB, memoryPercent: 18, networkRx: 1048576, networkTx: 524288, netIO: { rx: 1048576, tx: 524288 }, blockIO: { read: 0, write: 0 } }))),
+  containers: projects.flatMap(p => p.containers.map((c, i) => ({ id: c.id, name: c.name, image: c.image, hostId: 'local', hostName: '本机 · 示例', memUsage: 180 * 1024 ** 2, memLimit: GB, memPercent: 18, projectId: p.id, projectName: p.projectName, state: c.state, cpuPercent: i ? 7 : 2, memoryUsage: 180 * 1024 ** 2, memoryLimit: GB, memoryPercent: 18, networkRx: 1048576, networkTx: 524288, netIO: { rx: 1048576, tx: 524288 }, blockIO: { read: 0, write: 0 } }))),
   network: { rx: 1048576, tx: 524288 }, disk: [{ mount: '/', total: 128 * GB, used: 40 * GB, free: 88 * GB, percent: 31.25 }],
 };
 export const inspection = { latest: { id: 1, score: 82, grade: 'attention', summary: 'wiki-api 异常退出，建议检查数据库连接配置（示例）', createdAt: at, findings: [{ id: 'demo', level: 'warning', title: 'wiki-api 连接失败', message: '数据库主机名 db-old 无法解析' }], checks: [], stats: { warning: 1, critical: 0, passed: 8 } }, reports: [], schedule: { enabled: false }, trend: [] };

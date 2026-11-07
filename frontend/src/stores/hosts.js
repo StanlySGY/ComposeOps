@@ -8,29 +8,26 @@ export const useHostsStore = defineStore('hosts', () => {
   const loading = ref(false);
   const error = ref('');
   const pinging = ref('');
+  let loadVersion = 0;
+  let mutationVersion = 0;
+  const probes = new Map();
 
   const active = computed(() => hosts.value.find((host) => host.id === activeHostId.value) || hosts.value[0] || null);
 
   async function load(force = false) {
-    if (!force && hosts.value.length) {
-      // 已有数据:SWR 秒开,后台静默刷新
-      api.getHosts(true).then((data) => {
-        hosts.value = data.hosts || [];
-        syncActive(data.hosts);
-        error.value = '';
-      }).catch((e) => { error.value = e.message; });
-      return;
-    }
-    loading.value = true;
+    const request = ++loadVersion;
+    const mutation = mutationVersion;
+    loading.value = force || !hosts.value.length;
     error.value = '';
     try {
-      const data = await api.getHosts(force);
-      hosts.value = data.hosts || [];
-      syncActive(data.hosts);
+      const data = await api.getHosts(force || !!hosts.value.length);
+      if (request !== loadVersion || mutation !== mutationVersion) return;
+      hosts.value = Array.isArray(data.hosts) ? data.hosts : [];
+      syncActive(hosts.value);
     } catch (e) {
-      error.value = e.message;
+      if (request === loadVersion && mutation === mutationVersion) error.value = e.message;
     } finally {
-      loading.value = false;
+      if (request === loadVersion) loading.value = false;
     }
   }
   function syncActive(list) {
@@ -39,16 +36,25 @@ export const useHostsStore = defineStore('hosts', () => {
     list.forEach((host) => { host.active = host.id === activeHostId.value; });
   }
 
-  async function ping(id) {
+  function ping(id) {
+    if (probes.has(id)) return probes.get(id);
     pinging.value = id;
-    try {
-      const result = await api.pingHost(id);
-      const index = hosts.value.findIndex((host) => host.id === id);
-      if (index >= 0 && result.host) hosts.value[index] = { ...result.host, group: hosts.value[index].group };
+    const task = api.pingHost(id).then(result => {
+      const host = hosts.value.find(item => item.id === id);
+      if (host && result.host) {
+        mutationVersion += 1;
+        // A probe may finish after a switch/group edit; it only owns observation fields.
+        for (const key of ['status', 'latencyMs', 'version', 'containerCount', 'runningCount', 'lastPingAt', 'error']) {
+          host[key] = result.host[key];
+        }
+      }
       return result;
-    } finally {
-      pinging.value = '';
-    }
+    }).finally(() => {
+      probes.delete(id);
+      pinging.value = [...probes.keys()].at(-1) || '';
+    });
+    probes.set(id, task);
+    return task;
   }
 
   async function addOrUpdate(payload) {
@@ -65,6 +71,7 @@ export const useHostsStore = defineStore('hosts', () => {
 
   async function switchHost(id) {
     const result = await api.setActiveHost(id);
+    mutationVersion += 1;
     bumpHostEpoch();
     activeHostId.value = result.activeHostId;
     hosts.value.forEach((host) => { host.active = host.id === result.activeHostId; });
@@ -75,6 +82,7 @@ export const useHostsStore = defineStore('hosts', () => {
   async function assignGroup(id, group) {
     const saved = await api.setHostGroup(id, group);
     const host = hosts.value.find(item => item.id === id);
+    mutationVersion += 1;
     if (host) host.group = saved.group;
   }
   return { assignGroup, hosts, activeHostId, active, loading, error, pinging, load, ping, addOrUpdate, remove, switchHost };

@@ -2822,3 +2822,94 @@ a.card:hover, button.card:hover, .service-project-card:hover {
 .terminal-session-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 38px; padding: 8px 12px; border-bottom: 1px solid rgba(148,163,184,.12); background: #141a22; font-size: 12px; color: #a8b4c5; }
 .terminal-session-bar strong { color: #e2e8f0; font-weight: 500; }
 @media (max-width: 767px) { .app-workspace .app-main > .content-outer { padding-top: 14px; } .filter-chip { min-height: 36px; } }
+
+/* 节点工作区：每张卡片保留状态、上下文和下一步入口。 */
+.node-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.node-toolbar .search-field { flex: 1 1 230px; max-width: 360px; min-width: 0; }
+.node-toolbar-spacer { flex: 1; }
+.node-group { min-width: 0; }
+.node-group-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 0 0 12px; }
+.node-group-heading h2 { color: var(--color-surface-100); font-size: 14px; font-weight: 600; }
+.node-group-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line-subtle); border-radius: 8px; background: var(--panel-surface); }
+.node-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 14px; }
+.node-card { min-width: 0; border: 1px solid var(--line-subtle); border-radius: 14px; background: var(--panel-surface); padding: 18px; transition: border-color 160ms, background-color 160ms; }
+.node-card:hover { border-color: var(--line-hover); }
+.node-card-active { border-color: rgba(110,231,183,.28); box-shadow: inset 0 2px 0 rgba(110,231,183,.24); }
+.node-card-heading { display: flex; align-items: center; gap: 10px; }
+.node-card-heading h3 { font-size: 14px; font-weight: 600; color: var(--color-surface-100); }
+.node-card-mark { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border: 1px solid var(--line-subtle); border-radius: 10px; color: var(--color-surface-300); background: var(--canvas-mid); }
+.node-card-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-block: 22px 16px; }
+.node-card-stats span { display: block; color: var(--color-surface-400); font-size: 11px; margin-bottom: 6px; }
+.node-card-stats strong { font-size: 20px; line-height: 1.25; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--color-surface-100); }
+.node-card-notice { color: var(--color-surface-400); font-size: 11px; line-height: 1.6; margin-bottom: 10px; }
+.node-card-context { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; font-size: 11px; margin-bottom: 12px; }
+.node-card-context > span, .node-current-actions .text-link { display: inline-flex; align-items: center; gap: 6px; }
+.node-card-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line-subtle); }
+.node-card-footer select { margin-left: auto; width: auto; max-width: 100%; }
+.node-action-arrow { transition: transform 160ms; }
+.node-card-footer a:hover .node-action-arrow { transform: translate(1px, -1px); }
+.node-current-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.node-current-actions > div:first-child { flex: 1 1 220px; }
+.scope-callout { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px solid rgba(96,165,250,.25); border-radius: 10px; background: rgba(59,130,246,.08); color: var(--color-surface-300); font-size: 12px; }
+.scope-callout-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 999px; background: var(--color-status-info); box-shadow: 0 0 0 3px rgba(96,165,250,.12); }
+.scope-callout .text-link { margin-left: auto; }
+@media (max-width: 639px) {
+  .node-card { padding: 15px; }
+  .node-toolbar .search-field { flex-basis: 100%; max-width: none; }
+  .node-toolbar-spacer { display: none; }
+  .node-card-footer .btn-sm { min-height: 36px; }
+  .node-card-footer select { min-height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node-card, .node-action-arrow { transition: none; }
+  .node-card-footer a:hover .node-action-arrow { transform: none; }
+}
+
+/* 监控：固定环境指标与所选 Docker 范围各自成组。 */
+.monitor-view-bar, .monitor-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.monitor-section-heading { margin-bottom: 16px; }
+.monitor-section-heading .section-title, .monitor-section-heading .text-link { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.monitor-refresh-state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--color-surface-400); }
+.monitor-environment { padding: 14px 16px; border: 1px solid var(--line-subtle); border-radius: 12px; background: var(--panel-surface); }
+.monitor-environment:not(.is-expanded) .monitor-section-heading { margin-bottom: 0; }
+.monitor-disclosure { transition: transform 160ms; }
+.monitor-scope-label, .monitor-host-label { border: 1px solid var(--line-subtle); border-radius: 5px; padding: 2px 6px; color: var(--color-surface-300); font-size: 10px; font-weight: 400; }
+.monitor-thresholds { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--color-surface-400); }
+.monitor-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.monitor-toolbar .search-field { flex: 1 1 220px; min-width: 0; }
+.monitor-table { min-width: 640px; }
+.monitor-table tbody tr { transition: background-color 140ms; }
+.monitor-table tbody tr:hover { background: var(--panel-raised); }
+.monitor-container-identity { min-width: 180px; max-width: 320px; }
+.monitor-container-identity > strong, .monitor-container-identity > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitor-container-identity > strong { color: var(--color-surface-100); font-weight: 500; }
+.monitor-container-identity > span { margin-top: 4px; font-size: 11px; }
+.monitor-container-context { display: flex; align-items: center; gap: 8px; margin-top: 7px; min-height: 18px; }
+.monitor-number { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.monitor-memory { min-width: 110px; }
+.monitor-memory > span { display: block; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.monitor-row-actions { text-align: right; white-space: nowrap; }
+.monitor-row-actions > * + * { margin-left: 6px; }
+@media (max-width: 639px) {
+  .monitor-view-bar { align-items: flex-start; }
+  .monitor-table { min-width: 0; display: block; }
+  .monitor-table thead { display: none; }
+  .monitor-table tbody { display: grid; gap: 12px; }
+  .monitor-table tbody tr { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px; border: 1px solid var(--line-subtle); border-radius: 10px; }
+  .monitor-table tbody td { height: auto; border: 0; padding: 0; min-width: 0; max-width: none; }
+  .monitor-containers .table-wrap { border: 0; background: transparent; box-shadow: none; }
+  .monitor-container-identity, .monitor-memory, .monitor-row-actions { grid-column: 1 / -1; }
+  .monitor-number { text-align: left; }
+  .monitor-number::before { content: attr(data-label); display: block; color: var(--color-surface-400); font-size: 11px; margin-bottom: 4px; }
+  .monitor-memory { display: flex; align-items: center; gap: 10px; }
+  .monitor-memory .progress { flex: 1; }
+  .monitor-memory > span { margin: 0; }
+  .monitor-table tbody .monitor-row-actions { display: flex; align-items: center; justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--line-subtle); }
+  .monitor-row-actions .btn-sm, .monitor-row-actions .icon-btn { min-height: 36px; }
+  .monitor-toolbar .search-field { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .monitor-table tbody tr { transition: none; } }
+
+.monitor-memory .progress-danger > span { background: var(--color-status-error); }
+
+@media (prefers-reduced-motion: reduce) { .monitor-disclosure { transition: none; } }

@@ -162,7 +162,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 // embedded 模式供 MonitorView 的「历史指标」tab 复用,隐藏独立页头
-defineProps({ embedded: { type: Boolean, default: false } });
+const props = defineProps({ embedded: { type: Boolean, default: false }, initialProjectId: { type: String, default: '' }, initialContainerId: { type: String, default: '' } });
 import { AlertTriangle, Bell, Cpu, Database, HardDrive, Minus, Network, RefreshCw, TrendingDown, TrendingUp, X } from 'lucide-vue-next';
 import { api, metricsApi } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
@@ -191,6 +191,7 @@ let metricsRequestId = 0;
 let projectsRequestId = 0;
 let alertsRequestId = 0;
 let disposed = false;
+let initialSelectionApplied = false;
 
 const alertForm = ref({
   metric: 'cpu',
@@ -353,6 +354,19 @@ async function loadProjects() {
     if (disposed || requestId !== projectsRequestId) return;
     const nextProjects = (response.projects || []).filter(p => p.managed);
     projects.value = nextProjects;
+    if (!initialSelectionApplied) {
+      initialSelectionApplied = true;
+      const initial = nextProjects.find(p => (!props.initialProjectId || p.id === props.initialProjectId)
+        && p.containers?.some(c => c.id === props.initialContainerId));
+      if (initial) {
+        projectId.value = initial.id;
+        containerId.value = props.initialContainerId;
+        void loadMetrics();
+      } else if (props.initialProjectId || props.initialContainerId) {
+        projectId.value = nextProjects.find(p => p.id === props.initialProjectId)?.id || '';
+        error.value = '指定容器在当前节点不可用，请重新选择项目与容器。';
+      }
+    }
     if (projectId.value && !nextProjects.some((project) => project.id === projectId.value)) {
       projectId.value = '';
       containerId.value = '';
@@ -449,9 +463,10 @@ usePullRefresh(async () => {
 });
 onMounted(async () => {
   disposed = false;
-  await loadProjects();
-  await loadAlerts();
   window.addEventListener('composeops:host-changed', onHostChanged);
+  await loadProjects();
+  if (disposed) return;
+  await loadAlerts();
 });
 
 function onHostChanged() {

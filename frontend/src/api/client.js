@@ -295,7 +295,7 @@ export const api = {
   saveNotifications: (payload) => request('/personal/notifications', { method: 'PUT', body: JSON.stringify(payload) }),
   testNotifications: (payload) => request('/personal/notifications/test', { method: 'POST', body: JSON.stringify(payload) }),
   getOperations: () => request('/personal/operations', { cacheable: true }),
-  getDockerUsage: async () => normalizeDockerUsage(await request('/personal/maintenance/usage')),
+  getDockerUsage: async (hostId = '') => normalizeDockerUsage(await request(`/personal/maintenance/usage${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`)),
   getCostAnalysisReport: async () => normalizeCostReport(await request('/cost-analysis/report')),
   getCostTrends: () => request('/cost-analysis/trends?days=7'),
   getCostSuggestions: () => request('/cost-analysis/suggestions'),

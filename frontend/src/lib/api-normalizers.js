@@ -40,6 +40,8 @@ export function normalizeDockerUsage(value) {
   return {
     ...normalized,
     containers: { ...normalized.containers, count: numberOrZero(value?.containers?.count) },
+    hostId: String(value?.hostId || ''),
+    unavailableHosts: arrayOrEmpty(value?.unavailableHosts),
   };
 }
 

@@ -10,6 +10,7 @@ const histories = new Map();
 const jobs = new Map();
 const pending = new Map();
 let serial = 1;
+const previewHost = { id: 'local', name: '本机 · 示例', type: 'local', active: true, status: 'online', host: 'homelab-demo', port: 2375, group: 'production' };
 const sockets = new Set();
 function repair() {
   const project = projects[0];
@@ -66,7 +67,7 @@ export async function previewFetch(input, options = {}) {
     '/health': { status: 'ok', docker: 'ok', preview: true },
     '/auth/status': { authenticated: true, setupRequired: false },
     '/projects': { projects },
-    '/hosts': { hosts: [{ id: 'local', name: '本机 · 示例', type: 'local', active: true, status: 'online', host: 'homelab-demo', port: 2375 }] },
+    '/hosts': { hosts: [previewHost] },
     '/hosts/active': { activeHostId: 'local' },
     '/system/metrics': metrics,
     '/system/capabilities': { shellEnabled: false, compose: true, platform: 'linux', version: '1.5.0', preview: true },
@@ -177,7 +178,16 @@ export async function previewFetch(input, options = {}) {
     if (channel && path.endsWith('/reveal-key')) return json({ apiKey: 'demo-key-not-a-real-credential' });
     if (channel && method === 'DELETE') { channels.splice(channels.indexOf(channel), 1); return json(aiConfig()); }
   }
-  if (path === '/hosts/local/ping' && method === 'POST') return json({ ok: true, latencyMs: 1, host: reads['/hosts'].hosts[0] });
+  if (path === '/hosts/local/ping' && method === 'POST') {
+    const containers = projects.flatMap(project => project.containers);
+    Object.assign(previewHost, { latencyMs: 1, containerCount: containers.length, runningCount: containers.filter(c => c.state === 'running').length });
+    return json({ ok: true, latencyMs: 1, host: previewHost });
+  }
+  if (path === '/hosts/local/group' && method === 'PATCH') {
+    previewHost.group = body.group;
+    return json({ id: 'local', group: body.group });
+  }
+  if (path === '/hosts/active' && method === 'PUT' && body.hostId === 'local') return json({ ok: true, activeHostId: 'local' });
   if (path === '/ai/channels/order' && method === 'POST') { const ordered = body.ids.map(id => channels.find(c => c.id === id)).filter(Boolean); channels.splice(0, channels.length, ...ordered); return json({ ok: true }); }
   if (path === '/ai/fetch-models' && method === 'POST') return json({ models: ['demo-tool-model', 'demo-backup-model'] });
   if (path === '/ai/config' && method === 'POST') return json(aiConfig());
