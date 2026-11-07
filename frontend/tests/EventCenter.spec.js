@@ -72,6 +72,33 @@ async function mountEventCenter() {
 }
 
 describe('事件中心弹层的键盘可访问性与资源清理', () => {
+  it('加载完成前显示骨架，成功且无事件时才显示空态', async () => {
+    let resolveAlerts;
+    api.getAlertEvents.mockImplementation(() => new Promise(resolve => { resolveAlerts = resolve; }));
+    await mountEventCenter();
+    await wrapper.get('button[aria-label="打开事件中心"]').trigger('click');
+    expect(wrapper.find('[aria-label="正在加载事件"]').exists()).toBe(true);
+    expect(wrapper.find('empty-state-stub').exists()).toBe(false);
+    resolveAlerts({ events: [] });
+    await flushPromises();
+    expect(wrapper.find('[aria-label="正在加载事件"]').exists()).toBe(false);
+    expect(wrapper.find('empty-state-stub').exists()).toBe(true);
+  });
+
+  it('加载失败给出重试入口，不把错误伪报为没有事件', async () => {
+    api.getAlertEvents.mockRejectedValue(new Error('network failed'));
+    await mountEventCenter();
+    await wrapper.get('button[aria-label="打开事件中心"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('事件暂时无法加载，请重试');
+    expect(wrapper.find('empty-state-stub').exists()).toBe(false);
+    api.getAlertEvents.mockResolvedValue({ events: [] });
+    await wrapper.get('[role="status"] button').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('empty-state-stub').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('事件暂时无法加载');
+  });
+
   it('打开后声明为命名模态框、聚焦面板并循环 Tab 焦点', async () => {
     await mountEventCenter();
     const trigger = document.querySelector('button[aria-label="打开事件中心"]');
@@ -175,5 +202,12 @@ describe('事件中心弹层的键盘可访问性与资源清理', () => {
     for (const label of ['AI 诊断此告警(守护模式)', '展开日志', '标记已读', '静默此告警']) {
       expect(panel.querySelector(`button[aria-label="${label}"]`), label).not.toBeNull();
     }
+    expect(wrapper.find('empty-state-stub').exists()).toBe(false);
+    api.getAlertEvents.mockRejectedValue(new Error('network failed'));
+    await wrapper.get('button[aria-label="刷新事件"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('磁盘空间告警');
+    expect(wrapper.text()).toContain('当前显示上次的事件');
+    expect(wrapper.find('empty-state-stub').exists()).toBe(false);
   });
 });

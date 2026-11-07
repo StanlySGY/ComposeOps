@@ -1,18 +1,22 @@
 <template>
-  <div class="relative">
+  <div class="relative header-events">
     <button ref="eventCenterTrigger" class="icon-btn relative" title="事件中心" aria-label="打开事件中心" :aria-expanded="open" :aria-controls="open ? 'event-center-panel' : undefined" @click="toggle">
       <Bell class="h-4 w-4" />
       <span v-if="unreadCount" class="event-count">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
     </button>
     <div v-if="open" class="fixed inset-0 z-50" aria-hidden="true" @click="closePanel"></div>
     <section v-if="open" id="event-center-panel" ref="eventCenterPanel" class="event-panel z-50" role="dialog" aria-modal="true" aria-labelledby="event-center-title" tabindex="-1" @keydown="trapFocus">
-      <header class="flex flex-wrap items-center justify-between gap-2 border-b border-surface-800 px-4 py-3">
+      <header class="event-panel-header border-b border-surface-800 px-4 py-3">
         <div class="min-w-0 flex-1"><h2 id="event-center-title" class="text-sm font-semibold text-surface-100">事件中心</h2><p class="mt-0.5 text-muted">需要关注的运行状态与系统操作</p></div>
-        <label class="toggle-label gap-1.5 text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="w-8 h-[18px]" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
-        <label class="toggle-label gap-1.5 text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="w-8 h-[18px]" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label><button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
-        <button class="icon-btn" aria-label="关闭事件中心" @click="closePanel"><X class="h-4 w-4" /></button>
+        <div class="event-panel-options">
+          <label class="toggle-label gap-1.5 text-[11px]" :title="guardian.aiConfigured ? '开启后,新告警会自动触发 AI 诊断(守护模式)' : '守护模式需要先在设置中配置 AI API Key'"><input type="checkbox" class="w-8 h-[18px]" :checked="guardian.enabled" :disabled="!guardian.aiConfigured" @change="toggleGuardian" />AI 值守</label>
+          <label class="toggle-label gap-1.5 text-[11px]" title="页面在后台时,新告警弹出系统通知"><input type="checkbox" class="w-8 h-[18px]" :checked="desktopNotify" @change="toggleDesktopNotify" />通知</label>
+          <button class="icon-btn" title="刷新" aria-label="刷新事件" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
+        </div>
+        <button class="icon-btn event-panel-close" aria-label="关闭事件中心" @click="closePanel"><X class="h-4 w-4" /></button>
       </header>
       <div class="max-h-[min(68vh,32rem)] overflow-y-auto p-2">
+        <Skeleton v-if="loading && !events.length" class="p-3" :rows="3" label="正在加载事件" />
         <div v-for="event in events" :key="event.key" class="event-item" :class="{ 'event-read': event.read }">
           <router-link :to="event.to" class="flex min-w-0 flex-1 items-center gap-2" @click="closePanel">
             <span class="event-icon shrink-0" :class="event.tone"><component :is="event.icon" class="h-4 w-4" /></span>
@@ -35,7 +39,11 @@
             <button v-if="event.diagnosis" class="mt-2 inline-flex items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] text-violet-300 hover:bg-violet-500/20" @click="planRepair(event)"><Wand2 class="h-3 w-3" />一键生成修复计划</button>
           </div>
         </div>
-        <EmptyState icon="CircleCheckBig" icon-class="text-status-ok" compact title="当前没有待处理事件" description="异常与告警事件会出现在这里" />
+        <div v-if="loadError" class="flex items-center justify-between gap-3 rounded-lg bg-status-warn/10 px-3 py-3 text-xs text-status-warn" role="status">
+          <span>{{ events.length ? '刷新暂未完成，当前显示上次的事件' : '事件暂时无法加载，请重试' }}</span>
+          <button class="btn-secondary btn-sm shrink-0" :disabled="loading" @click="load">重试</button>
+        </div>
+        <EmptyState v-if="!loading && !loadError && !events.length" icon="CircleCheckBig" icon-class="text-status-ok" compact title="当前没有待处理事件" description="异常与告警事件会出现在这里" />
       </div>
       <footer class="flex items-center justify-between border-t border-surface-800 px-4 py-2.5 text-muted">
         <span>{{ unreadCount }} 未读 · {{ eventCount }} 个需要关注</span>
@@ -60,12 +68,14 @@ import { useToastStore } from '../stores/toast.js';
 import { AlertTriangle, Bell, Check, ChevronRight, CircleX, RefreshCw, RefreshCwOff, Sparkles, VolumeX, Wand2, X } from 'lucide-vue-next';
 import { api, wsUrl } from '../api/client.js';
 import EmptyState from './common/EmptyState.vue';
+import Skeleton from './common/Skeleton.vue';
 import ConfirmDialog from './common/ConfirmDialog.vue';
 
 const open = ref(false);
 const eventCenterTrigger = ref(null);
 const eventCenterPanel = ref(null);
 const loading = ref(false);
+const loadError = ref(false);
 const toast = useToastStore();
 const projects = ref([]);
 const operations = ref([]);
@@ -280,6 +290,7 @@ const unreadCount = computed(() => persistedEvents.value.filter((event) => !even
 async function load() {
   if (loading.value) return;
   loading.value = true;
+  loadError.value = false;
   try {
     const [projectData, operationData, updateData, jobData, alertData] = await Promise.all([
       api.getProjects(), api.getOperations(), api.getUpdateSettings(), api.listJobs(20), api.getAlertEvents(50),
@@ -290,7 +301,7 @@ async function load() {
     jobs.value = jobData.jobs || [];
     alertEvents.value = alertData.events || [];
   } catch {
-    // 事件中心允许显示已有缓存,加载失败由下一次刷新或重连补偿。
+    loadError.value = true;
   }
   finally { loading.value = false; }
   loadGuardian();

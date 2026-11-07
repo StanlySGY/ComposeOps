@@ -1,32 +1,24 @@
 <template>
-  <header class="app-header h-16 flex items-center justify-between gap-2 px-3 sm:px-6 shrink-0">
-    <div class="flex min-w-0 items-center gap-2 sm:gap-3">
-      <div class="brand-mark shrink-0"><Boxes class="w-5 h-5" /></div>
-      <div class="brand-text min-w-0">
-        <span class="brand-title block max-w-36 truncate text-sm sm:text-base font-semibold tracking-tight">ComposeOps</span>
-        <p class="text-muted truncate">{{ currentPage }}</p>
-      </div>
-    </div>
-    <div class="flex shrink-0 items-center gap-1.5 sm:gap-3 text-sm">
-      <button class="command-trigger hidden sm:inline-flex" title="快速跳转" aria-label="打开快速跳转" @click="commandOpen = true">
+  <header class="app-header">
+    <router-link class="app-brand" to="/dashboard" aria-label="ComposeOps，返回运维总览">
+      <span class="brand-mark"><Boxes class="w-5 h-5" /></span>
+      <span class="brand-title">ComposeOps</span>
+    </router-link>
+    <div class="header-actions">
+      <button class="header-control command-trigger" title="快速跳转（Ctrl / ⌘ K）" aria-label="打开快速跳转" @click="commandOpen = true">
         <Search class="h-4 w-4" />
-        <span class="hidden md:inline">快速跳转</span>
+        <span class="command-label">快速跳转</span>
+        <kbd class="command-key" aria-hidden="true">{{ commandShortcut }}</kbd>
       </button>
-      <button class="icon-btn sm:hidden" title="快速跳转" aria-label="打开快速跳转" @click="commandOpen = true">
-        <Search class="h-4 w-4" />
-      </button>
-      <span v-if="backendOnline" class="status-pill text-status-ok hidden md:inline-flex">
-        <span class="status-ping bg-status-ok"></span><span class="hidden sm:inline">服务正常</span>
+      <span class="header-connection" role="status" :data-state="backendOnline === null ? 'pending' : backendOnline ? 'online' : 'offline'" title="控制台连接状态，项目健康请查看总览">
+        <span class="header-status-dot" aria-hidden="true"></span><span>{{ backendOnline === null ? '连接中' : backendOnline ? '控制台已连接' : '控制台离线' }}</span>
       </span>
-      <span v-else class="status-pill text-status-error md:inline-flex hidden">
-        <span class="w-1.5 h-1.5 rounded-full bg-status-error"></span><span class="hidden sm:inline">服务离线</span>
-      </span>
-      <div class="relative">
-        <button ref="projectSwitcherTriggerRef" class="btn-secondary btn-sm" title="快速切换项目" aria-label="快速切换项目" :aria-expanded="projectSwitcherOpen" :aria-controls="projectSwitcherOpen ? 'project-switcher-panel' : undefined" @click="toggleProjectSwitcher">
-          <Layers class="w-3.5 h-3.5" /><span class="hidden min-[380px]:inline">项目</span>
-          <ChevronDown class="w-3 h-3" />
+      <div class="relative header-project-switcher">
+        <button ref="projectSwitcherTriggerRef" class="header-control header-project" title="快速切换项目" aria-label="快速切换项目" :aria-expanded="projectSwitcherOpen" :aria-controls="projectSwitcherOpen ? 'project-switcher-panel' : undefined" @click="toggleProjectSwitcher">
+          <Layers class="w-4 h-4" /><span class="hidden min-[380px]:inline">项目</span>
+          <ChevronDown class="header-chevron w-3 h-3" />
         </button>
-        <div v-if="projectSwitcherOpen" class="command-backdrop" @click.self="projectSwitcherOpen = false"></div>
+        <div v-if="projectSwitcherOpen" class="header-popover-backdrop" aria-hidden="true" @click.self="projectSwitcherOpen = false"></div>
         <div v-if="projectSwitcherOpen" id="project-switcher-panel" ref="projectSwitcherPanelRef" class="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-xl border border-surface-800 bg-surface-950 shadow-2xl z-[46]" role="dialog" aria-modal="true" aria-labelledby="project-switcher-title" tabindex="-1" @keydown="trapProjectSwitcherTab">
           <div id="project-switcher-title" class="border-b border-surface-800 px-3 py-2 text-xs font-semibold text-surface-300">快速切换项目</div>
           <label class="search-field mx-2 my-2 flex-none">
@@ -50,9 +42,9 @@
       <EventCenter />
       <button class="icon-btn" title="打开页面 Agent" aria-label="打开页面 Agent" @click="emitAgentOpen"><Bot class="w-4 h-4 text-status-info" /></button>
       <button class="icon-btn hidden sm:inline-flex header-density" :title="density === 'compact' ? '切换为舒适视图' : '切换为紧凑视图'" aria-label="紧凑布局" :aria-pressed="density === 'compact'" @click="toggleDensity"><Rows3 class="w-4 h-4" /></button>
-      <span class="hidden lg:inline text-muted">{{ currentTime }}</span>
-      <span class="hidden sm:inline h-5 w-px bg-surface-800"></span>
-      <button class="icon-btn" title="退出登录" aria-label="退出登录" @click="$emit('logout')"><LogOut class="w-4 h-4" /></button>
+      <time class="header-clock" :datetime="currentDateTime" title="本地时间">{{ currentTime }}</time>
+      <span class="header-divider" aria-hidden="true"></span>
+      <button class="icon-btn header-logout" title="退出登录" aria-label="退出登录" @click="$emit('logout')"><LogOut class="w-4 h-4" /></button>
     </div>
   </header>
 
@@ -82,15 +74,21 @@ import { api, bumpHostEpoch } from '../api/client.js';
 import { useHostsStore } from '../stores/hosts.js';
 import { useToastStore } from '../stores/toast.js';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { pageDetails } from '../lib/navigation.js';
 import { clearRecentPages, readRecentPages, rememberPage } from '../lib/command-history.js';
 
 const route = useRoute();
 const router = useRouter();
 const hostsStore = useHostsStore();
 const toast = useToastStore();
-const backendOnline = ref(false);
+const backendOnline = ref(null);
 const currentTime = ref('');
+const currentDateTime = ref('');
+const commandShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K';
+function updateClock() {
+  const now = new Date();
+  currentDateTime.value = now.toISOString();
+  currentTime.value = now.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 const commandOpen = ref(false);
 const projectSwitcherOpen = ref(false);
 const projectQuery = ref('');
@@ -147,7 +145,6 @@ const quickProjects = computed(() => {
     .filter((project) => !query || [project.projectName, project.owner, project.workingDir].some((value) => String(value || '').toLocaleLowerCase().includes(query)))
     .slice(0, 20);
 });
-const currentPage = computed(() => pageDetails(route).label);
 const envProjects = ref([]);
 const appBlueprints = ref([]);
 const baseCommands = [
@@ -276,7 +273,7 @@ let pingTimer; let clockTimer;
 
 let pingInitialized = false;
 /**
- * 窄屏 CSS 把 .status-pill 整条藏了,后端掉线在手机上没有任何提示。
+ * 窄屏隐藏连接文字,状态翻转时通过 toast 提供反馈。
  * 这里只在状态真的翻转时补一条 toast(首次探测不算翻转,避免进页面就弹提示)。
  */
 async function ping() {
@@ -348,9 +345,9 @@ onMounted(() => {
   void reloadHostProjects();
   void api.getBlueprints().then((data) => { appBlueprints.value = asArray(data?.blueprints); }).catch(() => {});
   ping();
-  currentTime.value = new Date().toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  updateClock();
   pingTimer = setInterval(ping, 5000);
-  clockTimer = setInterval(() => { currentTime.value = new Date().toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }, 30000);
+  clockTimer = setInterval(updateClock, 30000);
   window.addEventListener('keydown', onGlobalKeydown);
   window.addEventListener('composeops:host-changed', onHostChanged);
   window.addEventListener('composeops:projects-changed', onProjectsChanged);

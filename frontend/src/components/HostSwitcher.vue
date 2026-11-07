@@ -1,12 +1,12 @@
 <template>
-  <div class="relative">
-    <button ref="triggerRef" class="host-switch" title="切换 Docker 节点" aria-label="切换 Docker 节点" :aria-expanded="open" :aria-controls="open ? 'docker-host-switcher-panel' : undefined" @click="toggle">
-      <span v-if="!active || active.status === 'online'" class="status-ping bg-status-ok"></span>
-      <span v-else class="w-1.5 h-1.5 rounded-full bg-status-error"></span>
-      <span class="max-w-10 truncate sm:hidden">{{ active?.type === 'local' ? '本机' : (active?.name || '节点') }}</span>
-      <span class="hidden lg:inline max-w-24 truncate">{{ active?.name || 'Local' }}</span>
-      <ChevronDown class="w-3 h-3 text-surface-400" />
+  <div class="relative host-switcher">
+    <button ref="triggerRef" class="header-control host-switch" title="切换 Docker 节点" aria-label="切换 Docker 节点" aria-describedby="active-host-status" :aria-expanded="open" :aria-controls="open ? 'docker-host-switcher-panel' : undefined" @click="toggle">
+      <span class="header-status-dot" :data-state="active?.status || 'unknown'" aria-hidden="true"></span>
+      <span class="host-name-short">{{ active?.type === 'local' ? '本机' : (active?.name || '节点') }}</span>
+      <span class="host-name">{{ active?.name || '选择节点' }}</span>
+      <ChevronDown class="header-chevron w-3 h-3" />
     </button>
+    <span id="active-host-status" class="sr-only">{{ active?.name || '未选择节点' }}，{{ active?.status === 'online' ? '在线' : active?.status === 'offline' ? '离线' : '状态待确认' }}</span>
     <div v-if="open" class="fixed inset-0 z-[46]" @click="open = false"></div>
     <section v-if="open" id="docker-host-switcher-panel" class="host-dropdown z-[46]" role="group" aria-labelledby="docker-host-switcher-title">
       <header class="flex items-center justify-between border-b border-surface-800 px-3 py-2">

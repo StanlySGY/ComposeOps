@@ -74,6 +74,24 @@ async function start(component, stubs = {}) {
 }
 
 describe('顶部下拉控件的可访问性与焦点恢复', () => {
+  it('连接检查完成前保持未知状态，控制台连通不代表业务服务健康', async () => {
+    let respond;
+    fetch.mockReturnValueOnce(new Promise(resolve => { respond = resolve; }));
+    await start(AppHeader);
+    expect(wrapper.get('.header-connection').text()).toBe('连接中');
+    respond({ ok: true }); await flushPromises();
+    expect(wrapper.get('.header-connection').text()).toBe('控制台已连接');
+    expect(wrapper.text()).not.toContain('服务正常');
+  });
+
+  it('未知节点状态不冒充在线，短名称仍能读取完整节点说明', async () => {
+    api.getHosts.mockResolvedValue({ hosts: [{ ...hostFixtures()[0], status: 'unknown' }] });
+    await start(HostSwitcher);
+    expect(wrapper.get('#active-host-status').text()).toContain('状态待确认');
+    expect(wrapper.get('.header-status-dot').attributes('data-state')).toBe('unknown');
+    expect(wrapper.get('.host-switch').attributes('aria-describedby')).toBe('active-host-status');
+  });
+
   it('只记住成功打开的静态页面，取消导航不会污染最近记录', async () => {
     await start(AppHeader);
     const palette = wrapper.findComponent({ name: 'CommandPalette' });
