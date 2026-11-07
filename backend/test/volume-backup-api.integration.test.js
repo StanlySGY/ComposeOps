@@ -229,7 +229,7 @@ test('isolated Docker + protected API: create, verify, download, restore, delete
 test.after(async () => {
   dockerListMock?.mock?.restore?.();
   invalidateScanCache();
-  try { execFileSync('docker', ['compose', '-f', composeFile, 'down', '--remove-orphans', '--volumes'], { cwd: projectDir, stdio: 'ignore', timeout: 15000 }); } catch { /* Cleanup below removes any remaining test volume. */ }
+  try { execFileSync('docker', ['compose', '--project-name', projectName, '-f', composeFile, 'down', '--remove-orphans', '--volumes'], { cwd: projectDir, stdio: 'ignore', timeout: 15000 }); } catch { /* Cleanup below removes any remaining test volume. */ }
   if (sourceVolumeCreated) await docker.getVolume(volumeName).remove({ force: true }).catch(() => {});
   await app.close();
   fs.rmSync(tempDir, { recursive: true, force: true });
