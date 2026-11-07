@@ -290,20 +290,36 @@ test('数据卷恢复和删除均先展示明确的确认门，取消后不执�
   await expect(page.getByText('cache-data-demo.tar.gz')).toBeVisible();
 });
 
-test('定时任务创建表单先做本地校验，离线不支持的提交会明确报错且保留草稿', async ({ page }) => {
+test('定时任务创建先校验名称，提交失败保留草稿并允许重试', async ({ page }) => {
   await page.goto('./#/cron');
   await page.getByRole('button', { name: '新建定时任务' }).click();
   const dialog = page.getByRole('dialog', { name: '新建定时任务' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: '创建任务' }).click();
   await expect(dialog.getByText('请填写任务名称')).toBeVisible();
-  const name = dialog.getByPlaceholder('例如:每天凌晨自动备份数据库');
+  const name = dialog.getByLabel('任务名称', { exact: true });
   await name.fill('回归测试任务');
+  await page.evaluate(() => {
+    const original = window.fetch;
+    let rejectNextCreate = true;
+    window.fetch = (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+      if (rejectNextCreate && url.pathname === '/api/v1/cron' && init?.method === 'POST') {
+        rejectNextCreate = false;
+        return Promise.resolve(new Response(JSON.stringify({ message: '任务服务暂时不可用，请重试' }), {
+          status: 503, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      return original(input, init);
+    };
+  });
   await dialog.getByRole('button', { name: '创建任务' }).click();
-  await expect(dialog.getByText(/未在离线预览中模拟/)).toBeVisible();
+  await expect(dialog.getByText('任务服务暂时不可用，请重试')).toBeVisible();
   await expect(name).toHaveValue('回归测试任务');
-  await page.keyboard.press('Escape');
+  await expect(page.locator('article').filter({ hasText: '回归测试任务' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: '创建任务' }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(page.locator('article').filter({ hasText: '回归测试任务' })).toBeVisible();
 });
 
 test('工作流编辑器能拦截空名称和重复节点 ID', async ({ page }) => {
