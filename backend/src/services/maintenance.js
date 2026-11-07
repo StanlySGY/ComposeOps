@@ -1,4 +1,4 @@
-import { getActivityDocker } from './docker-hosts.js';
+import { getActivityDocker, getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
 import db, { pruneAgentPlans, pruneAiUsage, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
@@ -10,25 +10,45 @@ function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
 }
 
-export async function getDockerUsage() {
-  // 跟随当前活跃节点:此前固定本地 daemon,切到远程宿主后清理/检查仍操作面板本机。
-  const docker = await getActivityDocker();
-  const data = await docker.df();
-  const imagesTotal = sum(data.Images, 'Size');
-  const imagesReclaimable = sum((data.Images || []).filter((item) => Number(item.Containers) <= 0), 'Size');
-  const containersReclaimable = sum((data.Containers || []).filter((item) => item.State !== 'running'), 'SizeRw');
-  const buildCacheTotal = sum(data.BuildCache, 'Size');
-  const buildCacheReclaimable = sum((data.BuildCache || []).filter((item) => !item.InUse), 'Size');
-  const unusedVolumes = (data.Volumes || []).filter((item) => Number(item.UsageData?.RefCount) <= 0);
+export async function getDockerUsage(hostId = getActiveHostId()) {
+  hostId = hostId || getActiveHostId();
+  // Resolve before collecting: an unknown explicit node is a 404, not an empty total.
+  const selected = (hostId === 'all' ? listHosts().map(host => host.id) : [hostId])
+    .map(id => ({ id, docker: getDockerForHost(id) }));
+  const snapshots = await Promise.all(selected.map(async ({ id, docker }) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      const data = await docker.df({ abortSignal: controller.signal });
+      return { id, data };
+    } catch (error) {
+      return { id, data: null, error };
+    } finally { clearTimeout(timer); }
+  }));
+  const unavailable = snapshots.filter(item => !item.data).map(item => item.id);
+  const data = snapshots.filter(item => item.data).map(item => item.data);
+  if (!data.length) throw Object.assign(new Error(`节点存储暂不可达：${unavailable.join('、')}`), { code: 'HOST_UNAVAILABLE', statusCode: 503 });
+  const images = data.flatMap(item => item.Images || []);
+  const containers = data.flatMap(item => item.Containers || []);
+  const buildCache = data.flatMap(item => item.BuildCache || []);
+  const volumes = data.flatMap(item => item.Volumes || []);
+  const imagesTotal = sum(images, 'Size');
+  const imagesReclaimable = sum(images.filter((item) => Number(item.Containers) <= 0), 'Size');
+  const containersReclaimable = sum(containers.filter((item) => item.State !== 'running'), 'SizeRw');
+  const buildCacheTotal = sum(buildCache, 'Size');
+  const buildCacheReclaimable = sum(buildCache.filter((item) => !item.InUse), 'Size');
+  const unusedVolumes = volumes.filter((item) => Number(item.UsageData?.RefCount) <= 0);
   const volumesReclaimable = unusedVolumes
     .reduce((total, item) => total + (Number(item.UsageData?.Size) || 0), 0);
   return {
-    images: { count: data.Images?.length || 0, total: imagesTotal, reclaimable: imagesReclaimable },
-    containers: { count: data.Containers?.length || 0, reclaimable: containersReclaimable },
-    buildCache: { count: data.BuildCache?.length || 0, total: buildCacheTotal, reclaimable: buildCacheReclaimable },
+    images: { count: images.length, total: imagesTotal, reclaimable: imagesReclaimable },
+    containers: { count: containers.length, reclaimable: containersReclaimable },
+    buildCache: { count: buildCache.length, total: buildCacheTotal, reclaimable: buildCacheReclaimable },
     volumes: { count: unusedVolumes.length, reclaimable: volumesReclaimable },
     total: imagesTotal + buildCacheTotal,
     reclaimable: imagesReclaimable + containersReclaimable + buildCacheReclaimable + volumesReclaimable,
+    hostId,
+    unavailableHosts: unavailable,
   };
 }
 

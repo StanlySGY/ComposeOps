@@ -69,7 +69,9 @@ export default async function personalRoutes(fastify) {
     }
   });
 
-  fastify.get('/maintenance/usage', async () => getDockerUsage());
+  fastify.get('/maintenance/usage', {
+    schema: { querystring: { type: 'object', properties: { hostId: { type: 'string', maxLength: 64 } } } },
+  }, async (request) => getDockerUsage(request.query?.hostId));
   // confirmation 故意不设 const/required:处理函数自己校验 'PRUNE' 并返回
   // confirmation_required 机器码,schema 抢先拦下会把它降级成 validation_failed。
   fastify.post('/maintenance/prune', {

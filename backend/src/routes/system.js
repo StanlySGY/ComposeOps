@@ -151,6 +151,7 @@ export default async function systemRoutes(fastify) {
     const net = readNetStats(prevNet);
     const selected = request.query.hostId || getActiveHostId();
     const targets = listHosts().filter(item => selected === 'all' || item.id === selected);
+    if (!targets.length) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
     const hosts = await Promise.all(targets.map(async target => {
       try { return { id: target.id, name: target.name, ok: true, containers: await readContainerStats(target) }; }
       catch { return { id: target.id, name: target.name, ok: false, containers: [] }; }

@@ -299,13 +299,13 @@ export async function pingHost(id, probe = null) {
     const docker = createDockerClient(host);
     await docker.ping();
     const version = await docker.version().catch(() => null);
-    const containers = await docker.listContainers({ all: true }).catch(() => []);
+    const containers = await docker.listContainers({ all: true }).catch(() => null);
     const latencyMs = Date.now() - started;
     host.status = 'online';
     host.latencyMs = latencyMs;
     host.version = version?.Version || '';
-    host.containerCount = Array.isArray(containers) ? containers.length : 0;
-    host.runningCount = Array.isArray(containers) ? containers.filter((item) => item.State === 'running').length : 0;
+    host.containerCount = Array.isArray(containers) ? containers.length : null;
+    host.runningCount = Array.isArray(containers) ? containers.filter((item) => item.State === 'running').length : null;
     host.lastPingAt = new Date().toISOString();
     if (host.id !== 'local') writeHosts(readHosts());
     return {
