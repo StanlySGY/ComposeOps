@@ -1,0 +1,53 @@
+import { test, expect } from '@playwright/test';
+
+test('定时任务从快捷计划到时间预览、保存、启停与删除保持连贯', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./#/cron');
+  await page.getByRole('button', { name: /每周日 04:00 清理 Docker/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('任务类型', { exact: true })).toHaveValue('prune-safe');
+  await expect(dialog.getByLabel('执行周期', { exact: true })).toHaveValue('0 4 * * 0');
+  await expect(dialog.locator('.cron-preview time')).toHaveCount(3);
+  await dialog.getByLabel('执行周期', { exact: true }).selectOption('custom');
+  await expect(dialog.getByLabel('Cron 表达式', { exact: true })).toHaveValue('0 4 * * 0');
+  await dialog.getByLabel('Cron 表达式', { exact: true }).fill('60 4 * * *');
+  await expect(dialog.getByText(/无效的 cron 字段/)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '创建任务', exact: true })).toBeDisabled();
+  await dialog.getByLabel('执行周期', { exact: true }).selectOption('0 2 * * *');
+  await expect(dialog.locator('.cron-preview time')).toHaveCount(3);
+  await dialog.getByLabel('任务名称', { exact: true }).fill('示例清理计划');
+  await dialog.getByLabel('创建后启用计划').uncheck();
+  await dialog.getByRole('button', { name: '创建任务', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const row = page.locator('article').filter({ hasText: '示例清理计划' });
+  await expect(row).toContainText('停用');
+  await row.getByRole('checkbox', { name: '启用定时任务 示例清理计划' }).check();
+  await expect(row.getByRole('checkbox')).toBeChecked();
+  await row.getByRole('button', { name: '删除定时任务 示例清理计划' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: '删除定时任务 示例清理计划' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '删除任务', exact: true }).click();
+  await expect(row).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('窄屏表单可阅读且取消重开不残留自定义模式', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('./#/cron');
+  await page.getByRole('button', { name: '新建定时任务', exact: true }).click();
+  let dialog = page.getByRole('dialog');
+  await dialog.getByLabel('执行周期', { exact: true }).selectOption('custom');
+  await dialog.getByLabel('Cron 表达式', { exact: true }).fill('*/15 * * * *');
+  await expect(dialog.locator('.cron-preview time')).toHaveCount(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const bounds = await dialog.boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(321);
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await page.getByRole('button', { name: '新建定时任务', exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('执行周期', { exact: true })).toHaveValue('0 3 * * *');
+  await expect(dialog.getByLabel('Cron 表达式', { exact: true })).toHaveCount(0);
+});

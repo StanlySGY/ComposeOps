@@ -1,3 +1,4 @@
+import { previewSchedule, validateCron, nextRunTime } from '../../backend/src/lib/cron-expression.js';
 import { parseDocument } from 'yaml';
 import { at, projects, metrics, inspection, operations, alerts, storage, costReport, resources, marketplaceTemplates, channels, preferences, backups, logs, compose } from './fixtures.js';
 
@@ -5,6 +6,16 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const unsupported = () => json({ message: '此操作未在离线预览中模拟，请在自己的部署中使用。没有执行任何真实操作。' }, 501);
 const aiConfig = () => ({ channels, failoverEnabled: true, apiKey: '••••demo', model: channels[0]?.model || '', baseUrl: channels[0]?.baseUrl || '', systemPrompt: '离线示例：按实际应用的审批流程演示排障。' });
+const cronJobs = [];
+const cronTypes = {
+  'db-backup': { label: '数据库自动备份', description: '对纳管项目中的数据库执行备份' },
+  'prune-safe': { label: 'Docker 安全清理', description: '清理悬空镜像、退出容器与未使用构建缓存' },
+  'prune-all': { label: 'Docker 自动深度清理', description: '清理悬空镜像、退出容器与全部未使用构建缓存，不删除数据卷' },
+  'images-check': { label: '镜像更新检查', description: '只读检查镜像更新，不拉取或重建容器' },
+  'pull-images': { label: '定时拉取镜像', description: '对可编辑项目拉取镜像' },
+  'volume-backup': { label: '数据卷备份', description: '备份纳管项目的命名卷' },
+  inspection: { label: 'AI 巡检', description: '只读巡检并保存报告' },
+};
 const sessions = [];
 const histories = new Map();
 const jobs = new Map();
@@ -99,7 +110,7 @@ export async function previewFetch(input, options = {}) {
     '/jobs': { jobs: [...jobs.values()] },
     '/ops-tickets': { tickets: [], stats: { open: 0, blocked: 0, review: 0, terminal: 0 } },
     '/ops-tickets/worker/status': { running: false, mode: 'disabled' },
-    '/cron': { jobs: [] }, '/cron/history': { history: [] },
+    '/cron': { jobs: cronJobs.map(job => ({ ...job, nextRunAt: job.enabled ? nextRunTime(job.cron)?.getTime() : null, typeLabel: cronTypes[job.type]?.label })), types: cronTypes }, '/cron/history': { history: [] },
     '/gitops': { repos: [] }, '/gitops/drift': { repos: [], summary: {} },
     '/metrics/alerts': { alerts: [] }, '/metrics/historical': { data: [], metrics: [] },
     '/system/mcp': { enabled: false, mode: 'readonly', tokenConfigured: false, tools: [], endpoints: {} },
@@ -111,6 +122,23 @@ export async function previewFetch(input, options = {}) {
     '/cost-analysis/suggestions': { suggestions: [] },
     '/marketplace/stats': { totalBuiltin: 3, totalCommunity: 0, totalCustom: 1, totalFavorites: marketplaceTemplates.filter(t => t.favorited).length, categories: ['Web', 'Database', 'DevOps', 'Custom'], communityAvailable: false },
   };
+  if (path === '/cron/preview' && method === 'GET') {
+    try { return json(previewSchedule(url.searchParams.get('cron'))); }
+    catch (error) { return json({ message: error.message }, 400); }
+  }
+  if (path === '/cron' && method === 'POST') {
+    try { validateCron(body.cron); } catch (error) { return json({ message: error.message }, 400); }
+    if (!body.name?.trim() || !cronTypes[body.type]) return json({ message: '请填写名称并选择任务类型' }, 400);
+    const job = { ...body, id: 'demo-cron-' + serial++, createdAt: Date.now() };
+    cronJobs.push(job); return json(job);
+  }
+  if (path.startsWith('/cron/') && ['PUT', 'DELETE'].includes(method)) {
+    const job = cronJobs.find(item => item.id === pid);
+    if (!job) return json({ message: '示例任务不存在' }, 404);
+    if (method === 'PUT') Object.assign(job, { enabled: Boolean(body.enabled) });
+    else cronJobs.splice(cronJobs.indexOf(job), 1);
+    return json({ ok: true });
+  }
   if (path === '/marketplace/templates/search' && method === 'GET') {
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
     const source = url.searchParams.get('source');

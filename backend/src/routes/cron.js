@@ -7,6 +7,7 @@ import {
   listHistory,
   JOB_TYPES,
 } from '../services/cron-scheduler.js';
+import { previewSchedule } from '../lib/cron-expression.js';
 import { addOperation } from '../lib/db.js';
 
 /**
@@ -27,6 +28,13 @@ const idParams = {
 };
 
 export default async function cronRoutes(fastify) {
+  fastify.get('/preview', {
+    schema: { querystring: { type: 'object', required: ['cron'], properties: { cron: { type: 'string', minLength: 1, maxLength: 120 } } } },
+  }, async (request, reply) => {
+    try { return previewSchedule(request.query.cron); }
+    catch (error) { return reply.code(400).send({ error: 'invalid_cron', message: error.message }); }
+  });
+
   fastify.get('/', async () => ({ jobs: await listJobs(), types: JOB_TYPES }));
 
   fastify.post('/', {

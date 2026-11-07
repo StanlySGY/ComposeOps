@@ -30,91 +30,8 @@ export function summarizePullImagesResult(pulled, errors) {
   return pulled ? `已拉取 ${pulled} 个项目的镜像` : '没有可拉取镜像的项目';
 }
 
-/** 解析单个 cron 字段 → 匹配函数(纯函数,便于单测)。 */
-export function parseField(value, min, max) {
-  if (value === '*' || value.trim() === '') return () => true;
-  const matchers = [];
-  for (const part of String(value).split(',')) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    if (trimmed === '*') { matchers.push(() => true); continue; }
-    const stepMatch = /^(.+?)\/(\d+)$/.exec(trimmed);
-    let range = trimmed;
-    let step = 1;
-    if (stepMatch) { range = stepMatch[1]; step = Number(stepMatch[2]); }
-    let lo = min;
-    let hi = max;
-    if (range !== '*') {
-      const [a, b] = range.split('-');
-      lo = Number(a);
-      hi = b !== undefined ? Number(b) : lo;
-    }
-    if (Number.isNaN(lo) || Number.isNaN(hi) || lo < min || hi > max || step < 1) {
-      throw new Error(`无效的 cron 字段 "${trimmed}"`);
-    }
-    matchers.push((value) => value >= lo && value <= hi && (value - lo) % step === 0);
-  }
-  return (value) => matchers.some((match) => match(value));
-}
-
-/** 校验并解析 5 段 cron 表达式 → { minute, hour, day, month, weekday }(纯函数)。 */
-export function parseCron(expr = '') {
-  const parts = String(expr).trim().split(/\s+/);
-  if (parts.length !== 5) throw new Error('cron 表达式需要 5 段(分 时 日 月 周)');
-  return {
-    minute: parseField(parts[0], 0, 59),
-    hour: parseField(parts[1], 0, 23),
-    day: parseField(parts[2], 1, 31),
-    month: parseField(parts[3], 1, 12),
-    weekday: parseField(parts[4], 0, 7),
-  };
-}
-
-/** 校验 cron 表达式,合法返回 true,否则抛错(纯函数)。 */
-export function validateCron(expr) {
-  try {
-    parseCron(expr);
-    return true;
-  } catch (error) {
-    error.statusCode = 400;
-    throw error;
-  }
-}
-
-/** 计算下一次执行时间(从 from 开始向后找,最远扫描 5 年)(纯函数)。 */
-export function nextRunTime(expr, from = new Date()) {
-  const cron = parseCron(expr);
-  const cursor = new Date(from.getTime());
-  cursor.setMilliseconds(0);
-  cursor.setSeconds(0);
-  cursor.setMinutes(cursor.getMinutes() + 1);
-  const deadline = from.getTime() + 5 * 365 * 24 * 3600 * 1000;
-  while (cursor.getTime() <= deadline) {
-    if (
-      cron.minute(cursor.getMinutes()) &&
-      cron.hour(cursor.getHours()) &&
-      cron.day(cursor.getDate()) &&
-      cron.month(cursor.getMonth() + 1) &&
-      // weekday 字段合法范围是 0..7(7 = 周日,部分 cron 方言),而 getDay() 只返回
-      // 0-6:周日额外按 7 再测一次,否则写 7 的任务永不执行。
-      (cron.weekday(cursor.getDay()) || (cursor.getDay() === 0 && cron.weekday(7)))
-    ) {
-      return cursor;
-    }
-    // 前进 1 分钟;命中失败时按 1 小时/1 天加速,避免超高迭代
-    if (!cron.minute(cursor.getMinutes())) {
-      cursor.setMinutes(cursor.getMinutes() + 1);
-    } else if (!cron.hour(cursor.getHours())) {
-      cursor.setHours(cursor.getHours() + 1);
-      cursor.setMinutes(0);
-    } else {
-      cursor.setDate(cursor.getDate() + 1);
-      cursor.setHours(0);
-      cursor.setMinutes(0);
-    }
-  }
-  return null;
-}
+import { nextRunTime, validateCron } from '../lib/cron-expression.js';
+export { parseField, parseCron, validateCron, nextRunTime } from '../lib/cron-expression.js';
 
 export { JOB_TYPES };
 
@@ -138,7 +55,12 @@ async function loadFile() {
     if (!Array.isArray(data.jobs) || !Array.isArray(data.history)) throw new Error('任务文件结构无效');
     jobs = data.jobs;
     history = data.history;
-    if (!saved) await persist();
+    // 升级时为从未运行过的旧任务建立固定起点，避免补跑历史任务。
+    let initialized = false;
+    for (const job of jobs) {
+      if (!job.scheduleFromAt && !job.lastRunAt) { job.scheduleFromAt = Date.now(); initialized = true; }
+    }
+    if (!saved || initialized) await persist();
     fileState.loaded = true;
   } catch (err) {
     if (err.code === 'ENOENT') { fileState.loaded = true; return; }
@@ -177,6 +99,7 @@ export async function createJob(input = {}) {
     type,
     enabled: input.enabled !== false,
     createdAt: Date.now(),
+    scheduleFromAt: Date.now(),
     lastRunAt: null,
     lastStatus: null,
     lastError: null,
@@ -190,12 +113,12 @@ export async function updateJob(id, patch = {}) {
   await ensureFile();
   const job = jobs.find((item) => item.id === id);
   if (!job) throw Object.assign(new Error('任务不存在'), { statusCode: 404 });
+  if (patch.cron !== undefined) validateCron(patch.cron);
+  if (patch.type !== undefined && !JOB_TYPES[patch.type]) throw Object.assign(new Error('未知任务类型'), { statusCode: 400 });
+  if ((patch.enabled === true && !job.enabled) || (patch.cron !== undefined && String(patch.cron).trim() !== job.cron)) job.scheduleFromAt = Date.now();
   if (patch.name !== undefined) job.name = String(patch.name).trim().slice(0, 60) || job.name;
-  if (patch.cron !== undefined) { validateCron(patch.cron); job.cron = String(patch.cron).trim(); }
-  if (patch.type !== undefined) {
-    if (!JOB_TYPES[patch.type]) throw Object.assign(new Error('未知任务类型'), { statusCode: 400 });
-    job.type = patch.type;
-  }
+  if (patch.cron !== undefined) job.cron = String(patch.cron).trim();
+  if (patch.type !== undefined) job.type = patch.type;
   if (patch.enabled !== undefined) job.enabled = !!patch.enabled;
   await persist();
   return enrich(job);
@@ -215,8 +138,14 @@ export async function listHistory(limit = 50) {
   return history.slice(0, Math.max(1, Math.min(Number(limit) || 50, 200)));
 }
 
+export function nextScheduledRun(job) {
+  if (!job.enabled) return null;
+  const anchor = Math.max(Number(job.scheduleFromAt) || Number(job.createdAt) || 0, Number(job.lastRunAt) || 0);
+  return anchor > 0 ? nextRunTime(job.cron, new Date(anchor)) : null;
+}
+
 function enrich(job) {
-  const next = job.enabled ? nextRunTime(job.cron, job.lastRunAt ? new Date(job.lastRunAt) : new Date()) : null;
+  const next = nextScheduledRun(job);
   return { ...job, nextRunAt: next ? next.getTime() : null, typeLabel: JOB_TYPES[job.type]?.label || job.type };
 }
 
@@ -371,14 +300,11 @@ export async function runJobNow(id) {
   }
 }
 
-async function tick() {
+export async function tick() {
   const now = Date.now();
   for (const job of jobs) {
     if (!job.enabled || running.has(job.id)) continue;
-    // lastRunAt 为 null 的新任务必须从当前时间起算:从 1970 起算会让首个匹配点
-    // 必然落在过去,任务创建 15 秒内被立即补跑一次,与 enrich() 展示的
-    // "从现在起算的下次执行时间"自相矛盾。已有 lastRunAt 的任务保持追跑语义。
-    const next = nextRunTime(job.cron, job.lastRunAt ? new Date(job.lastRunAt) : new Date());
+    const next = nextScheduledRun(job);
     if (!next || next.getTime() > now) continue;
     running.add(job.id);
     const started = Date.now();

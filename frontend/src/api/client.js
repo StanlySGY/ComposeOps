@@ -186,6 +186,7 @@ export const api = {
   getProjectWebUi: (projectId) => request(`/projects/${projectId}/webui`),
   listDbDumpTargets: (projectId) => request(`/projects/${projectId}/db-dump`),
   listCronJobs: () => request('/cron'),
+  previewCronSchedule: (cron) => request(`/cron/preview?${new URLSearchParams({ cron })}`),
   createCronJob: (payload) => request('/cron', { method: 'POST', body: JSON.stringify(payload) }),
   updateCronJob: (id, payload) => request(`/cron/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteCronJob: (id) => request(`/cron/${id}`, { method: 'DELETE' }),
