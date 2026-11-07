@@ -9,7 +9,7 @@
  */
 
 import { findProject } from './scanner.js';
-import { getActivityDocker } from './docker-hosts.js';
+import { getProjectDocker } from './docker-hosts.js';
 
 /** 工具分类定义 */
 export const TOOL_CATEGORIES = {
@@ -170,7 +170,7 @@ const PRECONDITIONS = {
         if (!project) return false;
         
         // 检查服务是否存在且运行中
-        const docker = await getActivityDocker();
+        const docker = getProjectDocker(project);
         const containers = await docker.listContainers({
           filters: { label: [`com.docker.compose.project=${project.projectName}`] }
         });
@@ -191,7 +191,7 @@ const PRECONDITIONS = {
         const project = await findProject(context.projectId);
         if (!project) return true; // 项目不存在时跳过检查
         
-        const docker = await getActivityDocker();
+        const docker = getProjectDocker(project);
         const containers = await docker.listContainers({
           filters: { label: [`com.docker.compose.project=${project.projectName}`] }
         });
@@ -242,7 +242,7 @@ const POSTCONDITIONS = {
         const project = await findProject(context.projectId);
         if (!project) return false;
         
-        const docker = await getActivityDocker();
+        const docker = getProjectDocker(project);
         const containers = await docker.listContainers({
           filters: { 
             label: [
@@ -264,7 +264,7 @@ const POSTCONDITIONS = {
       check: async (params, result, context) => {
         const project = await findProject(context.projectId);
         if (!project) return false;
-        const docker = await getActivityDocker();
+        const docker = getProjectDocker(project);
         const containers = await docker.listContainers({
           filters: { label: [`com.docker.compose.project=${project.projectName}`] }
         });
@@ -280,7 +280,7 @@ const POSTCONDITIONS = {
         const project = await findProject(context.projectId);
         if (!project) return false;
         
-        const docker = await getActivityDocker();
+        const docker = getProjectDocker(project);
         const containers = await docker.listContainers({
           filters: { label: [`com.docker.compose.project=${project.projectName}`] }
         });

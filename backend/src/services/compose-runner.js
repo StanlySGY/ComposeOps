@@ -4,7 +4,7 @@ import path from 'path';
 import { randomBytes } from 'crypto';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
-import { composeEnv, getActiveHost } from './docker-hosts.js';
+import { composeEnv, getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 
 const COMPOSE_BIN = process.env.COMPOSE_BIN || 'docker';
@@ -60,7 +60,8 @@ async function restoreOrThrow(rollback, cause, message) {
 
 /** 组合节点环境变量(DOCKER_HOST)与 Compose 超时变量。 */
 export function nodeEnv(project) {
-  const hostEnv = composeEnv(project?.host || getActiveHost());
+  assertProjectHostUnchanged(project);
+  const hostEnv = composeEnv(getProjectHost(project));
   return {
     ...process.env,
     ...hostEnv,
@@ -116,7 +117,7 @@ export function spawnComposeCommand(project, args, overrideFiles = null) {
   });
 }
 
-export const COMPOSE_OPERATION_TIMEOUT_MS = 300000;
+export const COMPOSE_OPERATION_TIMEOUT_MS = 30000;
 
 export function spawnCompose(project, action) {
   const base = composeBase();
@@ -127,7 +128,7 @@ export function spawnCompose(project, action) {
   });
 }
 
-function runConfigCheck(project, files) {
+export function runConfigCheck(project, files, { timeoutMs = COMPOSE_OPERATION_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     const base = composeBase();
     const args = [...base.slice(1), ...files.flatMap((file) => ['-f', file]), 'config', '--quiet'];
@@ -138,8 +139,17 @@ function runConfigCheck(project, files) {
     });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
-    child.on('error', reject);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.stdout.resume();
+    child.on('error', error => { clearTimeout(timer); reject(error); });
     child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) return reject(Object.assign(new Error('Compose 校验超时，请检查节点连接后重试'), { statusCode: 504 }));
+      try { assertProjectHostUnchanged(project); } catch (error) { reject(error); return; }
       if (code === 0) resolve();
       else reject(Object.assign(new Error(stderr.trim() || `docker compose config 退出码 ${code}`), {
         statusCode: 422,

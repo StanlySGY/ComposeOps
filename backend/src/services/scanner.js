@@ -1,7 +1,7 @@
 import { access } from 'fs/promises';
 import path from 'node:path';
-import { getActiveHostType, getActivityDocker } from './docker-hosts.js';
-import { getProjectMountEnabled, getProjectPreference } from '../lib/db.js';
+import { getActiveHostId, getHost, getDockerForHost, listHosts } from './docker-hosts.js';
+import { getProjectMountEnabled, getProjectPreference, getSetting } from '../lib/db.js';
 import { safeProjectMountPath } from './mount-plan.js';
 import { composeProjectId } from './project-id.js';
 
@@ -64,8 +64,8 @@ function parseComposeFiles(raw, workingDir) {
 // 事件(尤其 health_status 抖动)还会逐事件再触发。3 秒内复用同一份快照足以削峰,
 // 对动作后的验收窗口(runGate 自己直接查 Docker)没有可感知影响。
 const SCAN_CACHE_TTL_MS = 3000;
-let scanCache = { client: null, at: 0, data: null };
-let scanInFlight = null;
+const scanCaches = new Map();
+const scanInFlights = new Map();
 
 function projectSnapshot(data) {
   // 权限和个人偏好不缓存,授权/撤销必须在下一次访问时立即生效。
@@ -84,31 +84,37 @@ function projectSnapshot(data) {
 
 /** 主动失效扫描缓存(节点切换/需要强制刷新时调用)。 */
 export function invalidateScanCache() {
-  scanCache = { client: null, at: 0, data: null };
-  scanInFlight = null;
+  scanCaches.clear();
+  scanInFlights.clear();
 }
 
-export async function scanProjects() {
-  const activeDocker = getActivityDocker();
-  const now = Date.now();
-  // 以 dockerode 客户端实例作缓存键:切换节点后客户端实例不同,天然隔离,无需感知宿主实现。
-  if (scanCache.client === activeDocker && scanCache.data && now - scanCache.at < SCAN_CACHE_TTL_MS) {
-    return projectSnapshot(scanCache.data);
-  }
-  if (scanInFlight?.client === activeDocker) return projectSnapshot(await scanInFlight.promise);
-  // 节点类型必须与客户端一起捕获,不能在 listContainers 返回后读取全局活动节点。
-  const nodeType = getActiveHostType();
-  const pending = { client: activeDocker, promise: null };
-  scanInFlight = pending;
-  pending.promise = scanProjectsUncached(activeDocker, nodeType).then(data => {
-    // 主动失效或切节点后,旧请求既不能复活缓存,也不能清除新请求。
-    if (scanInFlight === pending) scanCache = { client: activeDocker, at: Date.now(), data };
+export async function scanProjects(hostId = getActiveHostId(), { background = false } = {}) {
+  const host = getHost(hostId);
+  if (!host) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
+  const client = getDockerForHost(hostId);
+  const decorate = data => projectSnapshot(data).map(project => ({
+    ...project, ...(background ? {} : { activeHostAtScan: hostId }),
+  }));
+  const cache = scanCaches.get(hostId);
+  if (cache?.client === client && Date.now() - cache.at < SCAN_CACHE_TTL_MS) return decorate(cache.data);
+  const inflight = scanInFlights.get(hostId);
+  if (inflight?.client === client) return decorate(await inflight.promise);
+  const pending = { client, promise: null };
+  scanInFlights.set(hostId, pending);
+  pending.promise = scanProjectsUncached(client, host).then(data => {
+    if (scanInFlights.get(hostId) === pending) scanCaches.set(hostId, { client, at: Date.now(), data });
     return data;
-  }).finally(() => { if (scanInFlight === pending) scanInFlight = null; });
-  return projectSnapshot(await pending.promise);
+  }).finally(() => { if (scanInFlights.get(hostId) === pending) scanInFlights.delete(hostId); });
+  return decorate(await pending.promise);
 }
 
-async function scanProjectsUncached(activeDocker, nodeType) {
+export async function scanAllProjects() {
+  const results = await Promise.allSettled(listHosts().map(host => scanProjects(host.id, { background: true })));
+  return results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+}
+
+async function scanProjectsUncached(activeDocker, host) {
+  const nodeType = host.type;
   let containers;
   try {
     containers = await activeDocker.listContainers({ all: true });
@@ -132,7 +138,9 @@ async function scanProjectsUncached(activeDocker, nodeType) {
 
     if (!projects.has(key)) {
       projects.set(key, {
-        id: composeProjectId(workingDir, projectName),
+        id: composeProjectId(workingDir, projectName, host.id, getSetting('projects.legacy_host_id', 'local')),
+        hostId: host.id,
+        hostName: host.name,
         projectName,
         owner,
         workingDir,
@@ -182,7 +190,7 @@ async function scanProjectsUncached(activeDocker, nodeType) {
 
     // 容器化下，workingDir 是宿主机路径；只有挂载进来的才可达 → 才能编辑/执行生命周期。
     // 同时返回细分状态，便于前端区分“目录未挂载”和“标签里的文件已经失效”。
-    project.workingDirReachable = await isReachable(project.workingDir);
+    project.workingDirReachable = nodeType === 'local' && await isReachable(project.workingDir);
     const composeReachability = await Promise.all(project.composeFiles.map(async (file) => ({
       path: file,
       reachable: await isReachable(file),

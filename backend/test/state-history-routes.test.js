@@ -92,7 +92,7 @@ test('状态历史路由: /history 返回按时间倒序的转换明细', async 
   // 前端直接读 camelCase 字段,不能退回 snake_case
   assert.deepEqual(
     Object.keys(history[0]).sort(),
-    ['action', 'containerId', 'containerName', 'createdAt', 'execDuration', 'exitCode', 'healthStatus', 'id', 'projectId', 'projectName', 'timestamp'].sort()
+    ['action', 'containerId', 'containerName', 'createdAt', 'execDuration', 'exitCode', 'healthStatus', 'hostId', 'id', 'projectId', 'projectName', 'timestamp'].sort()
   );
   assert.equal(history[0].containerId, 'c-api');
 

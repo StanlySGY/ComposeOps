@@ -193,7 +193,7 @@ test('状态历史: 窗口批量查询按容器分组且组内升序', () => {
     );
   }
   // 窗口外的 stop 不应混进组内(它只作为起点推断来源)
-  assert.deepEqual(groups.get('c-preceding').map((item) => item.action), ['health_status']);
+  assert.deepEqual([...groups.values()].find(events => events[0].containerId === 'c-preceding').map((item) => item.action), ['health_status']);
 });
 
 test('状态历史: 容器列表返回窗口内每个容器的最近一次转换', () => {

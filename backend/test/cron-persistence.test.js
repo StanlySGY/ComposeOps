@@ -1,0 +1,25 @@
+import './helpers/isolated-db.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import db, { exportUserData } from '../src/lib/db.js';
+const root = await mkdtemp(join(tmpdir(), 'composeops-cron-'));
+process.env.CRON_DATA_FILE = join(root, 'cron.json');
+const cron = await import('../src/services/cron-scheduler.js');
+test.after(() => rm(root, { recursive: true, force: true }));
+test('损坏旧任务文件拒绝覆盖并产生告警，修复后迁入 SQLite 与导出', async () => {
+  await writeFile(process.env.CRON_DATA_FILE, '{broken');
+  await assert.rejects(cron.createJob({ name: '不能覆盖', type: 'images-check', cron: '0 0 * * *' }), /损坏/);
+  assert.equal(await readFile(process.env.CRON_DATA_FILE, 'utf8'), '{broken');
+  assert.ok(db.prepare("SELECT * FROM alert_events WHERE key = 'cron:persistence'").get());
+  await writeFile(process.env.CRON_DATA_FILE, JSON.stringify({ jobs: [{ id: 'legacy', name: '旧任务', enabled: false, type: 'images-check', cron: '0 0 * * *' }], history: [{ id: 'old-run' }] }));
+  const jobs = await cron.listJobs();
+  assert.equal(jobs[0].id, 'legacy');
+  await cron.createJob({ name: '新任务', type: 'images-check', cron: '0 0 * * *' });
+  await writeFile(process.env.CRON_DATA_FILE, '{broken-again');
+  assert.equal((await cron.listJobs()).length, 2);
+  assert.equal(exportUserData().cron.jobs.length, 2);
+  assert.equal(exportUserData().cron.history[0].id, 'old-run');
+});

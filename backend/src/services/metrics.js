@@ -26,10 +26,11 @@ function aggregateMetrics(metrics, intervalSeconds) {
   for (const metric of metrics) {
     const intervalMs = intervalSeconds * 1000;
     const bucketTimestamp = Math.floor(metric.timestamp / intervalMs) * intervalMs;
-    const key = `${metric.container_id}-${metric.metric_type}-${bucketTimestamp}`;
+    const key = `${metric.host_id}-${metric.container_id}-${metric.metric_type}-${bucketTimestamp}`;
     
     if (!buckets.has(key)) {
       buckets.set(key, {
+        host_id: metric.host_id,
         container_id: metric.container_id,
         metric_type: metric.metric_type,
         values: [],
@@ -43,6 +44,7 @@ function aggregateMetrics(metrics, intervalSeconds) {
 
   // 计算每个桶的平均值
   return Array.from(buckets.values()).map(bucket => ({
+    host_id: bucket.host_id,
     container_id: bucket.container_id,
     metric_type: bucket.metric_type,
     value: bucket.values.reduce((sum, v) => sum + v, 0) / bucket.values.length,
@@ -216,14 +218,16 @@ export function detectAnomalies(metrics, algorithms = ['z_score', 'moving_averag
  */
 export function queryHistoricalMetrics({
   containerId,
+  hostId,
   metricType,
   startTime,
   endTime,
   aggregation = 'auto',
 }) {
   const params = [];
-  let query = 'SELECT container_id, metric_type, value, unit, timestamp FROM container_metrics WHERE 1=1';
+  let query = 'SELECT host_id, container_id, metric_type, value, unit, timestamp FROM container_metrics WHERE 1=1';
 
+  if (hostId) { query += ' AND host_id = ?'; params.push(hostId); }
   if (containerId) {
     query += ' AND container_id = ?';
     params.push(containerId);
@@ -268,12 +272,13 @@ export function queryHistoricalMetrics({
 /**
  * 获取容器指标统计信息
  */
-export function getMetricsStats(containerId, metricType, hours = 24) {
+export function getMetricsStats(containerId, metricType, hours = 24, hostId) {
   const endTime = Date.now();
   const startTime = endTime - hours * 3600 * 1000;
 
   const metrics = queryHistoricalMetrics({
     containerId,
+    hostId,
     metricType,
     startTime,
     endTime,
@@ -327,11 +332,12 @@ export function applyRetentionPolicy() {
 
   // 对7-30天的数据进行聚合并删除原始数据
   const oldMetrics = db.prepare(
-    'SELECT DISTINCT container_id, metric_type FROM container_metrics WHERE timestamp < ? AND timestamp >= ?'
+    'SELECT DISTINCT host_id, container_id, metric_type FROM container_metrics WHERE timestamp < ? AND timestamp >= ?'
   ).all(sevenDaysAgo, thirtyDaysAgo);
 
-  for (const { container_id, metric_type } of oldMetrics) {
+  for (const { host_id, container_id, metric_type } of oldMetrics) {
     const metrics = queryHistoricalMetrics({
+      hostId: host_id,
       containerId: container_id,
       metricType: metric_type,
       startTime: thirtyDaysAgo,
@@ -339,18 +345,20 @@ export function applyRetentionPolicy() {
       aggregation: 300, // 5分钟聚合
     });
 
+    db.transaction(() => {
     // 删除原始数据
     db.prepare(
-      'DELETE FROM container_metrics WHERE container_id = ? AND metric_type = ? AND timestamp < ? AND timestamp >= ?'
-    ).run(container_id, metric_type, sevenDaysAgo, thirtyDaysAgo);
+      'DELETE FROM container_metrics WHERE host_id = ? AND container_id = ? AND metric_type = ? AND timestamp < ? AND timestamp >= ?'
+    ).run(host_id, container_id, metric_type, sevenDaysAgo, thirtyDaysAgo);
 
     // 插入聚合后的数据
     const insert = db.prepare(
-      'INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp) VALUES(?, ?, ?, ?, ?)'
+      'INSERT INTO container_metrics(host_id, container_id, metric_type, value, unit, timestamp) VALUES(?, ?, ?, ?, ?, ?)'
     );
     for (const metric of metrics) {
-      insert.run(metric.container_id, metric.metric_type, metric.value, metric.unit, metric.timestamp);
+      insert.run(host_id, metric.container_id, metric.metric_type, metric.value, metric.unit, metric.timestamp);
     }
+    })();
   }
 
   return {
@@ -362,7 +370,7 @@ export function applyRetentionPolicy() {
 /**
  * 智能告警规则评估
  */
-export function evaluateAlertRules(containerId) {
+export function evaluateAlertRules(containerId, hostId) {
   const rules = [
     {
       name: 'cpu_high',
@@ -404,7 +412,7 @@ export function evaluateAlertRules(containerId) {
   const alerts = [];
 
   for (const rule of rules) {
-    const stats = getMetricsStats(containerId, rule.metricType, 1); // 最近1小时
+    const stats = getMetricsStats(containerId, rule.metricType, 1, hostId); // 最近1小时
     if (rule.condition(stats)) {
       alerts.push({
         rule: rule.name,

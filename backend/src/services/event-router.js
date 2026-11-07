@@ -12,7 +12,7 @@ function eventIdentity(event) {
   const supplied = event.eventId ?? event.eventKey ?? event.key ?? event.id;
   if (supplied !== undefined && supplied !== null && String(supplied)) return boundedText(supplied, 240);
   const stable = JSON.stringify([
-    event.source, event.eventType, event.projectId, event.containerId,
+    event.source, event.eventType, event.hostId, event.projectId, event.containerId,
     event.action, event.title, event.detail, event.timestamp,
   ]);
   return createHash('sha256').update(stable).digest('hex').slice(0, 40);
@@ -31,6 +31,8 @@ function normalizeEvent(event = {}) {
     status: boundedText(event.status || 'open', 24),
     title: boundedText(event.title, 240),
     detail: boundedText(event.detail, 2000),
+    hostId: event.hostId || null,
+    hostName: boundedText(event.hostName, 160),
     projectId: event.projectId || null,
     projectName: boundedText(event.projectName || event.project?.projectName, 160),
     containerId: event.containerId || null,

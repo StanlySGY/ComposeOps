@@ -77,18 +77,14 @@ test('routes: 所有响应都带上安全响应头', async () => {
   assert.match(response.headers['permissions-policy'], /camera=\(\)/);
 });
 
-test('routes: /health 无需登录,按 Docker 可用性返回 200 或 503', async () => {
+test('routes: /health 保持面板存活并分别报告节点健康', async () => {
   const response = await app.inject({ method: 'GET', url: '/health' });
-  assert.ok([200, 503].includes(response.statusCode), `意外状态码 ${response.statusCode}`);
+  assert.equal(response.statusCode, 200);
   const body = response.json();
+  assert.equal(body.status, 'ok');
   assert.equal(typeof body.latencyMs, 'number');
-  if (response.statusCode === 200) {
-    assert.equal(body.status, 'ok');
-    assert.equal(body.docker, 'ok');
-  } else {
-    assert.equal(body.status, 'degraded');
-    assert.equal(body.docker, 'unreachable');
-  }
+  assert.ok(body.hosts.some(host => host.id === body.activeHostId));
+  assert.ok(body.hosts.every(host => typeof host.ok === 'boolean'));
 });
 
 test('routes: Agent 反馈端点受认证保护且参数被 schema 校验', async () => {

@@ -4,7 +4,7 @@
  * 提供实时资源使用查询、历史趋势分析、告警配置
  */
 
-import { getActivityDocker } from './docker-hosts.js';
+import { getProjectDocker } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 
 // 告警规则的创建/列举/删除已统一收敛到 alert-rules.js(存储 agent.alert_rules,
@@ -36,8 +36,8 @@ export async function resolveManagedContainer(containerIdOrName) {
  * @returns {Promise<object>}
  */
 export async function queryContainerMetrics(containerIdOrName, metric = 'cpu', period = '5m') {
-  const { container: managedContainer } = await resolveManagedContainer(containerIdOrName);
-  const docker = await getActivityDocker();
+  const { project, container: managedContainer } = await resolveManagedContainer(containerIdOrName);
+  const docker = getProjectDocker(project);
   const container = docker.getContainer(managedContainer.id);
   
   // 获取实时统计
@@ -47,7 +47,7 @@ export async function queryContainerMetrics(containerIdOrName, metric = 'cpu', p
   const parsed = parseContainerStats(stats, metric);
   
   // 获取历史数据（如果启用了监控）
-  const historical = await getHistoricalMetrics(managedContainer.id, metric, period);
+  const historical = await getHistoricalMetrics(managedContainer.id, metric, period, project.hostId);
   
   return {
     current: parsed.current,
@@ -150,7 +150,7 @@ function formatBytes(bytes) {
 /**
  * 获取历史指标数据
  */
-async function getHistoricalMetrics(containerIdOrName, metric, period) {
+async function getHistoricalMetrics(containerIdOrName, metric, period, hostId = 'local') {
   const db = (await import('../lib/db.js')).default;
   const storedMetric = metric === 'network' ? 'network_rx' : metric === 'disk' ? 'disk_read' : metric;
   
@@ -162,9 +162,9 @@ async function getHistoricalMetrics(containerIdOrName, metric, period) {
   const rows = db.prepare(`
     SELECT value, timestamp
     FROM container_metrics
-    WHERE container_id = ? AND metric_type = ? AND timestamp >= ?
+    WHERE container_id = ? AND metric_type = ? AND timestamp >= ? AND host_id = ?
     ORDER BY timestamp ASC
-  `).all(containerIdOrName, storedMetric, startTime);
+  `).all(containerIdOrName, storedMetric, startTime, hostId);
   
   if (rows.length === 0) {
     return { avg: null, max: null, data: [] };

@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { setSetting, addComposeBackupBatch, addOperation, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { readCompose } from './compose-runner.js';
-import { getActivityDocker } from './docker-hosts.js';
+import { getProjectDocker } from './docker-hosts.js';
 import { withRunner, readArchiveFile, putArchiveFile } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 
@@ -193,7 +193,7 @@ async function readProjectComposeContents(project) {
 export async function getProjectUpdates(project, { force = false } = {}) {
   const cached = cache.get(project.id);
   if (!force && cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data;
-  const docker = getActivityDocker();
+  const docker = getProjectDocker(project);
   const services = extractImageServices(await readProjectComposeContents(project));
   const images = [];
   const remoteDigests = new Map();
@@ -235,7 +235,7 @@ export async function getProjectUpdates(project, { force = false } = {}) {
 
 /** 全局检测所有可编辑项目(并发 3)。 */
 export async function checkAllUpdates() {
-  const { scanProjects } = await import('./scanner.js');
+  const { scanAllProjects: scanProjects } = await import('./scanner.js');
   const projects = (await scanProjects()).filter((project) => project.editable);
   const results = [];
   const queue = [...projects];
@@ -351,7 +351,7 @@ async function upgradeProjectLocked(project, { services, onOutput = () => {}, on
   if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
 
   // 健康轮询 15s:全部 running 且(如有 health)非 unhealthy 视为健康
-  const docker = getActivityDocker();
+  const docker = getProjectDocker(project);
   const deadline = Date.now() + 15000;
   let degraded = false;
   while (Date.now() < deadline) {

@@ -15,7 +15,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { getActiveHost, getDockerForHost, getHost } from './docker-hosts.js';
+import { getActiveHost, getDockerForHost, getHost, getProjectHost } from './docker-hosts.js';
 import { readCompose } from './compose-runner.js';
 import { readWorkspaceCompose } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
@@ -132,7 +132,7 @@ function composeReaderForProject(project) {
 }
 
 /** 列出项目可备份卷:解析 compose + 校验卷在当前宿主上存在。 */
-export async function listProjectVolumes(project, host = getActiveHost()) {
+export async function listProjectVolumes(project, host = getProjectHost(project)) {
   const compose = await composeReaderForProject(project)(project);
   const { volumes, error } = parseProjectVolumes(compose.content);
   if (error) throw Object.assign(new Error(error), { statusCode: 400 });
@@ -253,7 +253,7 @@ async function volumeBinds(volume, mode, host = getActiveHost(), docker = getDoc
 /** 备份单个命名卷,返回新纪录。 */
 export async function createVolumeBackup(project, volumeName) {
   volumeName = assertVolumeName(volumeName);
-  const host = getActiveHost();
+  const host = getProjectHost(project);
   const hostId = host?.id || 'local';
   return withVolumeOperationLock(project?.id, hostId, volumeName, async () => {
     const volumes = await listProjectVolumes(project, host);

@@ -25,6 +25,9 @@ const DEFAULT_HOSTS = [{
 const MASK = '••••••••••••';
 const clientCache = new Map(); // hostId -> { docker, created }
 const activeHostListeners = new Set();
+const hostsListeners = new Set();
+export function onHostsChange(listener) { hostsListeners.add(listener); return () => hostsListeners.delete(listener); }
+function notifyHostsChange(id) { for (const listener of hostsListeners) listener(id); }
 
 /** 活动节点或其连接配置变化时,让长连接立即迁移。 */
 export function onActiveHostChange(listener) {
@@ -132,6 +135,7 @@ export function upsertHost(input = {}) {
   else hosts.push(entry);
   writeHosts(hosts);
   invalidateClient(entry.id);
+  notifyHostsChange(entry.id);
   if (getActiveHostId() === entry.id) notifyActiveHostChange();
   return sanitizeHost(entry);
 }
@@ -168,6 +172,7 @@ export function deleteHost(id) {
   writeHosts(hosts);
   invalidateClient(id);
   if (getActiveHostId() === id) setActiveHost('local');
+  notifyHostsChange();
   return { ok: true };
 }
 
@@ -209,7 +214,12 @@ export function createDockerClient(host) {
 
 /** 当前活动节点对应的 dockerode 实例(远程节点带 30s 缓存)。 */
 export function getActivityDocker() {
-  const host = getActiveHost();
+  return getDockerForHost(getActiveHostId());
+}
+
+export function getDockerForHost(id) {
+  const host = getHost(id);
+  if (!host) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
   if (host.type === 'local') return localDocker;
   const cached = clientCache.get(host.id);
   if (cached && Date.now() - cached.created < 30_000) return cached.docker;
@@ -218,8 +228,21 @@ export function getActivityDocker() {
   return docker;
 }
 
-export function getDockerForHost(id) {
-  return createDockerClient(getHost(id) || getActiveHost());
+/** 仅从已解析的项目取节点；兼容旧的内部调用。不得把凭据放进扫描响应。 */
+export function getProjectHost(project) {
+  const host = getHost(project?.hostId || getActiveHostId());
+  if (!host) throw Object.assign(new Error('项目宿主已移除，请刷新项目列表'), { statusCode: 409 });
+  return host;
+}
+
+export function getProjectDocker(project) {
+  return getDockerForHost(getProjectHost(project).id);
+}
+
+export function assertProjectHostUnchanged(project) {
+  if (project?.activeHostAtScan && project.activeHostAtScan !== getActiveHostId()) {
+    throw Object.assign(new Error('宿主已变更，请在目标节点重新发起操作'), { statusCode: 409, code: 'HOST_CHANGED' });
+  }
 }
 
 function invalidateClient(id) {

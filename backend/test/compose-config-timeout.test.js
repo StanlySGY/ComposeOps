@@ -1,0 +1,20 @@
+import './helpers/isolated-db.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+const root = await mkdtemp(join(tmpdir(), 'composeops-config-timeout-'));
+const binary = join(root, 'hung-compose');
+await writeFile(binary, '#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n');
+await chmod(binary, 0o700);
+process.env.COMPOSE_BIN = binary;
+const { runConfigCheck } = await import('../src/services/compose-runner.js');
+const { withProjectOperationLock, activeProjectLocks } = await import('../src/services/project-operation-lock.js');
+test.after(() => rm(root, { recursive: true, force: true }));
+test('挂死的 config 子进程被终止，项目租约与内存锁释放', async () => {
+  const project = { id: 'timeout', workingDir: root, composeFiles: ['compose.yml'], hostId: 'local' };
+  await assert.rejects(withProjectOperationLock(project.id, () => runConfigCheck(project, project.composeFiles, { timeoutMs: 80 })), /校验超时/);
+  assert.equal(activeProjectLocks(), 0);
+  assert.equal(await withProjectOperationLock(project.id, () => 42), 42);
+});

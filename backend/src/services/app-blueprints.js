@@ -1,8 +1,8 @@
 import { readFile } from 'fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { setSetting, addOperation, setProjectPreference } from '../lib/db.js';
-import { getActivityDocker, getActiveHostType } from './docker-hosts.js';
+import { getSetting, setSetting, addOperation, setProjectPreference } from '../lib/db.js';
+import { getActivityDocker, getActiveHostType, getActiveHostId } from './docker-hosts.js';
 import { withRunner, putArchiveFile, runWorkspaceComposeArgs } from './compose-workspace.js';
 import { validateYaml } from '../lib/files.js';
 import { composeProjectId } from './project-id.js';
@@ -117,7 +117,7 @@ export async function deployBlueprint(blueprintId, values = {}, options = {}) {
 
   const root = projectRoot(safeName);
   const docker = dockerClient || getActivityDocker();
-  const projectId = composeProjectId(root, safeName);
+  const projectId = composeProjectId(root, safeName, getActiveHostId(), getSetting('projects.legacy_host_id', 'local'));
   // 检查目录是否已存在
   const existing = await docker.listContainers({ all: true }).then((cs) => cs.filter((c) => (c.Labels || {})['com.docker.compose.project.working_dir'] === root));
   if (existing.length) throw Object.assign(new Error('同名项目已经部署'), { statusCode: 409 });
@@ -125,7 +125,7 @@ export async function deployBlueprint(blueprintId, values = {}, options = {}) {
   // 统一通过宿主可见的 workspace runner 写文件。面板容器内 mkdir 成功
   // 不能证明 Docker daemon 所在宿主机能看到同一路径。
   const writeMode = 'workspace';
-  const mockProject = { id: projectId, composeFiles: [path.posix.join(root, 'docker-compose.yml')], workingDir: root, managed: true, mountEnabled: true };
+  const mockProject = { id: projectId, hostId: getActiveHostId(), activeHostAtScan: getActiveHostId(), composeFiles: [path.posix.join(root, 'docker-compose.yml')], workingDir: root, managed: true, mountEnabled: true };
   await workspaceRunner(mockProject, async (container) => {
     await putArchiveFile(container, root, 'docker-compose.yml', compose, { mode: 0o644, uid: 0, gid: 0 });
     await putArchiveFile(container, root, '.env', envContent, { mode: 0o600, uid: 0, gid: 0 });

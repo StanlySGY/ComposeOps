@@ -25,7 +25,7 @@ import eventCenterRoutes from './routes/event-center.js';
 import opsTicketRoutes from './routes/ops-tickets.js';
 import stateHistoryRoutes from './routes/state-history.js';
 import mcpRoutes from './routes/mcp.js';
-import docker from './services/docker.js';
+import { listHosts, getActiveHostId, getDockerForHost } from './services/docker-hosts.js';
 import { isAuthenticated, isConfigured, setPassword, validateOrigin } from './lib/auth.js';
 import { stopAlertMonitor } from './services/alert-monitor.js';
 import { stopHealthAlerter } from './services/health-alerter.js';
@@ -67,7 +67,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   });
 
   // dockerode 实例挂载到 fastify 上供 ws 路由使用
-  fastify.decorate('docker', docker);
+  fastify.decorate('docker', getDockerForHost(getActiveHostId()));
 
   fastify.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
@@ -166,25 +166,21 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   // MCP 协议端点(不经过 /api/v1 会话鉴权:使用独立 token,见 routes/mcp.js 安全模型)
   await fastify.register(mcpRoutes, { prefix: '/mcp' });
 
-  // 健康检查:探测 Docker socket 连通性,失败返回 503 便于编排层重启/摘流。
-  fastify.get('/health', async (request, reply) => {
+  // 面板自身存活与节点健康分开，远端不可达不能触发面板重启。
+  fastify.get('/health', async () => {
     const started = Date.now();
-    try {
-      await Promise.race([
-        docker.ping(),
-        new Promise((_, rejectPing) => setTimeout(() => rejectPing(new Error('docker ping 超时')), 3000).unref()),
-      ]);
-      return { status: 'ok', docker: 'ok', latencyMs: Date.now() - started, ts: Date.now() };
-    } catch (err) {
-      fastify.log.warn({ err: err.message }, 'health check: docker unreachable');
-      return reply.code(503).send({
-        status: 'degraded',
-        docker: 'unreachable',
-        error: err.message,
-        latencyMs: Date.now() - started,
-        ts: Date.now(),
-      });
-    }
+    const hosts = await Promise.all(listHosts().map(async host => {
+      const started = Date.now();
+      let timer;
+      try {
+        await Promise.race([getDockerForHost(host.id).ping(), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('节点连接超时')), 3000);
+        })]);
+        return { id: host.id, ok: true, latencyMs: Date.now() - started };
+      } catch { return { id: host.id, ok: false, latencyMs: Date.now() - started }; }
+      finally { clearTimeout(timer); }
+    }));
+    return { status: 'ok', docker: hosts.every(host => host.ok) ? 'ok' : 'degraded', activeHostId: getActiveHostId(), hosts, latencyMs: Date.now() - started, ts: Date.now() };
   });
 
   // 生产环境静态托管前端 dist。

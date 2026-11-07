@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 import { findProjectContainer } from '../services/scanner.js';
 import { getBackgroundJob } from '../lib/db.js';
 import { subscribeJobEvents } from '../services/job-events.js';
-import { getActivityDocker } from '../services/docker-hosts.js';
+import { getProjectDocker } from '../services/docker-hosts.js';
 import { aggregateProjectLogs } from '../services/log-aggregator.js';
 import { subscribeEvents } from '../services/events.js';
 import { followContainerLogs } from '../services/docker-log-stream.js';
@@ -94,7 +94,7 @@ export default async function wsRoutes(fastify) {
       if (match.project && !match.project.managed) throw new Error('项目尚未加入管理');
       if (!match.container) throw new Error('项目中未找到该容器');
       await followContainerLogs({
-        container: getActivityDocker().getContainer(match.container.id), tail, signal: controller.signal,
+        container: getProjectDocker(match.project).getContainer(match.container.id), tail, signal: controller.signal,
         onLine: line => safeSend(socket, line),
         onError: error => safeSend(socket, { type: 'error', data: error.message }),
         onEnd: () => {
@@ -224,7 +224,7 @@ export default async function wsRoutes(fastify) {
       if (session.destroyed) return;
       if (match.project && !match.project.managed) throw new Error('项目尚未加入管理');
       if (!match.container) throw new Error('项目中未找到该容器');
-      const container = getActivityDocker().getContainer(match.container.id);
+      const container = getProjectDocker(match.project).getContainer(match.container.id);
       exec = await container.exec({ AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: [cmd] });
       if (session.destroyed) return;
       stream = await exec.start({ hijack: true, stdin: true, Tty: true });

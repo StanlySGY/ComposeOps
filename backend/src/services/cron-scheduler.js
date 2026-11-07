@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'node:crypto';
@@ -6,10 +6,11 @@ import { pruneStorage } from './docker-storage.js';
 import { checkAllUpdates } from './image-updater.js';
 import { listProjectDbContainers, runDbDump } from './db-dumper.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
-import { scanProjects } from './scanner.js';
+import { scanAllProjects as scanProjects } from './scanner.js';
+import db, { addAlertEvent } from '../lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const CRON_DATA_FILE = path.join(__dirname, '../../data/cron-jobs.json');
+export const CRON_DATA_FILE = process.env.CRON_DATA_FILE || path.join(__dirname, '../../data/cron-jobs.json');
 
 const JOB_TYPES = {
   'db-backup': { label: '数据库自动备份', description: '对所有纳管项目中运行的数据库容器执行 Dump 并留存本地' },
@@ -120,28 +121,34 @@ export { JOB_TYPES };
 
 let jobs = [];
 let history = [];
-let fileLoaded = false;
+const fileState = { loaded: false, promise: null };
 
 async function ensureFile() {
-  if (fileLoaded) return;
-  fileLoaded = true;
+  if (fileState.loaded) return;
+  if (!fileState.promise) fileState.promise = loadFile().finally(() => { fileState.promise = null; });
+  return fileState.promise;
+}
+
+async function loadFile() {
+  const saved = db.prepare('SELECT payload FROM cron_state WHERE id = 1').get();
   try {
-    const raw = await readFile(CRON_DATA_FILE, 'utf8');
+    const raw = saved?.payload ?? await readFile(CRON_DATA_FILE, 'utf8');
     const data = JSON.parse(raw);
-    jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    history = Array.isArray(data.history) ? data.history : [];
+    if (!Array.isArray(data.jobs) || !Array.isArray(data.history)) throw new Error('任务文件结构无效');
+    jobs = data.jobs;
+    history = data.history;
+    if (!saved) await persist();
+    fileState.loaded = true;
   } catch (err) {
-    if (err.code !== 'ENOENT') {
-      console.error('[cron-scheduler] Failed to load cron data file:', err.message);
-    }
-    jobs = [];
-    history = [];
+    if (err.code === 'ENOENT') { fileState.loaded = true; return; }
+    addAlertEvent({ key: 'cron:persistence', title: '定时任务读取失败', detail: '原始任务文件已保留，请修复后重试', priority: 'danger', to: '/cron' });
+    throw new Error('定时任务数据损坏，已阻止覆盖原文件', { cause: err });
   }
 }
 
 async function persist() {
-  await mkdir(path.dirname(CRON_DATA_FILE), { recursive: true });
-  await writeFile(CRON_DATA_FILE, JSON.stringify({ jobs, history }, null, 2), 'utf8');
+  db.prepare('INSERT INTO cron_state(id, payload) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload')
+    .run(JSON.stringify({ jobs, history }));
 }
 
 export async function listJobs() {
@@ -257,7 +264,7 @@ async function executeJob(job) {
           const targets = await listProjectDbContainers(project).catch(() => []);
           for (const target of targets) {
             try {
-              const result = await runDbDump(project, target.containerId, {});
+              const result = await runDbDump(project, target.containerId, { download: false });
               if (result.exitCode === 0) dumped += 1;
               else errors.push(`${project.projectName}/${target.containerName}`);
             } catch (e) {
@@ -312,16 +319,14 @@ async function executeJob(job) {
         return `数据卷备份完成,共 ${backed} 个卷`;
       }
       case 'pull-images': {
-        const { spawnComposeCommand } = await import('./compose-runner.js');
-        const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
+        const { prepareProjectAction } = await import('./project-action-runner.js');
         const projects = (await scanProjects()).filter((project) => project.managed && project.editable);
         let pulled = 0;
         const errors = [];
         for (const project of projects) {
           try {
-            const code = project.mounted
-              ? await runStepSpawn(spawnComposeCommand(project, ['pull']))
-              : await runWorkspaceComposeArgs(project, ['pull']);
+            const prepared = await prepareProjectAction(project, 'pull');
+            const code = await prepared.run(() => {}, () => {}, { timeoutMs: 900000 });
             if (code === 0) pulled += 1;
             else errors.push(project.projectName);
           } catch (e) {
@@ -342,20 +347,6 @@ async function executeJob(job) {
     await recordRun(job, 'failed', error.message, Date.now() - started);
     throw error;
   }
-}
-
-function runStepSpawn(child) {
-  return new Promise((resolve, reject) => {
-    // 定时 pull 大镜像可能很慢:15 分钟兜底超时杀进程,防止任务悬挂占住 running 槽。
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('compose pull 超时(15 分钟)'));
-    }, 15 * 60 * 1000);
-    child.on('error', (err) => { clearTimeout(timer); reject(err); });
-    child.on('close', (code) => { clearTimeout(timer); resolve(code ?? 1); });
-    child.stdout.resume();
-    child.stderr.resume();
-  });
 }
 
 /* ---------------- 调度器 ---------------- */
@@ -400,7 +391,7 @@ async function tick() {
 
 export function startCronScheduler() {
   if (timer || process.env.DISABLE_BACKGROUND_JOBS === '1') return;
-  void ensureFile();
+  void ensureFile().catch(error => console.error('[cron-scheduler]', error.message));
   timer = setInterval(() => { void tick(); }, 15000);
   timer.unref();
 }

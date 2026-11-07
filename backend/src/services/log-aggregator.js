@@ -1,4 +1,4 @@
-import { getActivityDocker } from './docker-hosts.js';
+import { getProjectDocker } from './docker-hosts.js';
 import { followContainerLogs } from './docker-log-stream.js';
 
 /**
@@ -6,7 +6,7 @@ import { followContainerLogs } from './docker-log-stream.js';
  * 每个容器用 demuxStream 拆分 stdout/stderr,并统一打上 containerName 与时间戳。
  */
 export async function aggregateProjectLogs({ project, containerIds = [], tail = 200, signal, onLine = () => {}, onError = () => {}, onEnd = () => {} }) {
-  const docker = getActivityDocker();
+  const docker = getProjectDocker(project);
   const targets = (project.containers || []).filter((container) => {
     if (!containerIds.length) return true;
     return containerIds.some((id) => container.id === id || container.id.startsWith(id) || container.name === id);

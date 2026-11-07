@@ -722,8 +722,11 @@ export default async function projectRoutes(fastify) {
     if (!project) return;
     const { containerId, dbName } = request.body || {};
     if (!containerId) return reply.code(400).send({ error: 'missing_container', message: '请选择要导出的数据库容器' });
+    const controller = new AbortController();
+    const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    reply.raw.on('close', onClose);
     try {
-      const result = await runDbDump(project, containerId, { dbName });
+      const result = await runDbDump(project, containerId, { dbName, signal: controller.signal });
       if (result.exitCode !== 0) {
         result.stream.destroy();
         return reply.code(502).send({ error: 'dump_failed', message: '数据库导出命令执行失败,详见操作记录' });
@@ -733,6 +736,8 @@ export default async function projectRoutes(fastify) {
       return reply.send(result.stream);
     } catch (error) {
       return reply.code(error.statusCode || 502).send({ error: 'db_dump_failed', message: error.message });
+    } finally {
+      reply.raw.off('close', onClose);
     }
   });
 

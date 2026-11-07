@@ -4,7 +4,7 @@
  * 后台定时采集容器资源指标并存储到数据库
  */
 
-import { getActivityDocker } from './docker-hosts.js';
+import { getDockerForHost, listHosts } from './docker-hosts.js';
 import db, { pruneAiData } from '../lib/db.js';
 import { getSetting, setSetting } from '../lib/db.js';
 import { applyRetentionPolicy } from './metrics.js';
@@ -27,27 +27,14 @@ const STATS_TIMEOUT = 10000; // container.stats 单次最多等 10 秒
  */
 export async function collectAllMetrics() {
   if (collectionState.promise) return { collected: 0, skipped: true, timestamp: Date.now() };
-  const operation = (async () => {
+  const operation = Promise.all(listHosts().map(async host => {
     try {
-      const docker = await getActivityDocker();
-      const containers = await docker.listContainers({ filters: { status: ['running'] } });
-
-      const collected = [];
-      for (const containerInfo of containers) {
-        try {
-          const metrics = await collectContainerMetrics(containerInfo.Id);
-          collected.push({ container: containerInfo.Id, metrics });
-        } catch (error) {
-          console.error(`采集容器 ${containerInfo.Id} 指标失败:`, error.message);
-        }
-      }
-
-      return { collected: collected.length, timestamp: Date.now() };
-    } catch (error) {
-      // Docker offline or unreachable
-      return { collected: 0, skipped: true, timestamp: Date.now() };
-    }
-  })();
+      const docker = getDockerForHost(host.id);
+      const containers = await withTimeout(docker.listContainers({ filters: { status: ['running'] } }), STATS_TIMEOUT, '节点容器列表');
+      const results = await Promise.allSettled(containers.map(container => collectContainerMetrics(container.Id, docker, host.id)));
+      return { hostId: host.id, collected: results.filter(result => result.status === 'fulfilled').length, ok: true };
+    } catch { return { hostId: host.id, collected: 0, ok: false }; }
+  })).then(hosts => ({ hosts, collected: hosts.reduce((count, host) => count + host.collected, 0), timestamp: Date.now() }));
   collectionState.promise = operation;
   return operation.finally(() => {
     if (collectionState.promise === operation) collectionState.promise = null;
@@ -175,16 +162,15 @@ export function parseContainerMetrics(containerId, stats = {}, timestamp = Date.
 /**
  * 采集单个容器的指标
  */
-async function collectContainerMetrics(containerId) {
-  const docker = await getActivityDocker();
+async function collectContainerMetrics(containerId, docker, hostId) {
   const container = docker.getContainer(containerId);
   const stats = await withTimeout(container.stats({ stream: false }), STATS_TIMEOUT, `容器 ${containerId} stats`);
   const metrics = parseContainerMetrics(containerId, stats);
 
   // 批量插入数据库
   const insert = db.prepare(`
-    INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp)
-    VALUES(?, ?, ?, ?, ?)
+    INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp, host_id)
+    VALUES(?, ?, ?, ?, ?, ?)
   `);
   
   const transaction = db.transaction(() => {
@@ -194,7 +180,8 @@ async function collectContainerMetrics(containerId) {
         metric.metric_type,
         metric.value,
         metric.unit,
-        metric.timestamp
+        metric.timestamp,
+        hostId
       );
     }
   });

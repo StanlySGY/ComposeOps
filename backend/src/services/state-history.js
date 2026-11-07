@@ -1,5 +1,6 @@
 import {
   listContainerStateEvents,
+  stateContainerKey,
   listContainerStateEventsWindow,
   listContainerStateEventsBeforeWindow,
   listContainerStateLatest,
@@ -115,14 +116,14 @@ export function getStateUptime({ projectId = '', since, until = Date.now() / 100
   const end = Math.floor(Number(until) || Date.now() / 1000);
   const { groups, truncated: windowTruncated } = listContainerStateEventsWindow({ projectId, since: start, until: end });
   const { events: precedingEvents, stateEvents, truncated: precedingTruncated } = listContainerStateEventsBeforeWindow({ projectId, before: start });
-  const latestBeforeById = new Map(precedingEvents.map((event) => [event.containerId, event]));
-  const precedingStateById = new Map(stateEvents.map((event) => [event.containerId, event]));
+  const latestBeforeById = new Map(precedingEvents.map((event) => [stateContainerKey(event), event]));
+  const precedingStateById = new Map(stateEvents.map((event) => [stateContainerKey(event), event]));
 
   // 合并窗口内有事件的容器与仅有窗口前历史的容器。若窗口前最近的状态转换是
   // destroy,容器在窗口开始前已销毁,即使之后出现 health_status 也不能重新纳入统计。
   for (const event of precedingEvents) {
-    const precedingState = precedingStateById.get(event.containerId);
-    if (precedingState?.action !== 'destroy' && !groups.has(event.containerId)) groups.set(event.containerId, []);
+    const precedingState = precedingStateById.get(stateContainerKey(event));
+    if (precedingState?.action !== 'destroy' && !groups.has(stateContainerKey(event))) groups.set(stateContainerKey(event), []);
   }
   const truncated = windowTruncated || precedingTruncated;
   const containers = [];
@@ -134,7 +135,9 @@ export function getStateUptime({ projectId = '', since, until = Date.now() / 100
     const window = computeContainerWindow(events, preceding, start, end);
     const measurable = window.upSeconds + window.downSeconds;
     containers.push({
-      containerId,
+      containerId: latest.containerId,
+      projectId: latest.projectId,
+      hostId: latest.hostId,
       containerName: latest.containerName,
       projectName: latest.projectName,
       ...window,
@@ -182,6 +185,7 @@ export function listStateExits({ projectId = '', days = 7, limit = 100 } = {}) {
     for (const event of events) {
       if (event.action !== 'die') continue;
       exits.push({
+        hostId: event.hostId,
         containerId: event.containerId,
         containerName: event.containerName,
         projectName: event.projectName,

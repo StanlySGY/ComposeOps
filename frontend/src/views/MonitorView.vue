@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell">
-    <div class="page-header"><div><h1 class="page-title">实时监控</h1><p class="page-subtitle">{{ tab === 'live' ? scopeLabel : '容器资源历史曲线与告警阈值' }}</p></div><div class="page-actions"><template v-if="tab === 'live'"><span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">{{ lastUpdated }}</span><label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label><button class="btn-secondary" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button></template></div></div>
+    <div class="page-header"><div><h1 class="page-title">实时监控</h1><p class="page-subtitle">{{ tab === 'live' ? scopeLabel : '容器资源历史曲线与告警阈值' }}</p></div><div class="page-actions"><template v-if="tab === 'live'"><select v-model="hostFilter" class="input w-auto" aria-label="监控节点"><option value="">当前节点</option><option value="all">全部节点</option><option v-for="host in availableHosts" :key="host.id" :value="host.id">{{ host.name }}</option></select><span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">{{ lastUpdated }}</span><label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label><button class="btn-secondary" @click="refresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button></template></div></div>
     <div class="tabs-segment" role="tablist" aria-label="监控视图" @keydown="handleTabKeydown">
       <button id="monitor-tab-live" data-tab="live" :class="{ active: tab === 'live' }" role="tab" aria-controls="monitor-panel" :aria-selected="tab === 'live'" :tabindex="tab === 'live' ? 0 : -1" @click="setTab('live')"><ChartNoAxesCombined class="h-4 w-4" />实时</button>
       <button id="monitor-tab-history" data-tab="history" :class="{ active: tab === 'history' }" role="tab" aria-controls="monitor-panel" :aria-selected="tab === 'history'" :tabindex="tab === 'history' ? 0 : -1" @click="setTab('history')"><Activity class="h-4 w-4" />历史指标</button>
@@ -17,7 +17,7 @@
         <span v-if="crossedThreshold" class="rounded-sm border border-rose-900/50 bg-rose-950/40 px-2 py-0.5 text-rose-300">当前已超出阈值!</span>
         <button class="ml-auto text-surface-500 hover:text-surface-200" @click="resetTrends">重置趋势</button>
       </div>
-      <section class="section-panel flex-1"><div class="mb-4 flex items-center justify-between gap-3"><div><h2 class="section-title">容器资源</h2><p class="mt-1 text-muted">实时 CPU、内存占用与容器镜像</p></div><span v-if="data" class="count-badge">{{ data.containers?.length || 0 }} 个容器</span><span v-else class="count-badge text-surface-400" role="status" aria-live="polite">{{ loading ? '正在加载容器…' : '数据暂不可用' }}</span></div><div class="table-wrap"><table class="data-table min-w-[640px]"><thead><tr><th class="whitespace-nowrap">容器</th><th class="hidden sm:table-cell">镜像</th><th class="text-right whitespace-nowrap">CPU</th><th class="text-right whitespace-nowrap">内存</th><th class="min-w-32">内存占用</th></tr></thead><tbody><tr v-if="data && !(data.containers || []).length"><td colspan="5"><EmptyState compact icon="Inbox" title="暂无容器指标" description="当前节点没有可展示的容器,启动容器后这里会实时显示 CPU 与内存占用。" /></td></tr><tr v-for="c in data?.containers || []" :key="c.id" class="hover:bg-surface-800/25"><td class="font-mono tabular-nums whitespace-nowrap">{{ c.name }}<span v-if="histories[c.id]?.cpu.length > 1" class="ml-2 inline-flex min-w-[120px] gap-2 align-middle"><span class="metric-chip" :class="c.cpuPercent >= 85 ? 'bg-rose-950/50 text-rose-300' : 'text-sky-300'">CPU {{ numberValue(c.cpuPercent).toFixed(1) }}%</span><span class="metric-chip" :class="c.memPercent >= 90 ? 'bg-rose-950/50 text-rose-300' : 'text-emerald-300'">MEM {{ numberValue(c.memUsage / 1024 / 1024).toFixed(0) }}MB</span><SparklineChart :cpu="histories[c.id]?.cpu || []" :mem="histories[c.id]?.mem || []" :width="64" :height="20" /></span></td><td class="hidden max-w-64 truncate sm:table-cell" :title="c.image">{{ c.image }}</td><td class="text-right font-mono tabular-nums whitespace-nowrap">{{ c.cpuPercent }}%</td><td class="text-right font-mono tabular-nums whitespace-nowrap">{{ formatBytes(c.memUsage) }}</td><td class="min-w-32"><div class="progress progress-muted"><span :style="{ width: Math.min(100, c.memPercent) + '%' }"></span></div><div class="text-muted mt-1 font-mono tabular-nums">{{ c.memPercent }}%</div></td></tr></tbody></table></div></section>
+      <section class="section-panel flex-1"><div class="mb-4 flex items-center justify-between gap-3"><div><h2 class="section-title">容器资源</h2><p class="mt-1 text-muted">实时 CPU、内存占用与容器镜像</p></div><span v-if="data" class="count-badge">{{ data.containers?.length || 0 }} 个容器</span><span v-else class="count-badge text-surface-400" role="status" aria-live="polite">{{ loading ? '正在加载容器…' : '数据暂不可用' }}</span></div><div class="table-wrap"><table class="data-table min-w-[640px]"><thead><tr><th class="whitespace-nowrap">容器</th><th class="hidden sm:table-cell">镜像</th><th class="text-right whitespace-nowrap">CPU</th><th class="text-right whitespace-nowrap">内存</th><th class="min-w-32">内存占用</th></tr></thead><tbody><tr v-if="data && !(data.containers || []).length"><td colspan="5"><EmptyState compact icon="Inbox" title="暂无容器指标" description="当前节点没有可展示的容器,启动容器后这里会实时显示 CPU 与内存占用。" /></td></tr><tr v-for="c in data?.containers || []" :key="`${c.hostId}:${c.id}`" class="hover:bg-surface-800/25"><td class="font-mono tabular-nums whitespace-nowrap">{{ c.name }}<span v-if="c.hostName" class="ml-2 text-xs text-muted">{{ c.hostName }}</span><span v-if="histories[`${c.hostId}:${c.id}`]?.cpu.length > 1" class="ml-2 inline-flex min-w-[120px] gap-2 align-middle"><span class="metric-chip" :class="c.cpuPercent >= 85 ? 'bg-rose-950/50 text-rose-300' : 'text-sky-300'">CPU {{ numberValue(c.cpuPercent).toFixed(1) }}%</span><span class="metric-chip" :class="c.memPercent >= 90 ? 'bg-rose-950/50 text-rose-300' : 'text-emerald-300'">MEM {{ numberValue(c.memUsage / 1024 / 1024).toFixed(0) }}MB</span><SparklineChart :cpu="histories[`${c.hostId}:${c.id}`]?.cpu || []" :mem="histories[`${c.hostId}:${c.id}`]?.mem || []" :width="64" :height="20" /></span></td><td class="hidden max-w-64 truncate sm:table-cell" :title="c.image">{{ c.image }}</td><td class="text-right font-mono tabular-nums whitespace-nowrap">{{ c.cpuPercent }}%</td><td class="text-right font-mono tabular-nums whitespace-nowrap">{{ formatBytes(c.memUsage) }}</td><td class="min-w-32"><div class="progress progress-muted"><span :style="{ width: Math.min(100, c.memPercent) + '%' }"></span></div><div class="text-muted mt-1 font-mono tabular-nums">{{ c.memPercent }}%</div></td></tr></tbody></table></div></section>
       <section v-if="usage" class="section-panel"><div class="mb-4"><h2 class="section-title">Docker 存储</h2><p class="mt-1 text-muted">镜像、构建缓存和可回收空间</p></div><div class="grid sm:grid-cols-3 gap-4"><StatCard title="镜像" :value="formatBytes(usage.images.total)" :sub="`可回收 ${formatBytes(usage.images.reclaimable)}`"/><StatCard title="构建缓存" :value="formatBytes(usage.buildCache.total)" :sub="`可回收 ${formatBytes(usage.buildCache.reclaimable)}`"/><StatCard title="总计可回收" :value="formatBytes(usage.reclaimable)" sub="可在设置中预览并清理"/></div></section>
     </template>
     <ResourceMonitorView v-else embedded />
@@ -28,6 +28,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { Activity, ChartNoAxesCombined, RefreshCw } from 'lucide-vue-next'; import { api } from '../api/client.js'; import StatCard from '../components/StatCard.vue'; import SparklineChart from '../components/common/SparklineChart.vue'; import Skeleton from '../components/common/Skeleton.vue'; import EmptyState from '../components/common/EmptyState.vue'; import ResourceMonitorView from './ResourceMonitorView.vue'; import { monitorTrends, pushMonitorTrend, resetMonitorTrends } from '../lib/monitor-trends.js';
 import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
+import { useHostsStore } from '../stores/hosts.js';
 const route = useRoute();
 const router = useRouter();
 const tab = ref(route.query.tab === 'history' ? 'history' : 'live');
@@ -40,6 +41,10 @@ function setTab(next) {
 }
 watch(() => route.query.tab, (value) => { tab.value = value === 'history' ? 'history' : 'live'; });
 const data = ref(null); const usage = ref(null); const capabilities = ref({}); const autoRefresh = ref(true); const error = ref(''); const loading = ref(false); const lastUpdated = ref(''); const intervalMs = ref(5000); const histories = ref({}); const trends = monitorTrends; const crossedThreshold = ref(false); let timer;
+const hostFilter = ref('');
+const hostsStore = useHostsStore();
+const availableHosts = computed(() => hostsStore.hosts);
+watch(hostFilter, () => { invalidateRequest(); void refresh(); });
 const alertThresholds = { cpu: 85, mem: 90 };
 let mounted = false;
 let requestId = 0;
@@ -48,11 +53,13 @@ async function refresh() {
   if (!mounted || tab.value !== 'live' || loading.value) return;
   const currentRequest = ++requestId;
   loading.value = true;
-  const [metricsResult, usageResult] = await Promise.allSettled([api.getMetrics(), api.getDockerUsage()]);
+  const [metricsResult, usageResult] = await Promise.allSettled([api.getMetrics(hostFilter.value), api.getDockerUsage()]);
   if (!mounted || currentRequest !== requestId) return;
   const errors = [];
   if (metricsResult.status === 'fulfilled') {
     data.value = metricsResult.value;
+    const unavailable = (metricsResult.value.hosts || []).filter(host => !host.ok);
+    if (unavailable.length) errors.push(`节点暂不可达：${unavailable.map(host => host.name).join('、')}`);
     accumulate();
     lastUpdated.value = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
   } else {
@@ -72,10 +79,10 @@ async function refresh() {
 function accumulate() {
   const next = {};
   for (const c of data.value?.containers || []) {
-    const prev = histories.value[c.id] || { cpu: [], mem: [] };
+    const prev = histories.value[`${c.hostId}:${c.id}`] || { cpu: [], mem: [] };
     prev.cpu = [...prev.cpu, c.cpuPercent].slice(-96);
     prev.mem = [...prev.mem, c.memPercent].slice(-96);
-    next[c.id] = prev;
+    next[`${c.hostId}:${c.id}`] = prev;
   }
   histories.value = next;
   if (data.value) {

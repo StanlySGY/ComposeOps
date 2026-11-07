@@ -82,7 +82,7 @@ describe('状态历史面板', () => {
 
   it('项目下拉只列纳管项目,选择后按 projectId 重新请求', async () => {
     await start();
-    const select = wrapper.findAll('select')[0];
+    const select = wrapper.find('select[aria-label="项目筛选"]');
     const options = select.findAll('option').map((option) => option.text());
     expect(options.some((text) => text.includes('scratch'))).toBe(false);
 
@@ -94,7 +94,7 @@ describe('状态历史面板', () => {
 
   it('切换时间窗口按新 days 请求(后端 schema 上限 365)', async () => {
     await start();
-    await wrapper.findAll('select')[1].setValue('90');
+    await wrapper.find('select[aria-label="时间窗口"]').setValue('90');
     await flushPromises();
     expect(api.getStateUptime).toHaveBeenLastCalledWith({ projectId: '', days: 90 });
     expect(wrapper.text()).toContain('最近 90 天');

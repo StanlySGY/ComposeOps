@@ -1,6 +1,6 @@
-import { getActivityDocker } from './docker-hosts.js';
+import { getDockerForHost, listHosts, getProjectDocker } from './docker-hosts.js';
 import { getSetting, setSetting } from '../lib/db.js';
-import { scanProjects } from './scanner.js';
+import { scanAllProjects as scanProjects } from './scanner.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
 import { checkImageUpdates } from './maintenance.js';
 import { recordAlertEventAndNotify } from './events.js';
@@ -11,7 +11,7 @@ import { withProjectOperationLock } from './project-operation-lock.js';
 
 const previousStates = new Map();
 const agentRuleStates = new Map();
-let dockerStorageHigh = false;
+const dockerStorageHigh = new Map();
 let timer;
 let running = false;
 
@@ -117,7 +117,7 @@ async function applyAgentAlertAction(rule, project, container, current) {
     `阈值:${rule.threshold}`,
   ].join('\n');
   recordAlertEventAndNotify({
-    key: `${container.id}:agent:${rule.metric}`,
+    key: `${project.hostId}:${container.id}:agent:${rule.metric}`,
     title,
     detail: `${project.projectName} / ${container.name} · ${rule.metric}=${current} (阈值 ${rule.threshold})`,
     priority: 'warning',
@@ -128,7 +128,7 @@ async function applyAgentAlertAction(rule, project, container, current) {
   // 自动处置动作持项目操作锁:自动 restart/scale 与用户手动 stop/升级并发会互相踩踏。
   if (rule.action === 'auto_restart') {
     await withProjectOperationLock(project.id, () =>
-      getActivityDocker().getContainer(container.id).restart().catch(() => {}));
+      getProjectDocker(project).getContainer(container.id).restart().catch(() => {}));
   } else if (rule.action === 'scale') {
     await withProjectOperationLock(project.id, () => scaleServiceByOne(project, rule.service).catch(() => {}));
   }
@@ -161,7 +161,7 @@ async function evaluateAgentRules(project, container, stats) {
   const parsed = parseContainerStat(stats);
   let restartCount = 0;
   try {
-    const inspected = await getActivityDocker().getContainer(container.id).inspect();
+    const inspected = await getProjectDocker(project).getContainer(container.id).inspect();
     restartCount = Number(inspected?.RestartCount) || 0;
   } catch (err) {
     console.error(`[alert-monitor] Failed to inspect container ${container.id}:`, err.message);
@@ -186,7 +186,7 @@ async function poll() {
     const config = getNotificationConfig(false);
     const projects = await scanProjects();
     const managedProjects = projects.filter((item) => item.managed);
-    const managedContainerIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => item.id)));
+    const managedContainerIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => `${project.hostId}:${item.id}`)));
     const managedProjectIds = new Set(managedProjects.map((project) => String(project.id)));
     const runningContainerIds = new Set(managedProjects.flatMap((project) => project.containers
       .filter((item) => item.state === 'running')
@@ -196,10 +196,10 @@ async function poll() {
       if (!managedContainerIds.has(containerId)) previousStates.delete(containerId);
     }
     if (config.enabled) {
-      const activity = getActivityDocker();
       for (const project of managedProjects) {
+        const activity = getProjectDocker(project);
         for (const item of project.containers) {
-          const previous = previousStates.get(item.id);
+          const previous = previousStates.get(`${project.hostId}:${item.id}`);
           const memHigh = typeof previous === 'object' && !!previous?.memHigh;
           let nextMemHigh = false;
           if (item.state === 'running') {
@@ -212,7 +212,7 @@ async function poll() {
               nextMemHigh = percent >= config.memoryThreshold;
               if (nextMemHigh && !memHigh) {
                 recordAlertEventAndNotify({
-                  key: `${item.id}:memory`,
+                  key: `${project.hostId}:${item.id}:memory`,
                   title: 'ComposeOps:容器内存告警',
                   detail: `${project.projectName} / ${item.name}: ${percent.toFixed(1)}%`,
                   priority: 'warning',
@@ -226,33 +226,34 @@ async function poll() {
               console.error(`[alert-monitor] Failed to check stats for ${project.projectName}/${item.name}:`, err.message);
             }
           }
-          previousStates.set(item.id, { memHigh: nextMemHigh });
+          previousStates.set(`${project.hostId}:${item.id}`, { memHigh: nextMemHigh });
         }
       }
-      const usage = await activity.df().then((data) => {
+      for (const host of listHosts()) {
+      const usage = await getDockerForHost(host.id).df().then((data) => {
         const images = (data.Images || []).reduce((total, item) => total + (Number(item.Size) || 0), 0);
         const cache = (data.BuildCache || []).reduce((total, item) => total + (Number(item.Size) || 0), 0);
         return images + cache;
       }).catch(() => null);
-      const previousDockerStorageHigh = dockerStorageHigh;
+      const previousDockerStorageHigh = dockerStorageHigh.get(host.id);
       const storageHigh = usage != null && usage >= config.dockerStorageThresholdGb * 1024 ** 3;
       if (storageHigh && !previousDockerStorageHigh) {
         recordAlertEventAndNotify({
-          key: 'docker-storage',
+          key: `docker-storage:${host.id}`,
           title: 'ComposeOps:Docker 空间告警',
-          detail: `镜像与构建缓存占用 ${(usage / 1024 ** 3).toFixed(1)} GB`,
+          detail: `${host.name}：镜像与构建缓存占用 ${(usage / 1024 ** 3).toFixed(1)} GB`,
           priority: 'warning',
           to: '/settings?tab=maintenance',
         });
         await sendNotification('ComposeOps：Docker 空间告警', `镜像与构建缓存占用 ${(usage / 1024 ** 3).toFixed(1)} GB`)
           .catch(() => {});
       }
-      // eslint-disable-next-line require-atomic-updates -- 单线程事件循环下的边沿状态标志
-      if (usage != null) dockerStorageHigh = storageHigh;
+      if (usage != null) dockerStorageHigh.set(host.id, storageHigh);
+      }
     } else {
       // 通知渠道未启用时,仍评估带自动处置的 Agent 规则(auto_restart / scale)。
-      const activity = getActivityDocker();
       for (const project of managedProjects) {
+        const activity = getProjectDocker(project);
         for (const item of project.containers) {
           if (item.state !== 'running') continue;
           try {

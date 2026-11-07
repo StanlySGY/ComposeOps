@@ -128,7 +128,7 @@ test('Docker 首次订阅失败后自动重试,退订后停止重试', async (t)
   assert.equal(calls, 2);
 });
 
-test('已有订阅在切换节点时立即迁移,不等待新的 WebSocket 连接', async t => {
+test('所有节点同时订阅，切换活动节点不销毁其他节点事件流', async t => {
   const host = upsertHost({ name: '测试节点', type: 'tcp', host: '127.0.0.1', port: 1 });
   setActiveHost(host.id);
   const remote = getActivityDocker();
@@ -142,7 +142,7 @@ test('已有订阅在切换节点时立即迁移,不等待新的 WebSocket 连�
   await settle();
   setActiveHost(host.id);
   await settle();
-  assert.equal(localStream.destroyed, true);
+  assert.equal(localStream.destroyed, false);
   assert.equal(remoteEvents.mock.callCount(), 1);
   unsubscribe();
   assert.equal(remoteStream.destroyed, true);

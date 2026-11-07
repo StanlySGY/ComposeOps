@@ -1,8 +1,8 @@
-import { getActivityDocker, getActiveHostId, onActiveHostChange } from './docker-hosts.js';
+import { getDockerForHost, getActiveHostId, listHosts, onHostsChange } from './docker-hosts.js';
 import { createLineDecoder } from '../lib/line-decoder.js';
 import { scanProjects } from './scanner.js';
 import { composeProjectId } from './project-id.js';
-import { addContainerStateEvent, getProjectPreference } from '../lib/db.js';
+import { addContainerStateEvent, getProjectPreference, getSetting } from '../lib/db.js';
 
 /**
  * 容器状态变化实时推送服务
@@ -13,7 +13,7 @@ const COMPOSE_PROJECT_LABEL = 'com.docker.compose.project';
 const COMPOSE_WORKDIR_LABEL = 'com.docker.compose.project.working_dir';
 
 const SUBSCRIBERS = new Set(); // Set<Function>
-let eventSession = null;
+const eventSessions = new Map();
 let unsubscribeHostChange = null;
 let recorderUnsubscribe = null;
 
@@ -25,12 +25,8 @@ let recorderUnsubscribe = null;
 export function subscribeContainerEvents(callback) {
   if (typeof callback !== 'function') return () => {};
   SUBSCRIBERS.add(callback);
-  if (!unsubscribeHostChange) unsubscribeHostChange = onActiveHostChange(() => {
-    stopDockerEventStream();
-    void startDockerEventStream();
-  });
-  if (eventSession && eventSession.hostId !== getActiveHostId()) stopDockerEventStream();
-  if (!eventSession) void startDockerEventStream();
+  if (!unsubscribeHostChange) unsubscribeHostChange = onHostsChange(id => { if (id) stopDockerEventStream(id); syncHostStreams(); });
+  syncHostStreams();
   return () => {
     SUBSCRIBERS.delete(callback);
     // 无订阅者时停止事件流
@@ -77,6 +73,7 @@ export function stopStateRecorder() {
 function persistContainerStateEvent(payload) {
   try {
     addContainerStateEvent({
+      hostId: payload.hostId,
       containerId: payload.containerId,
       containerName: payload.containerName,
       projectId: payload.projectId,
@@ -95,11 +92,17 @@ function persistContainerStateEvent(payload) {
 /**
  * 启动 Docker Events 流监听
  */
-async function startDockerEventStream() {
-  if (eventSession || !SUBSCRIBERS.size) return;
-  const session = { hostId: getActiveHostId(), stream: null, timer: null, ending: false };
-  eventSession = session;
-  const current = () => eventSession === session && SUBSCRIBERS.size > 0;
+function syncHostStreams() {
+  const ids = new Set(listHosts().map(host => host.id));
+  for (const id of eventSessions.keys()) if (!ids.has(id)) stopDockerEventStream(id);
+  for (const id of ids) if (!eventSessions.has(id)) void startDockerEventStream(id);
+}
+
+async function startDockerEventStream(hostId, attempt = 0) {
+  if (eventSessions.has(hostId) || !SUBSCRIBERS.size) return;
+  const session = { hostId, stream: null, timer: null, ending: false };
+  eventSessions.set(hostId, session);
+  const current = () => eventSessions.get(hostId) === session && SUBSCRIBERS.size > 0;
   function attachStream(stream) {
     if (!current()) { stream.destroy(); return false; }
     session.stream = stream;
@@ -111,13 +114,13 @@ async function startDockerEventStream() {
     session.stream?.destroy();
     session.timer = setTimeout(() => {
       if (!current()) return;
-      eventSession = null;
-      void startDockerEventStream();
-    }, 3000);
+      eventSessions.delete(hostId);
+      void startDockerEventStream(hostId, attempt + 1);
+    }, Math.min(60000, 3000 * 2 ** Math.min(attempt, 4)));
     session.timer.unref?.();
   }
   try {
-    const stream = await getActivityDocker().getEvents({ filters: {
+    const stream = await getDockerForHost(hostId).getEvents({ filters: {
       type: ['container'],
       event: ['start', 'stop', 'die', 'kill', 'pause', 'unpause', 'restart', 'health_status', 'create', 'destroy'],
     } });
@@ -128,7 +131,7 @@ async function startDockerEventStream() {
       // 按完整 JSON 行解析,一条坏事件不应丢弃同 chunk 的其它事件。
       try {
         const event = JSON.parse(line);
-        queue = queue.then(() => current() && handleDockerEvent(event, current))
+        queue = queue.then(() => current() && handleDockerEvent(event, current, hostId))
           .catch(error => console.error('[container-events] 事件处理失败:', error.message));
       } catch (error) { console.error('[container-events] 事件解析失败:', error.message); }
     });
@@ -144,12 +147,13 @@ async function startDockerEventStream() {
 }
 
 /** 停止期间清除会话身份,迟到的 getEvents 与旧重连定时器都不能重新占用流。 */
-function stopDockerEventStream() {
-  const session = eventSession;
-  eventSession = null;
-  if (!session) return;
-  clearTimeout(session.timer);
-  session.stream?.destroy();
+function stopDockerEventStream(hostId) {
+  for (const [id, session] of eventSessions) {
+    if (hostId && id !== hostId) continue;
+    eventSessions.delete(id);
+    clearTimeout(session.timer);
+    session.stream?.destroy();
+  }
 }
 
 /**
@@ -157,11 +161,11 @@ function stopDockerEventStream() {
  * create/destroy 事件在 listContainers 快照里可能缺席(销毁后容器已不在列表、创建后 3s 缓存尚未刷新),
  * 但 Docker 把 compose 标签一并放进 Actor.Attributes,与 scanner 用同一套标签+同一哈希就能得到同一个 id。
  */
-function resolveProjectFromLabels(attributes = {}) {
+function resolveProjectFromLabels(attributes = {}, hostId) {
   const projectName = attributes[COMPOSE_PROJECT_LABEL];
   if (!projectName) return null;
   const workingDir = attributes[COMPOSE_WORKDIR_LABEL] || '';
-  const projectId = composeProjectId(workingDir, projectName);
+  const projectId = composeProjectId(workingDir, projectName, hostId, getSetting('projects.legacy_host_id', 'local'));
   if (!getProjectPreference(projectId).managed) return null;
   return { id: projectId, projectName };
 }
@@ -170,7 +174,7 @@ function resolveProjectFromLabels(attributes = {}) {
  * 处理单个 Docker 事件
  * @param {object} event Docker Events API 返回的事件对象
  */
-async function handleDockerEvent(event, current = () => true) {
+async function handleDockerEvent(event, current = () => true, hostId = getActiveHostId()) {
   // 过滤: 只处理容器事件
   if (event.Type !== 'container') return;
 
@@ -181,7 +185,7 @@ async function handleDockerEvent(event, current = () => true) {
   // 查找该容器所属的项目
   let projects;
   try {
-    const result = await scanProjects();
+    const result = await scanProjects(hostId, { background: true });
     projects = result.filter((p) => p.managed); // 仅推送已纳管项目
   } catch (error) {
     console.error('[container-events] 扫描项目失败:', error.message);
@@ -193,7 +197,7 @@ async function handleDockerEvent(event, current = () => true) {
   // 定位包含此容器的项目
   const matchedProject = projects.find((project) =>
     project.containers.some((container) => container.id === containerId)
-  ) || resolveProjectFromLabels(attributes);
+  ) || resolveProjectFromLabels(attributes, hostId);
 
   if (!matchedProject) {
     // 容器不属于任何纳管项目,忽略
@@ -203,6 +207,8 @@ async function handleDockerEvent(event, current = () => true) {
   // 构造推送事件
   const payload = {
     type: 'container_event',
+    hostId,
+    hostName: listHosts().find(host => host.id === hostId)?.name || hostId,
     action, // start, stop, die, kill, pause, unpause, restart, health_status, create, destroy
     containerId,
     projectId: matchedProject.id,
@@ -220,7 +226,7 @@ async function handleDockerEvent(event, current = () => true) {
   // 广播给所有订阅者
   broadcastEvent(payload);
   // Docker Event 只路由已纳管项目；eventId 包含 Host/容器/动作/daemon 时间戳，跨重连可去重。
-  const eventId = 'docker:' + getActiveHostId() + ':' + containerId + ':' + action + ':' + String(event.timeNano || event.time || payload.timestamp);
+  const eventId = 'docker:' + hostId + ':' + containerId + ':' + action + ':' + String(event.timeNano || event.time || payload.timestamp);
   void import('./event-router.js').then(({ routeWorkflowEvent }) => routeWorkflowEvent({
     ...payload,
     eventId,

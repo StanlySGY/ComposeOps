@@ -9,7 +9,7 @@ import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
 import { safeProjectMountPath } from './mount-plan.js';
-import { getActiveHost, getActiveHostType } from './docker-hosts.js';
+import { getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
 import { sshExec, sshReadFile, sshWriteFile } from './remote-shell.js';
 
 let runnerImagePromise;
@@ -183,10 +183,12 @@ async function acquireRunner(project) {
 }
 
 async function withRunner(project, callback) {
-  const hostType = getActiveHostType();
+  assertProjectHostUnchanged(project);
+  const host = getProjectHost(project);
+  const hostType = host.type;
+  if (hostType === 'tcp') throw Object.assign(new Error('TCP 节点仅支持容器操作，不能运行本地工作容器'), { statusCode: 409 });
   if (hostType === 'ssh') {
     try {
-      const host = getActiveHost();
       await validateWorkspaceProjectPaths(project, async (remotePath) => {
         const result = await sshExec(host, ['realpath', '-e', '--', remotePath], { timeoutMs: 15000 });
         if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);

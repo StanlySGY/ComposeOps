@@ -6,7 +6,7 @@ const APP_VERSION = require('../../package.json').version;
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import os from 'os';
-import { getActivityDocker } from '../services/docker-hosts.js';
+import { getDockerForHost, listHosts, getActiveHostId } from '../services/docker-hosts.js';
 import { parseContainerStat } from '../services/stats.js';
 import { getMcpStatus, saveMcpConfig, revealMcpToken } from './mcp.js';
 
@@ -104,15 +104,23 @@ function readNetStats(prev) {
   } catch { /* /proc/net/dev 不可读时返回零速率。 */ }
   return net;
 }
-async function readContainerStats() {
-  const docker = getActivityDocker();
-  const containers = await docker.listContainers({ all: false });
+async function bounded(promise) {
+  let timer;
+  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('节点指标读取超时')), 2500); })]); }
+  finally { clearTimeout(timer); }
+}
+
+async function readContainerStats(host) {
+  const docker = getDockerForHost(host.id);
+  const containers = await bounded(docker.listContainers({ all: false }));
   const rows = await Promise.all(containers.map(async (c) => {
     try {
-      const stat = await docker.getContainer(c.Id).stats({ stream: false });
+      const stat = await bounded(docker.getContainer(c.Id).stats({ stream: false }));
       const parsed = parseContainerStat(stat);
       return {
         id: c.Id,
+        hostId: host.id,
+        hostName: host.name,
         name: (c.Names[0] || '').replace(/^\//, ''),
         image: c.Image,
         cpuPercent: parsed.cpuPercent,
@@ -137,18 +145,17 @@ export default async function systemRoutes(fastify) {
     hostMetricsScope: process.env.HOST_METRICS === '1' ? 'host' : 'container',
   }));
   // GET /api/v1/system/metrics
-  fastify.get('/metrics', async () => {
+  fastify.get('/metrics', async (request) => {
     const host = readHostMetrics();
     const disk = readDiskStats();
     const net = readNetStats(prevNet);
-    let containers;
-    try {
-      containers = await readContainerStats();
-    } catch (error) {
-      console.error('[system] 读取容器指标失败:', error.message);
-      containers = [];
-    }
-    return { host, disk, network: net, containers };
+    const selected = request.query.hostId || getActiveHostId();
+    const targets = listHosts().filter(item => selected === 'all' || item.id === selected);
+    const hosts = await Promise.all(targets.map(async target => {
+      try { return { id: target.id, name: target.name, ok: true, containers: await readContainerStats(target) }; }
+      catch { return { id: target.id, name: target.name, ok: false, containers: [] }; }
+    }));
+    return { host, disk, network: net, hosts: hosts.map(({ containers: _, ...item }) => item), containers: hosts.flatMap(item => item.containers) };
   });
 
   // ---- MCP 服务管理(token/模式/开关) ----

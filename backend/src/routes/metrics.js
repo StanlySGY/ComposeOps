@@ -126,9 +126,10 @@ export default async function metricsRoutes(fastify) {
     },
     async (request) => {
       const { containerId, metricType, startTime, endTime, aggregation = 'auto' } = request.query;
-      const { container } = await resolveManagedContainer(containerId);
+      const { project, container } = await resolveManagedContainer(containerId);
       
       const metrics = queryHistoricalMetrics({
+        hostId: project.hostId,
         containerId: container.id,
         metricType,
         startTime: startTime !== undefined ? parseInt(startTime, 10) : undefined,
@@ -167,9 +168,9 @@ export default async function metricsRoutes(fastify) {
     async (request) => {
       const { containerId, metricType } = request.params;
       const { hours = 24 } = request.query;
-      const { container } = await resolveManagedContainer(containerId);
+      const { project, container } = await resolveManagedContainer(containerId);
 
-      const stats = getMetricsStats(container.id, metricType, parseInt(hours, 10));
+      const stats = getMetricsStats(container.id, metricType, parseInt(hours, 10), project.hostId);
       
       if (!stats) {
         return { 
@@ -208,7 +209,7 @@ export default async function metricsRoutes(fastify) {
     },
     async (request, reply) => {
       const { containerId, metricType, hours = 24, startTime: requestedStart, endTime: requestedEnd, algorithms = ['z_score', 'moving_average', 'trend'] } = request.body;
-      const { container } = await resolveManagedContainer(containerId);
+      const { project, container } = await resolveManagedContainer(containerId);
 
       const endTime = Number.isFinite(Number(requestedEnd)) ? Number(requestedEnd) : Date.now();
       const requestedHours = Number(hours);
@@ -220,6 +221,7 @@ export default async function metricsRoutes(fastify) {
       }
 
       const metrics = queryHistoricalMetrics({
+        hostId: project.hostId,
         containerId: container.id,
         metricType,
         startTime,
@@ -252,8 +254,8 @@ export default async function metricsRoutes(fastify) {
     },
     async (request) => {
       const { containerId } = request.params;
-      const { container } = await resolveManagedContainer(containerId);
-      const alerts = evaluateAlertRules(container.id);
+      const { project, container } = await resolveManagedContainer(containerId);
+      const alerts = evaluateAlertRules(container.id, project.hostId);
 
       return {
         alerts,

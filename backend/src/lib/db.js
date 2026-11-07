@@ -766,6 +766,33 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 20,
+    name: '节点身份归属、项目租约与定时任务持久化',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT OR IGNORE INTO settings(key, value)
+          SELECT 'projects.legacy_host_id', COALESCE((SELECT value FROM settings WHERE key = 'docker.active_host'), 'local');
+        CREATE TABLE IF NOT EXISTS project_operation_leases (
+          project_id TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS cron_state (
+          id INTEGER PRIMARY KEY CHECK(id = 1), payload TEXT NOT NULL
+        );
+      `);
+      database.exec(`CREATE TABLE IF NOT EXISTS container_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, container_id TEXT NOT NULL, metric_type TEXT NOT NULL,
+        value REAL NOT NULL, unit TEXT, timestamp INTEGER NOT NULL
+      )`);
+      addColumn(database, 'container_metrics', 'host_id', "TEXT NOT NULL DEFAULT 'local'");
+      addColumn(database, 'container_state_events', 'host_id', "TEXT NOT NULL DEFAULT 'local'");
+      const legacy = database.prepare("SELECT value FROM settings WHERE key = 'projects.legacy_host_id'").get().value;
+      database.prepare('UPDATE container_metrics SET host_id = ?').run(legacy);
+      database.prepare('UPDATE container_state_events SET host_id = ?').run(legacy);
+      database.exec('CREATE INDEX IF NOT EXISTS idx_metrics_host_container ON container_metrics(host_id, container_id, timestamp)');
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1750,6 +1777,7 @@ export function exportUserData() {
       'SELECT project_id AS projectId, managed, mount_enabled AS mountEnabled, favorite, note, updated_at AS updatedAt FROM project_preferences'
     ).all(),
     operations: listOperations(500),
+    cron: JSON.parse(db.prepare('SELECT payload FROM cron_state WHERE id = 1').get()?.payload || '{"jobs":[],"history":[]}'),
   };
 }
 
@@ -2118,11 +2146,12 @@ function toNullableNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-export function addContainerStateEvent({ containerId, containerName = '', projectId, projectName = '', action, healthStatus = '', exitCode = null, execDuration = null, timestamp }) {
+export function addContainerStateEvent({ hostId = 'local', containerId, containerName = '', projectId, projectName = '', action, healthStatus = '', exitCode = null, execDuration = null, timestamp }) {
   const result = db.prepare(`
-    INSERT INTO container_state_events(container_id, container_name, project_id, project_name, action, health_status, exit_code, exec_duration, timestamp)
-    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO container_state_events(host_id, container_id, container_name, project_id, project_name, action, health_status, exit_code, exec_duration, timestamp)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
+    hostId,
     String(containerId || ''),
     String(containerName || ''),
     String(projectId || ''),
@@ -2162,6 +2191,8 @@ export function getContainerStateEventBefore(containerId, timestamp) {
 }
 
 /** 按窗口批量取事件,按容器分组返回(升序),供可用率计算一次查询完成。 */
+export function stateContainerKey(event) { return `${event.hostId || 'local'}:${event.projectId}:${event.containerId}`; }
+
 export function listContainerStateEventsWindow({ projectId = '', since = 0, until = Date.now() / 1000, limit = 5000 } = {}) {
   const conditions = ['timestamp >= ?', 'timestamp <= ?'];
   const params = [Math.floor(Number(since) || 0), Math.floor(Number(until))];
@@ -2173,8 +2204,8 @@ export function listContainerStateEventsWindow({ projectId = '', since = 0, unti
   const grouped = new Map();
   for (const row of rows) {
     const event = mapContainerStateRow(row);
-    if (!grouped.has(event.containerId)) grouped.set(event.containerId, []);
-    grouped.get(event.containerId).push(event);
+    if (!grouped.has(stateContainerKey(event))) grouped.set(stateContainerKey(event), []);
+    grouped.get(stateContainerKey(event)).push(event);
   }
   return { groups: grouped, truncated: rows.length >= safeLimit };
 }
@@ -2191,7 +2222,7 @@ export function listContainerStateEventsBeforeWindow({ projectId = '', before = 
   const safeLimit = Math.max(1, Math.min(Number(limit) || 5000, 20000));
   const latestSql = `
     SELECT * FROM (
-      SELECT *, ROW_NUMBER() OVER (PARTITION BY container_id ORDER BY timestamp DESC, id DESC) AS row_rank
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY host_id, project_id, container_id ORDER BY timestamp DESC, id DESC) AS row_rank
       FROM container_state_events
       WHERE ${conditions.join(' AND ')}
     )
@@ -2204,7 +2235,7 @@ export function listContainerStateEventsBeforeWindow({ projectId = '', before = 
   const stateConditions = [...conditions, `action IN (${stateActions.map(() => '?').join(', ')})`];
   const stateEvents = db.prepare(`
     SELECT * FROM (
-      SELECT *, ROW_NUMBER() OVER (PARTITION BY container_id ORDER BY timestamp DESC, id DESC) AS row_rank
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY host_id, project_id, container_id ORDER BY timestamp DESC, id DESC) AS row_rank
       FROM container_state_events
       WHERE ${stateConditions.join(' AND ')}
     )
@@ -2236,7 +2267,7 @@ export function listContainerStateLatest({ projectId = '', since = 0, limit = 50
   const latest = new Map();
   for (const row of rows) {
     const event = mapContainerStateRow(row);
-    if (!latest.has(event.containerId)) latest.set(event.containerId, event);
+    if (!latest.has(stateContainerKey(event))) latest.set(stateContainerKey(event), event);
   }
   return latest;
 }
@@ -2248,6 +2279,7 @@ export function pruneContainerStateEvents(days = 90) {
 
 function mapContainerStateRow(row) {
   return {
+    hostId: row.host_id,
     id: Number(row.id),
     containerId: row.container_id,
     containerName: row.container_name,

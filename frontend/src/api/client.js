@@ -284,7 +284,7 @@ export const api = {
     return result?.preview || null;
   },
   // system
-  getMetrics: async () => normalizeMetrics(await request('/system/metrics')),
+  getMetrics: async (hostId = '') => normalizeMetrics(await request(`/system/metrics${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`)),
   getCapabilities: () => request('/system/capabilities'),
   getPreferences: () => request('/personal/preferences'),
   savePreferences: (payload) => request('/personal/preferences', { method: 'PUT', body: JSON.stringify(payload) }),

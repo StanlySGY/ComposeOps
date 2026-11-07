@@ -14,6 +14,7 @@
 
     <!-- 过滤器 -->
     <div class="toolbar-panel flex flex-wrap items-center gap-2">
+      <select v-model="hostFilter" class="input sm:w-40" aria-label="事件节点"><option value="">全部节点</option><option v-for="host in hostOptions" :key="host" :value="host">{{ host === 'local' ? '本地节点' : host }}</option></select>
       <select v-model="projectId" class="input sm:w-44" aria-label="项目筛选" @change="load">
         <option value="">全部纳管项目</option>
         <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
@@ -73,8 +74,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in visibleContainers" :key="item.containerId">
-              <td class="whitespace-nowrap">{{ item.containerName }}</td>
+            <tr v-for="item in visibleContainers" :key="`${item.hostId}:${item.containerId}`">
+              <td class="whitespace-nowrap">{{ item.containerName }}<span class="ml-2 text-xs text-muted">{{ item.hostId === 'local' ? '本地节点' : item.hostId }}</span></td>
               <td class="hidden max-w-40 truncate sm:table-cell">{{ item.projectName }}</td>
               <td class="min-w-32">
                 <div class="progress"><span :class="availabilityBarTone(item.availability)" :style="{ width: `${Math.max(0, Math.min(100, item.availability ?? 0))}%` }"></span></div>
@@ -158,6 +159,8 @@ const truncated = ref(false);
 const projects = ref([]);
 const projectId = ref('');
 const days = ref(7);
+const hostFilter = ref('');
+const hostOptions = computed(() => [...new Set([...containers.value, ...history.value].map(item => item.hostId).filter(Boolean))]);
 const actionFilter = ref('');
 const query = ref('');
 const containers = ref([]);
@@ -227,6 +230,7 @@ const rangeLabel = computed(() => `最近 ${days.value} 天`);
 const needle = computed(() => query.value.trim().toLowerCase());
 
 function matches(item) {
+  if (hostFilter.value && item.hostId !== hostFilter.value) return false;
   return !needle.value || `${item.containerName || ''} ${item.projectName || ''}`.toLowerCase().includes(needle.value);
 }
 

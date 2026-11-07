@@ -1,12 +1,13 @@
-import { createWriteStream, promises as fs } from 'fs';
+import { createReadStream, createWriteStream, promises as fs } from 'fs';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
-import { createGzip } from 'node:zlib';
+import { Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { randomUUID } from 'node:crypto';
+import { createGzip, createGunzip } from 'node:zlib';
 import { fileURLToPath } from 'url';
-import { getActivityDocker } from './docker-hosts.js';
-import { demuxStream } from '../lib/docker-streams.js';
+import { getProjectDocker } from './docker-hosts.js';
 import { readProjectEnv } from './project-env.js';
-import { addOperation } from '../lib/db.js';
+import { addOperation, addAlertEvent } from '../lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKUP_ROOT = path.join(__dirname, '../../data/backups/db');
@@ -102,7 +103,7 @@ export async function readDbEnv(project) {
  * 在指定容器内执行 dump,同时把 gzip 输出流提供给响应,并把 .gz 留存到 data/backups/db/。
  * @returns {Promise<{ stream: PassThrough, filename: string, exitCode: number, type: string }>}
  */
-export async function runDbDump(project, containerId, { dbName = '' } = {}) {
+export async function runDbDump(project, containerId, { dbName = '', download = true, signal } = {}) {
   if (!project?.managed) throw Object.assign(new Error('项目尚未加入管理'), { statusCode: 403 });
   const container = (project.containers || []).find((item) =>
     item.id === containerId || item.id.startsWith(containerId) || item.name === containerId);
@@ -117,7 +118,7 @@ export async function runDbDump(project, containerId, { dbName = '' } = {}) {
   }
   const { cmd, env } = buildDumpCommand(type, envCfg);
 
-  const docker = getActivityDocker();
+  const docker = getProjectDocker(project);
   const instance = await docker.getContainer(container.id).exec({
     Cmd: cmd,
     AttachStdout: true,
@@ -132,61 +133,85 @@ export async function runDbDump(project, containerId, { dbName = '' } = {}) {
     throw Object.assign(new Error(`启动 dump 失败:${error.message}`), { statusCode: 502 });
   }
 
-  const demux = demuxStream();
-  execStream.pipe(demux);
-
-  const gzip = createGzip();
-  const output = new PassThrough();
-  const localSink = new PassThrough();
-  gzip.pipe(output);
-  gzip.pipe(localSink);
-
-  let stderr = '';
-  demux.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
-  demux.stdout.pipe(gzip);
-
-  // exec 结束 = stdout 与 stderr 都结束;随后查询 exec 退出码
-  const streamEnded = new Promise((resolve) => {
-    let done = 0;
-    const maybe = () => { done += 1; if (done === 2) resolve(); };
-    demux.stdout.on('end', maybe);
-    demux.stderr.on('end', maybe);
-  });
-  // 保险:execStream 结束也视为完成
-  execStream.on('end', () => streamEnded.catch(() => {}));
-  execStream.on('error', (error) => { gzip.destroy(error); output.destroy(error); });
-
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeName = String(container.name).replace(/[^a-zA-Z0-9_-]/g, '-');
-  const filename = `${project.projectName}-${safeName}-${stamp}.${type === 'mongo' ? 'archive.gz' : 'sql.gz'}`;
+  const safeProject = String(project.projectName).replace(/[^a-zA-Z0-9_-]/g, '-');
+  const filename = `${safeProject}-${safeName}-${stamp}-${randomUUID().slice(0, 8)}.${type === 'mongo' ? 'archive.gz' : type === 'redis' ? 'rdb.gz' : 'sql.gz'}`;
   const filePath = path.join(BACKUP_ROOT, filename);
-  const sink = createWriteStream(filePath);
-  localSink.pipe(sink);
-  sink.on('error', (error) => { output.destroy(error); });
-
-  await streamEnded;
-  let exitCode = 1;
   try {
-    const info = await instance.inspect();
-    exitCode = info.ExitCode ?? 1;
-  } catch { /* exec inspect 失败时使用默认失败码。 */ }
-  // 让 gzip 收尾(可能还有少量尾部数据)
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  if (!gzip.writableEnded) gzip.end();
-  await new Promise((resolve) => {
-    let check = 0;
-    const maybe = () => { check += 1; if (check >= 2) resolve(); };
-    output.on('end', maybe);
-    localSink.on('end', maybe);
-    setTimeout(resolve, 3000);
-  });
+    const result = await persistDumpStream(execStream, filePath, () => instance.inspect(), { signal });
+    addOperation({ projectId: project.id, projectName: project.projectName, action: 'db.dump', status: 'success', detail: `${type} · ${container.name} · ${filename} · ${result.bytes} 字节` });
+    return { ...result, ...(download ? { stream: createReadStream(filePath) } : {}), filename, exitCode: 0, type, savedPath: filePath };
+  } catch (error) {
+    addOperation({ projectId: project.id, projectName: project.projectName, action: 'db.dump', status: 'failed', detail: '导出失败，未保留不完整备份' });
+    addAlertEvent({ key: `db-dump:${project.id}:${container.id}`, title: '数据库备份失败', detail: `${project.projectName} / ${container.name}：请检查数据库连接和可用空间后重试`, priority: 'danger', to: `/services?focus=${project.id}` });
+    throw error;
+  }
+}
 
-  addOperation({
-    projectId: project.id,
-    projectName: project.projectName,
-    action: 'db.dump',
-    status: exitCode === 0 ? 'success' : 'failed',
-    detail: `${type} · ${container.name} · ${filename}${stderr ? ` · ${stderr.slice(0, 200)}` : ''}`,
-  });
-  return { stream: output, filename, exitCode, type, savedPath: filePath };
+/** 按 Docker frame 解码，yield 跟随落盘背压；stderr 只保留有限大小，不混入备份。 */
+async function* dumpStdout(source, state) {
+  let header = Buffer.alloc(0);
+  let remaining = 0;
+  let type = 1;
+  for await (const chunk of source) {
+    let offset = 0;
+    while (offset < chunk.length) {
+      if (!remaining) {
+        const take = Math.min(8 - header.length, chunk.length - offset);
+        header = Buffer.concat([header, chunk.subarray(offset, offset + take)]);
+        offset += take;
+        if (header.length < 8) continue;
+        type = header[0];
+        if (![1, 2].includes(type)) throw new Error('数据库导出数据帧无效');
+        remaining = header.readUInt32BE(4);
+        header = Buffer.alloc(0);
+        if (!remaining) continue;
+      }
+      const take = Math.min(remaining, chunk.length - offset);
+      const piece = chunk.subarray(offset, offset + take);
+      offset += take;
+      remaining -= take;
+      if (type === 1) { state.rawBytes += piece.length; yield piece; }
+      else state.stderr = (state.stderr + piece.toString('utf8')).slice(-4096);
+    }
+  }
+  if (remaining || header.length) throw new Error('数据库导出数据流提前结束');
+}
+
+/** 后台只写文件；完成、退出码和解压校验全部通过后原子发布。 */
+export async function persistDumpStream(source, filePath, inspect, { signal, timeoutMs = 900000 } = {}) {
+  const partial = `${filePath}.${randomUUID()}.partial`;
+  const controller = new AbortController();
+  const abortSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const timeout = setTimeout(() => controller.abort(new Error('数据库备份超时')), timeoutMs);
+  const abort = () => source.destroy(abortSignal.reason);
+  abortSignal.addEventListener('abort', abort, { once: true });
+  const state = { rawBytes: 0, stderr: '' };
+  try {
+    abortSignal.throwIfAborted();
+    await pipeline(dumpStdout(source, state), createGzip(), createWriteStream(partial, { flags: 'wx', mode: 0o600 }), { signal: abortSignal });
+    const info = await new Promise((resolve, reject) => {
+      const cancelled = () => reject(abortSignal.reason);
+      if (abortSignal.aborted) return cancelled();
+      abortSignal.addEventListener('abort', cancelled, { once: true });
+      Promise.resolve().then(inspect).then(resolve, reject).finally(() => abortSignal.removeEventListener('abort', cancelled));
+    });
+    if (info.Running || info.ExitCode !== 0) throw new Error('数据库导出命令未成功结束，请检查数据库配置');
+    if (!state.rawBytes) throw new Error('数据库导出为空，未生成备份');
+    let verifiedBytes = 0;
+    await pipeline(createReadStream(partial), createGunzip(), new Writable({ write(chunk, _, done) { verifiedBytes += chunk.length; done(); } }), { signal: abortSignal });
+    if (verifiedBytes !== state.rawBytes) throw new Error('数据库备份完整性校验失败');
+    const { size: bytes } = await fs.stat(partial);
+    abortSignal.throwIfAborted();
+    await fs.rename(partial, filePath);
+    return { bytes, rawBytes: state.rawBytes, verified: true };
+  } catch (error) {
+    source.destroy();
+    await fs.rm(partial, { force: true });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    abortSignal.removeEventListener('abort', abort);
+  }
 }

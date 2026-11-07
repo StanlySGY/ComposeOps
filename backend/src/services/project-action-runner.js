@@ -3,6 +3,7 @@ import { runWorkspaceCompose } from './compose-workspace.js';
 import { runContainerAction, supportsContainerAction } from './project-control.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 import { invalidateScanCache } from './scanner.js';
+import { assertProjectHostUnchanged, onActiveHostChange } from './docker-hosts.js';
 
 export function assertProjectActionAllowed(project, action) {
   if (!Object.hasOwn(ACTIONS, action)) {
@@ -18,6 +19,7 @@ export function assertProjectActionAllowed(project, action) {
 }
 
 export async function prepareProjectAction(project, action) {
+  assertProjectHostUnchanged(project);
   assertProjectActionAllowed(project, action);
   if (project.editable && project.mounted) {
     const safeFiles = await Promise.all(project.composeFiles.map((_, index) => resolveProjectFile(project, index)));
@@ -27,6 +29,10 @@ export async function prepareProjectAction(project, action) {
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
         return withProjectOperationLock(project.id, () => new Promise((resolve, reject) => {
           const child = spawnCompose({ ...project, composeFiles: safeFiles }, action);
+          let hostChanged = false;
+          const unsubscribe = onActiveHostChange(() => {
+            try { assertProjectHostUnchanged(project); } catch { hostChanged = true; child.kill('SIGKILL'); }
+          });
           onChild(child);
           child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
           child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
@@ -34,9 +40,11 @@ export async function prepareProjectAction(project, action) {
             child.kill('SIGTERM');
             setTimeout(() => child.kill('SIGKILL'), 5000).unref?.();
           }, options.timeoutMs || 300000);
-          child.on('error', (error) => { clearTimeout(timer); reject(error); });
+          child.on('error', (error) => { unsubscribe(); clearTimeout(timer); reject(error); });
           child.on('close', (code, signal) => {
+            unsubscribe();
             clearTimeout(timer);
+            if (hostChanged) return reject(Object.assign(new Error('宿主已变更，操作已中止'), { statusCode: 409 }));
             resolve(signal ? 124 : code ?? 1);
           });
         })).finally(invalidateScanCache);
@@ -49,10 +57,22 @@ export async function prepareProjectAction(project, action) {
     return {
       mode: 'workspace',
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
-        return withProjectOperationLock(project.id, () => runWorkspaceCompose(project, action, onOutput, {
-          timeoutMs: options.timeoutMs,
-          onExec: (handle) => onChild(handle),
-        })).finally(invalidateScanCache);
+        return withProjectOperationLock(project.id, async () => {
+          assertProjectHostUnchanged(project);
+          let handle;
+          let changed = false;
+          const unsubscribe = onActiveHostChange(() => {
+            try { assertProjectHostUnchanged(project); } catch { changed = true; handle?.kill?.(); }
+          });
+          try {
+            const code = await runWorkspaceCompose(project, action, onOutput, {
+              timeoutMs: options.timeoutMs,
+              onExec: value => { handle = value; onChild(value); if (changed) handle?.kill?.(); },
+            });
+            if (changed) throw Object.assign(new Error('宿主已变更，操作已中止'), { statusCode: 409, code: 'HOST_CHANGED' });
+            return code;
+          } finally { unsubscribe(); }
+        }).finally(invalidateScanCache);
       },
     };
   }

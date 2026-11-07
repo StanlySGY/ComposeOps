@@ -227,7 +227,10 @@ test('workflow: agent 节点接入 Agent 引擎(未配置 API Key 时优雅失�
     ],
   });
   const instance = startWorkflow(definition.id, {});
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  const deadline = Date.now() + 5000;
+  while (getInstance(instance.id).status === 'running' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   const done = getInstance(instance.id);
   // 未配置 AI API Key 时,agent 节点应优雅失败(而非崩溃),工作流标记为 failed。
   assert.equal(done.status, 'failed');

@@ -1,6 +1,6 @@
-import { getActivityDocker } from './docker-hosts.js';
+import { getActivityDocker, getProjectDocker } from './docker-hosts.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
-import { scanProjects } from './scanner.js';
+import { scanAllProjects as scanProjects } from './scanner.js';
 import { recordAlertEventAndNotify } from './events.js';
 
 const DEFAULT_EVENTS = ['exit', 'oom', 'unhealthy'];
@@ -102,18 +102,18 @@ async function poll() {
   let projects;
   try { projects = await scanProjects(); } catch { return; }
   const managedProjects = projects.filter((item) => item.managed);
-  const managedIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => item.id)));
+  const managedIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => `${project.hostId}:${item.id}`)));
   for (const containerId of previousStates.keys()) {
     if (!managedIds.has(containerId)) previousStates.delete(containerId);
   }
-  const docker = getActivityDocker();
   for (const project of managedProjects) {
+    const docker = getProjectDocker(project);
     for (const container of project.containers) {
       const inspected = await inspectContainer(docker, container.id);
       const enriched = { ...container, ...inspected };
-      const previous = previousStates.get(container.id);
+      const previous = previousStates.get(`${project.hostId}:${container.id}`);
       const result = evaluateContainer(enriched, previous);
-      previousStates.set(container.id, {
+      previousStates.set(`${project.hostId}:${container.id}`, {
         state: enriched.state || '',
         health: enriched.health || null,
         exitCode: Number(enriched.exitCode ?? (enriched.state === 'exited' ? 1 : 0)),
@@ -124,12 +124,12 @@ async function poll() {
 
       const events = result.events.filter((event) => configEvents(config).includes(event));
       for (const event of events) {
-        const logs = await containerTailLogs(container.id, 8).catch(() => '');
+        const logs = await containerTailLogs(container.id, 8, docker).catch(() => '');
         const title = buildTitle(project, container, event);
         // 退出码/重启次数/OOM/健康状态只在 inspect 结果上,传 enriched 才不会全是 N/A。
         const body = buildBody(project, enriched, event, logs);
         recordAlertEventAndNotify({
-          key: `${container.id}:${event}`,
+          key: `${project.hostId}:${container.id}:${event}`,
           title,
           detail: `${project.projectName} / ${container.name} · ${container.statusText || ''}`,
           priority: event === 'crashloop' ? 'warning' : 'danger',
