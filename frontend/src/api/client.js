@@ -313,7 +313,7 @@ export const api = {
   importData: (payload) => request('/personal/import', { method: 'POST', body: JSON.stringify(payload) }),
   // marketplace
   getMarketplaceStats: () => request('/marketplace/stats'),
-  discoverAiTemplate: (query) => request('/marketplace/templates/ai-discover', { method: 'POST', body: JSON.stringify({ query }) }),
+  discoverAiTemplate: (query, signal) => request('/marketplace/templates/ai-discover', { method: 'POST', body: JSON.stringify({ query }), signal }),
   searchMarketplaceTemplates: (params) => request(`/marketplace/templates/search?${params.toString()}`),
   toggleMarketplaceFavorite: (templateId, isFavorited) => request(`/marketplace/favorites/${templateId}`, { method: isFavorited ? 'DELETE' : 'POST' }),
   createMarketplaceTemplate: (payload) => request('/marketplace/templates/custom', { method: 'POST', body: JSON.stringify(payload) }),

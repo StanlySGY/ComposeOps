@@ -275,3 +275,20 @@
 - 桌面/手机配置、桌面结果和320px失败截图保存为assets/2026-11-market-deployment-{form-desktop,form-mobile,result-desktop,failure-mobile}.webp。证据round17-browser-final.log、round17-tail-browser.log、round17-frontend-navigation-final.log、round17-live-marketplace-tail.log。早期导航失败日志保留，不把修复后通过冒称首次通过。
 
 - 补充窄屏重排：输出区ResizeObserver在跟随模式下保持尾部，手动回看保持位置；8项跨浏览器补验通过。手机截图等待sheet入场动画完成后重拍，真实4组演练再次通过，证据round17-live-marketplace-resize.log。
+
+
+## 第十八轮：市场编辑、AI 草稿与筛选连续性
+
+- 修正最初测试中的“+ 创建模板”按钮精确文本夹具后，11项初始用例中10项失败、1项旧行为通过；故障覆盖关闭丢草稿、不同模板互相重置、保存失败只toast、保存中仍可改字段、AI关闭/换查询的迟到响应、元数据丢失、删除确认缺忙态、详情缺复制与URL不恢复。
+- 新建useMarketplaceEditor，按模板ID在当前页面会话保留草稿与失败原因；配置不写localStorage/sessionStorage。写入固定目标与载荷，字段/重复提交锁定；离页释放弹层但继续核对原请求，确认成功才清对应草稿，列表读取失败不反转已确认保存。清空/恢复原内容可立即撤销。
+- 编辑窗口加入分组表单、Compose等宽编辑区/行数、变量元数据摘要、恢复提示、原位错误和可撤销操作。生成模板的envSchema完整保留。页面提供写入中/已确认/失败状态，关闭/切页草稿保留、刷新清除写明。
+- AI请求附带取消信号和请求身份；关闭/换查询使旧响应失效，中文输入法Enter不触发。保留生成结果供重新打开，修改名称即清旧预览；已有创建草稿时明确显示“替换草稿并填入”。实际能力文案改为生成/审核/保存/复制，自定义模板不误称可以直接部署。
+- 删除确认固定模板名称、busy、防重复，失败留窗原位重试；离页后清理窗口，写入完成仍可在页面查看结果。详情增加共用copyText真实复制、失败反馈和焦点返回。筛选q/source/category/favorites进入URL，输入只替换当前历史项，页面缓存不读取或改写其它路由查询。
+- 参考实际经代理读取的WAI-ARIA Modal Dialog官方模式：https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/ ，用于焦点回归、键盘关闭与工作流中的焦点目标；原始HTML和文本保存round18-wai-dialog.*。本轮扩展代码原生表单，复用已生成applications插画，不制作无必要位图。
+- 初轮浏览器夹具在preview传输初始化之前替换fetch，导致读取了原4张示例卡而非2张测试卡，9项因此失败；改为预览启动后安装夹具，桌面9/9通过。新增撤销/校验后四配置与旧部署/资源/视觉回归正在进行。新增异步finally、复制迟到、删除离页、撤销回归后单测2文件33项通过；终验随后补充。
+
+- 终验：四配置108项全部通过（新工作区40项、部署40项、资源/旧市场12项、视觉资产16项）。前端114文件/878项通过。生产构建6.46秒成功，无构建警告。
+- 新增真实Chrome→鉴权Fastify→隔离SQLite演练，5组通过：无效Compose拒绝且原记录不变；关闭恢复草稿后修正保存并保留envSchema；真实剪贴板保持配置原文；搜索来源刷新恢复；确认删除和清空/撤销/新建。pageerror为0，未执行Docker部署或真实LLM调用，脚本与结果在round18-live-marketplace.*。
+- 人工复查桌面和手机编辑、手机详情截图。手机Compose输入使用16px字号，避免小字号输入触发自动放大；补验移动布局和撤销后再记录最终截图。
+
+- 最终移动布局/撤销四配置8/8补验通过；字体调整后重建生产成功（5.29秒），真实5组演练再次通过。ESLint零错误，3条旧夹具警告。最终截图保存为assets/2026-11-market-workspace-{editor-desktop,editor-mobile,detail-mobile}.webp并人工复查。证据round18-mobile-final.log、round18-frontend-full.log、round18-live-marketplace-final.log；diff检查通过。

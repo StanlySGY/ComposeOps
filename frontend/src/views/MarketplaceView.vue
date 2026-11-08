@@ -8,9 +8,10 @@
 <div class="page-actions page-actions-market">
         <button @click="openAgentRecommend" class="btn-secondary"><Bot class="w-4 h-4" />让 Agent 推荐</button>
         <button @click="openAiDiscover" class="btn-secondary" :disabled="aiDiscovering"><Sparkles class="w-4 h-4" :class="{ 'animate-pulse': aiDiscovering }" />{{ aiDiscovering ? 'AI 查找中...' : 'AI 找应用' }}</button>
-        <button @click="showCreateModal = true" class="btn-primary">
+        <button @click="openCreate" class="btn-primary" :disabled="savingTemplate">
           <span class="icon">+</span>
           创建模板
+          <span v-if="hasCreateDraft" class="market-draft-dot" aria-label="有未保存草稿" />
         </button>
       </div>
       </div>
@@ -19,15 +20,19 @@
 
     <button v-if="lastDeployment" class="market-last-deploy" @click="restoreDeployment"><Rocket :size="16" /><span>查看上次部署 · {{ lastDeployment.template.name }}<small>{{ lastDeployment.record.context.hostName }} · {{ lastDeployment.record.context.projectName }}</small></span><span aria-hidden="true">→</span></button>
 
+    <p v-if="saveNotice" class="market-write-notice" :data-state="saveNotice.state" :role="saveNotice.state === 'error' ? 'alert' : 'status'"><LoaderCircle v-if="saveNotice.state === 'pending'" :size="15" class="animate-spin" /><span>{{ saveNotice.message }}</span><button v-if="saveNotice.state !== 'pending'" class="icon-btn" aria-label="关闭模板保存提示" @click="saveNotice = null"><X :size="14" /></button></p>
+
+    <p v-if="deleteNotice" class="market-write-notice" :data-state="deleteNotice.state" :role="deleteNotice.state === 'error' ? 'alert' : 'status'"><LoaderCircle v-if="deleteNotice.state === 'pending'" :size="15" class="animate-spin" /><span>{{ deleteNotice.message }}</span><button v-if="deleteNotice.state !== 'pending'" class="icon-btn" aria-label="关闭模板删除提示" @click="deleteNotice = null"><X :size="14" /></button></p>
+
     <section class="market-browser" aria-label="查找应用模板">
       <div class="filter-bar">
         <div class="search-box">
           <Search class="search-icon" aria-hidden="true" />
-          <input v-model="searchQuery" type="text" aria-label="搜索应用模板" placeholder="搜索应用名称或用途…" class="input search-input" @input="handleSearch" />
+          <input v-model="searchQuery" type="text" aria-label="搜索应用模板" placeholder="搜索应用名称或用途…" maxlength="200" class="input search-input" @input="handleSearch" />
           <button v-if="searchQuery" class="search-clear" aria-label="清空模板搜索" @click="clearSearch"><X class="h-4 w-4" /></button>
         </div>
-        <select v-model="selectedCategory" @change="loadTemplates" class="input filter-select" aria-label="筛选模板分类">
-          <option value="all">全部分类</option>
+        <select v-model="selectedCategory" @change="changeFilters" class="input filter-select" aria-label="筛选模板分类">
+          <option value="all">全部分类</option><option v-if="selectedCategory !== 'all' && !stats.categories.includes(selectedCategory)" :value="selectedCategory">{{ categoryLabel(selectedCategory) }}</option>
           <option v-for="cat in stats.categories" :key="cat" :value="cat">{{ categoryLabel(cat) }}</option>
         </select>
       </div>
@@ -35,7 +40,7 @@
         <div class="source-filters" role="group" aria-label="筛选模板来源">
           <button class="scope-chip" :aria-pressed="selectedSource === 'all'" @click="filterBySource('all')">全部模板</button>
           <button class="scope-chip" :aria-pressed="selectedSource === 'builtin'" @click="filterBySource('builtin')">内置模板 <span v-if="statsLoaded">{{ stats.totalBuiltin }}</span></button>
-          <button v-if="stats.communityAvailable" class="scope-chip" :aria-pressed="selectedSource === 'community'" @click="filterBySource('community')">社区模板 <span v-if="statsLoaded">{{ stats.totalCommunity }}</span></button>
+          <button v-if="stats.communityAvailable || selectedSource === 'community'" class="scope-chip" :aria-pressed="selectedSource === 'community'" @click="filterBySource('community')">社区模板 <span v-if="statsLoaded">{{ stats.totalCommunity }}</span></button>
           <button class="scope-chip" :aria-pressed="selectedSource === 'custom'" @click="filterBySource('custom')">自定义模板 <span v-if="statsLoaded">{{ stats.totalCustom }}</span></button>
         </div>
         <button class="scope-chip favorites-filter" :aria-pressed="onlyFavorites" @click="filterFavorites"><Star class="h-3.5 w-3.5" :fill="onlyFavorites ? 'currentColor' : 'none'" />我的收藏 <span v-if="statsLoaded">{{ stats.totalFavorites }}</span></button>
@@ -47,7 +52,7 @@
       <button type="button" class="ml-2 underline underline-offset-2" @click="loadStats">重试统计</button>
     </p>
     <div class="market-results" role="status" aria-live="polite">
-      <span>{{ loading ? '正在查找模板…' : `找到 ${filteredTemplates.length} 个模板` }}<span v-if="selectedCategory !== 'all'"> · {{ categoryLabel(selectedCategory) }}</span></span>
+      <span>{{ loading ? '正在查找模板…' : error ? '模板列表暂不可用' : `找到 ${filteredTemplates.length} 个模板` }}<span v-if="selectedCategory !== 'all'"> · {{ categoryLabel(selectedCategory) }}</span></span>
       <button v-if="hasFilters" class="btn-ghost" @click="clearFilters">重置筛选</button>
       <span v-else-if="statsLoaded && !stats.communityAvailable" class="market-source-note">内置与自定义模板</span>
     </div>
@@ -107,14 +112,14 @@
           <button
             v-if="isCustomTemplate(template)"
             @click="editTemplate(template)"
-            class="btn-secondary btn-edit"
+            class="btn-secondary btn-edit" :disabled="savingTemplate"
           >
             编辑
           </button>
           <button
             v-if="isCustomTemplate(template)"
-            @click="deleteTemplate(template.id)"
-            class="btn-ghost btn-delete"
+            @click="deleteTemplate(template)"
+            class="btn-ghost btn-delete" :disabled="deletingTemplate"
           >
             删除
           </button>
@@ -124,57 +129,56 @@
 
     <!-- 创建/编辑模态框 -->
     <BaseModal :show="showCreateModal || !!editingTemplate" :close-disabled="savingTemplate" :title="editingTemplate ? '编辑模板' : '创建模板'" @close="closeModal" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
-          <div class="form-group">
-            <label for="market-template-name">模板名称</label>
-            <input id="market-template-name" v-model="formData.name" type="text" class="input" placeholder="例如: LNMP Stack" />
+          <div class="market-form-intro"><span><FileCode2 :size="21" /></span><div><h3>{{ editingTemplate ? '让配置继续完善' : '留一份可复用的配置' }}</h3><p>保存会校验 Compose，不会启动服务。关闭或切页会保留草稿，刷新后清除。</p></div></div>
+          <p v-if="draftRestored" class="market-draft-note" role="status">已恢复上次未保存的内容。</p>
+          <div class="market-form-toolbar"><span>{{ formData.envSchema?.length ? `${formData.envSchema.length} 个配置项随模板保留` : '草稿仅在本次页面会话内保留' }}</span><button class="btn-ghost" :disabled="savingTemplate" @click="resetDraft">{{ editingTemplate ? '恢复原内容' : '清空表单' }}</button></div>
+          <p v-if="resetMessage" class="market-draft-note" role="status">{{ resetMessage }}<button v-if="resetBackup" class="ml-2 underline underline-offset-2" :disabled="savingTemplate" @click="undoReset">撤销</button></p>
+          <div class="market-form-row">
+            <div class="form-group"><label for="market-template-name">模板名称</label><input id="market-template-name" v-model="formData.name" type="text" class="input" placeholder="例如：团队知识库" maxlength="200" :disabled="savingTemplate" :aria-invalid="!!formErrors.name" @input="formErrors.name = ''" /><p v-if="formErrors.name" class="field-error">{{ formErrors.name }}</p></div>
+            <div class="form-group"><label for="market-template-category">分类</label><input id="market-template-category" v-model="formData.category" type="text" class="input" placeholder="例如：Web" list="market-category-options" maxlength="50" :disabled="savingTemplate" /><datalist id="market-category-options"><option v-for="category in stats.categories" :key="category" :value="category">{{ categoryLabel(category) }}</option></datalist></div>
           </div>
-          <div class="form-group">
-            <label for="market-template-category">分类</label>
-            <input id="market-template-category" v-model="formData.category" type="text" class="input" placeholder="例如: Web" />
-          </div>
-          <div class="form-group">
-            <label for="market-template-description">描述</label>
-            <textarea id="market-template-description" v-model="formData.description" rows="3" class="input" placeholder="简要描述模板用途"></textarea>
-          </div>
-          <div class="form-group">
-            <label for="market-template-compose">Compose 内容</label>
-            <textarea id="market-template-compose" v-model="formData.defaultCompose" rows="10" class="input" placeholder="version: '3'..."></textarea>
-          </div>
+          <div class="form-group"><label for="market-template-description">描述</label><textarea id="market-template-description" v-model="formData.description" rows="2" class="input" placeholder="写下用途，方便下次找到" maxlength="500" :disabled="savingTemplate"></textarea></div>
+          <div class="form-group market-compose-editor"><div><label for="market-template-compose">Compose 内容</label><span>YAML · {{ formData.defaultCompose.split('\n').length }} 行</span></div><textarea id="market-template-compose" v-model="formData.defaultCompose" rows="10" class="input" placeholder="services:&#10;  app:&#10;    image: nginx:stable" spellcheck="false" :disabled="savingTemplate" :aria-invalid="!!formErrors.defaultCompose" @input="formErrors.defaultCompose = ''"></textarea><p v-if="formErrors.defaultCompose" class="field-error">{{ formErrors.defaultCompose }}</p></div>
+          <details v-if="formData.envSchema?.length" class="market-variable-summary"><summary>随模板保留的配置项 · {{ formData.envSchema.length }}</summary><dl><div v-for="field in formData.envSchema" :key="field.key"><dt>{{ field.label || field.key }}<code>{{ field.key }}</code></dt><dd>{{ field.secret || field.type === 'password' ? '私密配置' : field.default || '未设默认值' }}</dd></div></dl></details>
+          <p v-if="saveError" class="alert-error" role="alert">{{ saveError }}</p>
 
       <template #footer>
-          <button @click="closeModal" class="btn-secondary btn-cancel">取消</button>
+          <button @click="closeModal" class="btn-secondary btn-cancel" :disabled="savingTemplate">取消</button>
           <button @click="saveTemplate" class="btn-primary btn-save" :disabled="savingTemplate">{{ savingTemplate ? '保存中…' : '保存' }}</button>
 
       </template>
     </BaseModal>
 
     <!-- AI 发现应用模态框 -->
-    <BaseModal :show="showAiModal" title="AI 找应用" @close="showAiModal = false" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
-          <p class="text-xs text-surface-400 mb-3">输入应用名,Agent 会联网检索官方部署方式并生成可一键部署的 Compose 模板草稿,确认后保存为自定义模板。</p>
+    <BaseModal :show="showAiModal" title="AI 找应用" @close="closeAiModal" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
+          <p class="text-xs text-surface-400 mb-3">输入应用名，AI 会检索部署资料并生成 Compose 草稿。请核对镜像、端口与数据目录；保存后可复制配置使用，自定义模板暂不提供直接部署。</p>
           <div class="form-group">
             <label for="market-ai-query">应用名称</label>
-            <input id="market-ai-query" v-model="aiQuery" type="text" class="input" placeholder="例如: umami / immich / gitea" @keydown.enter="runAiDiscover" />
+            <input id="market-ai-query" v-model="aiQuery" type="text" class="input" placeholder="例如：umami / immich / gitea" maxlength="120" @keydown.enter="runAiDiscover" />
           </div>
+          <div v-if="aiDiscovering" class="market-ai-progress" role="status"><LoaderCircle :size="18" class="animate-spin" /><div><strong>正在整理部署草稿</strong><p>完成后可先阅读，再决定是否保存。关闭窗口会停止等待。</p></div></div>
+          <p v-if="aiError" class="alert-error" role="alert">{{ aiError }}</p>
           <div v-if="aiPreview" class="form-group">
             <label>生成结果预览(确认后保存为自定义模板)</label>
             <div class="rounded-lg border border-surface-700/60 bg-surface-950/50 p-3 text-xs space-y-2">
               <p><b class="text-surface-200">{{ aiPreview.name }}</b> <span class="ml-1 text-surface-400">{{ aiPreview.category }}</span></p>
               <p class="text-surface-400">{{ aiPreview.description }}</p>
               <p v-if="aiPreview.envSchema?.length" class="text-surface-400">需要 {{ aiPreview.envSchema.length }} 个配置项:{{ aiPreview.envSchema.map((item) => item.key).join(', ') }}</p>
-              <pre class="probe-output max-h-40">{{ aiPreview.defaultCompose }}</pre>
+              <div class="market-code-heading"><span>Compose 草稿</span><button class="btn-ghost" :disabled="copyingCompose" @click="copyCompose(aiPreview)"><Copy :size="13" />{{ copyingCompose ? '复制中…' : '复制配置' }}</button></div><pre class="probe-output max-h-52" tabindex="0" aria-label="AI 生成的 Compose 草稿">{{ aiPreview.defaultCompose }}</pre>
+              <p v-if="copyFeedback" role="status">{{ copyFeedback }}</p>
             </div>
           </div>
 
       <template #footer>
-          <button @click="showAiModal = false" class="btn-secondary btn-cancel">取消</button>
+          <button @click="closeAiModal" class="btn-secondary btn-cancel">取消</button>
           <button v-if="!aiPreview" @click="runAiDiscover" class="btn-primary btn-save" :disabled="aiDiscovering || !aiQuery.trim()">{{ aiDiscovering ? '生成中…' : '生成模板' }}</button>
-          <button v-else @click="useAiTemplate" class="btn-primary btn-save">填入创建表单</button>
+          <button v-else @click="useAiTemplate" class="btn-primary btn-save" :disabled="savingTemplate">{{ hasCreateDraft ? '替换草稿并填入' : '填入创建表单' }}</button>
 
       </template>
     </BaseModal>
 
     <!-- 查看模板模态框 -->
-    <BaseModal :show="!!viewingTemplate" :title="viewingTemplate?.name || '模板详情'" @close="viewingTemplate = null" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
+    <BaseModal :show="!!viewingTemplate" :title="viewingTemplate?.name || '模板详情'" @close="closeDetails" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
           <div class="template-meta">
             <span class="action-label category-badge">{{ categoryLabel(viewingTemplate.category) }}</span>
             <span class="action-label source-badge">{{ getSourceLabel(viewingTemplate.id) }}</span>
@@ -182,11 +186,13 @@
           <p class="template-description">{{ viewingTemplate.description || '暂无描述' }}</p>
           <div v-if="viewingTemplate.author" class="template-author">作者: {{ viewingTemplate.author }}</div>
           <div class="compose-preview">
-            <h3>Compose 配置</h3>
-            <pre><code>{{ viewingTemplate.defaultCompose || viewingTemplate.compose }}</code></pre>
+            <div class="market-code-heading"><h3>Compose 配置</h3><button class="btn-ghost" :disabled="copyingCompose" @click="copyCompose(viewingTemplate)"><Copy :size="13" />{{ copyingCompose ? '复制中…' : '复制配置' }}</button></div>
+            <pre tabindex="0" aria-label="模板 Compose 配置"><code>{{ viewingTemplate.defaultCompose || viewingTemplate.compose }}</code></pre>
           </div>
+          <p v-if="copyFeedback" class="market-draft-note" role="status">{{ copyFeedback }}</p>
+          <p v-if="!isDeployableTemplate(viewingTemplate)" class="market-template-help">此模板用于保存与复用配置。可复制 Compose，确认变量后在目标项目中使用。</p>
 
-      <template #footer><button class="btn-secondary" @click="viewingTemplate = null">返回列表</button><button v-if="isDeployableTemplate(viewingTemplate)" class="btn-primary" @click="openDeploy(viewingTemplate)"><Rocket class="h-4 w-4" />配置并部署</button></template>
+      <template #footer><button class="btn-secondary" @click="closeDetails">返回列表</button><button v-if="isDeployableTemplate(viewingTemplate)" class="btn-primary" @click="openDeploy(viewingTemplate)"><Rocket class="h-4 w-4" />配置并部署</button></template>
     </BaseModal>
 
     <BlueprintDeployModal v-if="deployTarget" :template="deployTarget" :record="deployRecord" :return-label="deployReturnTemplate ? '返回详情' : '取消'" @close="closeDeploy" @record="rememberDeployment" @deployed="onDeployed" />
@@ -194,12 +200,12 @@
     <ConfirmDialog
       :show="showDeleteDialog"
       title="删除自定义模板"
-      message="确定删除此模板？"
+      :message="`确定删除模板“${pendingDelete?.name || ''}”？已部署的项目不受影响。`"
       tone="danger"
-      confirm-text="删除"
+      :confirm-text="deletingTemplate ? '删除中…' : '删除'" :busy="deletingTemplate"
       @confirm="confirmDelete"
-      @cancel="showDeleteDialog = false; pendingDeleteId = null"
-    />
+      @cancel="cancelDelete"
+    ><p v-if="deleteError" class="alert-error mt-3" role="alert">{{ deleteError }}</p></ConfirmDialog>
   </div>
 </template>
 
@@ -207,7 +213,10 @@
 import Skeleton from '../components/common/Skeleton.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import BlueprintDeployModal from '../components/marketplace/BlueprintDeployModal.vue';
-import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useMarketplaceEditor } from '../composables/useMarketplaceEditor.js';
+import { copyText } from '../lib/clipboard.js';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -215,13 +224,15 @@ import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import SceneIllustration from '../components/common/SceneIllustration.vue';
 import EmptyState from '../components/common/EmptyState.vue';
-import { Bot, Box, Database, FolderOpen, Globe, Wrench, Search, Star, X, Rocket, Sparkles } from 'lucide-vue-next';
+import { Bot, Box, Database, FolderOpen, Globe, Wrench, Search, Star, X, Rocket, Sparkles, Copy, FileCode2, LoaderCircle } from 'lucide-vue-next';
 
 const toast = useToastStore();
 const { openAgent, updateAgentContext } = useAgentConsole();
 
 let active = true;
-const savingTemplate = ref(false);
+const route = useRoute(); const router = useRouter();
+const { showCreateModal, editingTemplate, formData, savingTemplate, saveError, formErrors, saveNotice, draftRestored, hasCreateDraft,
+  openCreate, editTemplate, closeModal, saveTemplate, adoptTemplate, resetBackup, resetMessage, resetDraft, undoReset } = useMarketplaceEditor(() => Promise.all([loadTemplates(), loadStats()]));
 const loading = ref(false);
 const error = ref('');
 const stats = ref({ totalBuiltin: 0, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: [], communityAvailable: false, communityMessage: '' });
@@ -230,37 +241,66 @@ const statsLoading = ref(false);
 const statsError = ref('');
 let statsRequestId = 0;
 const filteredTemplates = ref([]);
-const searchQuery = ref('');
-const selectedSource = ref('all');
-const selectedCategory = ref('all');
-const onlyFavorites = ref(false);
+function readFilters(query = {}) {
+  return { q: typeof query.q === 'string' ? query.q.slice(0, 200) : '',
+    source: ['builtin', 'community', 'custom'].includes(query.source) ? query.source : 'all',
+    category: typeof query.category === 'string' ? query.category.slice(0, 50) : 'all', favorites: query.favorites === '1' };
+}
+const initialFilters = readFilters(route?.query);
+const searchQuery = ref(initialFilters.q);
+const selectedSource = ref(initialFilters.source);
+const selectedCategory = ref(initialFilters.category);
+const onlyFavorites = ref(initialFilters.favorites);
+const onMarketRoute = () => route?.name === 'marketplace' || route?.fullPath?.split('?')[0] === '/marketplace';
+function syncFilterQuery() {
+  if (!active || !onMarketRoute()) return;
+  const query = { ...route.query };
+  for (const [key, value] of Object.entries({ q: searchQuery.value || undefined, source: selectedSource.value === 'all' ? undefined : selectedSource.value,
+    category: selectedCategory.value === 'all' ? undefined : selectedCategory.value, favorites: onlyFavorites.value ? '1' : undefined })) {
+    if (value === undefined) delete query[key]; else query[key] = value;
+  }
+  // 输入细化只替换当前历史项，离开后返回能恢复完整筛选。
+  if (router.replace) void router.replace({ query });
+}
+function changeFilters() { syncFilterQuery(); void loadTemplates(); }
+watch(() => route?.fullPath, () => {
+  if (!onMarketRoute()) return;
+  const next = readFilters(route.query);
+  if (next.q === searchQuery.value && next.source === selectedSource.value && next.category === selectedCategory.value && next.favorites === onlyFavorites.value) return;
+  searchQuery.value = next.q; selectedSource.value = next.source; selectedCategory.value = next.category; onlyFavorites.value = next.favorites;
+  void loadTemplates();
+});
 const favoritePending = ref(new Set());
 const hasFilters = computed(() => searchQuery.value || selectedSource.value !== 'all' || selectedCategory.value !== 'all' || onlyFavorites.value);
 function filterBySource(source) {
   selectedSource.value = source;
-  void loadTemplates();
+  changeFilters();
 }
 function filterFavorites() {
   onlyFavorites.value = !onlyFavorites.value;
-  void loadTemplates();
+  changeFilters();
 }
 
-const showCreateModal = ref(false);
-const editingTemplate = ref(null);
 const aiDiscovering = ref(false);
 const showAiModal = ref(false);
 const aiQuery = ref('');
 const aiPreview = ref(null);
 const viewingTemplate = ref(null);
-const formData = ref({
-  name: '',
-  category: '',
-  description: '',
-  defaultCompose: ''
-});
 
 const showDeleteDialog = ref(false);
-const pendingDeleteId = ref(null);
+const pendingDelete = ref(null); const deletingTemplate = ref(false); const deleteError = ref(''); const deleteNotice = ref(null);
+const aiError = ref(''); let aiRequestId = 0; let aiController; let aiPreviewQuery = '';
+const copyingCompose = ref(false); const copyFeedback = ref(''); let copyRequestId = 0; let detailTrigger;
+function clearCopyFeedback() { copyRequestId++; copyingCompose.value = false; copyFeedback.value = ''; }
+async function copyCompose(template) {
+  if (copyingCompose.value) return;
+  const id = ++copyRequestId; copyingCompose.value = true; copyFeedback.value = '';
+  try {
+    await copyText(template.defaultCompose || template.compose || '');
+    if (active && id === copyRequestId) copyFeedback.value = 'Compose 配置已复制';
+  } catch { if (active && id === copyRequestId) copyFeedback.value = '复制失败，请选择配置文本后手动复制。'; }
+  finally { if (id === copyRequestId) copyingCompose.value = false; }
+}
 
 async function loadStats() {
   if (!active) return;
@@ -312,12 +352,13 @@ function clearFilters() {
   selectedCategory.value = 'all';
   selectedSource.value = 'all';
   onlyFavorites.value = false;
-  void loadTemplates();
+  changeFilters();
 }
 
 let searchTimeout = null;
 function handleSearch(event) {
   if (event?.isComposing) return;
+  syncFilterQuery();
   clearTimeout(searchTimeout);
   templatesRequestId++;
   error.value = '';
@@ -340,72 +381,43 @@ async function toggleFavorite(templateId) {
 }
 
 function viewTemplate(template) {
-  viewingTemplate.value = template;
+  clearCopyFeedback(); detailTrigger = document.activeElement; viewingTemplate.value = template;
+}
+function closeDetails() {
+  viewingTemplate.value = null; clearCopyFeedback();
+  void nextTick(() => { if (active && detailTrigger && document.contains(detailTrigger)) detailTrigger.focus({ preventScroll: true }); });
 }
 
-function editTemplate(template) {
-  editingTemplate.value = template;
-  formData.value = {
-    name: template.name,
-    category: template.category,
-    description: template.description || '',
-    defaultCompose: template.defaultCompose || ''
-  };
+
+function deleteTemplate(template) {
+  if (deletingTemplate.value) return;
+  pendingDelete.value = { id: template.id, name: template.name }; deleteError.value = ''; showDeleteDialog.value = true;
 }
-
-async function saveTemplate() {
-  if (savingTemplate.value) return;
-  if (!formData.value.name.trim()) {
-    toast.error('模板名称不能为空');
-    return;
-  }
-  if (!formData.value.defaultCompose.trim()) {
-    toast.error('Compose 内容不能为空');
-    return;
-  }
-
-  savingTemplate.value = true;
-  try {
-    if (editingTemplate.value) {
-      await api.updateMarketplaceTemplate(editingTemplate.value.id, formData.value);
-    } else {
-      await api.createMarketplaceTemplate(formData.value);
-    }
-
-    toast.success(editingTemplate.value ? '模板已更新' : '模板已创建');
-    savingTemplate.value = false;
-    closeModal();
-    await Promise.all([loadTemplates(), loadStats()]);
-  } catch (err) {
-    toast.error(err);
-  } finally { savingTemplate.value = false; }
+function cancelDelete() {
+  if (deletingTemplate.value) return;
+  showDeleteDialog.value = false; pendingDelete.value = null; deleteError.value = '';
 }
-
-function deleteTemplate(id) {
-  pendingDeleteId.value = id;
-  showDeleteDialog.value = true;
-}
-
 async function confirmDelete() {
-  const id = pendingDeleteId.value;
-  showDeleteDialog.value = false;
-
+  if (deletingTemplate.value || !pendingDelete.value) return;
+  const target = { ...pendingDelete.value }; deletingTemplate.value = true; deleteError.value = '';
+  deleteNotice.value = { state: 'pending', message: `正在删除模板“${target.name}”…` };
   try {
-    await api.deleteMarketplaceTemplate(id);
-    toast.success('模板已删除');
-    await Promise.all([loadTemplates(), loadStats()]);
-  } catch (err) {
-    toast.error(err);
-  } finally {
-    pendingDeleteId.value = null;
-  }
+    await api.deleteMarketplaceTemplate(target.id);
+    filteredTemplates.value = filteredTemplates.value.filter(item => item.id !== target.id); templatesRequestId++;
+    deleteNotice.value = { state: 'success', message: `模板“${target.name}”已删除` };
+    showDeleteDialog.value = false; pendingDelete.value = null;
+    if (active) toast.success(deleteNotice.value.message);
+    void Promise.all([loadTemplates(), loadStats()]);
+  } catch (error) {
+    deleteError.value = error?.message || '删除失败，请重试。';
+    deleteNotice.value = { state: 'error', message: `模板“${target.name}”未删除：${deleteError.value}` };
+  } finally { deletingTemplate.value = false; }
 }
 
-function openAiDiscover() {
-  aiQuery.value = '';
-  aiPreview.value = null;
-  showAiModal.value = true;
-}
+function cancelAiRequest() { aiRequestId++; aiController?.abort(); aiController = null; aiDiscovering.value = false; }
+function closeAiModal() { cancelAiRequest(); showAiModal.value = false; clearCopyFeedback(); }
+function openAiDiscover() { clearCopyFeedback(); showAiModal.value = true; }
+watch(() => aiQuery.value.trim(), () => { cancelAiRequest(); aiPreview.value = null; aiPreviewQuery = ''; aiError.value = ''; clearCopyFeedback(); });
 /** 让 Agent 推荐 → 打开 Agent 抽屉,预填一段带模板/变量上下文的需求描述。 */
 function openAgentRecommend() {
   const list = (filteredTemplates.value || []).slice(0, 30);
@@ -425,40 +437,28 @@ function openAgentRecommend() {
     },
   }));
 }
-async function runAiDiscover() {
-  if (!aiQuery.value.trim() || aiDiscovering.value) return;
-  aiDiscovering.value = true;
+async function runAiDiscover(event) {
+  if (event?.isComposing || event?.keyCode === 229 || !aiQuery.value.trim() || aiDiscovering.value) return;
+  const query = aiQuery.value.trim(); const id = ++aiRequestId; aiController = new AbortController();
+  aiDiscovering.value = true; aiError.value = ''; aiPreview.value = null; clearCopyFeedback();
+  const current = () => active && showAiModal.value && id === aiRequestId && query === aiQuery.value.trim();
   try {
-    const { template } = await api.discoverAiTemplate(aiQuery.value.trim());
-    aiPreview.value = template;
-  } catch (error) {
-    toast.error(error);
-  } finally {
-    aiDiscovering.value = false;
-  }
+    const { template } = await api.discoverAiTemplate(query, aiController.signal);
+    if (!current()) return;
+    if (!template?.defaultCompose) throw new Error('未收到有效的 Compose 草稿，请重试。');
+    aiPreview.value = template; aiPreviewQuery = query;
+  } catch (error) { if (current()) aiError.value = error?.message || '生成失败，请重试。'; }
+  finally { if (id === aiRequestId) { aiDiscovering.value = false; aiController = null; } }
 }
 function useAiTemplate() {
-  if (!aiPreview.value) return;
-  formData.value = {
-    name: aiPreview.value.name || '',
-    category: aiPreview.value.category || 'Custom',
-    description: aiPreview.value.description || '',
-    defaultCompose: aiPreview.value.defaultCompose || '',
-  };
-  showAiModal.value = false;
-  showCreateModal.value = true;
+  if (!aiPreview.value || aiPreviewQuery !== aiQuery.value.trim() || !adoptTemplate(aiPreview.value)) return;
+  closeAiModal();
 }
 
-function closeModal() {
-  if (savingTemplate.value) return;
-  showCreateModal.value = false;
-  editingTemplate.value = null;
-  formData.value = { name: '', category: '', description: '', defaultCompose: '' };
-}
 
 function clearSearch() {
   searchQuery.value = '';
-  void loadTemplates();
+  changeFilters();
 }
 function categoryLabel(category) {
   return { Web: '网站与代理', Network: '网络与代理', Database: '数据库与缓存', DevOps: '运维工具', Tools: '实用工具', Media: '媒体与文件', AI: '智能应用', Custom: '自定义', Monitoring: '监控' }[category] || category || '未分类';
@@ -519,6 +519,9 @@ onActivated(() => { active = true; if (!activatedOnce) { activatedOnce = true; r
 function stopPendingReads() {
   active = false;
   viewingTemplate.value = null;
+  showDeleteDialog.value = false;
+  closeAiModal();
+  clearCopyFeedback();
   clearTimeout(searchTimeout);
   templatesRequestId++;
   statsRequestId++;
@@ -531,6 +534,18 @@ onBeforeUnmount(stopPendingReads);
 
 <style scoped>
 @reference '../style.css';
+.market-write-notice { @apply mb-3 flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-xs text-surface-300; }
+.market-write-notice > span { @apply flex-1 break-words; }.market-write-notice[data-state=error] { @apply border-amber-400/25 text-amber-200; }.market-write-notice[data-state=success] { @apply border-emerald-400/20 text-emerald-200; }
+.market-form-intro { @apply mb-1 flex items-start gap-3; }.market-form-intro > span { @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/5 text-emerald-300; }.market-form-intro h3 { @apply text-sm font-medium text-surface-100; }.market-form-intro p, .market-template-help { @apply mt-1 text-xs leading-5 text-surface-400; }
+.market-draft-note { @apply rounded-lg border border-emerald-400/15 bg-emerald-400/5 px-3 py-2 text-xs text-emerald-200; }
+.market-form-toolbar { @apply flex items-center justify-between gap-3 text-[11px] text-surface-500; }.market-form-toolbar button { @apply min-h-10 shrink-0; }.market-draft-dot { @apply h-1.5 w-1.5 rounded-full bg-white; }
+.market-form-row { @apply grid grid-cols-[2fr_1fr] gap-4; }.market-form-row .input { @apply min-h-11; }
+.market-compose-editor > div, .market-code-heading { @apply flex items-center justify-between gap-3; }.market-compose-editor > div > span { @apply text-[10px] text-surface-500; }.market-compose-editor textarea { @apply min-h-52 resize-y font-mono text-xs leading-6; tab-size: 2; }.market-compose-editor > div label { margin-bottom: 0; }.field-error { @apply mt-1 text-xs text-status-error; }
+.market-variable-summary { @apply rounded-lg border border-surface-800 px-3 py-2 text-xs; }.market-variable-summary summary { @apply min-h-8 cursor-pointer text-surface-300; }.market-variable-summary dl > div { @apply flex items-center justify-between gap-3 border-t border-surface-800 py-2; }.market-variable-summary dt { @apply text-surface-300; }.market-variable-summary code { @apply ml-2 text-[10px] text-surface-500; }.market-variable-summary dd { @apply max-w-40 break-words text-surface-400; }
+.market-ai-progress { @apply flex items-start gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-emerald-300; }.market-ai-progress strong { @apply text-xs font-medium; }.market-ai-progress p { @apply mt-1 text-xs leading-5 text-surface-400; }
+.market-code-heading { @apply mb-2 text-xs text-surface-400; }.market-code-heading h3 { margin: 0; }.market-code-heading button { @apply min-h-10; }
+@media (max-width: 480px) { .market-form-row { grid-template-columns: 1fr; gap: 0; } .market-compose-editor textarea { min-height: 13rem; font-size: 16px; line-height: 1.5; } }
+
 .market-last-deploy { @apply mb-5 flex w-full items-center gap-3 rounded-xl border border-emerald-400/15 bg-emerald-400/5 px-4 py-3 text-left text-xs text-emerald-200 transition-colors hover:border-emerald-400/35 hover:bg-emerald-400/10; }
 .market-last-deploy > span:first-of-type { @apply min-w-0 flex-1 break-words; }
 .market-last-deploy small { @apply mt-1 block text-[11px] text-surface-400; }
