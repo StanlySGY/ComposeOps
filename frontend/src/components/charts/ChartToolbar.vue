@@ -75,55 +75,67 @@ onBeforeUnmount(() => {
 <style scoped>
 .chart-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: .85rem;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #27272a;
+  border-bottom: 1px solid var(--color-surface-800);
 }
 
 .chart-controls {
   display: flex;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .chart-type-btn {
   padding: 0.5rem;
   border-radius: 0.375rem;
-  background: #18181b;
-  border: 1px solid #27272a;
-  color: #a1a1aa;
+  background: var(--color-surface-900);
+  border: 1px solid var(--color-surface-800);
+  color: var(--color-surface-400);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background .2s, color .2s, border-color .2s;
 }
 
 .chart-type-btn:hover {
-  background: #27272a;
-  color: #e4e4e7;
+  background: var(--color-surface-800);
+  color: var(--color-surface-100);
 }
 
 .chart-type-btn.active {
-  background: #38BDF8;
-  border-color: #38BDF8;
-  color: #fff;
+  background: rgb(16 185 129 / 12%);
+  border-color: rgb(52 211 153 / 45%);
+  color: var(--color-accent);
 }
+.chart-type-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
 .chart-stats {
-  display: flex;
-  gap: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  flex: 1 1 16rem;
+  gap: .75rem;
+  min-width: 0;
   font-size: 0.75rem;
 }
 
 .stat-item {
-  color: #a1a1aa;
+  color: var(--color-surface-400);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .stat-item strong {
-  color: #e4e4e7;
+  display: block;
+  margin-top: .25rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-surface-100);
 }
 
 .stat-item.current strong {
-  color: #38BDF8;
+  color: var(--color-accent);
 }
 
 .export-dropdown {
@@ -139,10 +151,10 @@ onBeforeUnmount(() => {
 .export-menu {
   position: absolute;
   top: calc(100% + 0.5rem);
-  left: 0;
+  right: 0;
   min-width: 10rem;
-  background: #18181b;
-  border: 1px solid #27272a;
+  background: var(--color-surface-900);
+  border: 1px solid var(--color-surface-700);
   border-radius: 0.375rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 20;
@@ -157,7 +169,7 @@ onBeforeUnmount(() => {
   padding: 0.75rem 1rem;
   background: transparent;
   border: none;
-  color: #e4e4e7;
+  color: var(--color-surface-100);
   font-size: 0.875rem;
   text-align: left;
   cursor: pointer;
@@ -165,11 +177,12 @@ onBeforeUnmount(() => {
 }
 
 .export-menu-item:hover {
-  background: #27272a;
+  background: var(--color-surface-800);
 }
 
 .export-icon {
   font-size: 1rem;
   line-height: 1;
 }
+@media (prefers-reduced-motion: reduce) { .chart-type-btn, .export-menu-item { transition: none; } }
 </style>

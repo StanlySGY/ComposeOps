@@ -6,9 +6,6 @@
         <h1 class="page-title">历史指标</h1>
         <p class="page-subtitle">查看容器资源趋势、异常点与告警规则</p>
       </div>
-      <div class="page-actions">
-        <button ref="alertModalTrigger" class="btn-primary" @click="showAlertModal = true"><Bell class="h-4 w-4" />配置告警</button>
-      </div>
     </div>
 
     <!-- Container Selector -->
@@ -86,30 +83,6 @@
         </div>
       </section>
 
-      <!-- Alerts -->
-      <section class="section-panel">
-        <div class="mb-3 flex items-center justify-between gap-3">
-          <div><h2 class="section-title">告警规则</h2><p class="mt-1 text-muted">只展示当前选中容器的规则</p></div>
-          <button class="icon-btn" :disabled="loading" @click="loadAlerts" aria-label="刷新告警规则">
-            <RefreshCw class="h-4 w-4" />
-          </button>
-        </div>
-        <p v-if="alertsError" class="alert-error" role="alert">{{ alertsError }}</p>
-        <EmptyState v-else-if="containerAlerts.length === 0" compact icon="Bell" title="暂无告警规则" description="为当前容器配置 CPU、内存或重启次数告警。" />
-        <div v-else class="space-y-2">
-          <div v-for="alert in containerAlerts" :key="alert.id"
-               class="panel-card flex flex-wrap items-center justify-between gap-3">
-            <div class="flex min-w-0 items-center gap-3">
-              <AlertTriangle :class="['h-4 w-4', getAlertColor(alert.metric)]" />
-              <div class="min-w-0">
-                <div class="truncate text-sm font-medium text-surface-200">{{ alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric }}</div>
-                <div class="mt-0.5 text-xs text-surface-400">阈值：{{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : ' 次' }}</div>
-              </div>
-            </div>
-            <button @click="deleteAlertRule(alert.id)" class="btn-ghost text-status-error hover:text-status-error btn-sm">删除</button>
-          </div>
-        </div>
-      </section>
     </div>
 
     <div v-else-if="!containerId" class="section-panel py-8">
@@ -118,43 +91,46 @@
         :description="!projects.length ? '先在服务总览纳管一个 Compose 项目，再回来查看容器趋势。' : projectId && !containers.length ? '当前项目暂时没有可用容器，请选择其他项目或启动服务。' : '选择项目和容器后，这里会展示资源趋势、异常点与告警规则。'" />
     </div>
 
-    <!-- Alert Config Modal -->
-    <div v-if="showAlertModal" class="modal-overlay" @click.self="closeAlertModal" @keydown="trapAlertModalTab">
-      <div ref="alertModalElement" class="modal-content" role="dialog" aria-modal="true" aria-labelledby="resource-alert-modal-title" tabindex="-1">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 id="resource-alert-modal-title" class="text-lg font-semibold text-surface-100">配置告警规则</h3>
-          <button @click="closeAlertModal" class="icon-btn" aria-label="关闭告警规则配置">
-            <X class="h-5 w-5" />
-          </button>
+    <section v-if="currentContainer" class="section-panel alert-rules-panel" aria-label="容器告警规则" :aria-busy="alertsLoading">
+      <header class="alert-rules-heading">
+        <div class="flex min-w-0 items-start gap-3">
+          <span class="alert-section-icon"><Bell class="h-4 w-4" /></span>
+          <div class="min-w-0"><h2 class="section-title">告警规则 <span v-if="alertsLoaded" class="count-badge">{{ containerAlerts.length }}</span></h2><p class="mt-1 text-muted break-all">{{ currentContainer.name }} · 持续关注资源变化</p></div>
         </div>
-        <div class="space-y-3">
-          <div>
-            <label for="resource-alert-metric" class="mb-1 block text-sm text-surface-300">指标类型</label>
-            <select id="resource-alert-metric" v-model="alertForm.metric" class="input">
-              <option v-for="m in alertMetricTypes" :key="m.key" :value="m.key">{{ m.label }}</option>
-            </select>
-          </div>
-          <div>
-            <label for="resource-alert-threshold" class="mb-1 block text-sm text-surface-300">阈值</label>
-            <input id="resource-alert-threshold" v-model.number="alertForm.threshold" type="number" class="input" placeholder="例如: 80" />
-          </div>
-          <div>
-            <label for="resource-alert-action" class="mb-1 block text-sm text-surface-300">动作</label>
-            <select id="resource-alert-action" v-model="alertForm.action" class="input">
-              <option v-for="a in alertActionOptions" :key="a.key" :value="a.key">{{ a.label }}</option>
-            </select>
-          </div>
+        <div class="flex items-center gap-2">
+          <button class="icon-btn" :disabled="alertsLoading || alertBusy" @click="loadAlerts" aria-label="刷新告警规则"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': alertsLoading }" /></button>
+          <button class="btn-primary btn-sm" :disabled="alertBusy" @click="openAlertModal"><Plus class="h-4 w-4" />配置告警</button>
         </div>
-        <div class="mt-4 flex gap-2">
-          <button @click="createAlertRule" :disabled="!alertForm.metric || alertForm.threshold == null || !Number.isFinite(Number(alertForm.threshold))" class="btn-primary flex-1">
-            创建规则
-          </button>
-          <button @click="closeAlertModal" class="btn-secondary flex-1">
-            取消
-          </button>
-        </div>
-      </div>
-    </div>
+      </header>
+      <div v-if="alertFeedback" ref="alertFeedbackElement" class="alert-success mt-3" role="status" tabindex="-1"><CheckCircle2 class="h-4 w-4 shrink-0" /><span>{{ alertFeedback }}</span></div>
+      <div v-if="alertsError" class="alert-error mt-3" role="alert"><span class="min-w-0 flex-1">{{ alertsError }}</span><button class="text-link shrink-0" :disabled="alertsLoading" @click="loadAlerts">重新读取规则</button></div>
+      <div v-if="alertsLoading && !alertsLoaded" class="flex items-center gap-2 py-8 text-sm text-surface-400" role="status"><Loader2 class="h-4 w-4 animate-spin" />正在读取告警规则…</div>
+      <EmptyState v-else-if="alertsLoaded && !containerAlerts.length && !alertsError" compact icon="Bell" title="暂无告警规则" description="为 CPU、内存或重启次数设定阈值，建议先从仅通知开始。" />
+      <ul v-if="containerAlerts.length" class="mt-4 grid gap-2" aria-label="当前容器告警规则">
+        <li v-for="alert in containerAlerts" :key="alert.id" class="alert-rule-card">
+          <div class="flex min-w-0 items-start gap-3">
+            <component :is="alert.metric === 'cpu' ? Cpu : alert.metric === 'memory' ? Database : RefreshCw" :class="['mt-0.5 h-4 w-4 shrink-0', getAlertColor(alert.metric)]" />
+            <div class="min-w-0"><h3 class="text-sm font-medium text-surface-200">{{ alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric }}</h3><p class="mt-1 text-xs text-surface-400 tabular-nums">阈值：{{ alert.threshold }}{{ alert.metric === 'cpu' || alert.metric === 'memory' ? '%' : ' 次' }}</p></div>
+          </div>
+          <span class="alert-action-label" :class="{ 'is-automatic': alert.action && alert.action !== 'notify' }"><Bell v-if="!alert.action || alert.action === 'notify'" class="h-3 w-3" /><Zap v-else class="h-3 w-3" />{{ actionLabel(alert.action) }}</span>
+          <button class="btn-ghost btn-sm text-status-error" :disabled="alertBusy" :aria-label="`删除${alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric}告警规则`" @click="selectDeleteAlert(alert)">删除</button>
+        </li>
+      </ul>
+      <p class="mt-3 text-xs leading-relaxed text-surface-500">规则由后台持续检查。通知投递使用设置中的已启用渠道。</p>
+    </section>
+
+    <BaseModal :show="showAlertModal" title="配置告警规则" size-class="sm:max-w-md" body-class="p-4 space-y-4" :close-disabled="alertCreating" @close="closeAlertModal">
+      <div class="alert-target-context"><span class="text-xs text-surface-400">应用到容器</span><strong class="mt-1 block break-all text-sm text-surface-100">{{ alertTarget?.containerName }}</strong><span class="mt-1 block break-all text-xs text-surface-400">{{ alertTarget?.projectName }}</span></div>
+      <fieldset :disabled="alertCreating" class="space-y-4">
+        <div><label for="resource-alert-metric" class="mb-1.5 block text-xs font-medium text-surface-300">指标类型</label><select id="resource-alert-metric" v-model="alertForm.metric" class="input"><option v-for="m in alertMetricTypes" :key="m.key" :value="m.key">{{ m.label }}</option></select></div>
+        <div><label for="resource-alert-threshold" class="mb-1.5 block text-xs font-medium text-surface-300">阈值{{ alertForm.metric === 'restart_count' ? '（次）' : '（%）' }}</label><input id="resource-alert-threshold" v-model.number="alertForm.threshold" type="number" min="0" :max="alertForm.metric === 'restart_count' ? undefined : 100" step="any" class="input" placeholder="例如：80" aria-describedby="resource-alert-threshold-help" :aria-invalid="!validAlertForm" /><p id="resource-alert-threshold-help" class="mt-1.5 text-xs text-surface-400">{{ alertForm.metric === 'restart_count' ? '填写大于或等于 0 的重启次数。' : '填写 0–100 之间的百分比。' }}</p></div>
+        <div><label for="resource-alert-action" class="mb-1.5 block text-xs font-medium text-surface-300">触发后执行</label><select id="resource-alert-action" v-model="alertForm.action" class="input"><option v-for="a in alertActionOptions" :key="a.key" :value="a.key">{{ a.label }}</option></select></div>
+      </fieldset>
+      <p class="alert-action-preview" :class="{ 'is-automatic': alertForm.action !== 'notify' }"><component :is="alertForm.action === 'notify' ? Bell : AlertTriangle" class="h-4 w-4 shrink-0" /><span>{{ alertForm.action === 'notify' ? '触发时记录告警并通过已启用渠道发送通知。' : alertForm.action === 'auto_restart' ? '触发时会自动重启匹配容器，可能短暂中断服务。' : '触发时会自动增加该服务的副本数，需要项目支持 Compose 编辑。' }}</span></p>
+      <p v-if="alertCreateError" class="alert-error" role="alert">{{ alertCreateError }}</p>
+      <template #footer><button class="btn-secondary" :disabled="alertCreating" @click="closeAlertModal">取消</button><button class="btn-primary" :disabled="alertCreating || !validAlertForm" :aria-busy="alertCreating" @click="createAlertRule"><Loader2 v-if="alertCreating" class="h-4 w-4 animate-spin" /><Plus v-else class="h-4 w-4" />创建规则</button></template>
+    </BaseModal>
+    <ConfirmDialog :show="!!deleteTarget" title="删除告警规则" :message="`确认删除 ${deleteTarget?.containerName || '当前容器'} 的${alertMetricTypes.find(m => m.key === deleteTarget?.metric)?.label || ''}规则？删除后该规则将停止检查。`" tone="danger" confirm-text="确认删除" :busy="alertDeleting" @cancel="closeDeleteAlert" @confirm="deleteAlertRule"><p v-if="alertDeleteError" class="text-status-error" role="alert">{{ alertDeleteError }}</p></ConfirmDialog>
   </div>
 </template>
 
@@ -163,13 +139,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 // embedded 模式供 MonitorView 的「历史指标」tab 复用,隐藏独立页头
 const props = defineProps({ embedded: { type: Boolean, default: false }, initialProjectId: { type: String, default: '' }, initialContainerId: { type: String, default: '' } });
-import { AlertTriangle, Bell, Cpu, Database, HardDrive, Minus, Network, RefreshCw, TrendingDown, TrendingUp, X } from 'lucide-vue-next';
+import { AlertTriangle, Bell, Cpu, Database, HardDrive, Minus, Network, RefreshCw, TrendingDown, TrendingUp, Plus, Loader2, CheckCircle2, Zap } from 'lucide-vue-next';
 import { api, metricsApi } from '../api/client.js';
 import { useToastStore } from '../stores/toast.js';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import InteractiveChart from '../components/charts/InteractiveChart.vue';
-import { useEscapeKey } from '../composables/useEscapeKey.js';
+import BaseModal from '../components/common/BaseModal.vue';
+import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 
 const projects = ref([]);
 const projectId = ref('');
@@ -179,9 +156,20 @@ const period = ref('5m');
 const metricsData = ref(null);
 const alerts = ref([]);
 const showAlertModal = ref(false);
-const alertModalTrigger = ref(null);
-const alertModalElement = ref(null);
-let previousAlertModalFocus = null;
+const alertTarget = ref(null);
+const deleteTarget = ref(null);
+const alertCreating = ref(false);
+const alertDeleting = ref(false);
+const alertBusy = computed(() => alertCreating.value || alertDeleting.value);
+const alertCreateError = ref('');
+const alertDeleteError = ref('');
+const alertsLoading = ref(false);
+const alertsLoaded = ref(false);
+const alertFeedback = ref('');
+const alertFeedbackElement = ref(null);
+let alertContextVersion = 0;
+let createRequestId = 0;
+let deleteRequestId = 0;
 const loading = ref(false);
 const error = ref('');
 const alertsError = ref('');
@@ -212,50 +200,64 @@ const alertActionOptions = [
   { key: 'scale', label: '自动扩容 (+1 副本)' }
 ];
 
-const ALERT_MODAL_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-function getAlertModalFocusable() {
-  return [...(alertModalElement.value?.querySelectorAll(ALERT_MODAL_FOCUSABLE) || [])]
-    .filter((element) => !element.closest('[hidden]') && element.getAttribute('aria-hidden') !== 'true');
+const validAlertForm = computed(() => {
+  const { metric, threshold, action } = alertForm.value;
+  const value = Number(threshold);
+  return alertMetricTypes.some(item => item.key === metric) && alertActionOptions.some(item => item.key === action)
+    && threshold !== null && String(threshold).trim() !== '' && Number.isFinite(value) && value >= 0
+    && (metric === 'restart_count' || value <= 100);
+});
+function actionLabel(action) {
+  return alertActionOptions.find(item => item.key === (action === 'restart' ? 'auto_restart' : action))?.label || '仅通知';
+}
+function alertContext() {
+  return { version: alertContextVersion, projectId: projectId.value, containerId: containerId.value,
+    containerName: currentContainer.value?.name || containerId.value,
+    projectName: projects.value.find(item => item.id === projectId.value)?.projectName || projectId.value };
+}
+function isAlertContextCurrent(context) {
+  return !disposed && context?.version === alertContextVersion && context.projectId === projectId.value && context.containerId === containerId.value;
+}
+function invalidateAlertActions() {
+  alertContextVersion += 1;
+  createRequestId += 1;
+  deleteRequestId += 1;
+  showAlertModal.value = false;
+  alertTarget.value = null;
+  deleteTarget.value = null;
+  alertCreating.value = false;
+  alertDeleting.value = false;
+  alertCreateError.value = '';
+  alertDeleteError.value = '';
+  alertFeedback.value = '';
+}
+function openAlertModal() {
+  if (!currentContainer.value || alertBusy.value) return;
+  alertTarget.value = alertContext();
+  alertForm.value = { metric: 'cpu', threshold: 80, action: 'notify' };
+  alertCreateError.value = '';
+  showAlertModal.value = true;
 }
 function closeAlertModal() {
-  showAlertModal.value = false;
+  if (!alertCreating.value) showAlertModal.value = false;
 }
-function trapAlertModalTab(event) {
-  if (event.key !== 'Tab') return;
-  const dialog = alertModalElement.value;
-  if (!dialog) return;
-  const focusable = getAlertModalFocusable();
-  if (!focusable.length) {
-    event.preventDefault();
-    dialog.focus();
-    return;
-  }
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
-    event.preventDefault();
-    first.focus();
-  }
+function selectDeleteAlert(rule) {
+  if (alertBusy.value) return;
+  deleteTarget.value = { ...rule, ...alertContext() };
+  alertDeleteError.value = '';
 }
-useEscapeKey({ active: showAlertModal, onClose: closeAlertModal, layer: 'modal', lockBody: true });
-watch(showAlertModal, async (visible) => {
-  if (visible) {
-    previousAlertModalFocus = document.activeElement;
-    await nextTick();
-    const dialog = alertModalElement.value;
-    if (!dialog) return;
-    const focusable = getAlertModalFocusable();
-    (focusable[0] || dialog).focus({ preventScroll: true });
-    return;
-  }
+function closeDeleteAlert() {
+  if (!alertDeleting.value) deleteTarget.value = null;
+}
+async function showAlertFeedback(message, context) {
+  if (!isAlertContextCurrent(context)) return;
+  alertFeedback.value = message;
   await nextTick();
-  const target = previousAlertModalFocus?.isConnected ? previousAlertModalFocus : alertModalTrigger.value;
-  previousAlertModalFocus = null;
-  target?.focus?.({ preventScroll: true });
-});
+  if (isAlertContextCurrent(context)) {
+    alertFeedbackElement.value?.focus({ preventScroll: true });
+    alertFeedbackElement.value?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }
+}
 
 const metricTypes = [
   { key: 'cpu', label: 'CPU', icon: Cpu, color: 'text-cyan-400', chartColor: '#06B6D4', unit: '%' },
@@ -420,38 +422,74 @@ async function loadMetrics() {
 
 async function loadAlerts() {
   const requestId = ++alertsRequestId;
+  alertsLoading.value = true;
+  alertsError.value = '';
   try {
     const res = await metricsApi.getAlerts();
     if (disposed || requestId !== alertsRequestId) return;
     alerts.value = res.alerts || [];
-    alertsError.value = '';
+    alertsLoaded.value = true;
   } catch (err) {
     if (!disposed && requestId === alertsRequestId) alertsError.value = `加载告警失败：${err.message}`;
+  } finally {
+    if (!disposed && requestId === alertsRequestId) {
+      alertsLoading.value = false;
+      await nextTick();
+      if (!disposed && requestId === alertsRequestId && alertFeedbackElement.value === document.activeElement) {
+        alertFeedbackElement.value?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      }
+    }
   }
 }
 
 async function createAlertRule() {
-  if (!containerId.value || !alertForm.value.metric || alertForm.value.threshold == null || !Number.isFinite(Number(alertForm.value.threshold))) return;
+  const context = alertTarget.value;
+  if (alertCreating.value || !validAlertForm.value || !isAlertContextCurrent(context)) return;
+  const requestId = ++createRequestId;
+  const payload = { container: context.containerId, ...alertForm.value };
+  alertCreating.value = true;
+  alertCreateError.value = '';
   try {
-    await metricsApi.createAlert({
-      container: containerId.value,
-      ...alertForm.value
-    });
+    const result = await metricsApi.createAlert(payload);
+    if (requestId !== createRequestId || !isAlertContextCurrent(context)) return;
+    // Apply acknowledged writes before refreshing; an unavailable list must not erase success.
+    alertsRequestId += 1;
+    if (result.rule) {
+      alerts.value = [...alerts.value.filter(item => item.id !== result.rule.id), result.rule];
+      alertsLoaded.value = true;
+    }
     showAlertModal.value = false;
-    await loadAlerts();
+    alertCreating.value = false;
     useToastStore().success('告警规则已创建');
+    await showAlertFeedback(`已为 ${context.containerName} 创建告警规则。`, context);
+    if (requestId === createRequestId && isAlertContextCurrent(context)) void loadAlerts();
   } catch (err) {
-    useToastStore().error(`创建告警规则失败：${err.message}`);
+    if (requestId === createRequestId && isAlertContextCurrent(context)) alertCreateError.value = `创建告警规则失败：${err.message}`;
+  } finally {
+    if (requestId === createRequestId) alertCreating.value = false;
   }
 }
 
-async function deleteAlertRule(ruleId) {
+async function deleteAlertRule() {
+  const context = deleteTarget.value;
+  if (alertDeleting.value || !context || !isAlertContextCurrent(context)) return;
+  const requestId = ++deleteRequestId;
+  alertDeleting.value = true;
+  alertDeleteError.value = '';
   try {
-    await metricsApi.deleteAlert(ruleId);
-    await loadAlerts();
+    await metricsApi.deleteAlert(context.id);
+    if (requestId !== deleteRequestId || !isAlertContextCurrent(context)) return;
+    alertsRequestId += 1;
+    alerts.value = alerts.value.filter(item => item.id !== context.id);
+    deleteTarget.value = null;
+    alertDeleting.value = false;
     useToastStore().success('告警规则已删除');
+    await showAlertFeedback(`已删除 ${context.containerName} 的告警规则。`, context);
+    if (requestId === deleteRequestId && isAlertContextCurrent(context)) void loadAlerts();
   } catch (err) {
-    useToastStore().error(`删除告警失败：${err.message}`);
+    if (requestId === deleteRequestId && isAlertContextCurrent(context)) alertDeleteError.value = `删除告警失败：${err.message}`;
+  } finally {
+    if (requestId === deleteRequestId) alertDeleting.value = false;
   }
 }
 
@@ -470,6 +508,8 @@ onMounted(async () => {
 });
 
 function onHostChanged() {
+  invalidateAlertActions();
+  alertsLoaded.value = false;
   projectsRequestId += 1;
   alertsRequestId += 1;
   invalidateMetrics();
@@ -485,12 +525,14 @@ function onHostChanged() {
 
 onBeforeUnmount(() => {
   disposed = true;
+  invalidateAlertActions();
   projectsRequestId += 1;
   alertsRequestId += 1;
   invalidateMetrics();
   window.removeEventListener('composeops:host-changed', onHostChanged);
 });
 
+watch([projectId, containerId], invalidateAlertActions, { flush: 'sync' });
 watch(selectedMetric, () => { if (containerId.value) void loadMetrics(); });
 </script>
 
@@ -528,33 +570,23 @@ watch(selectedMetric, () => { if (containerId.value) void loadMetrics(); });
   outline-offset: 2px;
 }
 
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.72);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  width: 100%;
-  max-width: 28rem;
-  max-height: min(85vh, 42rem);
-  overflow-y: auto;
-  background: var(--color-surface-950);
-  border: 1px solid var(--color-surface-800);
-  border-radius: 0.75rem;
-  padding: 1.5rem;
-  color: var(--color-surface-100);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-}
-
+.alert-rules-panel { margin-top: 1rem; }
+.alert-rules-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .85rem; }
+.alert-section-icon { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; flex-shrink: 0; border: 1px solid rgb(52 211 153 / 20%); border-radius: .75rem; color: var(--color-accent); background: rgb(16 185 129 / 8%); }
+.alert-rule-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--color-surface-800); border-radius: .75rem; background: color-mix(in srgb, var(--color-surface-950) 80%, transparent); transition: border-color .18s, background .18s; }
+.alert-rule-card:hover, .alert-rule-card:focus-within { border-color: var(--color-surface-600); background: var(--color-surface-900); }
+.alert-action-label { display: inline-flex; align-items: center; gap: .35rem; font-size: .7rem; color: var(--color-surface-400); }
+.alert-action-label.is-automatic { color: var(--color-status-warn); }
+.alert-target-context { border-left: 2px solid var(--color-accent); padding: .5rem .75rem; background: rgb(16 185 129 / 5%); border-radius: 0 .5rem .5rem 0; }
+#resource-alert-metric, #resource-alert-threshold, #resource-alert-action { width: 100%; }
+.alert-action-preview { display: flex; align-items: flex-start; gap: .65rem; padding: .8rem; border-radius: .6rem; background: var(--color-surface-900); font-size: .75rem; line-height: 1.7; color: var(--color-surface-400); }
+.alert-action-preview.is-automatic { background: rgb(245 158 11 / 8%); color: var(--color-status-warn); }
 @media (max-width: 639px) {
   .metric-card { gap: .55rem; padding: .7rem; }
-  .modal-content { padding: 1rem; }
+  .alert-rule-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .alert-action-label { grid-column: 1; padding-left: 1.75rem; }
+  .alert-rule-card > button { grid-column: 2; grid-row: 1 / 3; }
+  .alert-rules-heading > div:last-child { margin-left: auto; }
 }
+@media (prefers-reduced-motion: reduce) { .alert-rule-card, .metric-card { transition: none; } }
 </style>

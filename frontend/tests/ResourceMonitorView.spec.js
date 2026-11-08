@@ -20,10 +20,12 @@ import ResourceMonitorView from '../src/views/ResourceMonitorView.vue';
 
 let wrapper;
 let router;
+const offsetParentDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent');
 
 beforeEach(async () => {
-  vi.clearAllMocks();
-  api.getProjects.mockResolvedValue({ projects: [] });
+  vi.resetAllMocks();
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', { configurable: true, get: () => document.body });
+  api.getProjects.mockResolvedValue({ projects: [{ id: 'p1', projectName: 'web-stack', managed: true, containers: [{ id: 'c1', name: 'api', state: 'running' }] }] });
   metricsApi.getAlerts.mockResolvedValue({ alerts: [] });
   metricsApi.getContainerMetrics.mockResolvedValue({ data: { current: 25, unit: '%' } });
   metricsApi.getHistoricalMetrics.mockResolvedValue({ metrics: [] });
@@ -42,11 +44,12 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
   document.body.innerHTML = '';
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', offsetParentDescriptor);
 });
 
 async function mountView(props = {}) {
   wrapper = mount(ResourceMonitorView, {
-    props,
+    props: { initialProjectId: 'p1', initialContainerId: 'c1', ...props },
     attachTo: document.body,
     global: {
       plugins: [router],
@@ -60,7 +63,7 @@ async function mountView(props = {}) {
 describe('资源监控告警配置弹窗的键盘可访问性', () => {
   it('提供命名模态框语义及正确关联的表单标签，并在打开时聚焦弹窗内', async () => {
     await mountView();
-    const trigger = document.querySelector('button.btn-primary');
+    const trigger = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === '配置告警');
     trigger.focus();
     trigger.click();
     await flushPromises();
@@ -68,7 +71,7 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.getAttribute('aria-labelledby')).toBe('resource-alert-modal-title');
+    expect(dialog.getAttribute('aria-label')).toBe('配置告警规则');
     expect(document.querySelector('label[for="resource-alert-metric"]')).not.toBeNull();
     expect(document.querySelector('label[for="resource-alert-threshold"]')).not.toBeNull();
     expect(document.querySelector('label[for="resource-alert-action"]')).not.toBeNull();
@@ -77,7 +80,7 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
 
   it('循环 Tab 焦点，Escape 关闭并恢复触发按钮焦点与滚动', async () => {
     await mountView();
-    const trigger = document.querySelector('button.btn-primary');
+    const trigger = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === '配置告警');
     trigger.focus();
     trigger.click();
     await flushPromises();
@@ -173,19 +176,19 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
 
   it('点击遮罩或关闭按钮也会关闭弹窗并恢复焦点', async () => {
     await mountView();
-    const trigger = document.querySelector('button.btn-primary');
+    const trigger = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === '配置告警');
     trigger.focus();
     trigger.click();
     await flushPromises();
 
-    document.querySelector('.modal-overlay').click();
+    document.querySelector('.modal-backdrop').click();
     await flushPromises();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
 
     trigger.click();
     await flushPromises();
-    document.querySelector('button[aria-label="关闭告警规则配置"]').click();
+    document.querySelector('button[aria-label="关闭"]').click();
     await flushPromises();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
@@ -239,7 +242,7 @@ it('从实时容器进入历史自动定位同一项目和容器', async () => {
     { id: 'p1', managed: true, containers: [{ id: 'c1', name: 'one' }] },
     { id: 'p2', managed: true, containers: [{ id: 'c2', name: 'two' }] },
   ] });
-  await mountView({ embedded: true, initialContainerId: 'c2' });
+  await mountView({ embedded: true, initialProjectId: '', initialContainerId: 'c2' });
   expect(wrapper.get('#resource-monitor-project').element.value).toBe('p2');
   expect(wrapper.get('#resource-monitor-container').element.value).toBe('c2');
   expect(metricsApi.getContainerMetrics).toHaveBeenCalledWith('c2', 'cpu', '5m');

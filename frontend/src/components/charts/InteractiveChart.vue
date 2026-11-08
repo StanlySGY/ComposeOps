@@ -708,12 +708,10 @@ watch(() => props.data.length, () => {
 }
 
 .zoom-controls {
-  position: absolute;
-  top: 4.5rem;
-  right: 1rem;
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  justify-content: flex-end;
+  gap: .35rem;
+  margin-top: .75rem;
 }
 
 .zoom-btn {
