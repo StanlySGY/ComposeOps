@@ -176,3 +176,38 @@ test('gitops integration: nonexistent branch leaves a clear error instead of a f
   assert.equal(existsSync(join(repo.localPath, '.git')), false);
 });
 
+
+test('gitops HTTP contract: bounded history, editable payload and file-only rollback', async () => {
+  const { default: Fastify } = await import('fastify');
+  const { default: gitopsRoutes } = await import('../src/routes/gitops.js');
+  const app = Fastify();
+  await app.register(gitopsRoutes, { prefix: '/gitops' });
+  const repo = addTestRepo('http-contract');
+  try {
+    const synced = await app.inject({ method: 'POST', url: `/gitops/${repo.id}/sync` });
+    assert.equal(synced.statusCode, 200, synced.body);
+    assert.equal(synced.json().ok, true);
+    const invalid = await app.inject(`/gitops/${repo.id}/history?limit=200`);
+    assert.equal(invalid.statusCode, 400, 'previous UI history limit violates the API schema');
+    const valid = await app.inject(`/gitops/${repo.id}/history?limit=100`);
+    assert.equal(valid.statusCode, 200, valid.body);
+    assert.ok(valid.json().commits.length >= 2);
+    const patched = await app.inject({ method: 'PATCH', url: `/gitops/${repo.id}`, payload: { name: 'edited by UI', url: repo.url, branch: repo.branch, localPath: repo.localPath, projectId: repo.projectId, autoSync: false, sshKey: '' } });
+    assert.equal(patched.statusCode, 200, patched.body);
+    assert.equal(patched.json().name, 'edited by UI');
+    const previous = valid.json().commits.at(-1);
+    const rolled = await app.inject({ method: 'POST', url: `/gitops/${repo.id}/rollback`, payload: { commitHash: previous.hash } });
+    assert.equal(rolled.statusCode, 200, rolled.body);
+    assert.equal(rolled.json().commit, previous.hash);
+    assert.equal(readFileSync(join(repo.localPath, 'release.txt'), 'utf8'), 'release-1\n');
+    assert.equal(listGitOpsRepos().find(item => item.id === repo.id).status, 'rolled_back');
+    assert.equal('deployment' in rolled.json(), false, 'rollback only reports the Git worktree result');
+    const drift = await app.inject('/gitops/drift');
+    assert.equal(drift.statusCode, 200, drift.body);
+    assert.equal(Array.isArray(drift.json()), true, 'actual drift route returns a list, not an envelope');
+    const row = drift.json().find(item => item.repoId === repo.id);
+    assert.equal(row.status, 'detached');
+    assert.ok(row.repairs.some(repair => repair.action === 'checkout'));
+    assert.ok(row.scannedAt);
+  } finally { await app.close(); }
+});

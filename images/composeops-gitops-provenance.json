@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-09",
+  "provider": "l0veyou-image-gen",
+  "model": "gpt-image-2",
+  "taskId": "983711f7bea049626cbe215b450eec40",
+  "ratio": "4:3",
+  "source": "20261109-021454-composeops-git-lineage.png",
+  "width": 1024,
+  "height": 768,
+  "selected": true,
+  "prompt": "为 ComposeOps 暗色工业风运维控制台绘制一张 GitOps 工作区插画。主体是三枚精密的磨砂石墨金属版本节点，沿简洁的分支轨道连接，右侧一个很小的翡翠绿色光点表示当前提交；低矮的等距视角、细腻的倒角、克制的边缘光、少量银色接点。整体像高级硬件产品的微缩静物摄影，安静、清楚、轻盈；深墨绿近黑色纯净背景 #0b1210，主体居中且四周宽阔留白，无网格背景，无文字、数字、标志或水印，无屏幕截图，无复杂线路。画面 4:3，用于页面右侧约200像素的装饰插画，与既有磨砂金属和翡翠色素材保持一致。",
+  "sourceSha256": "6664e54ce5bbd0b4a9d7e379cb9a84a05fe3601346dd0fa4a1098d1e3c8b3b5e",
+  "derived": [
+    {
+      "path": "frontend/src/assets/scenes/gitops-400.webp",
+      "width": 400,
+      "height": 300,
+      "bytes": 2682
+    },
+    {
+      "path": "frontend/src/assets/scenes/gitops-800.webp",
+      "width": 800,
+      "height": 600,
+      "bytes": 7434
+    }
+  ],
+  "encoding": {
+    "format": "webp",
+    "quality": 83,
+    "method": 6
+  }
+}

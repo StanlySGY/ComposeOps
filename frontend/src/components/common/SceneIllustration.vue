@@ -10,7 +10,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { Archive, BellRing, Boxes, Clock3, Layers, Orbit, Radar } from 'lucide-vue-next';
+import { Archive, BellRing, Boxes, Clock3, GitBranch, Layers, Orbit, Radar } from 'lucide-vue-next';
 import infrastructureSmall from '../../assets/scenes/infrastructure-400.webp?no-inline';
 import infrastructureLarge from '../../assets/scenes/infrastructure-800.webp?no-inline';
 import applicationsSmall from '../../assets/scenes/applications-400.webp?no-inline';
@@ -26,7 +26,11 @@ import eventsLarge from '../../assets/scenes/events-800.webp?no-inline';
 import scheduleSmall from '../../assets/scenes/schedule-400.webp?no-inline';
 import scheduleLarge from '../../assets/scenes/schedule-800.webp?no-inline';
 
+import gitopsSmall from '../../assets/scenes/gitops-400.webp?no-inline';
+import gitopsLarge from '../../assets/scenes/gitops-800.webp?no-inline';
+
 const scenes = {
+  gitops: { small: gitopsSmall, large: gitopsLarge, icon: GitBranch },
   infrastructure: { small: infrastructureSmall, large: infrastructureLarge, icon: Boxes },
   applications: { small: applicationsSmall, large: applicationsLarge, icon: Layers },
   assistant: { small: assistantSmall, large: assistantLarge, icon: Orbit },
@@ -36,7 +40,7 @@ const scenes = {
   schedule: { small: scheduleSmall, large: scheduleLarge, icon: Clock3 },
 };
 const props = defineProps({
-  kind: { type: String, required: true, validator: value => ['infrastructure', 'applications', 'assistant', 'observability', 'recovery', 'events', 'schedule'].includes(value) },
+  kind: { type: String, required: true, validator: value => ['infrastructure', 'applications', 'assistant', 'observability', 'recovery', 'events', 'schedule', 'gitops'].includes(value) },
   minWidth: { type: Number, default: 0 },
   sizes: { type: String, default: '220px' },
   eager: Boolean,
