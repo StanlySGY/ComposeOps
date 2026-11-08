@@ -10,7 +10,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { Archive, Boxes, Layers, Orbit, Radar } from 'lucide-vue-next';
+import { Archive, BellRing, Boxes, Layers, Orbit, Radar } from 'lucide-vue-next';
 import infrastructureSmall from '../../assets/scenes/infrastructure-400.webp?no-inline';
 import infrastructureLarge from '../../assets/scenes/infrastructure-800.webp?no-inline';
 import applicationsSmall from '../../assets/scenes/applications-400.webp?no-inline';
@@ -21,6 +21,8 @@ import observabilitySmall from '../../assets/scenes/observability-400.webp?no-in
 import observabilityLarge from '../../assets/scenes/observability-800.webp?no-inline';
 import recoverySmall from '../../assets/scenes/recovery-400.webp?no-inline';
 import recoveryLarge from '../../assets/scenes/recovery-800.webp?no-inline';
+import eventsSmall from '../../assets/scenes/events-400.webp?no-inline';
+import eventsLarge from '../../assets/scenes/events-800.webp?no-inline';
 
 const scenes = {
   infrastructure: { small: infrastructureSmall, large: infrastructureLarge, icon: Boxes },
@@ -28,9 +30,10 @@ const scenes = {
   assistant: { small: assistantSmall, large: assistantLarge, icon: Orbit },
   observability: { small: observabilitySmall, large: observabilityLarge, icon: Radar },
   recovery: { small: recoverySmall, large: recoveryLarge, icon: Archive },
+  events: { small: eventsSmall, large: eventsLarge, icon: BellRing },
 };
 const props = defineProps({
-  kind: { type: String, required: true, validator: value => ['infrastructure', 'applications', 'assistant', 'observability', 'recovery'].includes(value) },
+  kind: { type: String, required: true, validator: value => ['infrastructure', 'applications', 'assistant', 'observability', 'recovery', 'events'].includes(value) },
   minWidth: { type: Number, default: 0 },
   sizes: { type: String, default: '220px' },
   eager: Boolean,

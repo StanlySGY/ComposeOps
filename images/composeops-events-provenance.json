@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-09",
+  "provider": "l0veyou-image-gen",
+  "model": "gpt-image-2",
+  "taskId": "8f60d3b30e0196066c81e6db5c77bb69",
+  "ratio": "4:3",
+  "source": "20261109-000959-composeops-event-signal.png",
+  "width": 1024,
+  "height": 768,
+  "sourceSha256": "256adf3ed9f1a653b64af684a3cbe01220a4426b03b2d97506654369d0b82035",
+  "selected": true,
+  "derived": [
+    {
+      "path": "frontend/src/assets/scenes/events-400.webp",
+      "width": 400,
+      "height": 300,
+      "bytes": 5124
+    },
+    {
+      "path": "frontend/src/assets/scenes/events-800.webp",
+      "width": 800,
+      "height": 600,
+      "bytes": 12696
+    }
+  ],
+  "encoding": {
+    "format": "webp",
+    "quality": 83,
+    "method": 6
+  },
+  "prompt": "为中文 Docker 运维控制台 ComposeOps 绘制一张独立的小型产品插画。深炭灰纯净背景 #151a21，三分之四俯视的紧凑精密仪器：三张错落的烟灰色半透明玻璃薄片悬置在磨砂石墨金属底座上，前方一枚柔和琥珀色微型状态灯，后方两枚低亮度翡翠绿色状态灯，几根细而克制的发光轨迹把它们接入中央的小型信号节点，表达告警从发现到确认再到解决。无文字、无字母、无数字、无品牌标志、无人、无界面截图。真实的磨砂金属与烟灰玻璃，边缘高光精细，柔和摄影棚侧光，微弱接触阴影，颜色克制、低饱和。主体居中，占画面约 65%，四周宽裕负空间，背景没有噪点和网格。适合以 160px 宽展示，轮廓清晰、形体简洁，与深色工业风软件中的数据卷归档插画保持统一。"
+}

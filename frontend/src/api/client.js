@@ -327,8 +327,8 @@ export const api = {
   addCmdbRelation: (payload) => request('/cmdb/relations', { method: 'POST', body: JSON.stringify(payload) }),
   deleteCmdbRelation: (id) => request(`/cmdb/relations/${id}`, { method: 'DELETE' }),
   // 统一事件中心
-  getEvents: (params = {}) => request(`/events/events?${new URLSearchParams(params)}`, { cacheable: true }),
-  getEventStats: () => request('/events/events/stats', { cacheable: true }),
+  getEvents: (params = {}, force = false) => request(`/events/events?${new URLSearchParams(params)}`, { cacheable: true, force }),
+  getEventStats: (force = false) => request('/events/events/stats', { cacheable: true, force }),
   updateEvent: (id, patch) => request(`/events/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   pruneEvents: (days = 30) => request('/events/events/prune', { method: 'POST', body: JSON.stringify({ days }) }),
   // 工作流中心
