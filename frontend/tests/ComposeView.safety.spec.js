@@ -231,7 +231,7 @@ describe('Compose 草稿与保存事务', () => {
     expect(view().text()).not.toContain('暂无配置备份');
     mocks.api.getBackups.mockRejectedValueOnce(new Error('读取备份失败'));
     await button('备份').trigger('click'); await flushPromises();
-    expect(view().get('[role="alert"]').text()).toBe('读取备份失败');
+    expect(view().get('[role="alert"]').text()).toContain('读取备份失败');
     expect(editor().getValue()).toBe(original);
   });
 });

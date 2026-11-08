@@ -1,5 +1,25 @@
 import { test, expect } from '@playwright/test';
 
+test('任务导航在窄屏直达与切换时完整显示当前入口', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('./#/cron');
+  const nav = page.getByRole('navigation', { name: '任务中心导航' });
+  const current = nav.getByRole('link', { name: '定时任务', exact: true });
+  await expect(current).toHaveAttribute('aria-current', 'page');
+  await expect.poll(async () => {
+    const outer = await nav.boundingBox(); const inner = await current.boundingBox();
+    return inner.x >= outer.x - 1 && inner.x + inner.width <= outer.x + outer.width + 1;
+  }).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => {
+    const outer = await nav.boundingBox(); const inner = await current.boundingBox();
+    return inner.x >= outer.x - 1 && inner.x + inner.width <= outer.x + outer.width + 1;
+  }).toBe(true);
+  await nav.getByRole('link', { name: '工单', exact: true }).click();
+  await expect(nav.getByRole('link', { name: '工单', exact: true })).toHaveAttribute('aria-current', 'page');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 async function command(page, label) {
   await page.getByRole('button', { name: '打开快速跳转' }).click();
   const dialog = page.getByRole('dialog', { name: '快速跳转与操作' });

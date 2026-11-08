@@ -5,9 +5,9 @@
       <div><h1 class="page-title">Compose 配置</h1><p class="page-subtitle">保存前执行 YAML 与 docker compose config 校验</p></div>
       <div class="page-actions compose-toolbar-actions">
         <div class="compose-toolbar-group" role="group" aria-label="项目与配置文件">
-        <select :value="projectId" class="input min-w-52" aria-label="选择 Compose 项目" :disabled="saving || previewLoading || hostStale" @change="selectProject($event.target.value); $event.target.value = projectId"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
-        <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" :disabled="saving || previewLoading || hostStale" @click="selectProject('')"><X class="w-4 h-4" /></button>
-        <select v-if="project?.composeFiles.length > 1" :value="fileIndex" class="input" aria-label="选择 Compose 配置文件" :disabled="saving || previewLoading || hostStale" @change="selectFile($event)"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
+        <select :value="projectId" class="input min-w-52" aria-label="选择 Compose 项目" :disabled="saving || restoring || previewLoading || hostStale" @change="selectProject($event.target.value); $event.target.value = projectId"><option value="">选择项目</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.projectName }}</option></select>
+        <button v-if="projectId" class="btn-secondary" title="清除当前选择,回到引导页" aria-label="清除当前 Compose 项目" :disabled="saving || restoring || previewLoading || hostStale" @click="selectProject('')"><X class="w-4 h-4" /></button>
+        <select v-if="project?.composeFiles.length > 1" :value="fileIndex" class="input" aria-label="选择 Compose 配置文件" :disabled="saving || restoring || previewLoading || hostStale" @change="selectFile($event)"><option v-for="(file, i) in project.composeFiles" :key="file" :value="i">{{ shortName(file) }}</option></select>
         </div>
         <div class="compose-toolbar-group compose-toolbar-tools" role="group" aria-label="编辑与辅助工具">
         <button class="btn-secondary" :disabled="!content" @click="toggleEditorMode"><Layout class="w-4 h-4" />{{ editorMode === 'code' ? '可视化' : '代码' }}</button>
@@ -20,10 +20,10 @@
         </select>
         <button class="btn-secondary" :disabled="!content" @click="formatYaml"><AlignLeft class="w-4 h-4" />格式化</button>
         <button class="btn-secondary" title="把 docker run 命令转换为 Compose 片段" @click="showConverter = true"><ArrowRightLeft class="w-4 h-4" />转换</button>
-        <button class="btn-secondary" :disabled="!projectId || hostStale" @click="loadBackups"><History class="w-4 h-4" />备份</button>
+        <button class="btn-secondary" :disabled="!projectId || hostStale || restoring || saving || loadingConfig" @click="loadBackups"><History class="w-4 h-4" />备份</button>
         </div>
         <div class="compose-toolbar-group compose-toolbar-primary" role="group" aria-label="保存配置">
-        <button class="btn-primary" :disabled="saving || previewLoading || loadingConfig || hostStale || !filePath || !dirty" @click="save"><Save class="w-4 h-4" />{{ saving ? '保存中…' : previewLoading ? '校验中…' : '保存' }}</button>
+        <button class="btn-primary" :disabled="saving || restoring || previewLoading || loadingConfig || hostStale || !filePath || !dirty" @click="save"><Save class="w-4 h-4" />{{ saving ? '保存中…' : previewLoading ? '校验中…' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -91,12 +91,14 @@
       <DockerRunConverter />
     </BaseModal>
 
-    <BaseModal :show="showBackups" title="配置备份（最近 20 份）" size-class="max-w-[calc(100vw-2rem)] sm:max-w-3xl" body-class="p-3 space-y-2 overflow-auto max-h-[60vh]" @close="showBackups = false">
-      <EmptyState v-if="!backups.length" icon="History" compact title="暂无配置备份" description="保存一次配置后会自动产生备份" />
-      <div v-for="backup in backups" :key="backup.id" class="card p-3 flex items-center gap-3">
-        <div class="flex-1"><div class="text-sm">{{ formatTime(backup.createdAt) }}</div><div class="text-muted">{{ backup.reason }} · {{ backup.size }} 字符</div></div>
-        <button class="btn-ghost" @click="previewBackup(backup)"><Eye class="w-4 h-4" />比较</button>
-        <button class="btn-secondary" @click="restore(backup)"><Undo2 class="w-4 h-4" />恢复</button>
+    <BaseModal :show="showBackups" :close-disabled="restoring" title="配置备份（最近 20 份）" size-class="max-w-[calc(100vw-2rem)] sm:max-w-3xl" body-class="p-4 space-y-3 overflow-auto max-h-[65vh]" @close="closeBackups()">
+      <div class="compose-version-intro"><History class="h-5 w-5 shrink-0 text-emerald-300" /><div><p class="text-sm font-medium text-surface-200">{{ project?.projectName }} · 配置版本</p><p class="mt-1 text-xs leading-5 text-surface-400">先比较目标文件，再恢复。恢复只改文件，应用配置后容器才会更新。</p></div></div>
+      <p v-if="backupError" class="alert-error" role="alert">{{ backupError }} <button :disabled="backupsLoading" class="underline" @click="loadBackups">重新读取版本</button></p>
+      <Skeleton v-if="backupsLoading && !backups.length" :rows="3" label="正在读取配置版本" />
+      <EmptyState v-else-if="!backups.length && !backupError" icon="History" compact title="暂无配置备份" description="保存一次配置后会自动产生备份" />
+      <div v-for="backup in backups" :key="backup.id" class="compose-version-card" :data-backup-id="backup.id" :aria-busy="comparisonLoadingId === backup.id">
+        <div class="min-w-0 flex-1"><p class="compose-version-file"><FileCode2 class="h-4 w-4 shrink-0" /><span>{{ shortName(backup.filePath || '') || '文件未知' }}</span><span v-if="backup.filePath === filePath" class="count-badge text-emerald-300 shrink-0">当前文件</span></p><p class="mt-2 text-sm tabular-nums text-surface-300">{{ formatTime(backup.createdAt) }}</p><p class="mt-1 text-xs text-surface-400">{{ backupReason(backup.reason) }} · {{ backup.size }} 字符</p><p v-if="backupFileIndex(backup) < 0" class="mt-1 text-xs text-status-warn">原文件已不在当前项目中，无法恢复。</p></div>
+        <div class="compose-version-actions"><button class="btn-ghost" :disabled="comparisonLoadingId === backup.id || restoring || backupFileIndex(backup) < 0" @click="previewBackup(backup)"><Loader2 v-if="comparisonLoadingId === backup.id" class="w-4 h-4 animate-spin" /><Eye v-else class="w-4 h-4" />比较</button><button class="btn-secondary" :disabled="restoring || backupFileIndex(backup) < 0" @click="restore(backup)"><Undo2 class="w-4 h-4" />恢复</button></div>
       </div>
     </BaseModal>
 
@@ -138,11 +140,12 @@
     </BaseModal>
 
     <BaseModal :show="!!comparison" title="当前配置与备份比较" size-class="max-w-[calc(100vw-2rem)] sm:max-w-6xl" body-class="p-0" @close="comparison = null">
+      <p class="border-b border-surface-800 px-4 py-3 text-xs text-surface-400">{{ comparison?.filePath }} · 比较内容固定于打开时刻</p>
       <div class="grid md:grid-cols-2 gap-px bg-surface-800 max-h-[70vh] overflow-auto">
-        <pre class="diff-pane"><template v-for="(row, index) in diffOld" :key="'o' + index"><span class="diff-line" :class="row.type === 'remove' ? 'diff-remove' : 'diff-same'">{{ row.text }}</span>
-</template></pre>
-        <pre class="diff-pane"><template v-for="(row, index) in diffNew" :key="'n' + index"><span class="diff-line" :class="row.type === 'add' ? 'diff-add' : 'diff-same'">{{ row.text }}</span>
-</template></pre>
+        <section class="min-w-0"><h3 class="compose-diff-label">备份版本 · {{ formatTime(comparison?.createdAt) }}</h3><pre class="diff-pane"><template v-for="(row, index) in diffOld" :key="'o' + index"><span class="diff-line" :class="row.type === 'remove' ? 'diff-remove' : 'diff-same'">{{ row.text }}</span>
+</template></pre></section>
+        <section class="min-w-0"><h3 class="compose-diff-label">{{ comparison?.baselineLabel }}</h3><pre class="diff-pane"><template v-for="(row, index) in diffNew" :key="'n' + index"><span class="diff-line" :class="row.type === 'add' ? 'diff-add' : 'diff-same'">{{ row.text }}</span>
+</template></pre></section>
       </div>
     </BaseModal>
 
@@ -169,12 +172,13 @@
     <ConfirmDialog
       :show="showRestoreDialog"
       title="恢复配置备份"
-      message="恢复该备份?当前配置也会先自动备份。"
+      :message="restoreMessage"
       tone="warning"
       confirm-text="恢复"
+      :busy="restoring"
       @confirm="confirmRestore"
       @cancel="showRestoreDialog = false; pendingBackup = null"
-    />
+    ><p v-if="restoreError" class="alert-error" role="alert">{{ restoreError }}</p></ConfirmDialog>
   </div>
 </template>
 
@@ -186,10 +190,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
-import { ArrowRight, CircleCheck, AlignLeft, ArrowRightLeft, Eye, HardDrive, History, Layout, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
+import { ArrowRight, CircleCheck, AlignLeft, ArrowRightLeft, Eye, FileCode2, HardDrive, History, Layout, Loader2, Network, Pencil, Plus, RotateCw, Save, ShieldAlert, ShieldCheck, Trash2, Undo2, Variable, X } from 'lucide-vue-next';
 import DockerRunConverter from '../components/DockerRunConverter.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import { diffLines } from '../lib/diff.js';
+import { formatTimestamp } from '../lib/date-time.js';
 // 移除硬编码模板,改用模板市场 API
 import EmptyState from '../components/common/EmptyState.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
@@ -268,8 +273,8 @@ const savedPendingApply = ref(false);
 let configVersion = 0;
 let pendingSave = null;
 const showBackups = ref(false); const comparison = ref(null); const showConverter = ref(false);
-const diffOld = computed(() => comparison.value ? diffLines(comparison.value.content, content.value).filter((row) => row.type !== 'add') : []);
-const diffNew = computed(() => comparison.value ? diffLines(comparison.value.content, content.value).filter((row) => row.type !== 'remove') : []);
+const diffOld = computed(() => comparison.value ? diffLines(comparison.value.content, comparison.value.baseline).filter((row) => row.type !== 'add') : []);
+const diffNew = computed(() => comparison.value ? diffLines(comparison.value.content, comparison.value.baseline).filter((row) => row.type !== 'remove') : []);
 const semanticIssues = ref([]);
 const changePreview = ref(null);
 const showPreview = ref(false);
@@ -280,6 +285,15 @@ const showHostChangedDialog = ref(false);
 const showLeaveDialog = ref(false);
 const showRestoreDialog = ref(false);
 const pendingBackup = ref(null);
+const restoring = ref(false);
+const restoreError = ref('');
+const backupsLoading = ref(false);
+const backupError = ref('');
+const comparisonLoadingId = ref(null);
+let backupListRequest = 0;
+let comparisonRequest = 0;
+let restoreRequest = 0;
+const restoreMessage = computed(() => `恢复「${shortName(pendingBackup.value?.backup.filePath || '')}」的此版本？磁盘上的当前文件会先自动备份。${dirty.value ? '编辑器中未保存的修改将丢弃，不会进入自动备份。' : ''}恢复只修改文件，不会自动更新容器。`);
 const leaveCallback = ref(null);
 const editorMode = ref('code');
 const visualServices = ref([]);
@@ -297,8 +311,8 @@ const hostsStore = useHostsStore();
 // 编辑器有未保存改动时不响应下拉刷新,否则本地内容会被远端版本覆盖。
 usePullRefresh(async () => {
   await reloadProjects();
-  if (projectId.value && !dirty.value && !saving.value && !previewLoading.value) await load({ background: true });
-}, { keepAlive: true, refreshOnActivate: true, enabled: () => !dirty.value && !saving.value && !previewLoading.value && !hostStale.value });
+  if (projectId.value && !dirty.value && !saving.value && !restoring.value && !previewLoading.value) await load({ background: true });
+}, { keepAlive: true, refreshOnActivate: true, enabled: () => !dirty.value && !saving.value && !restoring.value && !previewLoading.value && !hostStale.value });
 onMounted(async () => {
   window.addEventListener('beforeunload', beforeUnload);
   window.addEventListener('composeops:host-changed', onHostChanged);
@@ -324,6 +338,7 @@ function resetLoadedConfig() {
   changePreview.value = null;
   showPreview.value = false;
   visualServices.value = [];
+  resetBackupContext();
   editor?.setValue('');
 }
 async function syncProjectFromRoute() {
@@ -392,10 +407,7 @@ function onHostChanged() {
   hostStale.value = true;
   loadingConfig.value = false;
   closePreview();
-  showBackups.value = false;
-  comparison.value = null;
-  pendingBackup.value = null;
-  showRestoreDialog.value = false;
+  resetBackupContext();
   if (dirty.value) {
     showHostChangedDialog.value = true;
     return;
@@ -413,14 +425,16 @@ async function confirmHostChanged() {
   } catch (e) { error.value = e.message; }
 }
 onBeforeUnmount(() => {
+  configVersion++;
+  resetBackupContext();
   disposeEditor();
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('composeops:host-changed', onHostChanged);
   cancelLeave();
 });
 function allowConfigSwitch() {
-  if (saving.value || previewLoading.value) {
-    toast.info('正在校验或保存配置，请稍后再切换');
+  if (saving.value || restoring.value || previewLoading.value) {
+    toast.info('正在校验、保存或恢复配置，请稍后再切换');
     return false;
   }
   if (!dirty.value) return true;
@@ -445,7 +459,8 @@ function cancelLeave() {
   leaveCallback.value?.(false);
   leaveCallback.value = null;
 }
-function beforeUnload(event) { if (dirty.value) { event.preventDefault(); event.returnValue = ''; } }
+function beforeUnload(event) { if (dirty.value || restoring.value) { event.preventDefault(); event.returnValue = ''; } }
+watch(restoring, value => { editor?.updateOptions?.({ readOnly: value }); });
 function disposeEditor() {
   completionDisposable?.dispose();
   contentDisposable?.dispose();
@@ -680,7 +695,7 @@ function findLineByContent(yamlContent, searchText, startLine = 0) {
 function selectionKey() { return `composeops:compose-project:${hostsStore.activeHostId || 'local'}`; }
 function rememberSelection() { try { sessionStorage.setItem(selectionKey(), projectId.value); } catch { /* 选择不依赖存储可用性 */ } }
 async function selectProject(nextProjectId) {
-  if (hostStale.value || saving.value || previewLoading.value) return;
+  if (hostStale.value || saving.value || restoring.value || previewLoading.value) return;
   const query = { ...route.query };
   if (nextProjectId) query.projectId = nextProjectId; else delete query.projectId;
   // 路由守卫确认后才提交选择，取消时原项目和草稿均保持不变。
@@ -728,7 +743,7 @@ async function load({ background = false } = {}) {
     if (background) {
       // 保存广播也会回到本页。内容未变化时保留下一步入口、光标和视图；
       // 请求期间产生的新草稿或保存预览，不能被迟到的刷新覆盖。
-      if (content.value !== previousContent || original.value !== previousOriginal || saving.value || previewLoading.value) return;
+      if (content.value !== previousContent || original.value !== previousOriginal || saving.value || restoring.value || previewLoading.value) return;
       if (data.content === original.value && data.path === filePath.value) return;
       savedPendingApply.value = false;
       error.value = ''; message.value = ''; semanticIssues.value = []; closePreview();
@@ -760,7 +775,7 @@ async function validateSemantics(snapshot = captureDraft()) {
   return false;
 }
 async function save() {
-  if (saving.value || previewLoading.value || loadingConfig.value || hostStale.value || !filePath.value || !projectId.value || !dirty.value) return;
+  if (saving.value || restoring.value || previewLoading.value || loadingConfig.value || hostStale.value || !filePath.value || !projectId.value || !dirty.value) return;
   const snapshot = captureDraft();
   // 在第一个 await 之前锁定，快捷键连按也只发出一轮校验和预览。
   previewLoading.value = true;
@@ -860,36 +875,99 @@ function insertTemplate() {
 }
 function formatYaml() { try { const next = YAML.stringify(YAML.parse(content.value), { indent: 2, lineWidth: 0 }); editor.setValue(next); } catch (e) { error.value = e.message; } }
 async function loadBackups() {
-  if (hostStale.value) return;
+  if (hostStale.value || restoring.value || saving.value || loadingConfig.value || !projectId.value) return;
   const snapshot = captureDraft();
+  const request = ++backupListRequest;
+  showBackups.value = true;
+  backupsLoading.value = true;
+  backupError.value = '';
   try {
     const data = await api.getBackups(snapshot.projectId);
-    if (!sameContext(snapshot)) return;
-    backups.value = data.backups || []; showBackups.value = true;
-  } catch (e) { if (sameContext(snapshot)) error.value = e.message; }
+    if (request !== backupListRequest || !sameContext(snapshot)) return;
+    backups.value = data.backups || [];
+  } catch (e) { if (request === backupListRequest && sameContext(snapshot)) backupError.value = e.message; }
+  finally { if (request === backupListRequest) backupsLoading.value = false; }
 }
-async function previewBackup(backup) { comparison.value = await api.getBackup(projectId.value, backup.id); }
+function closeBackups(force = false) {
+  if (restoring.value && !force) return;
+  showBackups.value = false;
+  backupListRequest++;
+  comparisonRequest++;
+  backupsLoading.value = false;
+  comparisonLoadingId.value = null;
+}
+function resetBackupContext() {
+  // A submitted operation remains bound to its old project on the server. Its
+  // completion must not keep the new host locked or release a newer operation.
+  restoreRequest++;
+  restoring.value = false;
+  closeBackups(true);
+  backups.value = [];
+  backupError.value = '';
+  comparison.value = null;
+  pendingBackup.value = null;
+  restoreError.value = '';
+  showRestoreDialog.value = false;
+}
+function backupFileIndex(backup) { return project.value?.composeFiles.indexOf(backup.filePath) ?? -1; }
+function backupReason(reason) { return { save: '保存前自动备份', restore: '恢复前自动备份' }[reason] || reason || '配置快照'; }
+async function previewBackup(backup) {
+  const targetIndex = backupFileIndex(backup);
+  if (hostStale.value || restoring.value || targetIndex < 0) return;
+  const snapshot = captureDraft();
+  const request = ++comparisonRequest;
+  comparisonLoadingId.value = backup.id;
+  backupError.value = '';
+  try {
+    const [version, current] = await Promise.all([
+      api.getBackup(snapshot.projectId, backup.id),
+      targetIndex === snapshot.fileIndex ? Promise.resolve({ content: snapshot.content }) : api.getComposeFile(snapshot.projectId, targetIndex),
+    ]);
+    if (request !== comparisonRequest || !showBackups.value || !sameContext(snapshot)) return;
+    comparison.value = { ...version, baseline: current.content, baselineLabel: targetIndex === snapshot.fileIndex ? (snapshot.content === snapshot.original ? '当前编辑器版本' : '当前编辑器版本 · 含未保存修改') : '目标文件当前版本' };
+  } catch (e) {
+    if (request === comparisonRequest && sameContext(snapshot)) backupError.value = e.message || '比较失败，请重试';
+  } finally { if (request === comparisonRequest) comparisonLoadingId.value = null; }
+}
 async function restore(backup) {
-  pendingBackup.value = backup;
+  const targetIndex = backupFileIndex(backup);
+  if (hostStale.value || restoring.value || saving.value || previewLoading.value || targetIndex < 0) return;
+  comparisonRequest++;
+  comparisonLoadingId.value = null;
+  comparison.value = null;
+  pendingBackup.value = { backup, snapshot: captureDraft(), fileIndex: targetIndex };
+  restoreError.value = '';
   showRestoreDialog.value = true;
 }
 async function confirmRestore() {
-  const backup = pendingBackup.value;
-  if (!backup || hostStale.value) return;
-  showRestoreDialog.value = false;
+  const target = pendingBackup.value;
+  if (!target || restoring.value || hostStale.value) return;
+  const { backup, snapshot } = target;
+  if (!sameDraft(snapshot)) { restoreError.value = '配置已变化，请取消后重新选择需要恢复的版本。'; return; }
+  const request = ++restoreRequest;
+  restoring.value = true;
+  restoreError.value = '';
   try {
-    await api.restoreBackup(projectId.value, backup.id);
-    showBackups.value = false;
-    await load();
-    toast.success('配置版本已成功回滚并生效');
-  } catch (e) {
-    toast.error(`备份恢复失败：${e.message}`);
-  } finally {
+    await api.restoreBackup(snapshot.projectId, backup.id);
+    if (!sameContext(snapshot)) return;
+    showRestoreDialog.value = false;
     pendingBackup.value = null;
-  }
+    closeBackups(true);
+    comparison.value = null;
+    fileIndex.value = target.fileIndex;
+    const reload = load();
+    const reloadVersion = configVersion;
+    await reload;
+    if (hostStale.value || reloadVersion !== configVersion) return;
+    savedPendingApply.value = true;
+    message.value = '配置文件已恢复，尚未应用到容器。请返回项目应用配置并检查结果。';
+    toast.success('配置文件已恢复，尚未应用到容器');
+  } catch (e) {
+    if (sameContext(snapshot)) { restoreError.value = e.message || '恢复失败，请重试'; toast.error(`备份恢复失败：${e.message}`); }
+  } finally { if (request === restoreRequest) restoring.value = false; }
 }
 function shortName(file) { return file.split('/').pop(); }
-function formatTime(value) { return new Date(`${value}Z`).toLocaleString(); }
+function formatTime(value) { return formatTimestamp(value); }
 
 function toggleEditorMode() {
   // 内容与视图模式分别异步更新；切到可视化后若 YAML 尚未加载，content watcher 会补齐解析。
@@ -977,6 +1055,20 @@ watch(content, () => {
 </script>
 
 <style scoped>
+.compose-version-intro { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--color-surface-800); border-radius: 12px; background: var(--color-surface-900); }
+.compose-version-card { display: flex; align-items: center; gap: 16px; padding: 16px; border: 1px solid var(--color-surface-800); border-radius: 12px; background: var(--color-surface-950); transition: border-color 160ms ease; }
+.compose-version-card:hover, .compose-version-card:focus-within { border-color: var(--color-surface-600); }
+.compose-version-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--color-surface-200); font-size: 14px; }
+.compose-version-file > span { overflow-wrap: anywhere; }
+.compose-version-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.compose-diff-label { margin: 0; padding: 12px 16px; font-size: 12px; font-weight: 500; color: var(--color-surface-300); background: var(--color-surface-900); border-bottom: 1px solid var(--color-surface-800); }
+@media (max-width: 639px) {
+  .compose-version-card { flex-wrap: wrap; gap: 12px; padding: 14px; }
+  .compose-version-card > div:first-child { flex-basis: 100%; }
+  .compose-version-actions { justify-content: flex-end; width: 100%; border-top: 1px solid var(--color-surface-800); padding-top: 10px; }
+  .compose-version-actions button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .compose-version-card { transition: none; } }
 .compose-toolbar-actions {
   align-items: stretch;
 }
