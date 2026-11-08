@@ -7,7 +7,8 @@ jobs:
   code:
     name: Tests, lint and builds
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 四种浏览器配置已扩展至 932 个场景，保留安装、构建与失败重试时间。
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
