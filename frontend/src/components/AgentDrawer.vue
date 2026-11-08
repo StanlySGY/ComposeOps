@@ -12,7 +12,7 @@
       </header>
       <div class="agent-drawer-context"><span>已携带当前页面上下文</span><small>{{ contextSummary }}</small></div>
       <div ref="scrollEl" class="agent-drawer-messages" @scroll="onScroll" @click="handleRichBlockClick">
-        <div v-if="!messages.length" class="agent-drawer-empty"><MessageCircle class="h-6 w-6 text-status-info" /><p>可以询问当前页面的数据、状态或操作方式。</p><button class="preset-chip" @click="input = defaultPrompt; focusInput()">{{ defaultPrompt }}</button></div>
+        <div v-if="!messages.length" class="agent-drawer-empty"><SceneIllustration kind="assistant" class="drawer-welcome-art" sizes="180px" /><p>可以询问当前页面的数据、状态或操作方式。</p><button class="preset-chip" @click="input = defaultPrompt; focusInput()">{{ defaultPrompt }}</button></div>
         <article v-for="message in messages" :key="message.id" class="agent-drawer-message" :class="message.role">
           <div class="agent-drawer-avatar"><UserRound v-if="message.role === 'user'" class="h-3.5 w-3.5" /><Bot v-else class="h-3.5 w-3.5" /></div>
           <div class="min-w-0 max-w-[calc(100%-2rem)]"><div v-if="message.tools?.length" class="agent-drawer-tools"><div class="agent-drawer-tool-track"><span v-for="(tool, index) in message.tools" :key="index" class="agent-drawer-tool-chip" :class="tool.status"><i></i>{{ tool.tool }}<em v-if="tool.durationMs">{{ (tool.durationMs / 1000).toFixed(1) }}s</em></span></div><details v-if="toolDetailCount(message)" class="agent-drawer-tool-detail"><summary>参数与结果({{ toolDetailCount(message) }})</summary><div v-for="(tool, index) in message.tools" :key="index" class="agent-drawer-tool-block" :class="tool.status"><strong>{{ tool.tool }} · {{ toolStatusLabel(tool.status) }}</strong><pre v-if="tool.paramsText && tool.paramsText !== '{}'">{{ tool.paramsText }}</pre><pre v-if="tool.error" class="is-error">{{ tool.error }}</pre><pre v-else-if="tool.summary">{{ tool.summary }}</pre></div></details></div><div v-if="message.taskNotices?.length" class="agent-task-notice"><p v-for="(notice, index) in message.taskNotices" :key="index">{{ notice }}</p></div><AgentThinking v-if="message.role === 'assistant'" :thinking="message.thinking" :live="!!message.thinkingStreaming" /><div v-if="message.streaming && !message.content" class="agent-typing" role="status" aria-live="polite"><i></i><i></i><i></i><span>正在处理</span></div><div v-else-if="message.role === 'assistant' && !message.content" class="agent-empty-reply">(未返回内容)</div><AgentMarkdown v-else-if="message.role === 'assistant'" class="agent-drawer-markdown" :content="message.content" /><div v-else class="agent-drawer-user">{{ message.content }}</div>
@@ -35,11 +35,12 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Bot, MessageCircle, MessageSquarePlus, Send, Square, UserRound, X } from 'lucide-vue-next';
+import { Bot, MessageSquarePlus, Send, Square, UserRound, X } from 'lucide-vue-next';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { PAGE_DRAWER_CHANNEL, useAgentChat } from '../composables/useAgentChat.js';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import AgentMarkdown from './common/AgentMarkdown.vue';
+import SceneIllustration from './common/SceneIllustration.vue';
 import AgentThinking from './agent/AgentThinking.vue';
 
 const { open, context, closeAgent, openAgent } = useAgentConsole();
@@ -245,4 +246,5 @@ function approveWithParams(message, remember = null) {
 .agent-confirm-params summary { color: rgba(254, 243, 199, 0.85); font-size: 10px; cursor: pointer; }
 .agent-confirm-params-text { display: block; width: 100%; margin-top: 5px; padding: 6px 8px; color: #e4e4e7; border: 1px solid rgba(146, 64, 14, 0.5); border-radius: 6px; background: rgba(0, 0, 0, 0.3); font-family: ui-monospace, Menlo, monospace; font-size: 10px; outline: none; resize: vertical; }.agent-drawer-composer { padding: 12px 16px 16px; border-top: 1px solid #303641; background: #151920; }.agent-drawer-composer .agent-input { display: block; width: 100%; min-height: 76px; max-height: 160px; margin-bottom: 9px; resize: vertical; padding: 10px 12px; color: #f4f4f5; border: 1px solid #46505e; border-radius: 9px; outline: none; background: #0f1319; font-size: 12px; line-height: 1.6; }.agent-drawer-composer .agent-input:focus { border-color: #0891b2; box-shadow: 0 0 0 2px rgba(8,145,178,.16); }.agent-drawer-composer small { font-size: 10px; }.agent-drawer-composer button[type='submit'] { flex: 0 0 auto; }
 @media (max-width: 520px) { .agent-drawer-head, .agent-drawer-context, .agent-drawer-messages { padding-left: 12px; padding-right: 12px; } .agent-drawer-composer { padding: 10px 12px 12px; } .agent-drawer-composer small { max-width: 65%; line-height: 1.4; } }
+.drawer-welcome-art { width: 180px; margin-bottom: -8px; }
 </style>

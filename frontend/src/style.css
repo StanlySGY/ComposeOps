@@ -2913,3 +2913,11 @@ a.card:hover, button.card:hover, .service-project-card:hover {
 .monitor-memory .progress-danger > span { background: var(--color-status-error); }
 
 @media (prefers-reduced-motion: reduce) { .monitor-disclosure { transition: none; } }
+
+/* 与插画同一套的精细线条；仅在确有指针悬停时提供位移反馈。 */
+.app-sidebar .nav-link svg { stroke-width: 1.7; transition: color 160ms ease, transform 160ms ease; }
+.app-sidebar .nav-link:focus-visible { outline: 2px solid var(--color-status-info); outline-offset: 2px; }
+@media (hover: hover) { .app-sidebar .nav-link:hover svg { transform: translateY(-1px); } }
+@media (prefers-reduced-motion: reduce) { .app-sidebar .nav-link svg { transition: none; }.app-sidebar .nav-link:hover svg { transform: none; } }
+
+.app-brand .brand-mark { border: 0; background: none; box-shadow: none; padding: 0; }

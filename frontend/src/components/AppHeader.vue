@@ -1,7 +1,7 @@
 <template>
   <header class="app-header">
     <router-link class="app-brand" to="/dashboard" aria-label="ComposeOps，返回运维总览">
-      <span class="brand-mark"><Boxes class="w-5 h-5" /></span>
+      <BrandMark class="brand-mark" />
       <span class="brand-title">ComposeOps</span>
     </router-link>
     <div class="header-actions">
@@ -64,6 +64,7 @@
 <script setup>
 import { deepLink } from '../lib/deep-links.js';
 import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue';
+import BrandMark from './common/BrandMark.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, Bot, Boxes, ChartNoAxesCombined, ChevronDown, Clock3, FileCode2, FileSearch, BellRing, History, KeyRound, Layers, LogOut, Play, RotateCw, Rows3, ScrollText, Search, Settings, ShieldCheck, Square, Store, TerminalSquare } from 'lucide-vue-next';
 import EventCenter from './EventCenter.vue';

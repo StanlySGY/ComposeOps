@@ -1,10 +1,10 @@
 <template>
   <div class="marketplace-view" :aria-busy="loading || (statsLoading && !statsLoaded)">
-    <header class="page-header">
-      <div>
+    <header class="page-header market-intro">
+      <div class="market-intro-copy">
         <h1>应用市场</h1>
-        <p class="page-subtitle">浏览、收藏并一键部署 Compose 应用模板</p>
-      </div>
+        <p class="page-subtitle">让好的应用，成为你的下一项服务。</p>
+        <p class="market-intro-note">浏览模板 · 按需配置 · 确认部署</p>
 <div class="page-actions page-actions-market">
         <button @click="openAgentRecommend" class="btn-secondary"><Bot class="w-4 h-4" />让 Agent 推荐</button>
         <button @click="openAiDiscover" class="btn-secondary" :disabled="aiDiscovering"><Sparkles class="w-4 h-4" :class="{ 'animate-pulse': aiDiscovering }" />{{ aiDiscovering ? 'AI 查找中...' : 'AI 找应用' }}</button>
@@ -13,6 +13,8 @@
           创建模板
         </button>
       </div>
+      </div>
+      <SceneIllustration kind="applications" class="market-intro-art" :min-width="768" sizes="240px" eager />
     </header>
 
     <section class="market-browser" aria-label="查找应用模板">
@@ -236,6 +238,7 @@ import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import SceneIllustration from '../components/common/SceneIllustration.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import { Bot, Box, Database, FolderOpen, Globe, Wrench, Search, Star, X, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
 
@@ -613,6 +616,16 @@ onBeforeUnmount(stopPendingReads);
 }
 
 .page-actions-market { @apply flex items-center gap-3; }
+.market-intro { position: relative; align-items: center; justify-content: space-between; min-height: 182px; padding: 22px 26px; overflow: hidden; border: 1px solid var(--line-subtle); border-radius: 16px; background: linear-gradient(110deg, rgba(110,231,183,.045), transparent 65%), var(--panel-surface); }
+.market-intro-copy { position: relative; z-index: 1; min-width: 0; }
+.market-intro-note { margin: 8px 0 16px; color: var(--color-surface-400); font-size: 11px; letter-spacing: .045em; }
+.market-intro-art { width: 240px; margin: -26px -8px -26px 0; }
+.template-avatar svg { stroke-width: 1.65; position: relative; }
+.btn-deploy svg { transition: transform 180ms ease; }
+@media (hover: hover) { .btn-deploy:hover:not(:disabled) svg { transform: translate(1px,-1px); } }
+@media (max-width: 1000px) { .market-intro-art { width: 190px; }.market-intro { padding: 20px; } }
+@media (max-width: 767px) { .market-intro-art { display: none; }.market-intro { min-height: 0; padding: 18px; }.market-intro-note { margin-bottom: 14px; } }
+
 
 .market-browser { @apply mt-5 mb-4 rounded-xl border border-surface-800 bg-surface-900/50 p-4; }
 .filter-bar { @apply flex flex-wrap gap-3; }
@@ -642,7 +655,7 @@ onBeforeUnmount(stopPendingReads);
   gap: 1rem;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
-.template-card:hover { @apply border-accent/60; transform: translateY(-2px); }
+@media (hover: hover) { .template-card:hover { @apply border-accent/60; transform: translateY(-2px); } }
 
 /* 精选模板用小徽章标注,不再整卡高亮边框(避免与收藏态混淆) */
 .featured-badge {
@@ -653,14 +666,17 @@ onBeforeUnmount(stopPendingReads);
 .template-heading { @apply min-w-0 flex-1; }
 .template-heading h2 { @apply m-0 break-words text-base font-semibold leading-6 text-surface-50; }
 .template-kind { @apply mt-1 block text-xs text-surface-400; }
-.template-avatar { @apply grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300; }
+.template-avatar { position: relative; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 4px 10px rgba(0,0,0,.08); background-image: linear-gradient(145deg, rgba(255,255,255,.05), transparent); @apply grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300; }
 .template-avatar[data-category="Database"] { @apply border-sky-400/20 bg-sky-400/10 text-sky-300; }
 .template-avatar[data-category="DevOps"], .template-avatar[data-category="Tools"], .template-avatar[data-category="Monitoring"] { @apply border-violet-400/20 bg-violet-400/10 text-violet-300; }
 .template-avatar[data-category="Custom"], .template-avatar[data-category="Media"] { @apply border-amber-400/20 bg-amber-400/10 text-amber-300; }
 .template-avatar[data-category="AI"] { @apply border-rose-400/20 bg-rose-400/10 text-rose-300; }
 
 .favorite-btn { min-height: 44px; min-width: 44px; @apply grid place-items-center rounded-lg px-2 py-1 text-xl text-surface-400 transition-colors hover:text-status-warn; background: transparent; border: none; cursor: pointer; }
+.favorite-btn svg { transition: transform 180ms ease, fill 180ms ease; }
 .favorite-btn.active { @apply text-status-warn; }
+.favorite-btn.active svg { transform: scale(1.1); }
+.favorite-btn:active:not(:disabled) svg { transform: scale(.88); }
 
 .card-body { display: flex; flex-direction: column; gap: 0.75rem; }
 .meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -707,7 +723,8 @@ onBeforeUnmount(stopPendingReads);
   .template-card { @apply p-4; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .template-card { transition: none; }
+  .template-card, .favorite-btn svg, .btn-deploy svg { transition: none; }
+  .btn-deploy:hover:not(:disabled) svg { transform: none; }
   .template-card:hover { transform: none; }
 }
 </style>

@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-08",
+  "provider": "l0veyou-image-gen",
+  "model": "gpt-image-2",
+  "purpose": "ComposeOps product illustration family",
+  "assets": [
+    {
+      "kind": "applications",
+      "prompt": "为 ComposeOps 容器运维工作台制作一张精致的产品配套插画，主题是“应用模块，自由组合”。极简等距透视的微型工业装置：五枚圆角方形应用模块像井然有序的展品排列在一张薄的石墨色台面上，中心模块由半透明翡翠绿玻璃制成，周围模块为深石墨色磨砂铝和烟灰玻璃，细小的冰蓝色侧边反光，底部两条极细绿光连接槽。主体只占画面中央约65%，四边保留充足干净空间，背景统一极深蓝灰 #10141a，像高端工业产品的安静棚拍，柔软接触阴影，几何结构简单清楚，低饱和、克制、有秩序。在网页中240像素宽仍能辨认。不要文字、数字、字母、品牌、屏幕UI、按钮、水印、机器人、人、星空、烟雾、密集纹理、霓虹光污染。横向4:3。",
+      "source": "20261108-204956-composeops-app-modules.png",
+      "taskId": "8f7d31cab507e1c703e058d43e898d81",
+      "ratio": "4:3",
+      "width": 1024,
+      "height": 768,
+      "selected": true
+    },
+    {
+      "kind": "assistant",
+      "prompt": "为 ComposeOps 深色运维工作台制作与石墨金属和翡翠玻璃服务器插画同一套的产品插画，主题“协作与思考”。在极深蓝灰 #10141a 平滑背景上，一枚小型半透明翡翠绿圆角晶体核心悬浮在两层深石墨金属方形底座上，核心周围只有两片错位展开的烟灰玻璃薄卡片，像正在有序整理的信息，细小冰蓝色边缘反光。安静的等距透视，几何体简单清楚，软棚拍光，极淡接触阴影，主体居中占画面65%，四边充足留白。克制的高端工业设计产品渲染，低饱和，缩到220像素宽仍可看清。不画机器人、脸、眼睛、人物、脑、魔法、星光、粒子、文字、数字、字母、界面UI、图表、品牌、水印或过强霓虹。横向4:3。",
+      "source": "20261108-205133-composeops-assistant-core.png",
+      "taskId": "c40cc3c65eef6e164f4397de82c7ce55",
+      "ratio": "4:3",
+      "width": 1024,
+      "height": 768,
+      "selected": true
+    },
+    {
+      "kind": "observability",
+      "prompt": "为 ComposeOps 运维控制台设计成套深色产品插画，主题“节点连接，清晰观测”。极深蓝灰 #10141a 的干净平滑背景上，三个精密圆角石墨金属方形计算节点在一个矮薄的等距透视底面上错落排列，通过两条极细翡翠绿的直角导线清晰连接；中间主节点是一座由三层薄板叠成的矮塔，顶层是半透明烟灰玻璃，左侧节点低而宽，右侧节点小而独立。少量柔和冰蓝边缘反光，只有中心节点有很克制的翡翠绿内部光。高端工业产品的安静棚拍质感，磨砂铝，柔和接触阴影，留白充足，主体居中占65%，简单明确，220像素展示仍清楚。不要文字、字母、数字、图表、坐标、UI界面、人物、机器人、雷达圈、霓虹光环、城市、密集机房、粒子、烟雾、品牌、水印。横向4:3。",
+      "source": "20261108-205320-composeops-connected-nodes.png",
+      "taskId": "5ce7970a2ee26c4caff557aebfc2ae77",
+      "ratio": "4:3",
+      "width": 1024,
+      "height": 768,
+      "selected": true
+    },
+    {
+      "kind": "infrastructure",
+      "source": "20261107-223326-composeops-modular-cluster-v2.png",
+      "reference": "composeops-login-provenance.json",
+      "crop": [
+        192,
+        0,
+        1344,
+        864
+      ],
+      "selected": true
+    }
+  ],
+  "derived": {
+    "directory": "frontend/src/assets/scenes",
+    "widths": [
+      400,
+      800
+    ],
+    "ratio": "4:3",
+    "format": "webp",
+    "quality": 83,
+    "method": 6
+  }
+}

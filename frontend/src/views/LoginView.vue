@@ -5,7 +5,7 @@
     <div class="login-layout relative z-10 grid w-full max-w-5xl items-center gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16">
       <section class="login-intro hidden lg:block">
         <div class="mb-7 flex items-center gap-3">
-          <span class="login-brand-mark"><Boxes class="h-6 w-6" /></span>
+          <BrandMark class="login-brand-mark" />
           <div>
             <p class="text-lg font-semibold tracking-tight text-surface-100">ComposeOps</p>
             <p class="mt-0.5 text-xs text-surface-400">DOCKER OPERATIONS WORKSPACE</p>
@@ -36,7 +36,7 @@
       <section class="login-card w-full rounded-2xl border border-surface-700/70 bg-surface-900/90 p-6 shadow-2xl backdrop-blur-xl sm:p-8" aria-labelledby="login-title">
         <div class="mb-7 lg:hidden">
           <div class="flex items-center gap-2.5 text-surface-100">
-            <span class="login-brand-mark login-brand-mark-small"><Boxes class="h-5 w-5" /></span>
+            <BrandMark class="login-brand-mark login-brand-mark-small" />
             <p class="text-xl font-semibold tracking-tight">ComposeOps</p>
           </div>
           <p class="mt-2 text-sm text-surface-400">个人 Docker 运维控制台</p>
@@ -82,8 +82,9 @@
 
 <script setup>
 import { ref } from 'vue';
-import { ArrowUp, Boxes, Eye, EyeOff, LogIn, ShieldCheck, Activity, FileCode2, ScrollText } from 'lucide-vue-next';
+import { ArrowUp, Eye, EyeOff, LogIn, ShieldCheck, Activity, FileCode2, ScrollText } from 'lucide-vue-next';
 import { useAuthStore } from '../stores/auth.js';
+import BrandMark from '../components/common/BrandMark.vue';
 import clusterSmall from '../assets/login-cluster-720.webp';
 import clusterLarge from '../assets/login-cluster-1200.webp';
 
@@ -146,18 +147,7 @@ async function submit() {
 .login-glow-one { top: -14rem; left: 12%; background: #3b82f6; }
 .login-glow-two { right: -12rem; bottom: -15rem; background: #10b981; }
 
-.login-brand-mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  flex: none;
-  place-items: center;
-  border: 1px solid rgba(96, 165, 250, 0.3);
-  border-radius: 13px;
-  color: #93c5fd;
-  background: linear-gradient(145deg, rgba(37, 99, 235, 0.22), rgba(15, 23, 42, 0.75));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.2);
-}
+.login-brand-mark { width: 44px; height: 44px; }
 
 .login-brand-mark-small { width: 36px; height: 36px; border-radius: 10px; }
 .login-headline-accent { display: block; color: #93c5fd; }
