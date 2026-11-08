@@ -17,6 +17,8 @@
       <SceneIllustration kind="applications" class="market-intro-art" :min-width="768" sizes="240px" eager />
     </header>
 
+    <button v-if="lastDeployment" class="market-last-deploy" @click="restoreDeployment"><Rocket :size="16" /><span>查看上次部署 · {{ lastDeployment.template.name }}<small>{{ lastDeployment.record.context.hostName }} · {{ lastDeployment.record.context.projectName }}</small></span><span aria-hidden="true">→</span></button>
+
     <section class="market-browser" aria-label="查找应用模板">
       <div class="filter-bar">
         <div class="search-box">
@@ -187,35 +189,7 @@
       <template #footer><button class="btn-secondary" @click="viewingTemplate = null">返回列表</button><button v-if="isDeployableTemplate(viewingTemplate)" class="btn-primary" @click="openDeploy(viewingTemplate)"><Rocket class="h-4 w-4" />配置并部署</button></template>
     </BaseModal>
 
-    <!-- 部署模板模态框 -->
-    <BaseModal :show="!!deployTarget" :title="`部署应用：${deployTarget?.name || ''}`" :close-disabled="deploying" @close="closeDeploy" size-class="max-w-3xl max-h-[88dvh] flex flex-col" body-class="min-h-0 overflow-y-auto p-5 space-y-4">
-          <p class="template-description">{{ deployTarget.description || '暂无描述' }}</p>
-          <div class="form-group">
-            <label for="market-deploy-project-name">项目名称</label>
-            <input id="market-deploy-project-name" v-model="deployProjectName" type="text" class="input" placeholder="留空使用默认名称" />
-          </div>
-          <div class="form-group">
-            <label>部署变量</label>
-            <p class="text-xs text-muted">按需填写,空值使用模板默认配置。</p>
-            <div v-if="deployVariables.length" class="space-y-2 mt-2">
-              <div v-for="field in deployVariables" :key="field.key" class="form-row">
-                <label :for="`market-deploy-variable-${field.key}`">{{ field.label || field.key }}</label>
-                <input :id="`market-deploy-variable-${field.key}`" v-model="deployValues[field.key]" :type="field.type === 'password' ? 'password' : 'text'" class="input" :placeholder="field.default || ''" />
-              </div>
-            </div>
-            <p v-else class="text-xs text-muted mt-2">该模板无需额外配置。</p>
-          </div>
-          <p v-if="deployError" class="text-xs text-status-error" role="alert">{{ deployError }}</p>
-
-      <template #footer>
-          <button @click="closeDeploy" class="btn-secondary btn-cancel" :disabled="deploying">{{ deployReturnTemplate ? '返回详情' : '取消' }}</button>
-          <button @click="deployTemplate" class="btn-primary btn-save" :disabled="deploying">
-            <LoaderCircle v-if="deploying" class="w-4 h-4 animate-spin" />
-            {{ deploying ? '部署中…' : '部署' }}
-          </button>
-
-      </template>
-    </BaseModal>
+    <BlueprintDeployModal v-if="deployTarget" :template="deployTarget" :record="deployRecord" :return-label="deployReturnTemplate ? '返回详情' : '取消'" @close="closeDeploy" @record="rememberDeployment" @deployed="onDeployed" />
 
     <ConfirmDialog
       :show="showDeleteDialog"
@@ -232,7 +206,8 @@
 <script setup>
 import Skeleton from '../components/common/Skeleton.vue';
 import BaseModal from '../components/common/BaseModal.vue';
-import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import BlueprintDeployModal from '../components/marketplace/BlueprintDeployModal.vue';
+import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useToastStore } from '../stores/toast.js';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
@@ -240,7 +215,7 @@ import { api } from '../api/client.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import SceneIllustration from '../components/common/SceneIllustration.vue';
 import EmptyState from '../components/common/EmptyState.vue';
-import { Bot, Box, Database, FolderOpen, Globe, Wrench, Search, Star, X, LoaderCircle, Rocket, Sparkles } from 'lucide-vue-next';
+import { Bot, Box, Database, FolderOpen, Globe, Wrench, Search, Star, X, Rocket, Sparkles } from 'lucide-vue-next';
 
 const toast = useToastStore();
 const { openAgent, updateAgentContext } = useAgentConsole();
@@ -506,86 +481,33 @@ function isDeployableTemplate(template) {
 
 const deployTarget = ref(null);
 const deployReturnTemplate = ref(null);
-const deployProjectName = ref('');
-const deployValues = ref({});
-const deploying = ref(false);
-const deployError = ref('');
-const deployVariables = computed(() => {
-  const template = deployTarget.value;
-  if (!template) return [];
-  const schema = template.envSchema || template.variables || [];
-  if (Array.isArray(schema)) return schema;
-  return Object.entries(schema).map(([name, config]) =>
-    config && typeof config === 'object' ? { key: name, ...config } : { key: name, default: config }
-  );
-});
-
+const deployRecord = ref(null);
+const lastDeployment = ref(null);
+function rememberDeployment(record) {
+  if (deployTarget.value) lastDeployment.value = { template: { id: deployTarget.value.id, name: deployTarget.value.name }, record };
+}
+function restoreDeployment() {
+  deployReturnTemplate.value = null;
+  deployRecord.value = lastDeployment.value.record;
+  deployTarget.value = lastDeployment.value.template;
+}
 function openDeploy(template) {
+  deployRecord.value = null;
   deployReturnTemplate.value = viewingTemplate.value;
   viewingTemplate.value = null;
   deployTarget.value = template;
-  deployProjectName.value = '';
-  deployValues.value = {};
-  deployError.value = '';
 }
-
 function closeDeploy(returnToDetails = true) {
-  if (deploying.value) return;
+  if (!deployTarget.value) return;
   if (returnToDetails) viewingTemplate.value = deployReturnTemplate.value;
   deployReturnTemplate.value = null;
   deployTarget.value = null;
-  deployProjectName.value = '';
-  deployValues.value = {};
-  deployError.value = '';
+}
+function onDeployed() {
+  deployReturnTemplate.value = null;
+  void Promise.all([loadTemplates(), loadStats()]);
 }
 
-async function deployTemplate() {
-  if (!deployTarget.value || deploying.value) return;
-  const template = deployTarget.value;
-  deploying.value = true;
-  deployError.value = '';
-
-  const values = { ...deployValues.value };
-  for (const field of deployVariables.value) {
-    if ((values[field.key] === undefined || values[field.key] === '') && field.default !== undefined) {
-      values[field.key] = field.default;
-    }
-  }
-  if (deployProjectName.value.trim()) values.projectName = deployProjectName.value.trim();
-
-  let succeeded = false;
-  try {
-    await api.streamBlueprintDeploy(template.id, values, (frame) => {
-      if (frame.type === 'result') {
-        if (frame.data?.ok) {
-          succeeded = true;
-          toast.success(`应用 ${template.name} 已开始部署`);
-        } else if (frame.data?.message) {
-          deployError.value = frame.data.message;
-        }
-      } else if (frame.type === 'stderr' || frame.type === 'error') {
-        deployError.value = String(frame.data || '').slice(0, 500) || deployError.value;
-      }
-    });
-    if (succeeded) {
-      deploying.value = false;
-      closeDeploy(false);
-      await Promise.all([loadTemplates(), loadStats()]);
-    }
-  } catch (err) {
-    deployError.value = err.message || '部署失败';
-  } finally {
-    deploying.value = false;
-  }
-}
-
-watch(deployTarget, (template) => {
-  if (!template) {
-    deployValues.value = {};
-    deployProjectName.value = '';
-    deployError.value = '';
-  }
-});
 
 usePullRefresh(() => Promise.all([loadStats(), loadTemplates()]), { keepAlive: true });
 onMounted(async () => {
@@ -596,6 +518,7 @@ onActivated(() => { active = true; if (!activatedOnce) { activatedOnce = true; r
 
 function stopPendingReads() {
   active = false;
+  viewingTemplate.value = null;
   clearTimeout(searchTimeout);
   templatesRequestId++;
   statsRequestId++;
@@ -608,6 +531,9 @@ onBeforeUnmount(stopPendingReads);
 
 <style scoped>
 @reference '../style.css';
+.market-last-deploy { @apply mb-5 flex w-full items-center gap-3 rounded-xl border border-emerald-400/15 bg-emerald-400/5 px-4 py-3 text-left text-xs text-emerald-200 transition-colors hover:border-emerald-400/35 hover:bg-emerald-400/10; }
+.market-last-deploy > span:first-of-type { @apply min-w-0 flex-1 break-words; }
+.market-last-deploy small { @apply mt-1 block text-[11px] text-surface-400; }
 /* 页面级配色/按钮/页眉改用全站 token(surface / accent / btn / page-header / input / modal),
    scoped 内只保留市场页布局与局部语义类的微调。 */
 .marketplace-view {

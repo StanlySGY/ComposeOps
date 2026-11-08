@@ -64,8 +64,8 @@ export const resources = {
 };
 
 export const marketplaceTemplates = [
-  { id: 'builtin-nginx', name: 'Nginx', category: 'Web', description: '轻量的 Web 服务与反向代理。通过端口变量适配你的本地环境。', featured: true, favorited: true, envSchema: [{ key: 'HTTP_PORT', label: 'HTTP 端口', default: '8080' }], defaultCompose: 'services:\n  nginx:\n    image: nginx:alpine\n    ports:\n      - "${HTTP_PORT}:80"\n    restart: unless-stopped\n' },
-  { id: 'builtin-redis', name: 'Redis', category: 'Database', description: '为应用提供高速缓存。使用命名卷保存持久化数据。', favorited: false, envSchema: [], defaultCompose: 'services:\n  redis:\n    image: redis:7-alpine\n    volumes:\n      - data:/data\nvolumes:\n  data:\n' },
-  { id: 'builtin-uptime-kuma', name: 'Uptime Kuma', category: 'DevOps', description: '跟踪站点与服务的可用性，建立自己的状态页面。', favorited: false, envSchema: [], defaultCompose: 'services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:2\n    ports:\n      - "3001:3001"\n    volumes:\n      - data:/app/data\nvolumes:\n  data:\n' },
+  { id: 'nginx', name: 'Nginx', category: 'Web', description: '轻量的 Web 服务与反向代理。通过端口变量适配你的本地环境。', featured: true, favorited: true, envSchema: [{ key: 'HTTP_PORT', label: 'HTTP 端口', default: '8080' }], defaultCompose: 'services:\n  nginx:\n    image: nginx:alpine\n    ports:\n      - "${HTTP_PORT}:80"\n    restart: unless-stopped\n' },
+  { id: 'redis', name: 'Redis', category: 'Database', description: '为应用提供高速缓存。使用命名卷保存持久化数据。', favorited: false, envSchema: [], defaultCompose: 'services:\n  redis:\n    image: redis:7-alpine\n    volumes:\n      - data:/data\nvolumes:\n  data:\n' },
+  { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'DevOps', description: '跟踪站点与服务的可用性，建立自己的状态页面。', favorited: false, envSchema: [], defaultCompose: 'services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:2\n    ports:\n      - "3001:3001"\n    volumes:\n      - data:/app/data\nvolumes:\n  data:\n' },
   { id: 'custom-team-tools', name: '团队工具箱', category: 'Custom', description: '自定义模板示例，可查看和复制配置，在自己的部署中编辑使用。', favorited: false, defaultCompose: 'services:\n  homepage:\n    image: ghcr.io/gethomepage/homepage:latest\n    ports:\n      - "3000:3000"\n' },
 ];

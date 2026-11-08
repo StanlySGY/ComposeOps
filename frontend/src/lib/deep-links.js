@@ -5,6 +5,7 @@ export const RETURN_ROUTES = {
   inspection: ['巡检报告', '/inspection'], monitor: ['实时监控', '/monitor'],
   resources: ['资源管理', '/resources'], settings: ['设置', '/settings'],
   agent: ['AI 助手', '/agent'], gitops: ['GitOps', '/gitops'],
+  marketplace: ['应用市场', '/marketplace'],
   cost: ['成本分析', '/cost'], 'maintenance-plan': ['运维计划', '/maintenance-plan'], 'node-groups': ['节点组', '/node-groups'],
   'ops-center': ['任务中心', '/ops-center'], review: ['变更与回滚', '/review'],
 };

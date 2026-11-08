@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
     searchMarketplaceTemplates: vi.fn(),
     toggleMarketplaceFavorite: vi.fn(),
     createMarketplaceTemplate: vi.fn(),
+    streamBlueprintDeploy: vi.fn(),
+    getProjects: vi.fn(),
   },
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
   openAgent: vi.fn(),
@@ -17,18 +19,72 @@ vi.mock('../src/api/client.js', () => ({ api: mocks.api }));
 vi.mock('../src/stores/toast.js', () => ({ useToastStore: () => mocks.toast }));
 vi.mock('../src/composables/useAgentConsole.js', () => ({ useAgentConsole: () => ({ openAgent: mocks.openAgent, updateAgentContext: mocks.updateAgentContext }) }));
 vi.mock('../src/composables/usePullRefresh.js', () => ({ usePullRefresh: vi.fn() }));
+vi.mock('../src/stores/hosts.js', () => ({ useHostsStore: () => ({ activeHostId: 'local', active: { id: 'local', name: '本地节点', type: 'local' } }) }));
 
 let wrapper;
 const stats = { totalBuiltin: 1, totalCommunity: 0, totalCustom: 0, totalFavorites: 0, categories: ['Network'], communityAvailable: false, communityMessage: '' };
-const deployable = { id: 'builtin-nginx', name: 'nginx', category: 'Network', description: 'Web server', defaultCompose: 'services: {}', envSchema: [{ key: 'PORT', label: 'HTTP 端口', type: 'text', default: '8080' }] };
+const deployable = { id: 'nginx', name: 'nginx', category: 'Network', description: 'Web server', defaultCompose: 'services: {}', envSchema: [{ key: 'PORT', label: 'HTTP 端口', type: 'port', default: '8080' }] };
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ fullPath: '/marketplace' }) }));
+vi.mock('vue-router', () => ({ useRoute: () => ({ fullPath: '/marketplace' }), useRouter: () => ({ push: vi.fn() }) }));
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockReturnValue(document.body);
   vi.clearAllMocks();
   mocks.api.getMarketplaceStats.mockResolvedValue({ ...stats });
   mocks.api.searchMarketplaceTemplates.mockResolvedValue({ results: [] });
   mocks.api.toggleMarketplaceFavorite.mockResolvedValue(undefined);
+  mocks.api.getProjects.mockResolvedValue({ projects: [] });
+});
+
+describe('应用部署结果与过程反馈', () => {
+  async function deployDialog(template = deployable) {
+    mocks.api.searchMarketplaceTemplates.mockResolvedValue({ results: [template] });
+    await start(); await wrapper.get('.btn-deploy').trigger('click'); await flushPromises();
+    return new DOMWrapper(document.querySelector('[role="dialog"]'));
+  }
+  it('默认项目名称与端口可见，secret:true 即使没有 password 类型也掩码并生成密码', async () => {
+    const dialog = await deployDialog({ ...deployable, envSchema: [...deployable.envSchema, { key: 'PASSWORD', label: '密码', secret: true, default: '' }] });
+    expect(dialog.get('#market-deploy-project-name').element.value).toBe('nginx');
+    expect(dialog.get('#market-deploy-variable-PORT').element.value).toBe('8080');
+    expect(dialog.get('#market-deploy-variable-PASSWORD').attributes('type')).toBe('password');
+    expect(dialog.get('#market-deploy-variable-PASSWORD').element.value.length).toBeGreaterThanOrEqual(32);
+  });
+  it('部署过程中实时输出可见且输入锁定', async () => {
+    let onFrame; let resolve;
+    mocks.api.streamBlueprintDeploy.mockImplementation((id, values, callback) => { onFrame = callback; return new Promise(r => { resolve = r; }); });
+    const dialog = await deployDialog(); await dialog.get('footer .btn-save').trigger('click');
+    onFrame({ type: 'stdout', data: 'Downloading application layers…' }); await flushPromises();
+    expect(dialog.text()).toContain('Downloading application layers');
+    expect(dialog.get('#market-deploy-project-name').element.disabled).toBe(true);
+    resolve(); await flushPromises();
+  });
+  it('正常 EOF 缺少结果帧时明确待核对，不静默允许再次部署', async () => {
+    mocks.api.streamBlueprintDeploy.mockResolvedValue(undefined);
+    const dialog = await deployDialog(); await dialog.get('footer .btn-save').trigger('click'); await flushPromises();
+    expect(dialog.text()).toContain('结果待核对');
+    expect(dialog.find('footer .btn-save').exists()).toBe(false);
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+  });
+  it('真实成功保留结果和查看服务入口，不把启动命令成功称为健康', async () => {
+    mocks.api.streamBlueprintDeploy.mockImplementation(async (id, values, callback) => callback({ type: 'result', data: { ok: true, code: 0, projectId: 'new-project', projectName: 'nginx', hostId: 'local', workingDir: '/projects/nginx', filesCreated: true } }));
+    const dialog = await deployDialog(); await dialog.get('footer .btn-save').trigger('click'); await flushPromises();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(dialog.text()).toContain('启动命令已完成');
+    expect(dialog.text()).toContain('查看服务');
+    expect(dialog.text()).not.toContain('应用运行正常');
+  });
+  it('非零退出即使旧后端误发 ok:true 也视为失败', async () => {
+    mocks.api.streamBlueprintDeploy.mockImplementation(async (id, values, callback) => callback({ type: 'result', data: { ok: true, code: 17, projectId: 'new-project', workingDir: '/projects/nginx', filesCreated: true } }));
+    const dialog = await deployDialog(); await dialog.get('footer .btn-save').trigger('click'); await flushPromises();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(dialog.text()).toContain('部署未完成'); expect(dialog.text()).toContain('17');
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+  });
+  it('创建目录后失败保留输出及目标，禁止直接重提覆盖', async () => {
+    mocks.api.streamBlueprintDeploy.mockImplementation(async (id, values, callback) => callback({ type: 'result', data: { ok: false, code: 1, directoryCreated: true, filesCreated: false, workingDir: '/projects/nginx', message: '无法写入 env', output: 'write failed' } }));
+    const dialog = await deployDialog(); await dialog.get('footer .btn-save').trigger('click'); await flushPromises();
+    expect(dialog.text()).toContain('/projects/nginx'); expect(dialog.text()).toContain('write failed');
+    expect(dialog.find('footer .btn-save').exists()).toBe(false);
+  });
 });
 afterEach(() => { vi.restoreAllMocks(); wrapper?.unmount(); wrapper = null; document.body.innerHTML = ''; });
 

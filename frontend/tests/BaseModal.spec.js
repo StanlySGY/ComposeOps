@@ -30,6 +30,12 @@ async function mountModal() {
 }
 
 describe('BaseModal 键盘焦点循环', () => {
+  it('通过 v-if 卸载弹窗仍恢复到原触发控件', async () => {
+    const trigger = document.createElement('button'); document.body.appendChild(trigger); trigger.focus();
+    await mountModal(); document.querySelector('#first').focus();
+    wrapper.unmount(); wrapper = null;
+    expect(document.activeElement).toBe(trigger);
+  });
   it('当焦点位于对话框容器时，Shift+Tab 回到最后一个可聚焦控件', async () => {
     await mountModal();
     const modal = document.querySelector('.modal');

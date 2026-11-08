@@ -152,7 +152,7 @@ export async function previewFetch(input, options = {}) {
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
     const source = url.searchParams.get('source');
     const category = url.searchParams.get('category');
-    return json({ results: marketplaceTemplates.filter(t => (!q || `${t.name} ${t.description} ${t.category}`.toLowerCase().includes(q)) && (!source || source === 'all' || t.id.startsWith(source + '-')) && (!category || category === 'all' || t.category === category) && (url.searchParams.get('onlyFavorites') !== 'true' || t.favorited)) });
+    return json({ results: marketplaceTemplates.filter(t => (!q || `${t.name} ${t.description} ${t.category}`.toLowerCase().includes(q)) && (!source || source === 'all' || (source === 'builtin' ? !/^(custom|community)-/.test(t.id) : t.id.startsWith(source + '-'))) && (!category || category === 'all' || t.category === category) && (url.searchParams.get('onlyFavorites') !== 'true' || t.favorited)) });
   }
   if (path.startsWith('/marketplace/favorites/') && ['POST', 'DELETE'].includes(method)) {
     const template = marketplaceTemplates.find(t => t.id === path.split('/').pop());

@@ -225,7 +225,7 @@ export const api = {
   removeStorageResource: (kind, id, hostId) => request(`/ops/storage/resources/${kind}/${encodeURIComponent(id)}${hostId ? `?expectedHostId=${encodeURIComponent(hostId)}` : ''}`, { method: 'DELETE' }),
   // app blueprints
   getBlueprints: () => request('/ops/blueprints'),
-  streamBlueprintDeploy: (blueprintId, values, onFrame) => streamComposeControl(null, null, onFrame, '/ops/blueprints/deploy', { blueprintId, values }),
+  streamBlueprintDeploy: (blueprintId, values, onFrame, signal, expectedHostId) => streamComposeControl(null, null, onFrame, '/ops/blueprints/deploy', { blueprintId, values, expectedHostId }, signal),
   // alert events
   getNotificationEvents: () => request('/ops/notifications/events'),
   saveNotificationEvents: (events) => request('/ops/notifications/events', { method: 'PUT', body: JSON.stringify({ events }) }),

@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { X } from 'lucide-vue-next';
 import { useEscapeKey } from '../../composables/useEscapeKey.js';
 
@@ -49,6 +49,11 @@ useEscapeKey({
 
 const modalRef = ref(null);
 let previousFocus = null;
+function restoreFocus() {
+  if (previousFocus && document.contains(previousFocus)) previousFocus.focus({ preventScroll: true });
+  previousFocus = null;
+}
+onBeforeUnmount(restoreFocus);
 function focusableIn(root) {
   return [...root.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
     .filter((el) => !el.matches(':disabled') && el.offsetParent !== null);
@@ -77,9 +82,6 @@ watch(() => props.show, async (visible) => {
     if (!modal) return;
     const focusables = focusableIn(modal);
     (focusables[0] || modal).focus({ preventScroll: true });
-  } else if (previousFocus && document.contains(previousFocus)) {
-    previousFocus.focus({ preventScroll: true });
-    previousFocus = null;
-  }
+  } else restoreFocus();
 }, { immediate: true });
 </script>
