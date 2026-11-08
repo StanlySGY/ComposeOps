@@ -202,14 +202,28 @@ async function start() {
 }
 function appendOutput(text) {
   const next = output.value + String(text ?? ''); outputTruncated.value ||= next.length > 65536; output.value = next.slice(-65536);
-  if (following.value) void nextTick(() => { if (outputElement.value) outputElement.value.scrollTop = outputElement.value.scrollHeight; });
+  if (following.value) void nextTick(() => { if (following.value) followOutput(); });
 }
-function trackScroll() { const element = outputElement.value; if (element) following.value = element.scrollHeight - element.scrollTop - element.clientHeight < 32; }
-function followOutput() { following.value = true; if (outputElement.value) outputElement.value.scrollTop = outputElement.value.scrollHeight; }
+let outputGeometry;
+const geometry = element => [element.clientWidth, element.clientHeight, element.scrollHeight];
+function trackScroll() {
+  const element = outputElement.value; if (!element) return;
+  const next = geometry(element);
+  const reflowed = outputGeometry && next.some((value, index) => value !== outputGeometry[index]);
+  outputGeometry = next;
+  // WebKit can emit the layout-induced scroll before ResizeObserver. It is not a user scroll.
+  if (reflowed && following.value) { followOutput(); return; }
+  following.value = element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+}
+function followOutput() {
+  following.value = true;
+  if (outputElement.value) { outputElement.value.scrollTop = outputElement.value.scrollHeight; outputGeometry = geometry(outputElement.value); }
+}
 watch(outputElement, element => {
   outputObserver?.disconnect();
+  outputGeometry = element ? geometry(element) : undefined;
   if (!element || typeof ResizeObserver !== 'function') return;
-  outputObserver = new ResizeObserver(() => { if (following.value) followOutput(); });
+  outputObserver = new ResizeObserver(() => { if (following.value) followOutput(); else outputGeometry = geometry(element); });
   outputObserver.observe(element);
 });
 function stopWaiting() {

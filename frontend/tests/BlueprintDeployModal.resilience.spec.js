@@ -30,6 +30,30 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); });
 
 describe('应用部署的目标与结果隔离', () => {
+  it('重排先触发scroll时仍跟随尾部，手动回看后重排保持阅读位置', async () => {
+    const pending = deferred(); let frame;
+    mocks.api.streamBlueprintDeploy.mockImplementation((id, values, callback) => { frame = callback; return pending.promise; });
+    await start(); await button('部署').trigger('click'); frame({ type: 'stdout', data: 'line\n'.repeat(100) }); await flushPromises();
+    const output = dialog().get('[aria-label="部署输出内容"]');
+    let width = 300, height = 200, total = 1000, top = 800;
+    Object.defineProperties(output.element, {
+      clientWidth: { configurable: true, get: () => width }, clientHeight: { configurable: true, get: () => height },
+      scrollHeight: { configurable: true, get: () => total }, scrollTop: { configurable: true, get: () => top, set: value => { top = Math.max(0, Math.min(value, total - height)); } },
+    });
+    await output.trigger('scroll');
+    width = 240; height = 160; total = 1400;
+    await output.trigger('scroll');
+    expect(top).toBe(1240);
+    total = 1800;
+    frame({ type: 'stdout', data: 'another line\n' }); await flushPromises();
+    expect(top).toBe(1640);
+    output.element.scrollTop = 0; await output.trigger('scroll');
+    width = 320; height = 220; total = 1000;
+    await output.trigger('scroll');
+    expect(top).toBe(0);
+    expect(dialog().text()).toContain('跟随最新');
+    pending.resolve(); await flushPromises();
+  });
   it('前端校验非法项目名/空秘密/重复端口，不发起写入', async () => {
     await start();
     await dialog().get('#market-deploy-project-name').setValue('../bad');

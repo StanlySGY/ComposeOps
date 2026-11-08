@@ -17,6 +17,10 @@
            @focus="enableKeyboardNav"
            @blur="disableKeyboardNav"
            @keydown="handleKeyDown"
+           @pointerdown="onPointerDown"
+           @pointermove="onPointerMove"
+           @pointerup="onPointerUp"
+           @pointercancel="touchStart = null"
            @mousedown="onMouseDown"
            @mousemove="onMouseMove"
            @mouseleave="onMouseLeave"
@@ -493,7 +497,23 @@ function chartPoint(event) {
   return { x: (event.clientX - rect.left) * props.width / width,
     y: (event.clientY - rect.top) * props.height / height };
 }
-function onMouseMove(event) {
+let touchStart = null;
+let touchInteraction = false;
+function onPointerDown(event) {
+  touchInteraction = event.pointerType === 'touch';
+  touchStart = touchInteraction ? { x: event.clientX, y: event.clientY } : null;
+  if (touchInteraction) hoverIndex.value = null;
+}
+function onPointerMove(event) {
+  if (event.pointerType !== 'touch') touchInteraction = false;
+}
+function onPointerUp(event) {
+  const start = touchStart; touchStart = null;
+  if (event.pointerType !== 'touch' || !start) return;
+  // A tap selects a point; a swipe remains the browser's normal page scroll.
+  if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 8) selectPoint(event);
+}
+function selectPoint(event) {
   if (!visiblePoints.value.length) return;
   const { x, y } = chartPoint(event);
   if (isDragging.value) {
@@ -505,8 +525,9 @@ function onMouseMove(event) {
   hoverIndex.value = Math.max(0, Math.min(visiblePoints.value.length - 1,
     Math.round(relX / plotWidth.value * (visiblePoints.value.length - 1))));
 }
+function onMouseMove(event) { if (!touchInteraction) selectPoint(event); }
 function onMouseDown(event) {
-  if (event.button !== 0 || visiblePoints.value.length < 2) return;
+  if (touchInteraction || event.button !== 0 || visiblePoints.value.length < 2) return;
   const point = chartPoint(event);
   if (point.x < padding.left || point.x > props.width - padding.right) return;
   isDragging.value = true;
@@ -533,7 +554,7 @@ function onMouseUp() {
   }
   clearDrag();
 }
-function onMouseLeave() { hoverIndex.value = null; }
+function onMouseLeave() { if (!touchInteraction) hoverIndex.value = null; }
 function onWheel(event) {
   // Let normal wheel input scroll the page even while the pointer is over a chart.
   if ((!event.ctrlKey && !event.metaKey) || sourcePoints.value.length < 2) return;

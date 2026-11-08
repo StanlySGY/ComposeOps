@@ -22,7 +22,17 @@ test('定时任务从快捷计划到时间预览、保存、启停与删除保�
   await expect(dialog).toHaveCount(0);
   const row = page.locator('article').filter({ hasText: '示例清理计划' });
   await expect(row).toContainText('停用');
-  await row.getByRole('checkbox', { name: '启用定时任务 示例清理计划' }).check();
+  // The switch holds its confirmed value while the API write is pending.
+  await row.getByRole('checkbox', { name: '启用定时任务 示例清理计划' }).click();
+  await expect(row.getByRole('checkbox')).toBeChecked();
+  await expect(page.locator('.cron-feedback')).toContainText('已启用');
+  await row.getByRole('button', { name: '编辑定时任务 示例清理计划', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: '编辑定时任务' });
+  await editor.getByLabel('执行周期', { exact: true }).selectOption('*/5 * * * *');
+  await expect(editor.locator('.cron-preview time')).toHaveCount(3);
+  await editor.getByRole('button', { name: '保存修改', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(row).toContainText('*/5 * * * *');
   await expect(row.getByRole('checkbox')).toBeChecked();
   await row.getByRole('button', { name: '删除定时任务 示例清理计划' }).click();
   await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click();

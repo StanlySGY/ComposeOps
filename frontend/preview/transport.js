@@ -17,6 +17,7 @@ const cronTypes = {
   'volume-backup': { label: '数据卷备份', description: '备份纳管项目的命名卷' },
   inspection: { label: 'AI 巡检', description: '只读巡检并保存报告' },
 };
+const enrichCronJob = job => ({ ...job, nextRunAt: job.enabled ? nextRunTime(job.cron)?.getTime() : null, typeLabel: cronTypes[job.type]?.label });
 const sessions = [];
 const histories = new Map();
 const jobs = new Map();
@@ -112,7 +113,7 @@ export async function previewFetch(input, options = {}) {
     '/jobs': { jobs: [...jobs.values()] },
     '/ops-tickets': { tickets: [], stats: { open: 0, blocked: 0, review: 0, terminal: 0 } },
     '/ops-tickets/worker/status': { running: false, mode: 'disabled' },
-    '/cron': { jobs: cronJobs.map(job => ({ ...job, nextRunAt: job.enabled ? nextRunTime(job.cron)?.getTime() : null, typeLabel: cronTypes[job.type]?.label })), types: cronTypes }, '/cron/history': { history: [] },
+    '/cron': { jobs: cronJobs.map(enrichCronJob), types: cronTypes }, '/cron/history': { history: [] },
     '/gitops': { repos: [] }, '/gitops/drift': { repos: [], summary: {} },
     '/metrics/alerts': { alerts: [] }, '/metrics/historical': { data: [], metrics: [] },
     '/system/mcp': { enabled: false, mode: 'readonly', tokenConfigured: false, tools: [], endpoints: {} },
@@ -138,14 +139,23 @@ export async function previewFetch(input, options = {}) {
   if (path === '/cron' && method === 'POST') {
     try { validateCron(body.cron); } catch (error) { return json({ message: error.message }, 400); }
     if (!body.name?.trim() || !cronTypes[body.type]) return json({ message: '请填写名称并选择任务类型' }, 400);
-    const job = { ...body, id: 'demo-cron-' + serial++, createdAt: Date.now() };
-    cronJobs.push(job); return json(job);
+    const job = { name: body.name.trim().slice(0, 60), cron: body.cron.trim(), type: body.type, enabled: body.enabled !== false, id: 'demo-cron-' + serial++, createdAt: Date.now() };
+    cronJobs.push(job); return json(enrichCronJob(job));
   }
   if (path.startsWith('/cron/') && ['PUT', 'DELETE'].includes(method)) {
     const job = cronJobs.find(item => item.id === pid);
     if (!job) return json({ message: '示例任务不存在' }, 404);
-    if (method === 'PUT') Object.assign(job, { enabled: Boolean(body.enabled) });
-    else cronJobs.splice(cronJobs.indexOf(job), 1);
+    if (method === 'PUT') {
+      try { if (body.cron !== undefined) validateCron(body.cron); }
+      catch (error) { return json({ message: error.message }, 400); }
+      if (body.type !== undefined && !cronTypes[body.type]) return json({ message: '未知任务类型' }, 400);
+      if (body.name !== undefined) job.name = String(body.name).trim().slice(0, 60) || job.name;
+      if (body.cron !== undefined) job.cron = String(body.cron).trim();
+      if (body.type !== undefined) job.type = body.type;
+      if (body.enabled !== undefined) job.enabled = Boolean(body.enabled);
+      return json(enrichCronJob(job));
+    }
+    cronJobs.splice(cronJobs.indexOf(job), 1);
     return json({ ok: true });
   }
   if (path === '/marketplace/templates/search' && method === 'GET') {

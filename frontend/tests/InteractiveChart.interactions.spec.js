@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import InteractiveChart from '../src/components/charts/InteractiveChart.vue';
 const data = Array.from({ length: 30 }, (_, index) => ({ timestamp: 1000 + index * 1000, value: index }));
 let wrapper;
@@ -7,6 +8,13 @@ function open(props = {}) {
   wrapper = mount(InteractiveChart, { attachTo: document.body, props: { data, ...props } });
   wrapper.get('svg.chart-canvas').element.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 150, right: 400, bottom: 150 });
   return wrapper.get('svg.chart-canvas');
+}
+async function pointer(svg, type, properties) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, { value }])));
+  svg.element.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  await nextTick();
 }
 afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; });
 
@@ -28,6 +36,29 @@ describe('图表真实交互契约', () => {
     const svg = open();
     await svg.trigger('mousemove', { clientX: 389, clientY: 50 });
     expect(wrapper.get('.tooltip-value').text()).toBe('29.0');
+  });
+
+  it('原生触屏点选保留样本，兼容鼠标离开事件不能立刻清掉提示', async () => {
+    const svg = open({ unit: '%' });
+    await pointer(svg, 'pointerdown', { pointerType: 'touch', clientX: 389, clientY: 50 });
+    await pointer(svg, 'pointerup', { pointerType: 'touch', clientX: 389, clientY: 50 });
+    await svg.trigger('mousemove', { clientX: 0, clientY: 0 });
+    await svg.trigger('mouseleave');
+    expect(wrapper.get('.tooltip-value').text()).toBe('29.0%');
+    await pointer(svg, 'pointermove', { pointerType: 'mouse' });
+    await svg.trigger('mouseleave');
+    expect(wrapper.find('.chart-tooltip').exists()).toBe(false);
+  });
+
+  it('触屏滑动与取消不误选点，也不阻止页面默认滚动', async () => {
+    const svg = open();
+    await pointer(svg, 'pointerdown', { pointerType: 'touch', clientX: 389, clientY: 50 });
+    await pointer(svg, 'pointerup', { pointerType: 'touch', clientX: 389, clientY: 90 });
+    expect(wrapper.find('.chart-tooltip').exists()).toBe(false);
+    await pointer(svg, 'pointerdown', { pointerType: 'touch', clientX: 389, clientY: 50 });
+    await pointer(svg, 'pointercancel', { pointerType: 'touch' });
+    await pointer(svg, 'pointerup', { pointerType: 'touch', clientX: 389, clientY: 50 });
+    expect(wrapper.find('.chart-tooltip').exists()).toBe(false);
   });
 
   it('焦点离开图表后普通输入的左右键不被截获', async () => {

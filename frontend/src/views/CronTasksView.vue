@@ -379,7 +379,8 @@ async function confirmRemove() {
     // A refresh error inserts content above the feedback; reveal it again after that layout settles.
     // Only follow the feedback while it still owns focus, so a user who moved on is not pulled back.
     await nextTick();
-    if (document.activeElement === feedbackEl.value) feedbackEl.value?.scrollIntoView?.({ block: 'nearest' });
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    if (!disposed && document.activeElement === feedbackEl.value) feedbackEl.value?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
   } catch (e) {
     removeError.value = e.message || '删除失败，请重试';
     toast.error(e);

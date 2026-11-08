@@ -385,10 +385,10 @@ test('移动端 Agent 会话列表支持对话框语义、焦点循环、Escape 
   await trigger.focus();
   await trigger.click();
 
-  const dialog = page.getByRole('dialog', { name: '会话', exact: true });
+  const dialog = page.getByRole('dialog', { name: '会话列表', exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute('aria-modal', 'true');
-  await expect(dialog.getByRole('heading', { name: '会话', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: '会话记录', exact: true })).toBeVisible();
   await expect(dialog).toBeFocused();
 
   const focusable = dialog.locator('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])');
@@ -497,7 +497,7 @@ test('GitOps 添加仓库表单阻止缺少必填字段的提交', async ({ page
   await expect(dialog).toBeVisible();
   const required = dialog.locator('form input[required], form select[required]');
   expect(await required.count()).toBeGreaterThanOrEqual(4);
-  await dialog.getByRole('button', { name: '添加', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: '添加', exact: true })).toBeDisabled();
   await expect(dialog).toBeVisible();
   expect(await required.evaluateAll((fields) => fields.some((field) => !field.checkValidity()))).toBe(true);
   await page.keyboard.press('Escape');
