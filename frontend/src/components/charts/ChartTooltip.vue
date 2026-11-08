@@ -3,7 +3,7 @@
  * 从 InteractiveChart.vue 拆分。
  */
 <template>
-  <div v-if="visible"
+  <div v-if="visible" ref="tooltipElement"
        class="chart-tooltip"
        :style="{ left: `${x}px`, top: `${y}px` }">
     <template v-if="multi && visibleRows.length > 0">
@@ -16,13 +16,13 @@
     </template>
     <template v-else-if="point">
       <div class="tooltip-time">{{ formatTime(point.timestamp) }}</div>
-      <div class="tooltip-value">{{ formatValue(point.value) }}</div>
+      <div class="tooltip-value">{{ formatValue(point.value) }}{{ unit }}</div>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch, onBeforeUnmount } from 'vue';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -34,6 +34,28 @@ const props = defineProps({
   point: { type: Object, default: null },
   unit: { type: String, default: '' },
 });
+const emit = defineEmits(['resize']);
+const tooltipElement = ref(null);
+let observer;
+let lastSize = '';
+function measure() {
+  const rect = tooltipElement.value?.getBoundingClientRect();
+  if (!rect?.width || !rect?.height) return;
+  const key = `${rect.width}:${rect.height}`;
+  if (key === lastSize) return;
+  lastSize = key;
+  emit('resize', { width: rect.width, height: rect.height });
+}
+watch(tooltipElement, element => {
+  observer?.disconnect();
+  if (!element) return;
+  measure();
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(measure);
+    observer.observe(element);
+  }
+}, { flush: 'post' });
+onBeforeUnmount(() => observer?.disconnect());
 
 /** 当前可见的 tooltip 行:筛掉 hoverIndex 无数据的 dataset,消除 v-for+v-if 混用。 */
 const visibleRows = computed(() =>
@@ -42,7 +64,7 @@ const visibleRows = computed(() =>
 
 function formatValue(value) {
   if (!Number.isFinite(Number(value))) return '-';
-  return `${Number(value).toFixed(1)}${props.unit}`;
+  return Number(value).toFixed(1);
 }
 function formatTime(timestamp) {
   const date = new Date(timestamp);
@@ -53,29 +75,33 @@ function formatTime(timestamp) {
 <style scoped>
 .chart-tooltip {
   position: absolute;
-  background: #18181b;
-  border: 1px solid #38BDF8;
+  background: var(--color-surface-900);
+  border: 1px solid var(--color-accent);
   border-radius: 0.375rem;
   padding: 0.5rem 0.75rem;
   pointer-events: none;
+  width: max-content;
+  max-width: min(200px, 100%);
+  overflow-wrap: anywhere;
   z-index: 10;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .tooltip-time {
   font-size: 0.75rem;
-  color: #a1a1aa;
+  color: var(--color-surface-400);
   margin-bottom: 0.25rem;
 }
 
 .tooltip-value {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #38BDF8;
+  color: var(--color-accent);
 }
 
 .tooltip-metric {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.25rem;
@@ -90,12 +116,12 @@ function formatTime(timestamp) {
 }
 
 .tooltip-metric-label {
-  color: #a1a1aa;
+  color: var(--color-surface-400);
   font-weight: 500;
 }
 
 .tooltip-metric-value {
-  color: #e4e4e7;
+  color: var(--color-surface-100);
   font-weight: 600;
 }
 </style>

@@ -77,6 +77,7 @@
         <EmptyState v-if="!loading && !chartData.length" compact icon="History" title="当前时间范围暂无历史数据" description="缩短时间范围或等待下一轮指标采集后再查看趋势。" />
         <div v-else class="history-chart-frame min-w-0 w-full">
           <InteractiveChart :data="chartData"
+            :aria-label="`${currentContainer?.name || '当前容器'} 的${metricTypes.find(m => m.key === selectedMetric)?.label || ''}历史指标`"
             :color="metricTypes.find(m => m.key === selectedMetric)?.chartColor || '#38BDF8'"
             :unit="metricTypes.find(m => m.key === selectedMetric)?.unit || ''"
             :anomalies="chartAnomalies" :width="800" :height="300" />

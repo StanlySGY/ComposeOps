@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import InteractiveChart from '../InteractiveChart.vue';
 
@@ -22,6 +22,7 @@ describe('InteractiveChart.vue', () => {
       props: defaultProps,
     });
   });
+  afterEach(() => wrapper.unmount());
 
   describe('component initialization', () => {
     it('renders chart wrapper', () => {
@@ -38,17 +39,20 @@ describe('InteractiveChart.vue', () => {
   });
 
   describe('chart type switching', () => {
-    it('starts with line chart by default', () => {
+    it('starts with area chart by default', () => {
       const activeBtn = wrapper.find('.chart-type-btn.active');
       expect(activeBtn.exists()).toBe(true);
+      expect(activeBtn.attributes('aria-label')).toBe('面积图');
+      expect(wrapper.find('.chart-area').exists()).toBe(true);
     });
 
     it('switches chart types when buttons are clicked', async () => {
       const buttons = wrapper.findAll('.chart-type-btn');
       expect(buttons.length).toBeGreaterThan(1);
       
-      await buttons[1].trigger('click');
-      expect(buttons[1].classes()).toContain('active');
+      await buttons[2].trigger('click');
+      expect(buttons[2].classes()).toContain('active');
+      expect(wrapper.findAll('.chart-bar')).toHaveLength(defaultProps.data.length);
     });
   });
 
@@ -193,6 +197,7 @@ describe('InteractiveChart.vue', () => {
       expect(svg.attributes('role')).toBe('img');
       expect(svg.attributes('aria-label')).toBe('Test Chart');
       expect(svg.attributes('tabindex')).toBe('0');
+      wrapperWithLabel.unmount();
     });
 
     it('accepts ariaLabel prop', async () => {
@@ -204,6 +209,7 @@ describe('InteractiveChart.vue', () => {
       const svg = wrapperWithLabel.find('svg.chart-canvas');
       expect(svg.attributes('role')).toBe('img');
       expect(svg.attributes('aria-label')).toBe('CPU Usage Chart');
+      wrapperWithLabel.unmount();
     });
   });
 });

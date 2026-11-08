@@ -54,41 +54,58 @@ export function useChartExport() {
     URL.revokeObjectURL(url);
   }
 
-  function exportToPNG({ canvasWrapper, width, height }) {
+  async function exportToPNG({ canvasWrapper, width, height }) {
     showExportMenu.value = false;
-
     const svgElement = canvasWrapper.value?.querySelector('svg');
-    if (!svgElement) return;
+    if (!svgElement) throw new Error('图表尚未就绪，请稍后重试');
 
-    const svgData = new XMLSerializer().serializeToString(svgElement);
+    // Rasterize a self-contained snapshot under the existing data: image policy.
+    const snapshot = svgElement.cloneNode(true);
+    snapshot.setAttribute('width', width);
+    snapshot.setAttribute('height', height);
+    snapshot.style.width = `${width}px`;
+    snapshot.style.height = `${height}px`;
+    const sources = svgElement.querySelectorAll('line, path, rect, circle, text');
+    const copies = snapshot.querySelectorAll('line, path, rect, circle, text');
+    const presentation = ['stroke', 'stroke-width', 'stroke-dasharray', 'fill', 'opacity', 'font-size', 'font-family'];
+    sources.forEach((source, index) => {
+      const style = getComputedStyle(source);
+      for (const property of presentation) {
+        if (source.hasAttribute(property)) continue;
+        const value = style.getPropertyValue(property);
+        if (value && !value.includes('url(')) copies[index].setAttribute(property, value);
+      }
+    });
+    const svgData = new XMLSerializer().serializeToString(snapshot);
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-
     canvas.width = width * 2;
     canvas.height = height * 2;
-
-    img.onload = () => {
-      ctx.fillStyle = '#0F131C';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      canvas.toBlob((blob) => {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', `chart-${Date.now()}.png`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      });
-    };
-
-    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl = URL.createObjectURL(svgBlob);
-    img.src = svgUrl;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('当前浏览器无法创建图片，请尝试导出 CSV');
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timer); img.onload = null; img.onerror = null; };
+      const timer = setTimeout(() => { cleanup(); reject(new Error('图片生成超时，请重试')); }, 10000);
+      img.onload = () => { cleanup(); resolve(); };
+      img.onerror = () => { cleanup(); reject(new Error('图片生成失败，请重试或导出 CSV')); };
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgData)}`;
+    });
+    ctx.fillStyle = '#0F131C';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(result => result ? resolve(result) : reject(new Error('无法编码 PNG 图片，请重试')), 'image/png');
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chart-${Date.now()}.png`;
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    try { link.click(); } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
   }
 
   return { showExportMenu, toggleExportMenu, exportToCSV, exportToPNG };

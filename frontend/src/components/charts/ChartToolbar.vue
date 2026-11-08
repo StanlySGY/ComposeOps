@@ -1,21 +1,24 @@
 <template>
-  <div class="chart-toolbar">
-    <div class="chart-controls">
+  <div class="chart-toolbar" @keydown="onToolbarKeydown">
+    <div class="chart-controls" role="group" aria-label="图表类型与导出">
       <button v-for="type in chartTypes" :key="type.key"
-              @click="$emit('type-change', type.key)"
+              @click="$emit('update:modelValue', type.key)"
               :class="['chart-type-btn', modelValue === type.key && 'active']"
+              :aria-pressed="modelValue === type.key"
               :title="type.label" :aria-label="type.label">
         <component :is="type.icon" class="w-4 h-4" />
       </button>
 
       <!-- Export button with dropdown -->
-      <div class="export-dropdown" ref="exportDropdownRef">
-        <button @click="toggleExportMenu"
+      <div class="export-dropdown" ref="exportDropdownRef" @focusout="onFocusOut">
+        <button ref="exportButton" @click="toggleExportMenu" @keydown.down.prevent="openExportMenu"
+                :aria-expanded="showExportMenu" :aria-controls="exportMenuId"
+                :disabled="exporting" :aria-busy="exporting"
                 class="chart-type-btn export-btn"
                 title="导出数据" aria-label="导出数据">
-          <Download class="w-4 h-4" />
+          <Loader2 v-if="exporting" class="w-4 h-4 animate-spin" /><Download v-else class="w-4 h-4" />
         </button>
-        <div v-if="showExportMenu" class="export-menu">
+        <div v-if="showExportMenu" :id="exportMenuId" ref="exportMenu" class="export-menu" role="group" aria-label="图表导出格式">
           <button @click="emitExport('csv')" class="export-menu-item">
             <FileText class="w-4 h-4" />
             <span>导出 CSV</span>
@@ -37,30 +40,54 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { Download, FileText, Image } from 'lucide-vue-next';
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { Download, FileText, Image, Loader2 } from 'lucide-vue-next';
 
 defineProps({
   modelValue: { type: String, default: 'area' },
   chartTypes: { type: Array, required: true },
   stats: { type: Object, required: true },
+  exporting: { type: Boolean, default: false },
 });
-const emit = defineEmits(['type-change', 'export']);
+const emit = defineEmits(['update:modelValue', 'export']);
 
 const showExportMenu = ref(false);
 const exportDropdownRef = ref(null);
+const exportButton = ref(null);
+const exportMenu = ref(null);
+const exportMenuId = `chart-export-${Math.random().toString(36).slice(2, 8)}`;
 
 function toggleExportMenu() {
-  showExportMenu.value = !showExportMenu.value;
+  if (showExportMenu.value) closeExportMenu();
+  else void openExportMenu();
+}
+async function openExportMenu() {
+  showExportMenu.value = true;
+  await nextTick();
+  exportMenu.value?.querySelector('button')?.focus({ preventScroll: true });
+}
+function closeExportMenu(restoreFocus = false) {
+  if (!showExportMenu.value) return;
+  showExportMenu.value = false;
+  if (restoreFocus) exportButton.value?.focus({ preventScroll: true });
+}
+function onFocusOut(event) {
+  if (event.relatedTarget && !exportDropdownRef.value?.contains(event.relatedTarget)) closeExportMenu();
+}
+function onToolbarKeydown(event) {
+  if (event.key !== 'Escape' || !showExportMenu.value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeExportMenu(true);
 }
 function emitExport(format) {
-  showExportMenu.value = false;
+  closeExportMenu(true);
   emit('export', format);
 }
 
 function handleClickOutside(event) {
   if (exportDropdownRef.value && !exportDropdownRef.value.contains(event.target)) {
-    showExportMenu.value = false;
+    closeExportMenu();
   }
 }
 

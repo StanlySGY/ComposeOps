@@ -3,19 +3,25 @@
     <ChartToolbar v-model="chartType"
                   :chart-types="chartTypes"
                   :stats="stats"
+                  :exporting="exporting"
                   @export="handleExport" />
+    <p v-if="exportError" class="alert-error mb-3" role="alert"><span class="min-w-0 flex-1">{{ exportError }}</span><button class="text-link shrink-0" @click="handleExport(lastExportFormat)">重试导出</button></p>
+    <p v-else-if="exportFeedback" class="mb-3 text-xs text-surface-400" role="status">{{ exportFeedback }}</p>
     <!-- Main Chart Canvas -->
     <div class="chart-canvas-wrapper" ref="canvasWrapper">
       <svg :viewBox="`0 0 ${width} ${height}`" class="chart-canvas"
            role="img"
            :aria-label="ariaLabel"
-           :aria-describedby="ariaDescription ? 'chart-desc' : undefined"
+           :aria-describedby="descriptionId"
            tabindex="0"
            @focus="enableKeyboardNav"
+           @blur="disableKeyboardNav"
+           @keydown="handleKeyDown"
            @mousedown="onMouseDown"
            @mousemove="onMouseMove"
            @mouseleave="onMouseLeave"
-           @wheel.prevent="onWheel">
+           @wheel="onWheel">
+        <desc :id="descriptionId">{{ ariaDescription || '使用左右方向键逐点查看，+ / - 缩放，R 重置。普通滚轮滚动页面，Ctrl 或 Command 加滚轮缩放图表。' }}</desc>
         <defs>
           <!-- Area gradient (单指标) -->
           <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
@@ -31,7 +37,7 @@
           </linearGradient>
           
           <!-- Anomaly pattern -->
-          <pattern id="anomaly-pattern" patternUnits="userSpaceOnUse" width="8" height="8">
+          <pattern :id="anomalyPatternId" patternUnits="userSpaceOnUse" width="8" height="8">
             <rect width="8" height="8" fill="#DC2626" opacity="0.1" />
             <path d="M0 8 L8 0 M-2 2 L2 -2 M6 10 L10 6" stroke="#DC2626" stroke-width="1" opacity="0.3" />
           </pattern>
@@ -43,9 +49,9 @@
                 :x1="padding.left" :y1="padding.top + plotHeight * i / gridLines"
                 :x2="width - padding.right" :y2="padding.top + plotHeight * i / gridLines"
                 class="grid-line" />
-          <line v-for="i in Math.min(visiblePoints.length, 10)" :key="`v-${i}`"
-                :x1="padding.left + plotWidth * i / Math.min(visiblePoints.length - 1, 10)" :y1="padding.top"
-                :x2="padding.left + plotWidth * i / Math.min(visiblePoints.length - 1, 10)" :y2="height - padding.bottom"
+          <line v-for="i in verticalGridCount" :key="`v-${i}`"
+                :x1="padding.left + plotWidth * (i - 1) / Math.max(1, verticalGridCount - 1)" :y1="padding.top"
+                :x2="padding.left + plotWidth * (i - 1) / Math.max(1, verticalGridCount - 1)" :y2="height - padding.bottom"
                 class="grid-line" />
         </g>
 
@@ -54,11 +60,11 @@
           <rect v-for="(anomaly, idx) in visibleAnomalies" :key="`anomaly-${idx}`"
                 :x="anomaly.x" :y="padding.top"
                 :width="anomaly.width" :height="plotHeight"
-                fill="url(#anomaly-pattern)" />
+                :fill="`url(#${anomalyPatternId})`" />
         </g>
 
         <!-- Phase 2: 多指标模式 -->
-        <template v-if="compareMode && multiLinePaths.length > 0">
+        <template v-if="compareMode && visibleDatasets.length > 0">
           <!-- 面积:chartType=area 时渲染多面积 -->
           <template v-if="chartType === 'area'">
             <path v-for="(areaData, idx) in multiAreaPaths" :key="`area-${idx}`"
@@ -79,8 +85,19 @@
                   class="chart-line" />
           </template>
 
+          <template v-if="chartType === 'bar'">
+            <g v-for="(dataset, dsIdx) in visibleDatasets" :key="`bars-${dsIdx}`">
+              <rect v-for="(point, idx) in dataset.visibleData" :key="idx" class="chart-bar"
+                    :x="getXForDataset(idx, dataset.visibleData.length) - barWidth / 2 + dsIdx * barWidth / visibleDatasets.length"
+                    :y="getYForScale(point.value, yScales[dsIdx])"
+                    :width="barWidth / visibleDatasets.length"
+                    :height="Math.max(0, height - padding.bottom - getYForScale(point.value, yScales[dsIdx]))"
+                    :fill="dataset.color" opacity="0.8" />
+            </g>
+          </template>
+
           <!-- Multi-metric hover crosshair -->
-          <g v-if="hoverIndex !== null" class="crosshair">
+          <g v-if="hoverIndex !== null && visiblePoints[hoverIndex]" class="crosshair">
             <line :x1="getX(hoverIndex)" :y1="padding.top"
                   :x2="getX(hoverIndex)" :y2="height - padding.bottom"
                   class="crosshair-line" />
@@ -128,8 +145,10 @@
                   class="chart-bar" />
           </g>
 
+          <circle v-if="visiblePoints.length === 1 && chartType !== 'bar'" class="chart-single-point" :cx="getX(0)" :cy="getY(visiblePoints[0].value)" r="4" :fill="color" />
+
           <!-- Hover crosshair -->
-          <g v-if="hoverIndex !== null" class="crosshair">
+          <g v-if="hoverIndex !== null && visiblePoints[hoverIndex]" class="crosshair">
             <line :x1="getX(hoverIndex)" :y1="padding.top"
                   :x2="getX(hoverIndex)" :y2="height - padding.bottom"
                   class="crosshair-line" />
@@ -149,7 +168,8 @@
               fill="#3B82F6" opacity="0.2" stroke="#3B82F6" stroke-width="1" />
       </svg>
 
-      <ChartTooltip :visible="hoverIndex !== null"
+      <ChartTooltip :visible="hoverIndex !== null && !!visiblePoints[hoverIndex]"
+                    @resize="tooltipSize = $event"
                     :x="tooltipX"
                     :y="tooltipY"
                     :multi="compareMode && visibleDatasets.length > 0"
@@ -160,11 +180,14 @@
     </div>
 
     <!-- Zoom controls -->
-    <div class="zoom-controls">
-      <button @click="zoomIn" class="zoom-btn" title="放大" aria-label="放大图表">
+    <div class="chart-range-labels" v-if="visiblePoints.length"><span>{{ pointTime(visiblePoints[0]) }}</span><span>{{ pointTime(visiblePoints.at(-1)) }}</span></div>
+    <p v-if="keyboardEnabled && hoverIndex !== null && visiblePoints[hoverIndex]" class="sr-only" aria-live="polite">{{ pointTime(visiblePoints[hoverIndex]) }}，{{ formatValue(visiblePoints[hoverIndex].value) }}</p>
+    <div class="zoom-controls" role="group" aria-label="图表缩放">
+      <span class="chart-zoom-summary" aria-live="polite">{{ zoomLevel > 1 ? `已放大 ${zoomLevel.toFixed(1)} 倍 · ${visiblePoints.length} 个样本` : `${visiblePoints.length} 个样本` }}</span>
+      <button @click="zoomIn" :disabled="zoomLevel >= maxZoom || visiblePoints.length < 2" class="zoom-btn" title="放大" aria-label="放大图表">
         <ZoomIn class="w-4 h-4" />
       </button>
-      <button @click="zoomOut" class="zoom-btn" title="缩小" aria-label="缩小图表">
+      <button @click="zoomOut" :disabled="zoomLevel <= minZoom" class="zoom-btn" title="缩小" aria-label="缩小图表">
         <ZoomOut class="w-4 h-4" />
       </button>
       <button @click="resetZoom" class="zoom-btn" title="重置" aria-label="重置图表缩放">
@@ -206,6 +229,8 @@ const chartType = ref('area');
 const padding = { top: 20, right: 20, bottom: 30, left: 50 };
 const gridLines = 5;
 const gradientId = `chart-grad-${Math.random().toString(36).slice(2, 8)}`;
+const descriptionId = `${gradientId}-description`;
+const anomalyPatternId = `anomaly-pattern-${gradientId}`;
 
 // Zoom and pan state
 const zoomLevel = ref(1);
@@ -220,6 +245,9 @@ const dragStart = ref(null);
 const dragEnd = ref(null);
 const wrapperRef = ref(null);
 const canvasWrapper = ref(null);
+const renderedSize = ref({ width: props.width, height: props.height });
+const tooltipSize = ref({ width: 120, height: 64 });
+let resizeObserver;
 
 // Phase 2: Keyboard navigation
 const focusedPointIndex = ref(null);
@@ -242,15 +270,19 @@ const activeDatasets = computed(() => {
   }];
 });
 
+const sourcePoints = computed(() => props.compareMode ? activeDatasets.value[0]?.data || [] : props.data);
+
 // Visible data range based on zoom and pan
 const visiblePoints = computed(() => {
-  if (props.data.length === 0) return [];
-  const totalPoints = props.data.length;
+  if (sourcePoints.value.length === 0) return [];
+  const totalPoints = sourcePoints.value.length;
   const visibleCount = Math.ceil(totalPoints / zoomLevel.value);
   const startIdx = Math.max(0, Math.min(totalPoints - visibleCount, Math.floor(panOffset.value)));
   const endIdx = Math.min(totalPoints, startIdx + visibleCount);
-  return props.data.slice(startIdx, endIdx);
+  return sourcePoints.value.slice(startIdx, endIdx);
 });
+
+const verticalGridCount = computed(() => Math.min(visiblePoints.value.length, 10));
 
 // Phase 2: 多数据集的可见范围
 const visibleDatasets = computed(() => {
@@ -426,18 +458,25 @@ function getYForScale(value, scale) {
   return padding.top + plotHeight.value * (1 - (value - min) / range);
 }
 
-// Tooltip position
+// Tooltip uses CSS pixels, while drawing and hit testing use SVG coordinates.
 const tooltipX = computed(() => {
   if (hoverIndex.value === null) return 0;
-  const x = getX(hoverIndex.value);
-  return Math.min(Math.max(x, 60), props.width - 120);
+  const availableWidth = renderedSize.value.width;
+  const tooltipWidth = Math.min(tooltipSize.value.width, availableWidth);
+  const x = getX(hoverIndex.value) * availableWidth / props.width;
+  return Math.max(0, Math.min(x - tooltipWidth / 2, availableWidth - tooltipWidth));
 });
-
 const tooltipY = computed(() => {
-  if (hoverIndex.value === null) return 0;
-  const y = getY(visiblePoints.value[hoverIndex.value].value);
-  return y > props.height / 2 ? y - 60 : y + 20;
+  const point = visiblePoints.value[hoverIndex.value];
+  if (!point) return 0;
+  const availableHeight = renderedSize.value.height;
+  const y = getY(point.value) * availableHeight / props.height;
+  const tooltipHeight = tooltipSize.value.height;
+  return Math.max(0, Math.min(y > availableHeight / 2 ? y - tooltipHeight - 8 : y + 12, availableHeight - tooltipHeight));
 });
+function pointTime(point) {
+  return new Date(point.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 
 // Formatting
 function formatValue(value) {
@@ -445,91 +484,70 @@ function formatValue(value) {
   return `${value.toFixed(1)}${props.unit}`;
 }
 
-// Mouse interactions
+// Convert the responsive SVG's on-screen coordinates back into its viewBox.
+function chartPoint(event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const width = rect.width || props.width;
+  const height = rect.height || props.height;
+  renderedSize.value = { width, height };
+  return { x: (event.clientX - rect.left) * props.width / width,
+    y: (event.clientY - rect.top) * props.height / height };
+}
 function onMouseMove(event) {
-  if (visiblePoints.value.length === 0) return;
-  
-  const rect = event.currentTarget.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-  
+  if (!visiblePoints.value.length) return;
+  const { x, y } = chartPoint(event);
   if (isDragging.value) {
-    dragEnd.value = { x, y };
+    dragEnd.value = { x: Math.max(padding.left, Math.min(props.width - padding.right, x)), y };
     return;
   }
-  
-  // Find closest point
   const relX = x - padding.left;
-  if (relX < 0 || relX > plotWidth.value) {
-    hoverIndex.value = null;
-    return;
-  }
-  
-  const index = Math.round((relX / plotWidth.value) * (visiblePoints.value.length - 1));
-  hoverIndex.value = Math.max(0, Math.min(visiblePoints.value.length - 1, index));
+  if (relX < 0 || relX > plotWidth.value) { hoverIndex.value = null; return; }
+  hoverIndex.value = Math.max(0, Math.min(visiblePoints.value.length - 1,
+    Math.round(relX / plotWidth.value * (visiblePoints.value.length - 1))));
 }
-
 function onMouseDown(event) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-  
+  if (event.button !== 0 || visiblePoints.value.length < 2) return;
+  const point = chartPoint(event);
+  if (point.x < padding.left || point.x > props.width - padding.right) return;
   isDragging.value = true;
-  dragStart.value = { x, y };
-  dragEnd.value = { x, y };
+  dragStart.value = point;
+  dragEnd.value = point;
 }
-
-function onMouseUp() {
-  if (!isDragging.value || !dragStart.value || !dragEnd.value) {
-    isDragging.value = false;
-    dragStart.value = null;
-    dragEnd.value = null;
-    return;
-  }
-  
-  const startX = Math.min(dragStart.value.x, dragEnd.value.x);
-  const endX = Math.max(dragStart.value.x, dragEnd.value.x);
-  const selectionWidth = endX - startX;
-  
-  // Only zoom if selection is meaningful
-  if (selectionWidth > 20) {
-    const startRatio = (startX - padding.left) / plotWidth.value;
-    const endRatio = (endX - padding.left) / plotWidth.value;
-    const newZoom = 1 / (endRatio - startRatio);
-    
-    if (newZoom >= minZoom && newZoom <= maxZoom) {
-      zoomLevel.value = newZoom;
-      panOffset.value = Math.floor(props.data.length * startRatio);
-    }
-  }
-  
+function clearDrag() {
   isDragging.value = false;
   dragStart.value = null;
   dragEnd.value = null;
 }
-
-function onMouseLeave() {
-  hoverIndex.value = null;
-}
-
-function onWheel(event) {
-  const delta = event.deltaY;
-  const factor = delta > 0 ? 0.9 : 1.1;
-  const newZoom = Math.max(minZoom, Math.min(maxZoom, zoomLevel.value * factor));
-  
-  if (newZoom !== zoomLevel.value) {
-    // Adjust pan to zoom towards mouse position
-    const rect = event.currentTarget.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left - padding.left;
-    const mouseRatio = mouseX / plotWidth.value;
-    
-    const oldVisibleCount = Math.ceil(props.data.length / zoomLevel.value);
-    const newVisibleCount = Math.ceil(props.data.length / newZoom);
-    const panAdjust = (oldVisibleCount - newVisibleCount) * mouseRatio;
-    
-    zoomLevel.value = newZoom;
-    panOffset.value = Math.max(0, panOffset.value + panAdjust);
+function onMouseUp() {
+  if (!isDragging.value || !dragStart.value || !dragEnd.value) { clearDrag(); return; }
+  const startX = Math.min(dragStart.value.x, dragEnd.value.x);
+  const endX = Math.max(dragStart.value.x, dragEnd.value.x);
+  const cssSelectionWidth = (endX - startX) * renderedSize.value.width / props.width;
+  if (cssSelectionWidth > 20) {
+    const fraction = (endX - startX) / plotWidth.value;
+    const count = visiblePoints.value.length;
+    const startIndex = Math.floor(panOffset.value) + Math.floor(count * (startX - padding.left) / plotWidth.value);
+    const nextZoom = Math.min(maxZoom, zoomLevel.value / fraction);
+    zoomLevel.value = nextZoom;
+    panOffset.value = Math.max(0, Math.min(sourcePoints.value.length - Math.ceil(sourcePoints.value.length / nextZoom), startIndex));
   }
+  clearDrag();
+}
+function onMouseLeave() { hoverIndex.value = null; }
+function onWheel(event) {
+  // Let normal wheel input scroll the page even while the pointer is over a chart.
+  if ((!event.ctrlKey && !event.metaKey) || sourcePoints.value.length < 2) return;
+  event.preventDefault();
+  const factor = event.deltaY > 0 ? 0.9 : 1.1;
+  const newZoom = Math.max(minZoom, Math.min(maxZoom, zoomLevel.value * factor));
+  if (newZoom === zoomLevel.value) return;
+  const point = chartPoint(event);
+  const mouseRatio = Math.max(0, Math.min(1, (point.x - padding.left) / plotWidth.value));
+  const oldVisibleCount = Math.ceil(sourcePoints.value.length / zoomLevel.value);
+  const newVisibleCount = Math.ceil(sourcePoints.value.length / newZoom);
+  const nextOffset = panOffset.value + (oldVisibleCount - newVisibleCount) * mouseRatio;
+  zoomLevel.value = newZoom;
+  panOffset.value = Math.max(0, Math.min(sourcePoints.value.length - newVisibleCount, nextOffset));
 }
 
 function zoomIn() {
@@ -548,11 +566,9 @@ function resetZoom() {
 
 // Phase 2: Keyboard navigation
 function handleKeyDown(event) {
-  if (!keyboardEnabled.value) return;
+  if (!keyboardEnabled.value || event.target !== canvasWrapper.value?.querySelector('svg.chart-canvas')) return;
   
-  const visibleLength = props.compareMode && visibleDatasets.value.length > 0
-    ? visibleDatasets.value[0].visibleData.length
-    : visiblePoints.value.length;
+  const visibleLength = visiblePoints.value.length;
   
   if (visibleLength === 0) return;
   
@@ -609,44 +625,62 @@ function handleKeyDown(event) {
 function enableKeyboardNav() {
   keyboardEnabled.value = true;
 }
+function disableKeyboardNav() {
+  keyboardEnabled.value = false;
+  focusedPointIndex.value = null;
+  hoverIndex.value = null;
+}
 
 // ChartToolbar 的 @export 转发到 CSV/PNG 导出(依赖 visible* computed,故置于其定义之后)。
 const { exportToCSV, exportToPNG } = useChartExport();
-function handleExport(format) {
-  if (format === 'png') {
-    exportToPNG({ canvasWrapper, width: props.width, height: props.height });
-  } else {
-    exportToCSV({
-      compareMode: props.compareMode,
-      visibleDatasets: visibleDatasets.value,
-      visiblePoints: visiblePoints.value,
-    });
+const exporting = ref(false);
+const exportError = ref('');
+const exportFeedback = ref('');
+const lastExportFormat = ref('csv');
+let disposed = false;
+async function handleExport(format) {
+  if (exporting.value) return;
+  lastExportFormat.value = format;
+  exportError.value = '';
+  exportFeedback.value = '';
+  exporting.value = true;
+  try {
+    if (format === 'png') await exportToPNG({ canvasWrapper, width: props.width, height: props.height });
+    else exportToCSV({ compareMode: props.compareMode, visibleDatasets: visibleDatasets.value, visiblePoints: visiblePoints.value });
+    if (!disposed) exportFeedback.value = `${format.toUpperCase()} 已生成，浏览器将开始下载。`;
+  } catch (error) {
+    if (!disposed) exportError.value = error?.message || '导出失败，请重试';
+  } finally {
+    if (!disposed) exporting.value = false;
   }
 }
 
-// Mount/unmount
+function measureChart() {
+  const rect = canvasWrapper.value?.querySelector('svg.chart-canvas')?.getBoundingClientRect();
+  if (rect?.width && rect?.height) renderedSize.value = { width: rect.width, height: rect.height };
+}
 onMounted(() => {
-  if (wrapperRef.value) {
-    wrapperRef.value.addEventListener('mouseup', onMouseUp);
+  measureChart();
+  if (typeof ResizeObserver !== 'undefined' && canvasWrapper.value) {
+    resizeObserver = new ResizeObserver(measureChart);
+    resizeObserver.observe(canvasWrapper.value);
   }
-  document.addEventListener('keydown', handleKeyDown);
+  document.addEventListener('mouseup', onMouseUp);
 });
-
 onBeforeUnmount(() => {
-  if (wrapperRef.value) {
-    wrapperRef.value.removeEventListener('mouseup', onMouseUp);
-  }
-  document.removeEventListener('keydown', handleKeyDown);
+  disposed = true;
+  resizeObserver?.disconnect();
+  document.removeEventListener('mouseup', onMouseUp);
 });
-
-// Watch for data changes and reset zoom if needed
-watch(() => props.data.length, () => {
-  if (zoomLevel.value > minZoom) {
-    const maxOffset = props.data.length - Math.ceil(props.data.length / zoomLevel.value);
-    if (panOffset.value > maxOffset) {
-      panOffset.value = Math.max(0, maxOffset);
-    }
-  }
+// Data and zoom changes can shrink the visible range before the next render.
+watch([visiblePoints, visibleDatasets], () => {
+  hoverIndex.value = null;
+  focusedPointIndex.value = null;
+}, { flush: 'sync' });
+watch(sourcePoints, () => {
+  zoomLevel.value = minZoom;
+  panOffset.value = 0;
+  clearDrag();
 });
 </script>
 
@@ -710,21 +744,27 @@ watch(() => props.data.length, () => {
 .zoom-controls {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
   gap: .35rem;
   margin-top: .75rem;
 }
 
+.chart-range-labels { display: flex; justify-content: space-between; gap: .5rem; margin-top: .35rem; font-size: .65rem; font-variant-numeric: tabular-nums; color: var(--color-surface-500); }
+.chart-zoom-summary { margin-right: auto; font-size: .7rem; color: var(--color-surface-400); }
+.zoom-btn:disabled { opacity: .4; cursor: default; }
+
 .zoom-btn {
   padding: 0.5rem;
-  background: #18181b;
-  border: 1px solid #27272a;
+  background: var(--color-surface-900);
+  border: 1px solid var(--color-surface-800);
   border-radius: 0.375rem;
   color: var(--color-surface-300, #b6bdc9);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background .2s, border-color .2s;
 }
 
-.zoom-btn:hover {
+.zoom-btn:hover:not(:disabled) {
   background: var(--color-surface-800, #363c48);
   color: var(--color-surface-100, #eceef2);
   border-color: #38BDF8;
@@ -747,4 +787,5 @@ watch(() => props.data.length, () => {
     opacity: 1;
   }
 }
+@media (prefers-reduced-motion: reduce) { .keyboard-focus-ring { animation: none; } .chart-bar, .zoom-btn { transition: none; } }
 </style>
