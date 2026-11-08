@@ -68,3 +68,36 @@ test('时间预览 API 只读，不创建任务，非法表达式返回可读错
     assert.equal((await listJobs()).length, count);
   } finally { await app.close(); }
 });
+
+test('任务编辑 API 返回可直接显示的确认状态，非法周期不产生部分修改', async () => {
+  const app = Fastify();
+  await app.register(cronRoutes, { prefix: '/cron' });
+  let id;
+  try {
+    const created = await app.inject({ method: 'POST', url: '/cron', payload: { name: '编辑流程验收', type: 'images-check', cron: '0 2 * * *', enabled: false } });
+    assert.equal(created.statusCode, 200);
+    id = created.json().id;
+    assert.ok(id);
+    assert.equal(created.json().nextRunAt, null);
+    const edited = await app.inject({ method: 'PUT', url: `/cron/${id}`, payload: { name: '已修改计划', type: 'images-check', cron: '*/15 * * * *', enabled: true } });
+    assert.equal(edited.statusCode, 200);
+    assert.equal(edited.json().id, id);
+    assert.equal(edited.json().name, '已修改计划');
+    assert.equal(edited.json().enabled, true);
+    assert.equal(edited.json().typeLabel, '镜像更新检查');
+    assert.ok(edited.json().nextRunAt > Date.now());
+    const invalid = await app.inject({ method: 'PUT', url: `/cron/${id}`, payload: { name: '不应保存', cron: '60 * * * *' } });
+    assert.equal(invalid.statusCode, 400);
+    const listing = await app.inject('/cron');
+    assert.deepEqual(listing.json().jobs.find(job => job.id === id), edited.json());
+    const paused = await app.inject({ method: 'PUT', url: `/cron/${id}`, payload: { enabled: false } });
+    assert.equal(paused.statusCode, 200);
+    assert.equal(paused.json().enabled, false);
+    assert.equal(paused.json().nextRunAt, null);
+    assert.equal((await app.inject({ method: 'DELETE', url: `/cron/${id}` })).statusCode, 200);
+    assert.ok(!(await app.inject('/cron')).json().jobs.some(job => job.id === id));
+  } finally {
+    if (id) await app.inject({ method: 'DELETE', url: `/cron/${id}` });
+    await app.close();
+  }
+});

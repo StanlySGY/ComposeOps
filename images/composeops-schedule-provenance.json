@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-09",
+  "provider": "l0veyou-image-gen",
+  "model": "gpt-image-2",
+  "taskId": "ac251c291704e2c0d4eaa1f4d254c4b3",
+  "ratio": "4:3",
+  "source": "20261109-003054-composeops-schedule-cadence.png",
+  "width": 1024,
+  "height": 768,
+  "sourceSha256": "7edac55a0cf3b2142bacf031a37903f0f73f1bda8c32ca5401da221247213ee6",
+  "selected": true,
+  "derived": [
+    {
+      "path": "frontend/src/assets/scenes/schedule-400.webp",
+      "width": 400,
+      "height": 300,
+      "bytes": 2252
+    },
+    {
+      "path": "frontend/src/assets/scenes/schedule-800.webp",
+      "width": 800,
+      "height": 600,
+      "bytes": 6296
+    }
+  ],
+  "encoding": {
+    "format": "webp",
+    "quality": 83,
+    "method": 6
+  },
+  "prompt": "为 ComposeOps 深色运维工作台绘制一张克制的三维静物插画：一块低矮的石墨色圆角金属底座，底座上竖立三个间距均匀的烟灰半透明玻璃时间刻度片，最前方刻度片边缘有一条微弱的祖母绿色指示灯，底座表面有一条纤细的轨道连接三个刻度片，表达定时任务按次序执行的节奏。物体放在画面中央，四周保留充足留白。暗炭灰背景，柔和棚拍光，真实材质，细致但不繁复，正交等距视角，低饱和度，高级工业产品摄影感。不包含文字、数字、标志、界面、钟面、过亮霓虹或粒子。与透明玻璃事件面板及石墨备份存储装置属于同一套产品插画。"
+}
