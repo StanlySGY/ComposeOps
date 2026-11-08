@@ -21,7 +21,7 @@ let wrapper, router, shown;
 const stubs = { VolumeBackupPanel: { template: '<div>备份面板</div>' }, BaseModal: true, ConfirmDialog: confirmStub };
 const button = text => wrapper.findAll('button').find(b => b.text().includes(text));
 async function start(keepAlive = false) {
-  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/resources', component: {} }] });
+  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/resources', name: 'resources', component: {} }, { path: '/dashboard', name: 'dashboard', component: {} }] });
   await router.push('/resources');
   await router.isReady();
   shown = ref(true);
@@ -121,6 +121,15 @@ describe('resource cleanup workflow', () => {
     expect(wrapper.find('[aria-label="搜索存储资源"]').exists()).toBe(false);
     router.back(); await flushPromises();
     expect(wrapper.get('#resources-tab-images').attributes('aria-selected')).toBe('true');
+  });
+  it('does not destroy the backup panel when another route changes its tab query', async () => {
+    await start();
+    await wrapper.get('#resources-tab-backups').trigger('click');
+    await flushPromises();
+    await router.push('/dashboard');
+    await flushPromises();
+    expect(wrapper.get('#resources-tab-backups').attributes('aria-selected')).toBe('true');
+    expect(wrapper.text()).toContain('备份面板');
   });
   it('does not fetch while deactivated and reloads the new host on activation', async () => {
     await start(true);

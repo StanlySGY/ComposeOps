@@ -268,7 +268,7 @@ function formatTime(value) {
   if (!value || Number.isNaN(new Date(value).getTime())) return '—';
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
-watch(() => route.query.tab, value => { if (active) applyTab(validTab(value)); });
+watch(() => route.query.tab, value => { if (active && route.name === 'resources') applyTab(validTab(value)); });
 usePullRefresh(refresh, { keepAlive: true });
 onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void refresh(); });
 let activatedOnce = false;

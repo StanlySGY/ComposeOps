@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-08",
+  "provider": "l0veyou-image-gen",
+  "model": "gpt-image-2",
+  "taskId": "8d55d7d756a8c8ac8c3baffda756e357",
+  "ratio": "4:3",
+  "source": "20261108-232041-composeops-recovery-archive.png",
+  "width": 1024,
+  "height": 768,
+  "sourceSha256": "eaf730b2cece47956b256078a2de0fbcf4341a1b10229bc2d937ce29f8cbfb75",
+  "prompt": "为 ComposeOps 深色容器运维台制作一张与石墨金属、烟灰玻璃、翡翠绿光同族的产品插画，主题“备份与恢复，数据妥善保存”。画面中央是一个精致的矮方形石墨金属档案座，三片圆角数据薄片整齐叠放，最上层薄片为半透明烟灰玻璃，内部一条克制的翡翠绿光；右后方有一片独立的玻璃副本，表现复制与留存。简单清楚的等距透视几何体，柔软的棚拍光，细小冰蓝边缘反光和真实接触阴影。背景为均匀极深蓝灰 #10141a，主体占画面中央约65%，四边留白，缩到180像素宽仍可辨认。与成熟基础设施软件的安静工业设计一致。不要锁、盾牌、对勾、箭头、文字、字母、数字、图表、UI、人物、机器人、硬盘品牌、水印、粒子、雾或强霓虹。4:3 横向构图。",
+  "selected": true,
+  "derived": [
+    {
+      "path": "frontend/src/assets/scenes/recovery-400.webp",
+      "width": 400,
+      "height": 300,
+      "bytes": 5410
+    },
+    {
+      "path": "frontend/src/assets/scenes/recovery-800.webp",
+      "width": 800,
+      "height": 600,
+      "bytes": 15386
+    }
+  ],
+  "encoding": {
+    "format": "webp",
+    "quality": 83,
+    "method": 6
+  }
+}
