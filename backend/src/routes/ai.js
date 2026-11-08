@@ -22,6 +22,7 @@ import {
   listAiSessions,
   truncateAiHistoryFrom,
 } from '../lib/db.js';
+import { getApprovalGate } from '../services/agent/approval-gate.js';
 import { testAiChannel } from '../services/ai-channel-probe.js';
 import { getActivityDocker } from '../services/docker-hosts.js';
 import { findProjectContainer } from '../services/scanner.js';
@@ -246,7 +247,7 @@ function aiRateLimit(limit, windowMs = 60000) {
       ? getAiHistory(limit + 1, Number(sessionId), beforeId)
       : getAiHistory(limit + 1, null, beforeId);
     const hasMore = messages.length > limit;
-    return { messages: hasMore ? messages.slice(1) : messages, hasMore };
+    return { messages: hasMore ? messages.slice(1) : messages, hasMore, ...(sessionId ? { approvalMode: getApprovalGate().getMode(sessionId) } : {}) };
   });
 
   // GET /api/v1/ai/sessions —— 会话列表(标题/时间/消息数)

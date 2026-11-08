@@ -1102,7 +1102,7 @@
 /* ===== 聊天消息入场动画 ===== */
 @keyframes message-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .agent-message, .agent-drawer-message { animation: message-in .22s ease both; }
-.agent-messages { scroll-behavior: smooth; }
+.agent-messages { scroll-behavior: auto; }
 .card { border-radius: 16px; }
 .nav-link:active, .agent-session-row:active { transform: scale(0.985); }
 .nav-link, .agent-session-row { transition: transform 0.12s var(--ease-out-soft), background 0.15s ease; }
@@ -1469,7 +1469,7 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.07),
     0 24px 70px rgba(0, 0, 0, 0.42);
 }
-.agent-messages, .agent-drawer-messages { scroll-behavior: smooth; overscroll-behavior: contain; }
+.agent-messages, .agent-drawer-messages { scroll-behavior: auto; overscroll-behavior: contain; }
 
 @media (hover: hover) and (pointer: fine) {
   .card:hover {
@@ -1580,28 +1580,21 @@ pre:hover .code-copy-btn { opacity: 1; }
 .code-copy-btn:hover { color: var(--cyan-strong); border-color: var(--cyan-border); }
 @media (hover: none) { .code-copy-btn { opacity: 0.75; } }
 
-/* ===== 消息操作悬浮栏 ===== */
+/* ===== 消息操作栏：保持可发现，键盘和触屏均可直接使用 ===== */
 .agent-message-actions {
-  position: absolute;
-  top: -12px;
-  right: 12px;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  padding: 4px;
-  background: rgba(23, 27, 34, 0.95);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  pointer-events: none;
+  width: fit-content;
+  margin-top: 8px;
+  opacity: .72;
+  transition: opacity .15s ease;
 }
-.agent-message:hover .agent-message-actions {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
+.agent-message.user .agent-message-actions { margin-left: auto; }
+.agent-message:hover .agent-message-actions,
+.agent-message:focus-within .agent-message-actions { opacity: 1; }
+.agent-message-action-btn:focus-visible { outline: 2px solid var(--cyan-strong); outline-offset: 2px; }
 .agent-message-action-btn {
   display: inline-grid;
   width: 26px;

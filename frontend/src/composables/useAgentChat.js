@@ -1,5 +1,5 @@
 import { notifyDataChanged } from '../lib/data-changes.js';
-import { getCurrentInstance, nextTick, onBeforeUnmount, ref } from 'vue';
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { useEscapeKey } from './useEscapeKey.js';
 import { api } from '../api/client.js';
 import { stripAgentProtocol } from '../lib/agent-text.js';
@@ -23,7 +23,16 @@ function createChannel() {
     approvalMode: ref('ask'),
     pendingQueue: ref([]),
     controller: null,
-    starting: false,
+    generation: 0,
+    sessionPromise: null,
+    activeRun: null,
+    operation: ref(''),
+    modeBusy: ref(false),
+    approvalVersion: 0,
+    historyLoading: ref(false),
+    historyError: ref(''),
+    queuePaused: ref(false),
+    queueId: 0,
     nextId: 0,
     tokenBuffer: '',
     bufferingAssistant: null,
@@ -59,8 +68,15 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   const sessionId = state.sessionId;
   const approvalMode = state.approvalMode;
   const pendingQueue = state.pendingQueue;
+  const queuePaused = state.queuePaused;
+  const operation = state.operation;
+  const modeBusy = state.modeBusy;
+  const historyLoading = state.historyLoading;
+  const historyError = state.historyError;
+  const sendingBlocked = computed(() => !!operation.value || modeBusy.value || historyLoading.value || !!historyError.value);
+  const busy = computed(() => running.value || !!operation.value || modeBusy.value);
   const scrollEl = ref(null);
-  const subscriber = { onEventExtra, onApproval };
+  const subscriber = { onEventExtra, onApproval, onContent: () => scrollBottom() };
   if (instance) state.subscribers.add(subscriber);
   function setSubscriberActive(active) { subscriber.active = active !== false; }
   // 滚动跟随:用户向上回看时暂停自动滚底,回到底部(或手动点"回到底部")后恢复。
@@ -72,6 +88,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     if (state.bufferingAssistant && state.tokenBuffer) {
       state.bufferingAssistant.content += state.tokenBuffer;
       state.tokenBuffer = '';
+      for (const item of state.subscribers) { if (item.active !== false) item.onContent?.(); }
     }
     state.bufferingAssistant = null;
   }
@@ -104,62 +121,125 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   }
 
   async function ensureSession() {
-    if (!sessionId.value) sessionId.value = Number((await api.createAgentSession()).sessionId);
-    return sessionId.value;
+    if (sessionId.value) return sessionId.value;
+    if (state.sessionPromise) return state.sessionPromise;
+    const generation = state.generation;
+    const pending = (async () => {
+      const result = await api.createAgentSession();
+      if (generation !== state.generation || state.sessionPromise !== pending || sessionId.value) return null;
+      const id = Number(result.sessionId);
+      if (!Number.isSafeInteger(id) || id <= 0) throw new Error('创建会话失败：服务未返回有效会话编号');
+      sessionId.value = id;
+      return id;
+    })();
+    state.sessionPromise = pending;
+    try { return await pending; }
+    finally { if (state.sessionPromise === pending) state.sessionPromise = null; }
   }
 
-  /** 消息 ID 统一由此生成,保证历史回放与新消息之间 :key 不冲突。 */
+  /** 消息 ID 在共享渠道内递增，历史和新回复均使用同一计数器。 */
   function nextMessageId() { return ++state.nextId; }
 
   function resetSession() {
-    resetChannel(state);
-    approvalMode.value = 'ask';
+    ++state.generation;
     state.controller?.abort();
     state.controller = null;
-    // 队列残留消息若不清,会在新会话里被 sendMessage 的"自动发送下一条"带出去,
-    // 造成用户以为已丢弃的内容发进了全新会话。
-    state.pendingQueue.value = [];
+    state.activeRun = null;
+    state.sessionPromise = null;
+    running.value = false;
+    operation.value = '';
+    modeBusy.value = false;
+    historyLoading.value = false;
+    historyError.value = '';
+    queuePaused.value = false;
+    resetChannel(state);
+    approvalMode.value = 'ask';
   }
 
-  async function sendMessage(text, extraPayload = {}) {
-    if (!text) return;
-    if (running.value || state.starting) {
-      pendingQueue.value.push({ text, extraPayload });
-      input.value = '';
-      return;
+  /** 页面历史写入也使用此锁，让抽屉不能同时发送或切换会话。 */
+  function lockSession(label) {
+    if (busy.value) return null;
+    const generation = state.generation;
+    operation.value = label;
+    return () => { if (generation === state.generation) operation.value = ''; };
+  }
+
+  function removeQueued(id) {
+    pendingQueue.value = pendingQueue.value.filter(item => item.id !== id);
+    if (!pendingQueue.value.length && !running.value) queuePaused.value = false;
+  }
+
+  async function resumeQueue() {
+    if (busy.value || sendingBlocked.value || !pendingQueue.value.length) return false;
+    queuePaused.value = false;
+    const next = pendingQueue.value.shift();
+    try { return await sendMessage(next.text, next.extraPayload); }
+    catch (error) {
+      pendingQueue.value.unshift(next); queuePaused.value = true;
+      throw error;
     }
-    state.starting = true;
-    try {
-      await ensureSession();
-    } finally {
-      state.starting = false;
+  }
+
+  async function sendMessage(text, extraPayload = {}, { immediate = false } = {}) {
+    if (!String(text || '').trim()) return false;
+    if (sendingBlocked.value) throw new Error(historyError.value || '会话正在同步，请稍后发送');
+    if (running.value || (!immediate && queuePaused.value && pendingQueue.value.length)) {
+      pendingQueue.value.push({ id: ++state.queueId, text, extraPayload: { ...extraPayload } });
+      if (input.value.trim() === text.trim()) input.value = '';
+      return true;
     }
-    const assistant = { id: ++state.nextId, role: 'assistant', content: '', streaming: true };
-    const userMessage = { id: ++state.nextId, role: 'user', content: text, persistedId: 0 };
-    messages.value.push(userMessage, assistant);
-    input.value = '';
-    running.value = true;
-    state.controller = new AbortController();
-    atBottom.value = true; // 发送即回到底部
-    scrollBottom(true);
+    if (!pendingQueue.value.length) queuePaused.value = false;
+    const run = { generation: state.generation, approvalVersion: state.approvalVersion, controller: new AbortController(), sessionId: undefined, stopped: false, text, draft: input.value };
+    const current = () => state.activeRun === run && state.generation === run.generation && (run.sessionId === undefined || sessionId.value === run.sessionId);
+    state.activeRun = run; state.controller = run.controller; running.value = true;
+    const draft = input.value;
+    if (input.value.trim() === text.trim()) input.value = '';
+    let assistant;
     try {
-      await api.agentExecuteStream({ message: text, sessionId: sessionId.value, role: 'auto', ...extraPayload }, (event) => handleEvent(event, assistant), state.controller.signal);
+      const id = await ensureSession();
+      if (!current()) return false;
+      if (run.stopped || !id) { if (!input.value) input.value = draft || text; return false; }
+      run.sessionId = id;
+      assistant = reactive({ id: nextMessageId(), role: 'assistant', content: '', streaming: true, requestContext: { ...extraPayload } });
+      run.assistant = assistant;
+      const userMessage = reactive({ id: nextMessageId(), role: 'user', content: text, persistedId: 0 });
+      messages.value.push(userMessage, assistant);
+      atBottom.value = true; scrollBottom(true);
+      await api.agentExecuteStream({ role: 'auto', ...extraPayload, message: text, sessionId: id }, event => {
+        if (!current() || run.stopped) return;
+        if (event.type === 'session_meta') { userMessage.persistedId = event.userMessageId; return; }
+        if (event.type === 'approval_mode' && run.approvalVersion !== state.approvalVersion) return;
+        if (['done', 'error', 'interrupted', 'max_loops_reached'].includes(event.type)) run.terminal = true;
+        if (['error', 'interrupted', 'max_loops_reached'].includes(event.type)) queuePaused.value = true;
+        handleEvent(event, assistant);
+      }, run.controller.signal);
+      if (current() && !run.stopped && !run.terminal) {
+        assistant.error = '连接已结束，但未收到任务完成确认。请先核对执行结果，再继续。';
+        assistant.interrupted = true; queuePaused.value = true;
+      }
+      return true;
     } catch (error) {
-      if (error.name !== 'AbortError') assistant.content = `执行失败：${error.message}`;
-    } finally {
+      if (!current()) return false;
+      queuePaused.value = true;
+      if (!assistant) { if (!input.value) input.value = draft || text; throw error; }
       flushTokens();
-      assistant.streaming = false;
-      assistant.confirmation = null;
-      // 执行结束(含中断/失败)必须停掉"思考中"脉冲,否则非 done 收尾的路径
-      // 会把思考面板永远留在"正在思考"状态。
-      assistant.thinkingStreaming = false;
-      running.value = false;
-      state.controller = null;
-      scrollBottom();
-      // 自动发送队列中的下一条
-      if (pendingQueue.value.length > 0) {
-        const next = pendingQueue.value.shift();
-        await sendMessage(next.text, next.extraPayload);
+      if (error.name === 'AbortError') assistant.interrupted = true;
+      else { assistant.error = `连接或执行失败：${error.message}`; assistant.interrupted = true; }
+      return true;
+    } finally {
+      if (current()) {
+        flushTokens();
+        if (assistant) {
+          assistant.streaming = false; assistant.confirmation = null; assistant.thinkingStreaming = false;
+          if (run.stopped) assistant.interrupted = true;
+        }
+        running.value = false; state.controller = null; state.activeRun = null;
+        scrollBottom();
+        if (!run.stopped && !queuePaused.value && pendingQueue.value.length) {
+          const next = pendingQueue.value.shift();
+          try { await sendMessage(next.text, next.extraPayload); }
+          catch { pendingQueue.value.unshift(next); queuePaused.value = true; }
+        }
       }
     }
   }
@@ -176,45 +256,41 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     }
   }
 
-  async function continueAfterInterrupt(extraPayload = {}) {
-    if (running.value) return;
-    const last = [...messages.value].reverse().find((m) => m.role === 'assistant' && m.interrupted);
-    if (last) last.interrupted = false;
-    await sendMessage('请继续刚才被中断的任务,从中断处接着完成;已经执行过的步骤不要重复执行。', extraPayload);
+  async function continueAfterInterrupt(extraPayload = {}, messageId = null) {
+    if (busy.value || sendingBlocked.value) return false;
+    const last = [...messages.value].reverse().find(m => m.role === 'assistant' && m.interrupted && (!messageId || m.id === messageId));
+    if (!last) return false;
+    const accepted = await sendMessage('请继续刚才被中断的任务，先核对已执行步骤的结果，避免重复修改，再完成剩余部分。', { ...extraPayload, ...last.requestContext }, { immediate: true });
+    if (accepted) last.interrupted = false;
+    return accepted;
   }
 
-  async function regenerate(extraPayload = {}) {
-    const lastUser = [...messages.value].reverse().find((m) => m.role === 'user');
-    if (!lastUser || running.value) return;
-    const lastUserIndex = messages.value.lastIndexOf(lastUser);
-    // 重跑等同于"从这条提问重新开始":后端历史必须一并截断,否则重开会话会看到两遍同一轮。
-    if (sessionId.value && lastUser.persistedId) {
-      try {
-        await api.truncateAiHistory(Number(sessionId.value), Number(lastUser.persistedId));
-      } catch (error) {
-        throw new Error(`同步历史失败:${error.message}`, { cause: error });
-      }
-    }
-    messages.value.splice(lastUserIndex);
-    await sendMessage(lastUser.content, extraPayload);
+  async function regenerate(extraPayload = {}, messageId = null) {
+    const end = messageId == null ? messages.value.length : messages.value.findIndex(message => message.id === messageId);
+    if (end < 0) return false;
+    const user = messages.value.slice(0, end).reverse().find(message => message.role === 'user');
+    if (!user) return false;
+    const answer = messageId == null ? messages.value.at(-1) : messages.value[end];
+    return editAndResend(user.id, user.content, { ...extraPayload, ...answer?.requestContext });
   }
 
   async function editAndResend(messageId, newContent, extraPayload = {}) {
-    if (running.value) return;
-    const index = messages.value.findIndex((m) => m.id === messageId);
-    if (index === -1) return;
-    const target = messages.value[index];
-    // 先截断持久化历史,再删本地气泡:顺序反了会让"截断失败"变成静默的前后端分叉。
-    if (sessionId.value && target?.persistedId) {
-      try {
-        await api.truncateAiHistory(Number(sessionId.value), Number(target.persistedId));
-      } catch (error) {
-        // 截断失败时不继续,避免本地删了、服务端还留着旧轮次。
-        throw new Error(`同步历史失败:${error.message}`, { cause: error });
-      }
-    }
-    messages.value.splice(index);
-    await sendMessage(newContent, extraPayload);
+    if (busy.value || sendingBlocked.value) return false;
+    const index = messages.value.findIndex(message => message.id === messageId && message.role === 'user');
+    if (index < 0) return false;
+    const target = messages.value[index], id = sessionId.value, generation = state.generation;
+    const unlock = lockSession('正在同步历史');
+    if (!unlock) return false;
+    const current = () => generation === state.generation && id === sessionId.value && messages.value[index] === target;
+    try {
+      if (id && target.persistedId) await api.truncateAiHistory(Number(id), Number(target.persistedId));
+      if (!current()) return false;
+      messages.value.splice(index);
+    } catch (error) {
+      if (!current()) return false;
+      throw new Error(`同步历史失败：${error.message}`, { cause: error });
+    } finally { unlock(); }
+    return sendMessage(newContent, extraPayload, { immediate: true });
   }
 
   /** 工具执行轨迹:requested → executing → done/failed/rejected,供消息区展示。 */
@@ -244,12 +320,6 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   }
 
   function handleEvent(event, assistant) {
-    if (event.type === 'session_meta') {
-      // 后端刚把这条用户消息落库,回填 id;编辑重发时据此删除对应历史段。
-      const lastUser = [...messages.value].reverse().find((item) => item.role === 'user' && !item.persistedId);
-      if (lastUser) lastUser.persistedId = event.userMessageId;
-      return;
-    }
     if (event.type === 'token') {
       queueToken(assistant, event.content);
       scrollBottom();
@@ -290,7 +360,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       assistant.interrupted = true;
       assistant.content += `${assistant.content ? '\n\n' : ''}${stripAgentProtocol(event.reason || '执行已中断')}`;
     }
-    else if (event.type === 'error') { flushTokens(); assistant.confirmation = null; assistant.content += `${assistant.content ? '\n\n' : ''}${stripAgentProtocol(event.content || 'Agent 执行失败')}`; }
+    else if (event.type === 'error') { flushTokens(); assistant.interrupted = true; assistant.confirmation = null; assistant.content += `${assistant.content ? '\n\n' : ''}${stripAgentProtocol(event.content || 'Agent 执行失败')}`; }
     else if (event.type === 'done') {
       flushTokens();
       if (event.content) assistant.content = stripAgentProtocol(event.content);
@@ -319,13 +389,17 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       }
       assistant.thinkingStreaming = true;
     }
-    for (const item of state.subscribers) { if (item.active !== false) item.onEventExtra?.(event, assistant); }
+    for (const item of state.subscribers) {
+      if (item.active !== false) { item.onEventExtra?.(event, assistant); item.onContent?.(); }
+    }
     scrollBottom();
   }
 
   async function approve(message, inputOverride = null, remember = null) {
     const confirmation = message.confirmation;
     if (!confirmation || confirmation.busy) return;
+    const generation = state.generation, id = sessionId.value;
+    const current = () => generation === state.generation && id === sessionId.value && message.confirmation === confirmation;
     confirmation.busy = true;
     confirmation.error = '';
     try {
@@ -333,9 +407,11 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       if (inputOverride && typeof inputOverride === 'object' && Object.keys(inputOverride).length) payload.input = inputOverride;
       if (remember === 'call' || remember === 'tool') payload.remember = remember;
       await api.agentApprove(payload);
+      if (!current()) return;
       message.confirmation = null;
       for (const item of state.subscribers) { if (item.active !== false) item.onApproval?.(message, 'approved'); }
     } catch (error) {
+      if (!current()) return;
       confirmation.busy = false;
       confirmation.error = String(error?.message || '确认请求失败，请检查连接后重试');
     }
@@ -344,19 +420,33 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   async function reject(message) {
     const confirmation = message.confirmation;
     if (!confirmation || confirmation.busy) return;
+    const generation = state.generation, id = sessionId.value;
+    const current = () => generation === state.generation && id === sessionId.value && message.confirmation === confirmation;
     confirmation.busy = true;
     confirmation.error = '';
     try {
       await api.agentApprove({ executionId: confirmation.executionId, toolCallId: confirmation.toolCallId, approved: false });
+      if (!current()) return;
       message.confirmation = null;
       for (const item of state.subscribers) { if (item.active !== false) item.onApproval?.(message, 'rejected'); }
     } catch (error) {
+      if (!current()) return;
       confirmation.busy = false;
       confirmation.error = String(error?.message || '拒绝请求失败，请检查连接后重试');
     }
   }
 
-  function interrupt() { state.controller?.abort(); }
+  function interrupt() {
+    queuePaused.value = true;
+    const run = state.activeRun;
+    if (run) run.stopped = true;
+    state.controller?.abort();
+    // 会话创建还没有发出执行流，立即恢复输入。迟到创建由 promise 身份丢弃。
+    if (run && !run.assistant) {
+      state.sessionPromise = null; state.activeRun = null; state.controller = null; running.value = false;
+      if (!input.value) input.value = run.draft || run.text;
+    }
+  }
 
   /** 富内容块"放大查看"(页面内浮层,类似豆包)的状态与点击委托。 */
   const zoomOpen = ref(false);
@@ -410,22 +500,27 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   }
 
   // 切换本会话审批模式:后端 ApprovalGate 按 sessionId 记忆,这里只负责把
-  // 选择立刻反映到界面(不等下一轮 approval_mode 事件回来)。
+  // 服务端确认后再更新界面，避免失败时显示未生效的授权。
   // 尚未建会话时先建:否则模式会落进匿名 default 桶,而首条消息发出的
   // 执行流用的是真实 sessionId 桶,选择看起来"没生效"。
   async function setApprovalMode(mode) {
     const next = String(mode || '');
-    if (!['ask', 'allow_writes', 'full'].includes(next) || next === approvalMode.value) return;
-    const previous = approvalMode.value;
-    approvalMode.value = next;
+    if (!['ask', 'allow_writes', 'full'].includes(next) || next === approvalMode.value || modeBusy.value || operation.value || historyLoading.value || historyError.value || (running.value && !sessionId.value)) return false;
+    const generation = state.generation;
+    modeBusy.value = true;
+    ++state.approvalVersion;
     try {
-      await ensureSession();
-      await api.setAgentApprovalMode({ sessionId: sessionId.value, mode: next });
+      const id = await ensureSession();
+      if (generation !== state.generation || !id) return false;
+      await api.setAgentApprovalMode({ sessionId: id, mode: next });
+      if (generation !== state.generation || sessionId.value !== id) return false;
+      approvalMode.value = next;
+      return true;
     } catch (error) {
-      approvalMode.value = previous;
+      if (generation !== state.generation) return false;
       throw error;
-    }
+    } finally { if (generation === state.generation) modeBusy.value = false; }
   }
 
-  return { messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, ensureSession, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom, setSubscriberActive };
+  return { busy, operation, lockSession, modeBusy, historyLoading, historyError, sendingBlocked, queuePaused, removeQueued, resumeQueue, messages, input, running, sessionId, approvalMode, setApprovalMode, scrollEl, atBottom, onScroll, scrollBottom, scrollToBottom, nextMessageId, ensureSession, resetSession, sendMessage, regenerate, editAndResend, continueAfterInterrupt, rateMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom, setSubscriberActive };
 }

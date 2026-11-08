@@ -22,7 +22,7 @@ vi.mock('../src/composables/useAgentChat.js', async () => {
   return {
     PAGE_DRAWER_CHANNEL: 'test-page-drawer',
     useAgentChat: () => ({
-      messages, input: ref(''), running: ref(false), scrollEl: ref(null), onScroll: vi.fn(),
+      messages, input: ref(''), running: ref(false), busy: ref(false), sendingBlocked: ref(false), historyLoading: ref(false), historyError: ref(''), queuePaused: ref(false), scrollEl: ref(null), onScroll: vi.fn(), scrollToBottom: vi.fn(),
       resetSession: vi.fn(), sendMessage: vi.fn(), pendingQueue: ref([]), approve: vi.fn(), reject: vi.fn(),
       interrupt: vi.fn(), handleRichBlockClick: vi.fn(), zoomOpen, zoomContent: ref(''),
       zoomScale: ref(1), zoomReturnFocus: ref(null), onZoomWheel: vi.fn(), closeZoom: agentState.closeZoom,

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createRouter, createMemoryHistory } from 'vue-router';
 const { api, toast } = vi.hoisted(() => ({
- api: Object.fromEntries(['getProjects','getAiSessions','getAiMemories','getAgentRoles','getAiHistory','clearAiHistory','clearAiSessions','renameAgentSession','compactAgentSession','createAgentSession','agentExecuteStream','agentApprove'].map(name=>[name,vi.fn()])),
+ api: Object.fromEntries(['getProjects','getAiSessions','getAiMemories','getAgentRoles','getAiHistory','clearAiHistory','clearAiSessions','renameAgentSession','compactAgentSession','createAgentSession','agentExecuteStream','agentApprove','truncateAiHistory'].map(name=>[name,vi.fn()])),
  toast:{success:vi.fn(),error:vi.fn(),info:vi.fn()},
 }));
 vi.mock('../src/api/client.js',()=>({api}));
@@ -101,4 +101,34 @@ it('中文输入法确认候选时不触发发送，普通回车才发送',async
 it('历史恢复途中离页再返回时重新读取，不把中断加载当作空会话',async()=>{
  const vm=await start(),pending=deferred();api.getAiHistory.mockReturnValueOnce(pending.promise);const first=vm.openSession(2);wrapper.unmount();wrapper=null;
  const next=await start();expect(next.sessionId).toBe(2);expect(next.messages[0]?.content).toBe('问题 2');pending.resolve(history(2));await first;
+});
+it('历史中的审批模式真实恢复，不沿用上一会话的模式',async()=>{
+ api.getAiHistory.mockImplementation(async id=>({...history(id),approvalMode:id===1?'full':'allow_writes'}));
+ const vm=await start();expect(vm.approvalMode).toBe('full');await vm.openSession(2);expect(vm.approvalMode).toBe('allow_writes');
+});
+it('编辑重发截断失败保留编辑态、草稿和挂载上下文',async()=>{
+ const vm=await start();vm.startEdit(vm.messages[0]);vm.input='修订后的排障目标';vm.attachedLogs='日志证据';vm.projectId='p1';
+ api.truncateAiHistory.mockRejectedValueOnce(new Error('数据库忙'));await vm.submit();expect(vm.editingMessageId).toBeTruthy();expect(vm.input).toBe('修订后的排障目标');expect(api.agentExecuteStream).not.toHaveBeenCalled();
+ api.truncateAiHistory.mockResolvedValueOnce({});await vm.submit();expect(vm.editingMessageId).toBeNull();expect(api.agentExecuteStream.mock.calls[0][0]).toMatchObject({message:'修订后的排障目标',attachedLogs:'日志证据',projectId:'p1'});
+});
+it('历史恢复中的工作台离页后，抽屉仍不能发送到尚未恢复的会话',async()=>{
+ const vm=await start(),pending=deferred();api.getAiHistory.mockReturnValueOnce(pending.promise);const task=vm.openSession(2);wrapper.unmount();wrapper=null;
+ const drawer=useAgentChat();expect(drawer.sendingBlocked.value).toBe(true);await expect(drawer.sendMessage('迟到消息')).rejects.toThrow('恢复');pending.resolve(history(2));await task;expect(api.agentExecuteStream).not.toHaveBeenCalled();
+});
+it('语音识别迟到回调在切换会话后不污染新草稿',async()=>{
+ let engine;window.SpeechRecognition=class{constructor(){engine=this;}start(){}abort(){}};
+ const vm=await start();vm.toggleVoiceInput();const stale=engine.onresult;await vm.openSession(2);vm.input='新会话草稿';stale({results:[[{transcript:'旧语音'}]]});expect(vm.input).toBe('新会话草稿');delete window.SpeechRecognition;
+});
+it('暂停的队列按会话保留，返回时不会自动发送',async()=>{
+ const vm=await start();const chat=useAgentChat();chat.pendingQueue.value=[{id:77,text:'待核对恢复',extraPayload:{projectId:'p1'}}];chat.queuePaused.value=true;
+ await vm.openSession(2);expect(chat.pendingQueue.value).toEqual([]);await vm.openSession(1);expect(chat.pendingQueue.value[0].text).toBe('待核对恢复');expect(chat.queuePaused.value).toBe(true);expect(api.agentExecuteStream).not.toHaveBeenCalled();
+});
+it('删除请求离页后成功，释放已删除的共享会话',async()=>{
+ const vm=await start(),pending=deferred();api.clearAiHistory.mockReturnValueOnce(pending.promise);vm.deleteSession(1);const task=vm.confirmDeleteSession();wrapper.unmount();wrapper=null;
+ const chat=useAgentChat();expect(chat.busy.value).toBe(true);pending.resolve({ok:true});await task;expect(chat.sessionId.value).toBeNull();expect(chat.busy.value).toBe(false);
+});
+it('HTTP环境无Clipboard API时提供复制回退并恢复焦点',async()=>{
+ const vm=await start();const clipboard=Object.getOwnPropertyDescriptor(navigator,'clipboard');Object.defineProperty(navigator,'clipboard',{value:undefined,configurable:true});const previous=document.execCommand;document.execCommand=vi.fn(()=>true);
+ try{await vm.copyMessage(vm.messages[1]);expect(document.execCommand).toHaveBeenCalledWith('copy');expect(toast.success).toHaveBeenCalledWith('已复制到剪贴板');expect(document.querySelector('textarea[style*="-9999px"]')).toBeNull();}
+ finally{document.execCommand=previous;if(clipboard)Object.defineProperty(navigator,'clipboard',clipboard);else delete navigator.clipboard;}
 });

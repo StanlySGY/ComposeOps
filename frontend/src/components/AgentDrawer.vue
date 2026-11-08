@@ -8,19 +8,20 @@
       </button>
       <header class="agent-drawer-head">
         <div class="flex min-w-0 items-center gap-2"><Bot class="h-4 w-4 text-status-info" /><div class="min-w-0"><strong class="block truncate">页面 Agent</strong><small class="block truncate">{{ pageContext.page || '当前页面' }} · {{ pageContext.mode || '运维问答与操作' }}</small></div></div>
-        <div class="flex items-center gap-1"><button class="icon-btn" title="新建会话(清空当前上下文)" aria-label="新建会话" :disabled="running" @click="startFreshSession"><MessageSquarePlus class="h-4 w-4" /></button><button class="icon-btn" title="中断执行" aria-label="中断执行" :disabled="!running" @click="interrupt"><Square class="h-4 w-4" /></button><button class="icon-btn" title="关闭 Agent" aria-label="关闭 Agent" @click="closeAgent"><X class="h-4 w-4" /></button></div>
+        <div class="flex items-center gap-1"><button class="icon-btn" title="新建会话(清空当前上下文)" aria-label="新建会话" :disabled="busy" @click="startFreshSession"><MessageSquarePlus class="h-4 w-4" /></button><button class="icon-btn" title="中断执行" aria-label="中断执行" :disabled="!running" @click="interrupt"><Square class="h-4 w-4" /></button><button class="icon-btn" title="关闭 Agent" aria-label="关闭 Agent" @click="closeAgent"><X class="h-4 w-4" /></button></div>
       </header>
       <div class="agent-drawer-context"><span>已携带当前页面上下文</span><small>{{ contextSummary }}</small></div>
       <div ref="scrollEl" class="agent-drawer-messages" @scroll="onScroll" @click="handleRichBlockClick">
-        <div v-if="!messages.length" class="agent-drawer-empty"><SceneIllustration kind="assistant" class="drawer-welcome-art" sizes="180px" /><p>可以询问当前页面的数据、状态或操作方式。</p><button class="preset-chip" @click="input = defaultPrompt; focusInput()">{{ defaultPrompt }}</button></div>
+        <p v-if="running && !messages.length" class="agent-drawer-status" role="status">正在准备会话…</p><div v-else-if="!messages.length" class="agent-drawer-empty"><SceneIllustration kind="assistant" class="drawer-welcome-art" sizes="180px" /><p>可以询问当前页面的数据、状态或操作方式。</p><button class="preset-chip" @click="input = defaultPrompt; focusInput()">{{ defaultPrompt }}</button></div>
         <article v-for="message in messages" :key="message.id" class="agent-drawer-message" :class="message.role">
           <div class="agent-drawer-avatar"><UserRound v-if="message.role === 'user'" class="h-3.5 w-3.5" /><Bot v-else class="h-3.5 w-3.5" /></div>
           <div class="min-w-0 max-w-[calc(100%-2rem)]"><div v-if="message.tools?.length" class="agent-drawer-tools"><div class="agent-drawer-tool-track"><span v-for="(tool, index) in message.tools" :key="index" class="agent-drawer-tool-chip" :class="tool.status"><i></i>{{ tool.tool }}<em v-if="tool.durationMs">{{ (tool.durationMs / 1000).toFixed(1) }}s</em></span></div><details v-if="toolDetailCount(message)" class="agent-drawer-tool-detail"><summary>参数与结果({{ toolDetailCount(message) }})</summary><div v-for="(tool, index) in message.tools" :key="index" class="agent-drawer-tool-block" :class="tool.status"><strong>{{ tool.tool }} · {{ toolStatusLabel(tool.status) }}</strong><pre v-if="tool.paramsText && tool.paramsText !== '{}'">{{ tool.paramsText }}</pre><pre v-if="tool.error" class="is-error">{{ tool.error }}</pre><pre v-else-if="tool.summary">{{ tool.summary }}</pre></div></details></div><div v-if="message.taskNotices?.length" class="agent-task-notice"><p v-for="(notice, index) in message.taskNotices" :key="index">{{ notice }}</p></div><AgentThinking v-if="message.role === 'assistant'" :thinking="message.thinking" :live="!!message.thinkingStreaming" /><div v-if="message.streaming && !message.content" class="agent-typing" role="status" aria-live="polite"><i></i><i></i><i></i><span>正在处理</span></div><div v-else-if="message.role === 'assistant' && !message.content" class="agent-empty-reply">(未返回内容)</div><AgentMarkdown v-else-if="message.role === 'assistant'" class="agent-drawer-markdown" :content="message.content" /><div v-else class="agent-drawer-user">{{ message.content }}</div>
+            <p v-if="message.error" class="agent-drawer-error" role="alert">{{ message.error }}</p><div v-if="message.interrupted && !running" class="agent-drawer-continue"><button type="button" class="btn-secondary btn-sm" :disabled="sendingBlocked" @click="continueSafely(message)"><Play class="h-3 w-3" />继续执行</button><small>先核对结果，再继续剩余任务</small></div>
             <div v-if="message.confirmation" class="agent-drawer-confirm"><strong>需要确认后执行<span v-if="message.confirmation.tool" class="ml-1.5 font-mono text-[11px] text-status-warn/80">{{ message.confirmation.tool }}</span></strong><p>{{ message.confirmation.description }}</p><p v-if="message.confirmation.error" class="mt-2 text-sm text-status-error" role="alert" aria-live="assertive">{{ message.confirmation.error }}</p><details class="agent-confirm-params" @toggle="initParamsEdit($event, message)"><summary>查看 / 编辑参数</summary><textarea v-model="message.confirmation.paramsText" class="agent-confirm-params-text" aria-label="确认执行参数 JSON" rows="5" spellcheck="false"></textarea></details><div class="mt-2 flex flex-wrap gap-2"><button class="btn-primary btn-sm" :disabled="message.confirmation.busy" @click="approveWithParams(message)">确认执行</button><button v-if="message.confirmation.risk !== 'critical'" class="btn-secondary btn-sm" :disabled="message.confirmation.busy" @click="approveWithParams(message, 'call')">确认并本会话不再询问(同参数)</button><button class="btn-secondary btn-sm" :disabled="message.confirmation.busy" @click="reject(message)">拒绝</button></div></div>
           </div>
         </article>
       </div>
-      <form class="agent-drawer-composer" @submit.prevent="submit"><textarea ref="inputEl" v-model="input" class="agent-input" aria-label="给页面 Agent 发送消息" rows="3" placeholder="询问当前页面或让 Agent 执行任务…" @keydown.enter.exact.prevent="submit"></textarea><div class="flex items-center justify-between gap-2"><small class="text-surface-400">{{ running ? (pendingQueue.length ? '执行中,已排队 ' + pendingQueue.length + ' 条' : '执行中,可继续输入并自动排队') : '需要修改时会先请求确认' }}</small><button class="btn-primary" type="submit" :disabled="!input.trim()"><Send class="h-4 w-4" />{{ running ? '排队' : '发送' }}</button></div></form>
+      <form class="agent-drawer-composer" @submit.prevent="submit"><AgentPendingQueue :items="pendingQueue" :paused="queuePaused" :busy="busy || sendingBlocked" @remove="removeQueued" @resume="resumeQueueSafely" /><p v-if="sendError || historyError" class="agent-drawer-error" role="alert">{{ sendError || historyError }}<a v-if="historyError" href="#/agent" @click="closeAgent">返回工作台恢复历史</a></p><p v-if="historyLoading" class="agent-drawer-status" role="status">正在恢复会话历史…</p><textarea ref="inputEl" v-model="input" class="agent-input" aria-label="给页面 Agent 发送消息" rows="3" placeholder="询问当前页面或让 Agent 执行任务…" @keydown="onComposerKeydown"></textarea><div class="flex items-center justify-between gap-2"><small class="text-surface-400">{{ running ? (pendingQueue.length ? '执行中,已排队 ' + pendingQueue.length + ' 条' : '执行中,可继续输入并自动排队') : '需要修改时会先请求确认' }}</small><button class="btn-primary" type="submit" :disabled="!input.trim() || sendingBlocked"><Send class="h-4 w-4" />{{ running || queuePaused && pendingQueue.length ? '排队' : '发送' }}</button></div></form>
     </aside>
     <teleport to="body">
       <div v-if="zoomOpen" class="rich-zoom-mask" @click.self="closeZoom()" @wheel.prevent="onZoomWheel">
@@ -35,21 +36,23 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Bot, MessageSquarePlus, Send, Square, UserRound, X } from 'lucide-vue-next';
+import { Bot, MessageSquarePlus, Play, Send, Square, UserRound, X } from 'lucide-vue-next';
 import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { PAGE_DRAWER_CHANNEL, useAgentChat } from '../composables/useAgentChat.js';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
 import AgentMarkdown from './common/AgentMarkdown.vue';
 import SceneIllustration from './common/SceneIllustration.vue';
 import AgentThinking from './agent/AgentThinking.vue';
+import AgentPendingQueue from './agent/AgentPendingQueue.vue';
 
 const { open, context, closeAgent, openAgent } = useAgentConsole();
 // 两种视图使用同一会话；收起、切页不会中断执行或清空草稿。
 const chat = useAgentChat({ channel: PAGE_DRAWER_CHANNEL });
 // onScroll 必须绑定到消息容器:此前漏绑导致 atBottom 恒为 true,
 // 流式期间用户向上回看会被滚动跟随持续拽回底部。
-const { messages, input, running, scrollEl, onScroll, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom } = chat;
+const { busy, sendingBlocked, historyLoading, historyError, queuePaused, removeQueued, resumeQueue, continueAfterInterrupt, messages, input, running, scrollEl, onScroll, scrollToBottom, resetSession, sendMessage, pendingQueue, approve, reject, interrupt, handleRichBlockClick, zoomOpen, zoomContent, zoomScale, zoomReturnFocus, onZoomWheel, closeZoom } = chat;
 const inputEl = ref(null);
+const sendError = ref('');
 const drawerEl = ref(null);
 const zoomDialogEl = ref(null);
 let zoomOpener = null;
@@ -145,8 +148,8 @@ function handleAgentPrompt(event) {
   if (open.value) focusInput();
 }
 function startFreshSession() {
-  if (running.value) return;
-  resetSession();
+  if (busy.value) return;
+  resetSession(); sendError.value = '';
   focusInput();
 }
 const pageContext = computed(() => ({ page: context.value.page || '当前页面', route: window.location.hash.replace(/^#/, '') || '/', mode: context.value.mode || '运维问答与操作', summary: context.value.summary || '', state: context.value.state || '' }));
@@ -158,11 +161,24 @@ const defaultPrompt = computed(() => {
 });
 useEscapeKey({ active: open, onClose: closeAgent, layer: 'drawer', lockBody: true });
 function focusInput() { void nextTick(() => inputEl.value?.focus()); }
-function submit() {
+async function submit() {
   const text = input.value.trim();
-  if (!text) return;
-  // 抽屉与工作台共用同一 chat 实例:执行中提交会进入队列,由 useAgentChat 自动续发。
-  void sendMessage(text, { pageContext: pageContext.value });
+  if (!text || sendingBlocked.value) return;
+  sendError.value = '';
+  try { await sendMessage(text, { pageContext: pageContext.value }); }
+  catch (error) { sendError.value = error.message || '消息未发送，请重试'; }
+}
+async function resumeQueueSafely() {
+  sendError.value = '';
+  try { await resumeQueue(); } catch (error) { sendError.value = error.message; }
+}
+async function continueSafely(message) {
+  sendError.value = '';
+  try { await continueAfterInterrupt({ pageContext: pageContext.value }, message.id); } catch (error) { sendError.value = error.message; }
+}
+function onComposerKeydown(event) {
+  if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault(); void submit();
 }
 // 会话 id 在第一次发送时惰性创建(ensureSession),这里不做历史回填 ——
 // 抽屉是"就当前页面问一句"的轻入口,续上历史会让上下文与页面不符。
@@ -172,7 +188,7 @@ watch(open, (value) => {
     return;
   }
   captureDrawerOpener();
-  focusInput();
+  focusInput(); scrollToBottom();
 });
 onMounted(() => {
   if (open.value) {
@@ -202,8 +218,9 @@ function approveWithParams(message, remember = null) {
   if (confirmation?.paramsText !== undefined && confirmation.paramsText.trim()) {
     try {
       inputOverride = JSON.parse(confirmation.paramsText);
+      if (!inputOverride || typeof inputOverride !== 'object' || Array.isArray(inputOverride)) throw new Error('参数必须是 JSON 对象');
     } catch {
-      message.content = '参数不是合法 JSON,请修正后再确认';
+      confirmation.error = '参数必须是合法 JSON 对象，请修正后再确认';
       return;
     }
   }
@@ -213,6 +230,7 @@ function approveWithParams(message, remember = null) {
 </script>
 
 <style scoped>
+.agent-drawer-error { margin: 8px 0; padding: 8px 10px; border: 1px solid rgb(244 63 94 / .25); border-radius: 8px; background: rgb(244 63 94 / .06); color: #fda4af; font-size: 12px; line-height: 1.65; }.agent-drawer-error a { display: block; margin-top: 4px; text-decoration: underline; }.agent-drawer-status { margin-bottom: 8px; color: #a9c9bf; font-size: 12px; }.agent-drawer-continue { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }.agent-drawer-continue small { color: #a3adb9; font-size: 11px; }
 .agent-drawer-layer { position: fixed; inset: 0; z-index: 51; pointer-events: none; }.agent-drawer-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgba(0,0,0,.58); pointer-events: auto; }.agent-drawer { position: absolute; top: 0; right: 0; display: flex; width: min(100vw, 30rem); max-width: 100%; height: 100%; flex-direction: column; color: #d4d4d8; border-left: 1px solid #3f4653; background: #181c23; box-shadow: -18px 0 45px rgba(0,0,0,.35); pointer-events: auto; }.agent-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #303641; }.agent-drawer-head strong { font-size: 13px; color: #f4f4f5; }.agent-drawer-head small { color: #71717a; font-size: 10px; }.agent-drawer-context { padding: 9px 16px; border-bottom: 1px solid #272c35; background: #11151b; }.agent-drawer-context span, .agent-drawer-context small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.agent-drawer-context span { color: #67e8f9; font-size: 10px; }.agent-drawer-context small { margin-top: 2px; color: #71717a; font-size: 10px; }.agent-drawer-messages { min-height: 0; flex: 1; overflow-y: auto; padding: 16px; }.agent-drawer-empty { display: grid; min-height: 100%; place-content: center; justify-items: center; gap: 10px; color: #71717a; font-size: 12px; text-align: center; }.agent-drawer-message { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; }.agent-drawer-message.user { flex-direction: row-reverse; }.agent-drawer-avatar { display: grid; width: 25px; height: 25px; flex: 0 0 auto; place-items: center; color: #67e8f9; border: 1px solid #155e75; border-radius: 7px; background: #082f49; }.agent-drawer-message.user .agent-drawer-avatar { color: #a1a1aa; border-color: #3f4653; background: #20252d; }.agent-drawer-user, .agent-drawer-markdown { padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.65; }.agent-drawer-user { white-space: pre-wrap; background: #082f49; color: #f4f4f5; }.agent-drawer-markdown { background: #20252d; color: #d4d4d8; }.agent-drawer-markdown :deep(p) { margin: 0 0 7px; }.agent-drawer-markdown :deep(p:last-child) { margin-bottom: 0; }.agent-drawer-markdown :deep(pre) { overflow: auto; padding: 8px; background: #11151b; }.agent-drawer-markdown :deep(table) { display: block; width: 100%; margin: 7px 0; overflow-x: auto; border-collapse: collapse; font-size: 11px; }.agent-drawer-markdown :deep(th), .agent-drawer-markdown :deep(td) { padding: 4px 7px; border: 1px solid #303641; text-align: left; vertical-align: top; }.agent-drawer-markdown :deep(th) { color: #e4e4e7; font-weight: 600; background: #11151b; }.agent-drawer-markdown :deep(tr:nth-child(even) td) { background: rgba(17,21,27,.4); }.agent-drawer-markdown :deep(hr) { margin: 10px 0; border: 0; border-top: 1px solid #303641; }
 .agent-typing { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; color: #71717a; font-size: 11px; }
 .agent-typing i { width: 4px; height: 4px; border-radius: 999px; background: #22d3ee; animation: typing-bounce 1.1s cubic-bezier(0.34, 1.3, 0.64, 1) infinite; }

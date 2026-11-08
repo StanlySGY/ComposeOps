@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-history-mode-'));
+process.env.DB_PATH = path.join(dir, 'test.db');
+const { buildApp } = await import('../src/app.js');
+const { default: db, addAiMessage } = await import('../src/lib/db.js');
+const app = await buildApp({ logger: false });
+await app.ready();
+test.after(async () => { await app.close(); db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+
+test('恢复历史返回对应会话的真实审批模式，切换和分页不串会话', async () => {
+  let headers = { origin: 'http://localhost:3001', host: 'localhost:3001' };
+  let response = await app.inject({ method: 'GET', url: '/api/v1/ai/history?sessionId=1', headers });
+  assert.equal(response.statusCode, 401);
+  response = await app.inject({ method: 'POST', url: '/api/v1/auth/setup', headers, payload: { password: 'history-mode-test-only-password' } });
+  assert.equal(response.statusCode, 200);
+  headers = { ...headers, cookie: String(response.headers['set-cookie']).split(';', 1)[0] };
+  const create = async () => (await app.inject({ method: 'POST', url: '/api/v1/ai/agent/sessions', headers })).json().sessionId;
+  const first = await create(), second = await create();
+  const user = addAiMessage('user', '检查服务', null, first);
+  const answer = addAiMessage('assistant', '已完成', null, first);
+  response = await app.inject({ method: 'POST', url: '/api/v1/ai/agent/approval-mode', headers, payload: { sessionId: first, mode: 'full' } });
+  assert.equal(response.statusCode, 200);
+  response = await app.inject({ method: 'GET', url: `/api/v1/ai/history?sessionId=${first}&limit=1`, headers });
+  assert.equal(response.json().approvalMode, 'full');
+  assert.deepEqual(response.json().messages.map(row => row.id), [answer]);
+  assert.equal(response.json().hasMore, true);
+  response = await app.inject({ method: 'GET', url: `/api/v1/ai/history?sessionId=${first}&beforeId=${answer}`, headers });
+  assert.equal(response.json().approvalMode, 'full');
+  assert.deepEqual(response.json().messages.map(row => row.id), [user]);
+  response = await app.inject({ method: 'GET', url: `/api/v1/ai/history?sessionId=${second}`, headers });
+  assert.equal(response.json().approvalMode, 'ask');
+  response = await app.inject({ method: 'POST', url: '/api/v1/ai/agent/approval-mode', headers, payload: { sessionId: second, mode: 'allow_writes' } });
+  assert.equal(response.statusCode, 200);
+  response = await app.inject({ method: 'GET', url: `/api/v1/ai/history?sessionId=${first}`, headers });
+  assert.equal(response.json().approvalMode, 'full');
+});
