@@ -7,8 +7,9 @@
     <p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p><p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
     <section v-if="tab === 'ai'" class="settings-section">
-      <AiChannelsPanel v-model:channels="ai.channels" @health-change="refreshChannelHealth" />
-      <fieldset class="space-y-4" :disabled="savingAi">
+      <SettingsLoadState :state="loads.ai" name="ai" label="AI 设置" @retry="loadAi" />
+      <fieldset class="min-w-0 space-y-4" :disabled="!loads.ai.ready || savingAi">
+      <AiChannelsPanel v-if="loads.ai.ready" v-model:channels="ai.channels" @health-change="refreshChannelHealth" />
       <h2 class="section-title">通用 AI 设置</h2>
       <div class="ios-group">
         <div class="ios-row">
@@ -83,6 +84,8 @@
     </section>
 
     <section v-if="tab === 'notifications'" class="settings-section">
+      <SettingsLoadState :state="loads.notifications" name="notifications" label="通知设置" @retry="loadNotifications" />
+      <fieldset class="min-w-0 space-y-4" :disabled="!loads.notifications.ready || savingNotifications || testingNotifications">
       <h2 class="section-title">异常通知</h2>
       <div class="ios-group">
         <div class="ios-row">
@@ -121,14 +124,19 @@
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">容器不健康</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="unhealthy" aria-label="容器不健康" /></label></div>
       </div>
       <div class="flex gap-2"><button class="btn-primary" :disabled="savingNotifications" @click="saveNotifications"><Save class="w-4 h-4" />{{ savingNotifications ? '保存中…' : '保存通知设置' }}</button><button class="btn-secondary" :disabled="testingNotifications || savingNotifications" @click="testNotifications"><Send class="w-4 h-4" />{{ testingNotifications ? '发送中…' : '发送测试' }}</button></div>
+      </fieldset>
     </section>
 
     <section v-if="tab === 'maintenance'" class="settings-section">
       <h2 class="section-title">镜像更新</h2><ImageUpdatePanel />
+      <SettingsLoadState :state="loads.updates" name="updates" label="更新策略" @retry="loadUpdates" />
+      <fieldset class="min-w-0 space-y-3" :disabled="!loads.updates.ready || savingUpdates">
       <div class="ios-group">
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">定时检查镜像更新</div><div class="ios-row-desc">只查询远端镜像摘要并发送提醒，不会下载镜像或重建容器。</div></div><label class="toggle-label"><input v-model="updates.autoEnabled" type="checkbox" aria-label="定时检查镜像更新" /></label></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">检查间隔（小时）</div></div><div class="ios-row-control"><input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input max-w-24 text-center" aria-label="镜像更新检查间隔（小时）" /></div></div>
       </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" :disabled="savingUpdates" @click="saveUpdates"><Save class="w-4 h-4" />{{ savingUpdates ? '保存中…' : '保存更新策略' }}</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
+      </fieldset>
+      <SettingsLoadState :state="loads.usage" name="usage" label="磁盘用量" @retry="loadUsage" />
       <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" aria-label="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>
         <div class="card p-3">
           <div class="flex items-center justify-between text-sm"><span class="text-surface-300">磁盘占用</span><span v-if="usage" class="text-muted">{{ formatBytes(usageTotal) }} · 可释放 {{ formatBytes(usageReclaimable) }}</span></div>
@@ -140,6 +148,7 @@
     <DataMaintenancePanel v-if="tab === 'maintenance'" />
 
     <section v-if="tab === 'mounts'" class="settings-section">
+      <SettingsLoadState :state="loads.mounts" name="mounts" label="项目权限" @retry="loadMountPlan()" />
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div><h2 class="section-title">Compose 项目纳管</h2><p class="text-sm text-surface-400 mt-1">自动发现的项目默认没有操作权限，只有明确勾选并应用后才加入管理。</p></div>
         <button class="btn-secondary" :disabled="mountLoading" @click="loadMountPlan"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': mountLoading }" />重新扫描</button>
@@ -183,6 +192,7 @@
     </section>
 
     <section v-if="tab === 'hosts'" class="settings-section">
+      <SettingsLoadState :state="{ ready: !hostsStore.loading && !hostsStore.error, loading: hostsStore.loading, error: hostsStore.error }" name="hosts" label="Docker 节点" @retry="hostsStore.load(true)" />
       <div class="flex items-center justify-between gap-3">
         <div><h2 class="section-title">Docker 节点纳管</h2><p class="text-sm text-surface-400 mt-1">添加远程 Docker 主机(Local/TCP/SSH),全局切换后所有项目、日志与指标跟随目标节点。</p></div>
         <button class="btn-primary" @click="openHostEditor()"><Server class="w-4 h-4" />添加远程主机</button>
@@ -241,9 +251,11 @@
     <ConfirmDialog :show="!!removeHostTarget" title="删除 Docker 节点" :message="`确认删除节点 ${removeHostTarget?.name || ''}?删除后不会影响远程主机本身。`" tone="danger" confirm-text="删除节点" @confirm="confirmRemoveHost" @cancel="removeHostTarget = null" />
     <ConfirmDialog :show="managementConfirm" title="取消项目纳管" :message="`将取消 ${removedProjectCount} 个项目的管理权限,相关控制与编辑入口会立即关闭。确认继续?`" tone="warning" confirm-text="确认应用" @confirm="confirmSaveManagement" @cancel="managementConfirm = false" />
     <section v-if="tab === 'mcp'" class="settings-section space-y-4">
+      <SettingsLoadState :state="loads.mcp" name="mcp" label="MCP 配置" @retry="loadMcp" />
+      <fieldset class="min-w-0 space-y-4" :disabled="!loads.mcp.ready || savingMcp || resettingMcpToken">
       <div class="flex items-center justify-between">
         <div><h2 class="section-title">MCP 服务</h2><p class="mt-1 text-sm text-surface-400">把面板的运维工具通过 MCP 协议暴露给 Claude Desktop、Cursor 等客户端</p></div>
-        <label class="toggle-label"><input v-model="mcp.enabled" type="checkbox" :disabled="savingMcp" @change="saveMcp" />启用</label>
+        <label class="toggle-label"><input v-model="mcp.enabled" type="checkbox" aria-label="启用 MCP 服务" :disabled="savingMcp" @change="saveMcp" />启用</label>
       </div>
       <template v-if="mcp.enabled">
         <div class="form-grid">
@@ -268,16 +280,18 @@
           <div class="flex flex-wrap items-center gap-2">
             <button class="btn-secondary btn-sm" @click="copyMcpConfig">复制客户端配置</button>
             <button class="btn-secondary btn-sm" :disabled="resettingMcpToken" @click="regenerateMcpToken"><RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': resettingMcpToken }" />{{ resettingMcpToken ? '重置中…' : '重置 Token' }}</button>
-            <button class="btn-secondary btn-sm" @click="showMcpToken">查看 Token</button>
+            <button class="btn-secondary btn-sm" @click="showMcpToken">复制 Token</button>
           </div>
         </div>
       </template>
       <p v-else class="text-sm text-surface-400">启用后,外部 MCP 客户端可以用独立 Token 安全调用面板工具(默认只读:状态查询、日志、巡检等)。</p>
+      </fieldset>
     </section>
     <section v-if="tab === 'about'" class="settings-section">
+      <SettingsLoadState :state="loads.capabilities" name="capabilities" label="系统信息" @retry="loadCapabilities" />
       <h2 class="section-title">ComposeOps <span class="count-badge">v{{ capabilities.version || '?' }}</span></h2>
       <p class="text-sm text-surface-400">单用户 Docker Compose 运维台。默认建议仅监听本机或通过 Tailscale 访问。</p>
-      <div class="text-sm space-y-1"><p>Web Shell：{{ capabilities.shellEnabled ? '已启用' : '未启用' }}</p><p>环境指标范围：{{ capabilities.hostMetricsScope === 'host' ? '宿主机' : 'ComposeOps 容器' }}</p></div>
+      <div v-if="loads.capabilities.ready" class="text-sm space-y-1"><p>Web Shell：{{ capabilities.shellEnabled ? '已启用' : '未启用' }}</p><p>环境指标范围：{{ capabilities.hostMetricsScope === 'host' ? '宿主机' : 'ComposeOps 容器' }}</p></div>
       <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-surface-800 pt-4">
         <a class="btn-secondary inline-flex" href="https://github.com/StanlySGY" target="_blank" rel="noopener noreferrer"><Github class="w-4 h-4" />作者 @StanlySGY</a>
         <a class="btn-secondary inline-flex" href="https://github.com/StanlySGY/ComposeOps" target="_blank" rel="noopener noreferrer"><Github class="w-4 h-4" />项目仓库</a>
@@ -291,7 +305,7 @@
 <script setup>
 import ImageUpdatePanel from '../components/services/ImageUpdatePanel.vue';
 import DataMaintenancePanel from '../components/settings/DataMaintenancePanel.vue';
-import { computed, markRaw, onMounted, ref, watch } from 'vue';
+import { computed, markRaw, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Activity, Bell, Bot, Download, FolderCog, Github, HardDrive, Info, KeyRound, Pencil, Plug, RefreshCw, Save, Send, Server, ShieldCheck, SlidersHorizontal, Star, Trash2, Upload, Wrench, Zap } from 'lucide-vue-next';
@@ -302,6 +316,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import AiChannelsPanel from '../components/settings/AiChannelsPanel.vue';
 import AgentPoliciesPanel from '../components/settings/AgentPoliciesPanel.vue';
+import SettingsLoadState from '../components/settings/SettingsLoadState.vue';
 const tabs = [{ id: 'ai', label: 'AI', icon: markRaw(Bot) }, { id: 'agent-policy', label: 'Agent 策略', icon: markRaw(ShieldCheck) }, { id: 'personal', label: '偏好', icon: markRaw(SlidersHorizontal) }, { id: 'notifications', label: '通知', icon: markRaw(Bell) }, { id: 'maintenance', label: '维护', icon: markRaw(Wrench) }, { id: 'mounts', label: '项目纳管', icon: markRaw(FolderCog) }, { id: 'hosts', label: 'Docker 节点', icon: markRaw(Server) }, { id: 'mcp', label: 'MCP', icon: markRaw(Plug) }, { id: 'about', label: '关于', icon: markRaw(Info) }];
 const route = useRoute();
 const router = useRouter();
@@ -309,6 +324,23 @@ const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.quer
 const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const savingAi = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
 const mountPlan = ref(null); const mountLoading = ref(false); const highlightedProjectId = computed(() => String(route.query.projectId || ''));
 const hostEditor = ref(null); const savingHost = ref(false); const savingPreferences = ref(false); const changingPassword = ref(false); const savingNotifications = ref(false); const testingNotifications = ref(false); const savingUpdates = ref(false);
+const loads = reactive(Object.fromEntries(['ai', 'notifications', 'updates', 'mounts', 'usage', 'capabilities', 'mcp'].map(key => [key, { loading: false, ready: false, error: '' }])));
+let disposed = false;
+onBeforeUnmount(() => { disposed = true; });
+async function loadSection(key, read, apply) {
+  const state = loads[key];
+  if (state.loading) return;
+  state.loading = true;
+  state.error = '';
+  try {
+    const result = await read();
+    if (disposed) return;
+    apply(result);
+    state.ready = true;
+  } catch (cause) {
+    if (!disposed) state.error = cause.message || '请求失败，请重试';
+  } finally { if (!disposed) state.loading = false; }
+}
 const preferencesLoading = ref(true);
 const preferencesReady = ref(false);
 const preferencesError = ref('');
@@ -448,16 +480,35 @@ async function loadPreferences() {
     preferencesError.value = `读取偏好失败：${cause.message}`;
   } finally { preferencesLoading.value = false; }
 }
-async function loadSettings() { void loadPreferences(); try { await aiStore.loadConfig(); applyAiConfig(aiStore.config); const [notificationConfig, updateConfig, systemCapabilities, plan] = await Promise.all([api.getNotifications(), api.getUpdateSettings(), api.getCapabilities(), api.getMountPlan()]); void hostsStore.load(); notifications.value = notificationConfig; updates.value = updateConfig; capabilities.value = systemCapabilities; applyMountPlan(plan); await loadUsage(); try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ } } catch (e) { fail(e); } }
+function loadAi() {
+  if (savingAi.value) return;
+  return loadSection('ai', async () => { await aiStore.loadConfig(); return aiStore.config; }, applyAiConfig);
+}
+function loadNotifications() {
+  if (savingNotifications.value || testingNotifications.value) return;
+  return loadSection('notifications', () => Promise.all([api.getNotifications(), api.getNotificationEvents()]), ([config, events]) => {
+    notifications.value = config;
+    alertEvents.value = events.events || [];
+  });
+}
+function loadUpdates() {
+  if (savingUpdates.value) return;
+  return loadSection('updates', () => api.getUpdateSettings(), config => { updates.value = config; });
+}
+function loadCapabilities() {
+  return loadSection('capabilities', () => api.getCapabilities(), config => { capabilities.value = config; });
+}
+async function loadSettings() {
+  await Promise.allSettled([loadPreferences(), loadAi(), loadNotifications(), loadUpdates(), loadCapabilities(), loadMountPlan(false), hostsStore.load()]);
+}
 onMounted(loadSettings);
-// 下拉刷新只重读只读面板(磁盘占用、渠道健康、节点、告警事件),不动用户正在编辑的配置表单。
+// 下拉刷新只重读只读面板(磁盘占用、渠道健康、节点),不动用户正在编辑的配置表单。
 usePullRefresh(async () => {
   void hostsStore.load();
-  await Promise.all([loadUsage(), refreshChannelHealth()]);
-  try { const ev = await api.getNotificationEvents(); alertEvents.value = ev.events || ['exit', 'oom', 'unhealthy']; } catch (e) { /* 忽略事件回填失败 */ }
+  await Promise.all([tab.value === 'maintenance' ? loadUsage() : undefined, loads.ai.ready ? refreshChannelHealth() : undefined]);
 }, { keepAlive: true, refreshOnActivate: true });
 async function saveAi() {
-  if (savingAi.value) return;
+  if (savingAi.value || !loads.ai.ready) return;
   savingAi.value = true;
   try {
     const { systemPrompt, failoverEnabled, searchProvider, searchApiKey, searchBaseUrl } = ai.value;
@@ -501,29 +552,44 @@ function channelLabel(type) {
   return { bark: 'Bark', telegram: 'Telegram', wecom: '企业微信', dingtalk: '钉钉', feishu: '飞书', email: '邮件 SMTP', webhook: '通用 Webhook' }[type] || type;
 }
 const mcp = ref({ enabled: false, mode: 'readonly', token: '', configured: false, sseUrl: '/mcp/sse', sessionCount: 0, toolsExported: 0 }); const savingMcp = ref(false); const resettingMcpToken = ref(false);
-async function loadMcp() {
-  try { mcp.value = { ...mcp.value, ...(await api.getMcpConfig()) }; } catch (e) { /* MCP 配置读取失败时保持默认 */ }
+let savedMcp = null;
+function applyMcp(config) {
+  mcp.value = { ...mcp.value, ...config };
+  savedMcp = { ...mcp.value };
+}
+function loadMcp() {
+  if (savingMcp.value || resettingMcpToken.value) return;
+  return loadSection('mcp', () => api.getMcpConfig(), applyMcp);
 }
 async function saveMcp() {
-  if (savingMcp.value) return;
+  if (savingMcp.value || resettingMcpToken.value || !loads.mcp.ready) return;
   savingMcp.value = true;
-  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ enabled: mcp.value.enabled, mode: mcp.value.mode })) }; ok(mcp.value.enabled ? 'MCP 服务已启用' : 'MCP 服务已关闭'); }
-  catch (e) { fail(e); }
+  try { applyMcp(await api.saveMcpConfig({ enabled: mcp.value.enabled, mode: mcp.value.mode })); ok(mcp.value.enabled ? 'MCP 服务已启用' : 'MCP 服务已关闭'); }
+  catch (e) { if (savedMcp) mcp.value = { ...savedMcp }; fail(e); }
   finally { savingMcp.value = false; }
 }
 async function regenerateMcpToken() {
-  if (resettingMcpToken.value) return;
+  if (resettingMcpToken.value || savingMcp.value || !loads.mcp.ready) return;
   resettingMcpToken.value = true;
-  try { mcp.value = { ...mcp.value, ...(await api.saveMcpConfig({ regenerateToken: true })) }; ok('Token 已重置,旧 Token 立即失效'); }
+  try { applyMcp(await api.saveMcpConfig({ regenerateToken: true })); ok('Token 已重置,旧 Token 立即失效'); }
   catch (e) { fail(e); }
   finally { resettingMcpToken.value = false; }
 }
 async function showMcpToken() {
-  try { const { token } = await api.revealMcpToken(); if (token) { await navigator.clipboard.writeText(token).catch(() => {}); ok(`Token 已复制到剪贴板:${token.slice(0, 6)}••••`); } } catch (e) { fail(e); }
+  if (!loads.mcp.ready) return;
+  try {
+    const { token } = await api.revealMcpToken();
+    if (!token) throw new Error('未能读取 Token，请重试');
+    if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持安全复制，请通过 HTTPS 或本机地址访问后重试');
+    await navigator.clipboard.writeText(token);
+    ok('Token 已复制到剪贴板');
+  } catch (e) { fail(e); }
 }
 async function copyMcpConfig() {
   try {
     const { token } = await api.revealMcpToken();
+    if (!token) throw new Error('未能读取 Token，请重试');
+    if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持安全复制，请通过 HTTPS 或本机地址访问后重试');
     const origin = window.location.origin;
     const config = { mcpServers: { composeops: { url: `${origin}${mcp.value.httpUrl || '/mcp'}`, headers: { Authorization: `Bearer ${token}` } } } };
     await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
@@ -531,7 +597,7 @@ async function copyMcpConfig() {
   } catch (e) { fail(e); }
 }
 async function saveNotifications() {
-  if (savingNotifications.value) return;
+  if (savingNotifications.value || testingNotifications.value || !loads.notifications.ready) return;
   try {
     const n = notifications.value;
     if (!Number.isInteger(Number(n.intervalSeconds)) || Number(n.intervalSeconds) < 30) throw new Error('通知巡检间隔必须是至少 30 秒的整数');
@@ -552,9 +618,9 @@ async function saveNotifications() {
     ok('通知配置已保存');
   } catch (e) { fail(e); } finally { savingNotifications.value = false; }
 }
-async function testNotifications() { if (testingNotifications.value) return; testingNotifications.value = true; try { const result = await api.testNotifications(notifications.value); if (result?.skipped) { ok(result.message || '通知未发送：请先启用一个通知渠道。'); return; } ok('测试通知已发送'); } catch (e) { fail(e); } finally { testingNotifications.value = false; } }
-async function saveUpdates() { if (savingUpdates.value) return; try { if (!Number.isInteger(Number(updates.value.intervalHours)) || Number(updates.value.intervalHours) < 1 || Number(updates.value.intervalHours) > 720) throw new Error('镜像检查间隔必须是 1–720 小时的整数'); savingUpdates.value = true; updates.value = await api.saveUpdateSettings(updates.value); ok('更新策略已保存'); } catch (e) { fail(e); } finally { savingUpdates.value = false; } }
-async function loadUsage() { try { usage.value = await api.getStorageDf(); } catch (e) { fail(e); } }
+async function testNotifications() { if (testingNotifications.value || savingNotifications.value || !loads.notifications.ready) return; testingNotifications.value = true; try { const result = await api.testNotifications(notifications.value); if (result?.skipped) { ok(result.message || '通知未发送：请先启用一个通知渠道。'); return; } ok('测试通知已发送'); } catch (e) { fail(e); } finally { testingNotifications.value = false; } }
+async function saveUpdates() { if (savingUpdates.value || !loads.updates.ready) return; try { if (!Number.isInteger(Number(updates.value.intervalHours)) || Number(updates.value.intervalHours) < 1 || Number(updates.value.intervalHours) > 720) throw new Error('镜像检查间隔必须是 1–720 小时的整数'); savingUpdates.value = true; updates.value = await api.saveUpdateSettings(updates.value); ok('更新策略已保存'); } catch (e) { fail(e); } finally { savingUpdates.value = false; } }
+function loadUsage() { return loadSection('usage', () => api.getStorageDf(), result => { usage.value = result; }); }
 function applyMountPlan(plan) {
   mountPlan.value = plan;
   savedManagedProjectIds.value = plan.projects.filter((project) => project.managed).map((project) => project.id);
@@ -562,7 +628,13 @@ function applyMountPlan(plan) {
   selectedProjectIds.value = [...savedManagedProjectIds.value];
   selectedMountProjectIds.value = [...savedMountProjectIds.value];
 }
-async function loadMountPlan() { mountLoading.value = true; try { applyMountPlan(await api.getMountPlan()); ok('项目与权限状态已重新扫描'); } catch (e) { fail(e); } finally { mountLoading.value = false; } }
+async function loadMountPlan(showMessage = true) {
+  if (mountLoading.value) return;
+  mountLoading.value = true;
+  try {
+    await loadSection('mounts', () => api.getMountPlan(), plan => { applyMountPlan(plan); if (showMessage) ok('项目与权限状态已重新扫描'); });
+  } finally { mountLoading.value = false; }
+}
 async function saveManagement() {
   if (removedProjectCount.value) { managementConfirm.value = true; return; }
   await confirmSaveManagement();
@@ -587,8 +659,14 @@ function setTab(next) {
   if (next === 'ai') delete query.tab;
   else query.tab = next;
   router.replace({ query });
-  if (next === 'mcp') loadMcp();
 }
-watch(() => route.query.tab, (value) => { tab.value = tabs.some((item) => item.id === value) ? value : 'ai'; });
+watch(() => route.query.tab, (value) => {
+  if (route.name && route.name !== 'settings') return;
+  tab.value = tabs.some((item) => item.id === value) ? value : 'ai';
+});
+watch(tab, (value) => {
+  if (value === 'mcp' && !loads.mcp.ready) void loadMcp();
+  if (value === 'maintenance' && !loads.usage.ready) void loadUsage();
+}, { immediate: true });
 watch(selectedProjectIds, (ids) => { selectedMountProjectIds.value = selectedMountProjectIds.value.filter((id) => ids.includes(id)); }, { deep: true });
 </script>
