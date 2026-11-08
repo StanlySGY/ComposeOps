@@ -2339,7 +2339,13 @@ export function updateWorkflowDefinition(id, patch = {}) {
 }
 
 export function deleteWorkflowDefinition(id) {
-  return db.prepare('DELETE FROM workflow_definitions WHERE id = ?').run(id).changes > 0;
+  return db.transaction(() => {
+    const active = db.prepare(`SELECT COUNT(*) AS count FROM workflow_instances WHERE definition_id = ? AND status IN ('pending', 'running', 'waiting_approval')`).get(id);
+    if (Number(active?.count) > 0) {
+      throw Object.assign(new Error('此工作流仍有未结束的运行或待审批实例，请先处理或取消这些实例。'), { statusCode: 409, code: 'WORKFLOW_HAS_ACTIVE_INSTANCES' });
+    }
+    return db.prepare('DELETE FROM workflow_definitions WHERE id = ?').run(id).changes > 0;
+  })();
 }
 
 export function createWorkflowInstance({ id, definitionId, name = '', status = 'pending', context = {}, idempotencyKey = null, triggerEventId = null }) {

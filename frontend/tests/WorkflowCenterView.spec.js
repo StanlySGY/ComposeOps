@@ -39,10 +39,11 @@ it('异步加载的定义和待审批实例显示在页面,刷新状态保持响
   const store = useWorkflowStore();
   store.definitions = [];
   store.instances = [];
-  store.error = '刷新失败';
+  store.definitionsError = '定义刷新失败';
+  store.instancesError = '实例刷新失败';
   await flushPromises();
-  expect(wrapper.text()).toContain('还没有工作流');
-  expect(wrapper.text()).toContain('暂无运行实例');
+  expect(wrapper.text()).not.toContain('还没有工作流');
+  expect(wrapper.text()).not.toContain('暂无运行实例');
   expect(wrapper.text()).toContain('刷新失败');
 });
 
