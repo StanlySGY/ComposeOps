@@ -83,7 +83,7 @@ beforeEach(async () => {
   });
   await router.push('/tickets');
   await router.isReady();
-  wrapper = mount(OpsTicketsView, { global: { plugins: [router] } });
+  wrapper = mount(OpsTicketsView, { global: { plugins: [router], stubs: { teleport: true } } });
   await flushPromises();
 });
 
@@ -102,7 +102,7 @@ describe('OpsTicketsView long-lived operations workspace', () => {
     wrapper.unmount(); wrapper = null;
     await router.push('/ops-center');
     await router.push(source);
-    wrapper = mount(OpsTicketsView, { global: { plugins: [router] } });
+    wrapper = mount(OpsTicketsView, { global: { plugins: [router], stubs: { teleport: true } } });
     await flushPromises();
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain('报告验收');
     expect(api.getOpsTicket).toHaveBeenLastCalledWith('opt-1');
@@ -157,7 +157,7 @@ describe('OpsTicketsView long-lived operations workspace', () => {
   it('prefills an event-sourced Ticket draft without creating it automatically', async () => {
     wrapper.unmount();
     await router.push({ path: '/tickets', query: { create: '1', sourceType: 'event', sourceId: 'event-77', title: '磁盘空间告警跟进', description: '来源事件 ID：event-77\n该内容仅作为观察证据。', projectId: 'project-staging' } });
-    wrapper = mount(OpsTicketsView, { global: { plugins: [router] } });
+    wrapper = mount(OpsTicketsView, { global: { plugins: [router], stubs: { teleport: true } } });
     await flushPromises();
     expect(wrapper.get('input[placeholder*="检查 staging"]').element.value).toBe('磁盘空间告警跟进');
     expect(wrapper.get('input[placeholder="event-id / inspection-id / agent-plan-id"]').element.value).toBe('event-77');
@@ -180,7 +180,7 @@ describe('OpsTicketsView long-lived operations workspace', () => {
       scope: expect.objectContaining({ projectIds: ['project-staging'], composeProjectNames: ['compose-worker-test'] }),
       allowedActions: ['service.inspect'],
     }));
-    expect(wrapper.text()).toContain('已签发新的 Mandate 快照');
+    expect(wrapper.text()).toContain('已签发新授权');
   });
 
   it('blocks a read-only Mandate without an explicit Compose project scope', async () => {
@@ -190,18 +190,23 @@ describe('OpsTicketsView long-lived operations workspace', () => {
     await wrapper.findAll('form').at(-1).trigger('submit');
     await flushPromises();
     expect(api.issueOpsMandate).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain('必须在 Mandate 中明确填写 Compose 项目名范围');
+    expect(wrapper.text()).toContain('必须明确填写授权的 Compose 项目名范围');
   });
 
   it('requires explicit confirmation and explains the read-only worker allowlist', async () => {
-    await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('Effect 队列')).trigger('click');
+    await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('动作队列')).trigger('click');
     const approve = wrapper.findAll('button').find((button) => button.text().includes('批准并入队'));
     await approve.trigger('click');
     await flushPromises();
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('只读白名单'));
+    expect(window.confirm).not.toHaveBeenCalled();
+    const confirmation = wrapper.get('[role=dialog]');
+    expect(confirmation.text()).toContain('当前仅支持本机只读检查');
+    expect(api.approveOpsEffect).not.toHaveBeenCalled();
+    await confirmation.findAll('button').find(button => button.text() === '批准并入队').trigger('click');
+    await flushPromises();
     expect(api.approveOpsEffect).toHaveBeenCalledWith('opt-1', 'oef-1');
-    expect(wrapper.text()).toContain('等待派发队列');
-    expect(wrapper.text()).toContain('受控 Effect Worker');
+    expect(wrapper.text()).toContain('动作已入队');
+    expect(wrapper.text()).toContain('执行器状态');
     expect(wrapper.text()).toContain('service.inspect');
     expect(wrapper.text()).toContain('明确禁止');
     expect(wrapper.text()).toContain('运行中');
@@ -209,7 +214,7 @@ describe('OpsTicketsView long-lived operations workspace', () => {
   });
 
   it('offers only the supported read-only actions and asks for an exact Compose project', async () => {
-    await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('Effect 队列')).trigger('click');
+    await wrapper.findAll('[role="tab"]').find((item) => item.text().includes('动作队列')).trigger('click');
     await wrapper.findAll('button').find((button) => button.text().includes('新增意图')).trigger('click');
     const form = wrapper.findAll('form').find((item) => item.text().includes('Compose 项目名'));
     expect(form.text()).toContain('service.inspect');
