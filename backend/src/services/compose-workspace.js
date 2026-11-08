@@ -194,6 +194,7 @@ async function withRunner(project, callback) {
         if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);
         return result.stdout.trim();
       });
+      assertProjectHostUnchanged(project);
       return await callback({ __ssh: true, host });
     } catch (error) {
       if (!error.statusCode) error.statusCode = 409;
@@ -211,6 +212,7 @@ async function withRunner(project, callback) {
       if (result.code !== 0) throw new Error(result.stderr?.trim() || `realpath 无法解析 ${remotePath}`);
       return result.stdout.trim();
     });
+    assertProjectHostUnchanged(project);
     return await callback(lease.container);
   } catch (error) {
     if (error.statusCode === 504 && lease) {
@@ -221,6 +223,59 @@ async function withRunner(project, callback) {
     throw error;
   } finally {
     if (lease) releaseRunner(lease.entry);
+  }
+}
+
+/**
+ * 首次部署专用：原子创建全新目录，不复用或覆盖任何已有目录。
+ * 普通 withRunner 仍要求 Compose 文件已经存在。这里只给短生命周期
+ * helper 挂 /projects（无 Docker socket、无网络），创建完成立即释放。
+ */
+export async function withNewWorkspace(project, callback) {
+  const { root, files } = projectPaths(project);
+  if (path.posix.dirname(root) !== '/projects' || files.some(file => path.posix.dirname(file) !== root)) {
+    throw Object.assign(new Error('应用首次部署只能在 /projects 的独立子目录创建配置'), { statusCode: 403 });
+  }
+  assertProjectHostUnchanged(project);
+  const host = getProjectHost(project);
+  if (host.type === 'tcp') throw Object.assign(new Error('TCP 节点不支持创建应用工作区'), { statusCode: 409 });
+  let container;
+  try {
+    if (host.type === 'ssh') {
+      const parent = await sshExec(host, ['mkdir', '-p', '--', '/projects'], { timeoutMs: 15000 });
+      if (parent.code !== 0) throw Object.assign(new Error('无法创建远端应用父目录，请检查 /projects 写入权限'), { statusCode: 409 });
+      container = { __ssh: true, host };
+    } else {
+      container = await docker.createContainer({
+        Image: await runnerImage(), Cmd: ['sleep', '300'],
+        Labels: { 'composeops.helper': 'blueprint-init', 'composeops.project': project.id },
+        HostConfig: {
+          AutoRemove: true, ReadonlyRootfs: true, NetworkMode: 'none',
+          // Binds 明确创建尚不存在的 /projects；Mounts 要求 source 已存在。
+          Binds: ['/projects:/projects:rw'], SecurityOpt: ['no-new-privileges:true'],
+        },
+      });
+      await container.start();
+    }
+    assertProjectHostUnchanged(project);
+    const created = await execInRunner(container, [
+      'sh', '-c', 'if [ -e "$1" ] || [ -L "$1" ]; then exit 17; fi; umask 077; mkdir -- "$1"',
+      'composeops-init', root,
+    ], { timeoutMs: 15000 });
+    if (created.code !== 0) {
+      throw Object.assign(new Error(created.code === 17
+        ? `项目目录 ${root} 已存在，为避免覆盖配置，请查看原项目或换一个项目名`
+        : `无法创建项目目录 ${root}，请检查目录是否已存在及写入权限`), { statusCode: 409 });
+    }
+    try {
+      assertProjectHostUnchanged(project);
+      return await callback(container);
+    } catch (error) {
+      error.directoryCreated = true;
+      throw error;
+    }
+  } finally {
+    if (container && !container.__ssh) await container.remove({ force: true }).catch(() => {});
   }
 }
 
@@ -271,9 +326,6 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
   const stream = await instance.start({ hijack: input !== undefined, stdin: input !== undefined });
   const demux = demuxStream();
   stream.pipe(demux);
-  // onExec:把 exec 流句柄交给调用方(后台任务管理器据此实现"伪停止"——断流即止损,
-  // runner 容器内的 compose 进程通常随管道关闭退出;无法保证强杀)。
-  if (typeof onExec === 'function') onExec({ kill: () => { try { stream.destroy?.(); demux.destroy?.(); } catch { /* 尽力而为 */ } } });
   const stdout = [];
   const stderr = [];
   let stdoutBytes = 0;
@@ -295,8 +347,12 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     }
     onOutput('stderr', chunk.toString('utf8').slice(-20000));
   });
-  if (input !== undefined) stream.end(input);
   let timer;
+  let rejectCancelled;
+  const onStreamError = error => rejectCancelled?.(error);
+  const onStreamClose = () => {
+    if (!stream.readableEnded) rejectCancelled?.(Object.assign(new Error('Compose 输出连接已中断，执行结果需核对'), { code: 'STREAM_CLOSED' }));
+  };
   try {
     const outputDone = Promise.all([
       new Promise((resolve, reject) => demux.stdout.on('end', resolve).on('error', reject)),
@@ -305,20 +361,34 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     const timedOut = new Promise((_, reject) => {
       timer = setTimeout(() => reject(Object.assign(new Error('Compose 工作命令执行超时'), { statusCode: 504 })), timeoutMs);
     });
-    await Promise.race([outputDone, timedOut]);
+    const cancelled = new Promise((_, reject) => { rejectCancelled = reject; });
+    stream.once('error', onStreamError);
+    stream.once('close', onStreamClose);
+    const completion = Promise.race([outputDone, timedOut, cancelled]);
+    // 断流仅停止本次等待，无法保证远端进程回滚。先安装监听再交付句柄，
+    // 避免初始化期间已取消的请求同步 kill 后等待到 5 分钟超时。
+    if (typeof onExec === 'function') onExec({ kill: () => {
+      rejectCancelled(Object.assign(new Error('Compose 输出已断开，已执行操作需在项目中核对'), { name: 'AbortError' }));
+      try { stream.destroy?.(); demux.destroy?.(); } catch { /* 尽力而为 */ }
+    } });
+    if (input !== undefined && !stream.destroyed) stream.end(input);
+    await completion;
+    // 退出检查也受同一命令期限约束。
+    const result = await Promise.race([instance.inspect(), timedOut, cancelled]);
+    return {
+      code: result.ExitCode ?? 1,
+      stdout: Buffer.concat(stdout).toString('utf8'),
+      stderr: Buffer.concat(stderr).toString('utf8'),
+    };
   } catch (error) {
     try { stream.destroy?.(); } catch { /* 超时清理时 stream 可能已经结束。 */ }
     demux.destroy?.();
     throw error;
   } finally {
     clearTimeout(timer);
+    stream.off('error', onStreamError);
+    stream.off('close', onStreamClose);
   }
-  const result = await instance.inspect();
-  return {
-    code: result.ExitCode ?? 1,
-    stdout: Buffer.concat(stdout).toString('utf8'),
-    stderr: Buffer.concat(stderr).toString('utf8'),
-  };
 }
 
 async function readArchiveFile(container, filePath) {

@@ -217,11 +217,12 @@
     "category": "Network",
     "description": "全网 DNS 广告拦截与隐私保护,局域网级过滤",
     "icon": "shield-check",
-    "defaultCompose": "services:\n  app:\n    image: adguard/adguardhome:latest\n    container_name: ${CONTAINER_NAME}\n    restart: unless-stopped\n    ports:\n      - \"${DNS_PORT}:53:53/tcp\"\n      - \"${DNS_PORT}:53:53/udp\"\n      - \"${WEB_PORT}:80\"\n      - \"${WEB_PORT}:3000\"\n    volumes:\n      - ${DATA_PATH}/work:/opt/adguardhome/work\n      - ${DATA_PATH}/conf:/opt/adguardhome/conf",
+    "defaultCompose": "services:\n  app:\n    image: adguard/adguardhome:latest\n    container_name: ${CONTAINER_NAME}\n    restart: unless-stopped\n    ports:\n      - \"${DNS_PORT}:53/tcp\"\n      - \"${DNS_PORT}:53/udp\"\n      - \"${WEB_PORT}:80\"\n      - \"${SETUP_PORT}:3000\"\n    volumes:\n      - ${DATA_PATH}/work:/opt/adguardhome/work\n      - ${DATA_PATH}/conf:/opt/adguardhome/conf",
     "envSchema": [
       { "key": "CONTAINER_NAME", "label": "容器名", "default": "adguard-home" },
       { "key": "DNS_PORT", "label": "DNS 端口", "default": "53", "type": "port" },
-      { "key": "WEB_PORT", "label": "Web 端口", "default": "8082", "type": "port" },
+      { "key": "WEB_PORT", "label": "管理端口", "default": "8082", "type": "port" },
+      { "key": "SETUP_PORT", "label": "首次设置端口", "default": "3002", "type": "port" },
       { "key": "DATA_PATH", "label": "数据目录", "default": "./data" }
     ]
   },

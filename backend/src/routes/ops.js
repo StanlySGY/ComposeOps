@@ -15,6 +15,7 @@ import { listAlertEvents, updateAlertEvent, pruneAlertEvents } from '../services
 import { isGuardianEnabled, setGuardianEnabled, diagnoseAlertEvent } from '../services/guardian.js';
 import { getAiConfig } from '../services/ai.js';
 import { notificationConfigBody } from '../lib/schemas.js';
+import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
 
 /**
  * 本文件的 schema 一律不收紧服务端已有的归一化语义:
@@ -31,7 +32,7 @@ const alertEventBody = {
   properties: { read: { type: 'boolean' }, muted: { type: 'boolean' } },
 };
 
-export default async function opsRoutes(fastify) {
+export default async function opsRoutes(fastify, { blueprintDeployer = deployBlueprint } = {}) {
   // ---- 镜像更新雷达:全局检测 ----
   fastify.post('/updates/check-all', async (request, reply) => {
     try {
@@ -236,30 +237,24 @@ export default async function opsRoutes(fastify) {
         properties: {
           blueprintId: { type: 'string', maxLength: 200 },
           values: { type: 'object' },
+          expectedHostId: { type: 'string', minLength: 1, maxLength: 128 },
         },
       },
     },
   }, async (request, reply) => {
-    const { blueprintId, values } = request.body || {};
+    const { blueprintId, values, expectedHostId } = request.body || {};
     if (!blueprintId) return reply.code(400).send({ error: 'missing_blueprint_id', message: '缺少 blueprintId 参数' });
+    reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
-    const send = (type, data) => {
-      if (reply.raw.destroyed || reply.raw.writableEnded) return;
-      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
-    };
+    const controller = new AbortController();
     let output = '';
+    let outputTruncated = false;
     let finished = false;
-    const finish = (payload) => {
-      if (finished) return;
-      finished = true;
-      send('result', payload);
-      reply.raw.end();
-    };
     let child;
     let disconnected = false;
     const stopChild = (candidate) => {
@@ -269,25 +264,42 @@ export default async function opsRoutes(fastify) {
         : candidate.exitCode === null && candidate.killed !== true;
       if (running) candidate.kill('SIGTERM');
     };
-    deployBlueprint(blueprintId, values || {}, {
-      onOutput: (type, text) => { output += text; send(type, text); },
-      onChild: (process) => {
-        child = process;
-        if (disconnected) stopChild(process);
-      },
-    }).then((result) => {
-      send('exit', { code: result.code });
-      finish({ ok: true, ...result, output });
-    }).catch((error) => {
-      const text = `${error.message}\n`;
-      output += text;
-      send('stderr', text);
-      finish({ ok: false, message: error.message, output });
-    });
-    reply.raw.on('close', () => {
+    const disconnect = () => {
+      if (finished || disconnected) return;
       disconnected = true;
+      controller.abort();
       stopChild(child);
-    });
+    };
+    const writer = createBoundedSseWriter(reply.raw, { onOverflow: disconnect });
+    const send = (type, data) => writer.send({ type, data });
+    const appendOutput = (type, value) => {
+      const text = String(value);
+      outputTruncated ||= output.length + text.length > 65536;
+      output = (output + text).slice(-65536);
+      for (let offset = 0; offset < text.length && !disconnected; offset += 8192) send(type, text.slice(offset, offset + 8192));
+    };
+    const finish = async (payload) => {
+      if (finished) return;
+      send('result', { ...payload, output, outputTruncated });
+      finished = true;
+      await writer.end();
+    };
+    reply.raw.once('close', disconnect);
+    try {
+      const result = await blueprintDeployer(blueprintId, values || {}, {
+        expectedHostId, signal: controller.signal,
+        onOutput: appendOutput,
+        onPhase: phase => send('phase', phase),
+        onChild: handle => { child = handle; if (disconnected) stopChild(handle); },
+      });
+      send('exit', { code: result.code });
+      await finish({ ...result, ok: result.code === 0 && result.ok !== false });
+    } catch (error) {
+      appendOutput('stderr', `${error.message}\n`);
+      await finish({ ok: false, message: error.message, error: error.code || 'blueprint_deploy_failed' });
+    } finally {
+      reply.raw.off('close', disconnect);
+    }
   });
 
   // ---- 健康告警事件配置(与通知配置合并存储) ----
