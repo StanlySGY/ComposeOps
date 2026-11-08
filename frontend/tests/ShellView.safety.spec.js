@@ -13,6 +13,7 @@ vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket(url, options
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   constructor() { this.cols = 80; this.rows = 24; this.dispose = vi.fn(); mocks.terminals.push(this); }
   loadAddon() {} open() {} focus() {} reset() {} write() {}
+  clear = vi.fn(); getSelection() { return ""; } onSelectionChange() {} options = {};
   onData(callback) { this.input = callback; } onResize() {}
 } }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
@@ -33,7 +34,7 @@ beforeEach(() => {
   mocks.api.getCapabilities.mockResolvedValue({ shellEnabled: true });
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 });
-afterEach(() => { wrapper?.unmount(); wrapper = null; vi.unstubAllGlobals(); });
+afterEach(() => { wrapper?.unmount(); wrapper = null; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('终端目标与会话一致性', () => {
   it('深链进入停止容器时解释原因且不尝试连接', async () => {
@@ -97,5 +98,61 @@ describe('终端目标与会话一致性', () => {
     pending.resolve({ projects }); await flushPromises();
     expect(terminal.dispose).toHaveBeenCalledTimes(1);
     expect(mocks.channels[0].connect).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('终端就绪反馈与操作连续性', () => {
+  const ready = () => mocks.channels[0].options.onMessage({ data: JSON.stringify({ type: 'ready' }) });
+  const button = label => wrapper.findAll('button').find(b => b.text() === label);
+  it('WebSocket已打开但Shell未就绪时仍等待且不发送键盘输入', async () => {
+    await start();
+    expect(wrapper.get('.terminal-session-bar').text()).toContain('正在启动 Shell');
+    const sent = mocks.channels[0].sent.length; mocks.terminals[0].input('do-not-run\n');
+    expect(mocks.channels[0].sent).toHaveLength(sent);
+    ready(); await flushPromises();
+    expect(wrapper.get('.terminal-session-bar').text()).toContain('已连接');
+    mocks.terminals[0].input('pwd\n'); expect(mocks.channels[0].sent.at(-1)).toBe('pwd\n');
+  });
+  it('Shell初始化超时会断开并可手动重试', async () => {
+    vi.useFakeTimers(); await start(); await vi.advanceTimersByTimeAsync(31000);
+    expect(mocks.channels[0].connected.value).toBe(false);
+    expect(wrapper.text()).toContain('初始化超时');
+    expect(button('连接').attributes('disabled')).toBeUndefined();
+  });
+  it('连接后断开保留可选中的终端输出，重新连接明确开启新会话', async () => {
+    await start(); ready(); await flushPromises();
+    await button('断开').trigger('click'); await flushPromises();
+    expect(wrapper.find('.terminal-empty').exists()).toBe(false);
+    expect(wrapper.get('.terminal-session-bar').text()).toContain('已断开');
+    expect(wrapper.text()).toContain('输出已保留');
+    expect(button('新建会话')).toBeDefined();
+  });
+  it('清除滚动记录只操作本地显示，不把clear拼进用户命令', async () => {
+    await start(); ready(); await flushPromises();
+    const before = mocks.channels[0].sent.length;
+    await wrapper.get('[aria-label="清除终端滚动记录"]').trigger('click');
+    expect(mocks.terminals[0].clear).toHaveBeenCalledOnce(); expect(mocks.channels[0].sent).toHaveLength(before);
+  });
+  it('刷新发现容器停止立即结束输入并保留结果', async () => {
+    await start(); ready(); await flushPromises();
+    mocks.api.getProjects.mockResolvedValue({ projects: [{ ...projects[0], containers: [{ id: 'c1', name: 'web', state: 'exited' }] }] });
+    await wrapper.get('[aria-label="刷新终端目标"]').trigger('click'); await flushPromises();
+    expect(mocks.channels[0].connected.value).toBe(false); expect(wrapper.text()).toContain('当前容器未运行');
+    expect(wrapper.find('.terminal-empty').exists()).toBe(false);
+  });
+  it('功能开关加载失败仍可浏览项目，重试成功后不自动误连', async () => {
+    mocks.api.getCapabilities.mockRejectedValueOnce(new Error('功能开关暂时不可达'));
+    await start(); expect(wrapper.get('[aria-label="选择终端项目"]').text()).toContain('测试项目');
+    expect(mocks.channels[0].connect).not.toHaveBeenCalled();
+    await button('重新加载').trigger('click'); await flushPromises();
+    expect(mocks.channels[0].connect).not.toHaveBeenCalled();
+    expect(button('连接').attributes('disabled')).toBeUndefined();
+  });
+  it('Shell类型保存在深链中，前进后退不会沿用错误Shell', async () => {
+    await start(); await wrapper.get('[aria-label="选择终端 Shell"]').setValue('bash'); await flushPromises();
+    expect(router.currentRoute.value.query.cmd).toBe('bash');
+    await router.push('/shell?projectId=p&containerId=c2&cmd=sh'); await flushPromises();
+    expect(wrapper.get('[aria-label="选择终端 Shell"]').element.value).toBe('sh');
   });
 });

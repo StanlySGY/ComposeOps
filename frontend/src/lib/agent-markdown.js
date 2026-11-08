@@ -23,6 +23,8 @@ function normalizeAgentMarkdown(value) {
   for (const line of lines) {
     if (/^\s*```/.test(line)) {
       inFence = !inFence;
+      // split 已移除行尾换行；标准围栏不得再补一行空白，也不拆分 jsonc 等语言名。
+      if (/^\s*```[a-z0-9_+.-]*[ \t]*$/i.test(line)) { output.push(line); continue; }
       // 两种形态一次修掉,且不能重复补换行:
       //   1) 标准围栏 "```yaml\n" —— 语言后紧跟换行,原样保留;
       //   2) 粘连输出 "```yamlservices:" —— 语言和正文糊在一行,补一个换行。

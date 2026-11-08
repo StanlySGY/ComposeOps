@@ -11,6 +11,7 @@ import { subscribeContainerEvents, getContainersSnapshot } from '../services/con
 
 /** Web Shell 会话上限与超时(防连接泄漏 / 占坑不操作)。 */
 const MAX_EXEC_SESSIONS = 20;
+const EXEC_INIT_TIMEOUT_MS = 30000;
 const EXEC_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 分钟无活动自动回收
 const activeExecSessions = new Map(); // socket -> { idleTimer, destroyed }
 
@@ -25,6 +26,8 @@ export function teardownExecSession(socket) {
   if (!session) return false;
   session.destroyed = true;
   if (session.idleTimer) clearTimeout(session.idleTimer);
+  if (session.initTimer) clearTimeout(session.initTimer);
+  if (session.finishTimer) clearTimeout(session.finishTimer);
   activeExecSessions.delete(socket);
   return true;
 }
@@ -167,10 +170,13 @@ export default async function wsRoutes(fastify) {
     }
     if (socket.readyState !== WebSocket.OPEN) return;
     // 在第一次 await 前占位并绑定释放,并发初始化也计入上限。
-    const session = { idleTimer: null, destroyed: false };
+    const session = { idleTimer: null, initTimer: null, destroyed: false };
     activeExecSessions.set(socket, session);
     let exec;
     let stream;
+    let initialized = false;
+    let ending = false;
+    let streamEnded = false;
     let pendingInput = [];
     let pendingBytes = 0;
     let pendingResize = null;
@@ -181,6 +187,23 @@ export default async function wsRoutes(fastify) {
       pendingBytes = 0;
       pendingResize = null;
       stream?.destroy();
+    }
+    async function finishExec() {
+      if (session.destroyed || ending) return;
+      ending = true;
+      session.finishTimer = setTimeout(() => {
+        safeSend(socket, { type: 'error', data: '会话已结束，退出状态核对超时，请查看终端输出' });
+        teardown(); socket.close();
+      }, 3000);
+      session.finishTimer.unref?.();
+      try {
+        const state = await exec.inspect();
+        if (!session.destroyed && Number.isInteger(state.ExitCode) && state.ExitCode !== 0) {
+          safeSend(socket, { type: 'error', data: `Shell 异常结束（退出码 ${state.ExitCode}），请查看下方输出；若 ${cmd} 不存在，可选择其他 Shell` });
+        }
+      } catch {
+        if (!session.destroyed) safeSend(socket, { type: 'error', data: '会话已结束，退出状态暂时无法核对，请查看终端输出' });
+      } finally { teardown(); socket.close(); }
     }
     function refreshIdle() {
       if (session.destroyed) return;
@@ -193,7 +216,7 @@ export default async function wsRoutes(fastify) {
       session.idleTimer.unref?.();
     }
     function onMessage(data, isBinary) {
-      if (session.destroyed) return;
+      if (session.destroyed || ending) return;
       refreshIdle();
       if (!isBinary) {
         try {
@@ -201,7 +224,7 @@ export default async function wsRoutes(fastify) {
           if (message.type === 'resize') {
             if (Number.isInteger(message.cols) && Number.isInteger(message.rows) && message.cols > 0 && message.rows > 0 && message.cols <= 1000 && message.rows <= 1000) {
               const size = { w: message.cols, h: message.rows };
-              if (stream) void exec.resize(size).catch(() => {});
+              if (initialized) void exec.resize(size).catch(() => {});
               else pendingResize = size;
             }
             return;
@@ -209,7 +232,7 @@ export default async function wsRoutes(fastify) {
         } catch { /* 普通终端输入继续按字节透传。 */ }
       }
       const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
-      if (!stream) {
+      if (!initialized) {
         if (pendingBytes + bytes.length > 64 * 1024) {
           safeSend(socket, { type: 'error', data: '终端初始化期间输入过多,请重新连接后再粘贴' });
           teardown();
@@ -223,6 +246,11 @@ export default async function wsRoutes(fastify) {
     socket.once('close', teardown);
     socket.on('message', onMessage);
     refreshIdle();
+    session.initTimer = setTimeout(() => {
+      safeSend(socket, { type: 'error', data: 'Shell 初始化超时，请检查容器后重新连接' });
+      teardown(); socket.close();
+    }, EXEC_INIT_TIMEOUT_MS);
+    session.initTimer.unref?.();
     try {
       const match = await findProjectContainer(projectId, containerId);
       if (session.destroyed) return;
@@ -241,8 +269,21 @@ export default async function wsRoutes(fastify) {
         teardown();
         socket.close();
       });
-      stream.on('end', () => { teardown(); socket.close(); });
-      stream.on('close', () => { teardown(); socket.close(); });
+      const endStream = () => {
+        streamEnded = true;
+        if (initialized) void finishExec();
+      };
+      stream.on('end', endStream);
+      stream.on('close', endStream);
+      // Docker可能先建立hijack流，再把OCI启动错误写入流；流打开不代表Shell已运行。
+      const state = await exec.inspect();
+      if (session.destroyed) return;
+      if (!state.Running || streamEnded) {
+        throw new Error(`Shell 未能启动或已退出${Number.isInteger(state.ExitCode) ? `（退出码 ${state.ExitCode}）` : ''}，请确认容器内已安装 ${cmd}，并查看下方输出`);
+      }
+      initialized = true;
+      clearTimeout(session.initTimer); session.initTimer = null;
+      safeSend(socket, { type: 'ready' });
       if (pendingResize) void exec.resize(pendingResize).catch(() => {});
       pendingResize = null;
       for (const bytes of pendingInput) if (stream.writable) stream.write(bytes);

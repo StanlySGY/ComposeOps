@@ -245,3 +245,12 @@ describe('renderAgentMarkdown — 不回归', () => {
     expect(renderAgentMarkdown('正常回答')).toContain('正常回答');
   });
 });
+
+
+describe('代码复制不改变原始正文', () => {
+  const code = source => { const root = document.createElement('div'); root.innerHTML = renderAgentMarkdown(source); return root.querySelector('code'); };
+  it('标准代码围栏不在正文前多加换行', () => { expect(code('```sh\necho 正文\n```').textContent).toBe('echo 正文\n'); });
+  it('用户保留的首行空白仍保留', () => { expect(code('```yaml\n\nservices: {}\n```').textContent).toBe('\nservices: {}\n'); });
+  it('jsonc语言标记不被拆成正文', () => { const value = code('```jsonc\n{}\n```'); expect(value.className).toBe('language-jsonc'); expect(value.textContent).toBe('{}\n'); });
+  it('历史粘连yaml围栏仍能恢复代码', () => { expect(code('```yamlservices: {}\n```').textContent).toBe('services: {}\n'); });
+});
