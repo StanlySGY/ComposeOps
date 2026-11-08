@@ -537,10 +537,10 @@ function confirmKeyboardRestart() {
   restartTarget.value = null;
   if (project) void run(project, 'restart');
 }
-function handleRestored() {
-  activityProject.value = null;
-  refresh();
-  useToastStore().success('配置版本已成功回滚并生效');
+function handleRestored(result) {
+  if (!result?.projectId || result.projectId !== activityProject.value?.id) return;
+  if (!expandedIds.value.has(result.projectId)) toggleExpanded(result.projectId);
+  void refresh(true);
 }
 function pausePage() {
   output.open = false;
