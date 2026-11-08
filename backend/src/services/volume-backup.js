@@ -12,6 +12,7 @@ import { recordEvent } from './event-center.js';
 
 import { mkdir, stat } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -521,9 +522,9 @@ export async function streamBackupToReply(id, reply) {
   if (!record) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
   const file = assertBackupFileName(record.file);
   const resolved = await resolveBackupFile(record);
-  reply.header('Content-Type', 'application/gzip');
-  reply.header('Content-Disposition', `attachment; filename="${file}"`);
   if (resolved.kind === 'local') {
+    reply.header('Content-Type', 'application/gzip');
+    reply.header('Content-Disposition', `attachment; filename="${file}"`);
     reply.header('Content-Length', resolved.bytes);
     return reply.send(createReadStream(resolved.path));
   }
@@ -531,11 +532,11 @@ export async function streamBackupToReply(id, reply) {
   const host = hostForId(record.host);
   const docker = getDockerForHost(host.id);
   await ensureHelperImage(docker);
-  const volume = assertVolumeName(record.volume);
   const container = await docker.createContainer({
     Image: HELPER_IMAGE,
     Cmd: ['sh', '-c', `cat "/backup/${file}"`],
-    HostConfig: { Binds: await volumeBinds(volume, 'ro', host, docker) },
+    // A recovery archive remains downloadable even after its source volume is gone.
+    HostConfig: { Binds: [await resolveBackupBind(host, docker, 'ro')], NetworkMode: 'none' },
     Labels: { 'composeops.role': 'volume-backup' },
   });
   let attach = null;
@@ -544,25 +545,27 @@ export async function streamBackupToReply(id, reply) {
   let containerFinished = false;
   let stdoutFinished = false;
   let stderrFinished = false;
-  let finishTimer = null;
-  const cleanup = async (endReply = false) => {
+  const output = new PassThrough();
+  const cleanup = async () => {
     if (cleaned) return;
     cleaned = true;
-    if (finishTimer) clearTimeout(finishTimer);
     reply.raw.off?.('close', onReplyClose);
-    demux?.stdout?.unpipe(reply.raw);
+    demux?.stdout?.unpipe(output);
     demux?.stdout?.destroy();
     demux?.stderr?.destroy();
     demux?.destroy();
     attach?.destroy?.();
     await container.remove({ force: true }).catch(() => {});
-    if (endReply && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
   };
-  const onReplyClose = () => { void cleanup(); };
-  const abortStream = () => {
+  const onReplyClose = () => { output.destroy(); void cleanup(); };
+  const abortStream = (error) => {
     if (cleaned) return;
     void cleanup().finally(() => {
-      if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.destroy();
+      if (!reply.raw.headersSent) {
+        reply.removeHeader('Content-Type');
+        reply.removeHeader('Content-Disposition');
+      }
+      output.destroy(Object.assign(new Error(`远程备份读取失败:${error?.message || '归档读取未完整结束'}`), { statusCode: 502 }));
     });
   };
   const markStreamFinished = () => {
@@ -570,15 +573,18 @@ export async function streamBackupToReply(id, reply) {
   };
   const finishNormally = () => {
     if (!containerFinished || !stdoutFinished || !stderrFinished || cleaned) return;
-    void cleanup(true);
+    void cleanup().then(() => output.end());
   };
   try {
     reply.raw.once('close', onReplyClose);
     attach = await container.attach({ stream: true, stdout: true, stderr: true, logs: false });
     await container.start();
     if (cleaned) throw new Error('客户端已断开');
-    demux = demuxStream();
+    demux = demuxStream({ strict: true });
     attach.on('error', abortStream);
+    attach.once('close', () => {
+      if (!attach.readableEnded) abortStream(new Error('Docker 下载连接提前关闭'));
+    });
     demux.on('error', abortStream);
     demux.stdout.on('error', abortStream);
     demux.stderr.on('error', abortStream);
@@ -592,24 +598,24 @@ export async function streamBackupToReply(id, reply) {
     });
     attach.pipe(demux);
     demux.stderr.resume();
-    demux.stdout.pipe(reply.raw, { end: false });
+    demux.stdout.pipe(output, { end: false });
     const onContainerFinished = (result) => {
       if (result && result.StatusCode !== undefined && Number(result.StatusCode) !== 0) {
-        abortStream();
+        abortStream(new Error(`helper exit ${result.StatusCode}`));
         return;
       }
       containerFinished = true;
       finishNormally();
-      if ((!stdoutFinished || !stderrFinished) && !cleaned) {
-        finishTimer = setTimeout(abortStream, 5000);
-        finishTimer.unref?.();
-      }
+      // Process exit can precede delivery of buffered bytes by minutes on a slow
+      // connection. End only after both output streams drain; close/error aborts.
     };
     void container.wait().then(onContainerFinished, abortStream);
-    return reply;
+    reply.header('Content-Type', 'application/gzip');
+    reply.header('Content-Disposition', `attachment; filename="${file}"`);
+    return reply.send(output);
   } catch (error) {
     await cleanup();
-    reply.raw.destroy();
+    output.destroy();
     throw Object.assign(new Error(`远程备份读取失败:${error.message}`), { statusCode: 502 });
   }
 }
