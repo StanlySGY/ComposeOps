@@ -292,3 +292,13 @@
 - 人工复查桌面和手机编辑、手机详情截图。手机Compose输入使用16px字号，避免小字号输入触发自动放大；补验移动布局和撤销后再记录最终截图。
 
 - 最终移动布局/撤销四配置8/8补验通过；字体调整后重建生产成功（5.29秒），真实5组演练再次通过。ESLint零错误，3条旧夹具警告。最终截图保存为assets/2026-11-market-workspace-{editor-desktop,editor-mobile,detail-mobile}.webp并人工复查。证据round18-mobile-final.log、round18-frontend-full.log、round18-live-marketplace-final.log；diff检查通过。
+
+
+## 第十九轮：模板持久化并发、身份保护与收藏一致性
+
+- 实测初始10项故障基线9失败、1通过；同时新建16个模板只有1个落库，不同项修改互相覆盖，同项字段合并丢失，删除与新建/编辑交错复活已删除数据。更新可通过额外字段改变id/author/createdAt，损坏JSON会当空列表覆盖，删除不清收藏，统计包含不存在模板。
+- 自定义模板读取/修改/写回改为同一个同步SQLite事务，目录快照持有期间不await；新ID采用UUID。编辑明确白名单，只接纳名称、分类、描述、Compose与envSchema；HTTP schema同步限制额外字段。不存在目标明确404，不以旧快照复活。
+- 读取损坏JSON、非数组、空项、非法/重复身份时报告503并保留原始内容。收藏读取同样拒绝损坏数据；模板删除与收藏清理原子提交，故障注入触发器验证清理失败时删除回滚。收藏统计只计算当前模板，历史孤立收藏不会虚增。
+- 13项针对性通过，含真实Fastify/鉴权/SQLite：未登录写入401、12个并发HTTP新建全部保留、身份字段不能伪造、并发删除后列表一致、损坏数据返回503且不泄露原内容。后端全量正在执行，本轮不修改数据库schema、不迁移数据。
+
+- 终验：后端625项中624通过、1条件跳过；ESLint零错误、3条旧夹具警告。更新存储层后重跑真实Chrome/鉴权API/独立SQLite的5组编辑演练全部通过，pageerror为0。证据round19-{baseline,http-targeted,backend-full,live-marketplace}.log；diff检查通过。

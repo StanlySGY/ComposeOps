@@ -138,6 +138,7 @@ export default async function marketplaceRoutes(fastify) {
       description: '创建自定义模板',
       body: {
         type: 'object',
+        additionalProperties: false,
         required: ['name', 'defaultCompose'],
         properties: {
           name: { type: 'string', maxLength: 200 },
@@ -191,6 +192,7 @@ export default async function marketplaceRoutes(fastify) {
       },
       body: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           name: { type: 'string', maxLength: 200 },
           category: { type: 'string', maxLength: 50 },

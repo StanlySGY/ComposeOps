@@ -4,7 +4,8 @@
  */
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getSetting, setSetting } from '../lib/db.js';
+import db, { getSetting, setSetting } from '../lib/db.js';
+import { randomUUID } from 'node:crypto';
 import { getAiConfig, callOpenAI, searchWeb, UNTRUSTED_GUARD } from './ai.js';
 import { parseYaml, validateYaml } from '../lib/files.js';
 import { validateComposeSemantics } from './compose-validator.js';
@@ -58,14 +59,26 @@ function normalizeEnvSchema(value) {
 /**
  * 获取自定义模板列表
  */
-export async function getCustomTemplates() {
-  const raw = getSetting('marketplace.custom.templates') || '[]';
+function readSettingArray(key, label, validEntry) {
+  const raw = getSetting(key);
+  if (raw === null) return [];
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every(validEntry)) throw new Error('invalid list');
+    return parsed;
   } catch {
-    return [];
+    throw Object.assign(new Error(`${label}数据格式异常，已保留原始数据，请检查备份后修复。`), { statusCode: 503, code: 'MARKETPLACE_DATA_INVALID' });
   }
 }
+function readCustomTemplates() {
+  const ids = new Set();
+  return readSettingArray('marketplace.custom.templates', '自定义模板', item => {
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id.startsWith('custom-') || ids.has(item.id)
+      || typeof item.name !== 'string' || typeof item.defaultCompose !== 'string') return false;
+    ids.add(item.id); return true;
+  });
+}
+export async function getCustomTemplates() { return readCustomTemplates(); }
 
 /**
  * 创建自定义模板
@@ -137,105 +150,71 @@ export async function discoverTemplateWithAI(query) {
 
 export async function createCustomTemplate(template) {
   const { name, category, description, defaultCompose, envSchema } = template;
-  
-  if (!name?.trim()) throw Object.assign(new Error('模板名称不能为空'), { statusCode: 400 });
-  if (!defaultCompose?.trim()) throw Object.assign(new Error('Compose 内容不能为空'), { statusCode: 400 });
+  if (typeof name !== 'string' || !name.trim()) throw Object.assign(new Error('模板名称不能为空'), { statusCode: 400 });
+  if (typeof defaultCompose !== 'string' || !defaultCompose.trim()) throw Object.assign(new Error('Compose 内容不能为空'), { statusCode: 400 });
   validateTemplateCompose(defaultCompose);
-  
-  const customs = await getCustomTemplates();
-  const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  
   const newTemplate = {
-    id,
-    name: name.trim().slice(0, 200),
-    category: category?.trim().slice(0, 50) || 'Custom',
-    description: description?.trim().slice(0, 500) || '',
-    author: 'user',
-    createdAt: new Date().toISOString(),
-    defaultCompose: String(defaultCompose),
-    envSchema: normalizeEnvSchema(envSchema),
+    id: `custom-${randomUUID()}`, name: name.trim().slice(0, 200), category: String(category || 'Custom').trim().slice(0, 50) || 'Custom',
+    description: String(description || '').trim().slice(0, 500), author: 'user', createdAt: new Date().toISOString(),
+    defaultCompose, envSchema: normalizeEnvSchema(envSchema),
   };
-  
-  customs.push(newTemplate);
-  setSetting('marketplace.custom.templates', JSON.stringify(customs));
-  
-  return newTemplate;
+  // 读取、修改、写回在同一个同步事务中完成，不在持有目录快照期间 await。
+  return db.transaction(() => {
+    const customs = readCustomTemplates(); customs.push(newTemplate);
+    setSetting('marketplace.custom.templates', JSON.stringify(customs));
+    return newTemplate;
+  })();
 }
 
-/**
- * 更新自定义模板
- */
+/** 更新只接纳可编辑字段，不能改变身份、创建归属或伪造展示元数据。 */
 export async function updateCustomTemplate(id, updates) {
-  const customs = await getCustomTemplates();
-  const index = customs.findIndex(t => t.id === id);
-  
-  if (index === -1) throw Object.assign(new Error('模板不存在'), { statusCode: 404 });
-  if (!customs[index].id.startsWith('custom-')) throw new Error('只能编辑自定义模板');
-  
-  const next = { ...customs[index], ...updates };
-  if (!next.name?.trim()) throw Object.assign(new Error('模板名称不能为空'), { statusCode: 400 });
-  if (!next.defaultCompose?.trim()) throw Object.assign(new Error('Compose 内容不能为空'), { statusCode: 400 });
-  validateTemplateCompose(next.defaultCompose);
-  customs[index] = {
-    ...next,
-    name: String(next.name).trim().slice(0, 200),
-    category: String(next.category || 'Custom').trim().slice(0, 50) || 'Custom',
-    description: String(next.description || '').trim().slice(0, 500),
-    defaultCompose: String(next.defaultCompose),
-    envSchema: normalizeEnvSchema(next.envSchema),
-    updatedAt: new Date().toISOString(),
-  };
-  setSetting('marketplace.custom.templates', JSON.stringify(customs));
-  
-  return customs[index];
+  const patch = Object.fromEntries(['name', 'category', 'description', 'defaultCompose', 'envSchema']
+    .filter(key => Object.hasOwn(updates, key)).map(key => [key, updates[key]]));
+  return db.transaction(() => {
+    const customs = readCustomTemplates(); const index = customs.findIndex(item => item.id === id);
+    if (index === -1) throw Object.assign(new Error('模板不存在'), { statusCode: 404 });
+    const next = { ...customs[index], ...patch };
+    if (typeof next.name !== 'string' || !next.name.trim()) throw Object.assign(new Error('模板名称不能为空'), { statusCode: 400 });
+    if (typeof next.defaultCompose !== 'string' || !next.defaultCompose.trim()) throw Object.assign(new Error('Compose 内容不能为空'), { statusCode: 400 });
+    validateTemplateCompose(next.defaultCompose);
+    customs[index] = { ...next, name: next.name.trim().slice(0, 200), category: String(next.category || 'Custom').trim().slice(0, 50) || 'Custom',
+      description: String(next.description || '').trim().slice(0, 500), envSchema: normalizeEnvSchema(next.envSchema), updatedAt: new Date().toISOString() };
+    setSetting('marketplace.custom.templates', JSON.stringify(customs));
+    return customs[index];
+  })();
 }
 
-/**
- * 删除自定义模板
- */
+/** 删除与收藏清理共用一个事务，任意一步失败均保留原数据。 */
 export async function deleteCustomTemplate(id) {
-  const customs = await getCustomTemplates();
-  const index = customs.findIndex(t => t.id === id);
-  
-  if (index === -1) throw Object.assign(new Error('模板不存在'), { statusCode: 404 });
-  if (!customs[index].id.startsWith('custom-')) throw new Error('只能删除自定义模板');
-  
-  customs.splice(index, 1);
-  setSetting('marketplace.custom.templates', JSON.stringify(customs));
+  return db.transaction(() => {
+    const customs = readCustomTemplates(); const index = customs.findIndex(item => item.id === id);
+    if (index === -1) throw Object.assign(new Error('模板不存在'), { statusCode: 404 });
+    customs.splice(index, 1);
+    setSetting('marketplace.custom.templates', JSON.stringify(customs));
+    setSetting('marketplace.favorites', JSON.stringify(getFavorites().filter(item => item !== id)));
+  })();
 }
 
-/**
- * 获取收藏列表
- */
 export function getFavorites() {
-  const raw = getSetting('marketplace.favorites') || '[]';
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return [...new Set(readSettingArray('marketplace.favorites', '模板收藏', item => typeof item === 'string'))];
 }
 
-/**
- * 添加收藏
- */
 export function addFavorite(templateId) {
-  const favorites = getFavorites();
-  if (!favorites.includes(templateId)) {
-    favorites.push(templateId);
-    setSetting('marketplace.favorites', JSON.stringify(favorites));
-  }
-  return favorites;
+  return db.transaction(() => {
+    const favorites = getFavorites();
+    if (!favorites.includes(templateId)) {
+      favorites.push(templateId); setSetting('marketplace.favorites', JSON.stringify(favorites));
+    }
+    return favorites;
+  })();
 }
 
-/**
- * 移除收藏
- */
 export function removeFavorite(templateId) {
-  const favorites = getFavorites();
-  const filtered = favorites.filter(id => id !== templateId);
-  setSetting('marketplace.favorites', JSON.stringify(filtered));
-  return filtered;
+  return db.transaction(() => {
+    const filtered = getFavorites().filter(id => id !== templateId);
+    setSetting('marketplace.favorites', JSON.stringify(filtered));
+    return filtered;
+  })();
 }
 
 /**
@@ -310,13 +289,13 @@ export async function searchTemplates(query, options = {}) {
  */
 export async function getMarketplaceStats() {
   const allTemplates = await getAllTemplates();
-  const favorites = getFavorites();
+  const favorites = new Set([...allTemplates.builtin, ...allTemplates.community, ...allTemplates.custom].filter(item => item.favorited).map(item => item.id));
   
   return {
     totalBuiltin: allTemplates.builtin.length,
     totalCommunity: allTemplates.community.length,
     totalCustom: allTemplates.custom.length,
-    totalFavorites: favorites.length,
+    totalFavorites: favorites.size,
     communityAvailable: getCommunitySourceStatus().available,
     communityMessage: getCommunitySourceStatus().message,
     categories: [...new Set([
