@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { ref } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
-const mocks = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getCapabilities: vi.fn() }, channels: [], terminals: [] }));
+const mocks = vi.hoisted(() => ({ api: { getProjects: vi.fn(), getCapabilities: vi.fn() }, channels: [], terminals: [], searches: [] }));
 vi.mock('../src/api/client.js', () => ({ api: mocks.api, wsUrl: value => value }));
 vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket(url, options) {
   const connected = ref(false);
@@ -12,11 +12,18 @@ vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket(url, options
 } }));
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   constructor() { this.cols = 80; this.rows = 24; this.dispose = vi.fn(); mocks.terminals.push(this); }
-  loadAddon() {} open() {} focus() {} reset() {} write() {}
+  loadAddon() {} open() {} focus = vi.fn(); reset() {} write() {}
+  clearSelection = vi.fn(); scrollToBottom = vi.fn(); onScroll() {} onWriteParsed() {}
+  buffer = { active: { viewportY: 0, baseY: 0 } };
   clear = vi.fn(); getSelection() { return ""; } onSelectionChange() {} options = {};
   onData(callback) { this.input = callback; } onResize() {}
 } }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
+vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {
+  constructor() { mocks.searches.push(this); }
+  findNext = vi.fn(); findPrevious = vi.fn(); clearDecorations = vi.fn(); dispose = vi.fn();
+  onDidChangeResults(callback) { this.results = callback; }
+} }));
 import ShellView from '../src/views/ShellView.vue';
 
 const projects = [{ id: 'p', managed: true, projectName: '测试项目', containers: [{ id: 'c1', name: 'web', state: 'running' }, { id: 'c2', name: 'worker', state: 'running' }] }];
@@ -29,10 +36,58 @@ async function start() {
   await flushPromises();
 }
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.channels.length = 0; mocks.terminals.length = 0;
+  vi.clearAllMocks(); mocks.channels.length = 0; mocks.terminals.length = 0; mocks.searches.length = 0;
   mocks.api.getProjects.mockResolvedValue({ projects });
   mocks.api.getCapabilities.mockResolvedValue({ shellEnabled: true });
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+});
+
+describe('终端查找与输入隔离', () => {
+  async function open() {
+    await start(); mocks.channels[0].options.onMessage({ data: JSON.stringify({ type: 'ready' }) }); await flushPromises();
+    await wrapper.get('[aria-label="查找终端输出"]').trigger('click'); await flushPromises();
+  }
+  it('输入即查找、切换大小写、上下匹配和关闭均不发送命令', async () => {
+    await open(); const search = mocks.searches.at(-1), channel = mocks.channels[0], sent = channel.sent.length;
+    await wrapper.get('input[aria-label="终端查找内容"]').setValue('Error');
+    expect(search.findNext).toHaveBeenLastCalledWith('Error', expect.objectContaining({ incremental: true, caseSensitive: false }));
+    search.results({ resultIndex: 0, resultCount: 3 }); await flushPromises();
+    expect(wrapper.get('.shell-search-result').text()).toBe('1 / 3');
+    await wrapper.get('[aria-label="区分大小写"]').trigger('click');
+    expect(search.findNext).toHaveBeenLastCalledWith('Error', expect.objectContaining({ caseSensitive: true }));
+    await wrapper.get('[aria-label="上一个匹配"]').trigger('click');
+    expect(search.findPrevious).toHaveBeenCalledWith('Error', expect.objectContaining({ incremental: false }));
+    await wrapper.get('input').trigger('keydown', { key: 'Enter' });
+    expect(search.findNext).toHaveBeenLastCalledWith('Error', expect.objectContaining({ incremental: false }));
+    await wrapper.get('[aria-label="关闭终端查找"]').trigger('click');
+    expect(wrapper.find('.shell-search').exists()).toBe(false);
+    expect(search.clearDecorations).toHaveBeenCalled(); expect(mocks.terminals[0].focus).toHaveBeenCalled();
+    expect(channel.sent).toHaveLength(sent);
+  });
+  it('中文输入确认不触发匹配跳转，空内容清除高亮且反馈真实', async () => {
+    await open(); const search = mocks.searches.at(-1);
+    await wrapper.get('input').setValue('服务'); search.findNext.mockClear();
+    await wrapper.get('input').trigger('keydown', { key: 'Enter', isComposing: true, keyCode: 229 });
+    expect(search.findNext).not.toHaveBeenCalled();
+    search.results({ resultIndex: -1, resultCount: 0 }); await flushPromises();
+    expect(wrapper.get('.shell-search-result').text()).toBe('未找到匹配');
+    search.results({ resultIndex: -1, resultCount: 1000 }); await flushPromises();
+    expect(wrapper.get('.shell-search-result').text()).toBe('至少 1000 处');
+    await wrapper.get('input').setValue('');
+    expect(wrapper.get('.shell-search-result').text()).toBe('输入关键词');
+    expect(wrapper.get('[aria-label="下一个匹配"]').attributes('disabled')).toBeDefined();
+    expect(search.clearDecorations).toHaveBeenCalled();
+  });
+  it('断开仍可查找保留输出，新会话清除旧匹配和关键词', async () => {
+    await open(); await wrapper.get('input').setValue('old');
+    await wrapper.findAll('button').find(button => button.text() === '断开').trigger('click');
+    expect(wrapper.find('.shell-search').exists()).toBe(true);
+    await wrapper.findAll('button').find(button => button.text() === '新建会话').trigger('click');
+    expect(wrapper.find('.shell-search').exists()).toBe(false);
+    mocks.channels[0].options.onMessage({ data: JSON.stringify({ type: 'ready' }) }); await flushPromises();
+    await wrapper.get('[aria-label="查找终端输出"]').trigger('click');
+    expect(wrapper.get('input').element.value).toBe('');
+  });
 });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.unstubAllGlobals(); vi.useRealTimers(); });
 

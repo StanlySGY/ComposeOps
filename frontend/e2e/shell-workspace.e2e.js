@@ -95,3 +95,74 @@ test('320像素窄屏长目标不造成页面横向溢出', async ({ page }, inf
   await page.locator('.terminal-host').scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath('shell-narrow.png'), fullPage: true });
 });
+
+async function searchOutput(page) {
+  await page.evaluate(() => window.shellFixture.sockets.at(-1).output('\r\nError alpha\r\nerror beta\r\nError gamma\r\n' + Array.from({ length: 120 }, (_, i) => `line ${i}`).join('\r\n') + '\r\n$ '));
+  await page.getByRole('button', { name: '查找终端输出', exact: true }).click();
+  await page.getByRole('textbox', { name: '终端查找内容' }).fill('Error');
+  await expect(page.locator('.shell-search-result')).toHaveText(/\d \/ 3/);
+}
+test('查找真实终端滚动记录并循环跳转、区分大小写和反馈无匹配', async ({ page }, info) => {
+  const errors = await install(page); await ready(page); const before = await commandCount(page); await searchOutput(page);
+  const query = page.getByRole('textbox', { name: '终端查找内容' }), result = page.locator('.shell-search-result');
+  const first = await result.innerText();
+  await query.press('Enter'); await expect(result).not.toHaveText(first);
+  await query.press('Shift+Enter'); await expect(result).toHaveText(first);
+  await page.getByRole('button', { name: '区分大小写' }).click();
+  await expect(result).toHaveText(/\d \/ 2/); await expect(page.getByRole('button', { name: '区分大小写' })).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: info.outputPath('shell-search.png'), fullPage: true });
+  await query.fill('不存在的内容'); await expect(result).toHaveText('未找到匹配');
+  await expect(page.getByRole('button', { name: '下一个匹配' })).toBeDisabled();
+  await query.fill(''); await expect(result).toHaveText('输入关键词');
+  expect(await commandCount(page)).toBe(before); expect(errors).toEqual([]);
+});
+test('查找快捷键和关闭恢复焦点不会发送 Shell 按键', async ({ page }) => {
+  const errors = await install(page); await ready(page); await searchOutput(page);
+  const query = page.getByRole('textbox', { name: '终端查找内容' }); const before = await commandCount(page);
+  await query.press('Escape'); await expect(query).toHaveCount(0); await expect(terminal(page)).toBeFocused();
+  await terminal(page).press('Control+f'); await expect(query).toBeFocused();
+  await query.press('F3'); await query.press('Shift+F3');
+  await query.press('Escape'); await terminal(page).press('Meta+f'); await expect(query).toBeFocused();
+  await page.getByRole('button', { name: '关闭终端查找' }).click(); await expect(terminal(page)).toBeFocused();
+  expect(await commandCount(page)).toBe(before);
+  await terminal(page).pressSequentially('pwd'); expect(await commandCount(page)).toBeGreaterThan(before); expect(errors).toEqual([]);
+});
+test('持续输出更新匹配计数，回到最新输出结束查找且不发送命令', async ({ page }) => {
+  const errors = await install(page); await ready(page); await searchOutput(page);
+  const before = await commandCount(page);
+  await page.evaluate(() => window.shellFixture.sockets.at(-1).output('\r\nError delta\r\n$ '));
+  await expect(page.locator('.shell-search-result')).toHaveText(/\d \/ 4/);
+  await expect(page.getByRole('button', { name: '回到最新终端输出' })).toBeEnabled();
+  await page.getByRole('button', { name: '回到最新终端输出' }).click();
+  await expect(page.locator('.shell-search')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '回到最新终端输出' })).toBeDisabled();
+  await expect(terminal(page)).toBeFocused(); expect(await commandCount(page)).toBe(before); expect(errors).toEqual([]);
+});
+test('断开后仍可搜索，新会话清除关键词与旧结果', async ({ page }) => {
+  const errors = await install(page); await ready(page); await searchOutput(page);
+  await showTargets(page); await page.getByRole('button', { name: '断开', exact: true }).click();
+  await page.getByRole('textbox', { name: '终端查找内容' }).fill('gamma'); await expect(page.locator('.shell-search-result')).toHaveText('1 / 1');
+  await page.getByRole('button', { name: '新建会话', exact: true }).click(); await ready(page);
+  await expect(page.locator('.shell-search')).toHaveCount(0);
+  await page.getByRole('button', { name: '查找终端输出', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: '终端查找内容' })).toHaveValue('');
+  await page.getByRole('textbox', { name: '终端查找内容' }).fill('gamma'); await expect(page.locator('.shell-search-result')).toHaveText('未找到匹配'); expect(errors).toEqual([]);
+});
+test('清除滚动记录后匹配同步消失，窄屏查找栏无横向溢出', async ({ page }, info) => {
+  await page.setViewportSize({ width: 320, height: 740 }); const errors = await install(page); await ready(page); await searchOutput(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await expect(page.getByRole('button', { name: '关闭终端查找' })).toBeVisible();
+  expect((await page.locator('.shell-terminal').boundingBox()).height).toBeGreaterThanOrEqual(180);
+  await page.screenshot({ path: info.outputPath('shell-search-narrow.png'), fullPage: true });
+  const before = await commandCount(page); await page.getByRole('button', { name: '清除终端滚动记录' }).click();
+  await expect(page.locator('.shell-search-result')).toHaveText('未找到匹配'); expect(await commandCount(page)).toBe(before); expect(errors).toEqual([]);
+});
+test('中文跨软换行仍能定位，达到高亮上限时不误报精确总数', async ({ page }) => {
+  const errors = await install(page); await ready(page);
+  const needle = '中文终端查找'.repeat(50);
+  await page.evaluate(text => window.shellFixture.sockets.at(-1).output(`\r\n${text}\r\n${'match '.repeat(1050)}\r\n$ `), needle);
+  await page.getByRole('button', { name: '查找终端输出', exact: true }).click(); const query = page.getByRole('textbox', { name: '终端查找内容' });
+  await query.fill(needle); await expect(page.locator('.shell-search-result')).toHaveText('1 / 1');
+  await query.fill('match'); await expect(page.locator('.shell-search-result')).toHaveText('至少 1000 处');
+  await page.getByRole('button', { name: '下一个匹配' }).click(); expect(errors).toEqual([]);
+});

@@ -2940,6 +2940,13 @@ a.card:hover, button.card:hover, .service-project-card:hover {
 .shell-output-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid #242b33; background: #101419; }
 .shell-output-tools .btn-ghost { padding: 6px 8px; font-size: 11px; }
 .shell-output-hint { flex: 1; font-size: 11px; color: #94a3b8; }
+.shell-search { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #2a333e; background: #101a1b; }
+.shell-search-field { display: flex; flex: 1 1 180px; align-items: center; gap: 8px; min-width: 0; color: #6ee7b7; }
+.shell-search-field .input { width: 100%; min-width: 0; font-size: 12px; }
+.shell-search-result { min-width: 68px; font-size: 11px; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+.shell-search-actions { display: flex; gap: 4px; margin-left: auto; }
+.shell-search-actions .btn-ghost { display: grid; place-items: center; min-width: 34px; min-height: 34px; padding: 6px; }
+.shell-search-actions [aria-pressed="true"] { color: #6ee7b7; background: #24554a; }
 .shell-keyboard { display: flex; gap: 6px; padding: 8px 10px; overflow-x: auto; border-top: 1px solid #242b33; background: #0f1419; }
 .shell-keyboard button { flex: 1 0 auto; min-width: 32px; padding: 0 8px; min-height: 38px; border: 1px solid #2a333e; border-radius: 8px; background: #1b232d; font: 12px ui-monospace, monospace; transition: transform 120ms, background 120ms; }
 .shell-keyboard button:active { transform: translateY(1px); background: #2a3945; }
@@ -2951,7 +2958,10 @@ a.card:hover, button.card:hover, .service-project-card:hover {
   .shell-kind { grid-column: 2; grid-row: 3; }
   .shell-session-note { flex-basis: 100%; }
   .shell-output-hint { flex-basis: 100%; line-height: 1.5; }
+  .shell-search-field { flex-basis: 100%; }
+  .shell-search-actions .btn-ghost { min-width: 38px; min-height: 38px; }
   .shell-page .terminal-host { min-height: 340px; }
+  .shell-page .terminal-host.is-searching { min-height: 550px; }
 }
 
 .shell-target-toggle { display: none; min-width: 0; align-items: center; gap: 8px; min-height: 36px; color: var(--color-surface-300); font-size: 12px; text-align: left; }

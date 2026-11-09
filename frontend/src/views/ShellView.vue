@@ -17,12 +17,25 @@
     <p v-else-if="selectedContainer && selectedContainer.state !== 'running'" class="alert-warning" role="status">当前容器未运行，无法建立终端。可切换到「日志」排查，或返回项目启动容器。</p>
     <div v-if="loadError" class="alert-error flex items-center justify-between gap-3" role="alert"><span>{{ loadError }}</span><button class="btn-secondary shrink-0" :disabled="loading" @click="loadData()">重新加载</button></div>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
-    <div class="card flex flex-1 min-h-[420px] flex-col overflow-hidden terminal-host">
+    <div class="card flex flex-1 min-h-[420px] flex-col overflow-hidden terminal-host" :class="{ 'is-searching': searchOpen }" @keydown.capture="onTerminalKeydown">
       <div class="terminal-session-bar" role="status" aria-live="polite">
         <span class="status-dot" :class="connected ? 'bg-status-ok' : connecting ? 'bg-status-warn animate-pulse' : 'bg-surface-600'"></span>
         <strong>{{ statusLabel }}</strong>
         <span v-if="sessionTarget || selectedContainer" class="min-w-0 truncate font-mono" :title="sessionTarget || `${selectedContainer.name} · ${cmd}`">{{ sessionTarget || `${selectedContainer.name} · ${cmd}` }}</span>
         <span class="shell-session-note">{{ notice || (connected ? '独立会话 · 离开页面即断开' : '确认连接后才可输入') }}</span>
+      </div>
+      <div v-if="searchOpen" class="shell-search" role="search" aria-label="查找终端输出">
+        <div class="shell-search-field">
+          <Search class="h-4 w-4 shrink-0" aria-hidden="true" />
+          <input ref="searchInput" v-model="searchQuery" class="input" aria-label="终端查找内容" placeholder="查找终端输出…" autocomplete="off" spellcheck="false" @keydown="onSearchKeydown" />
+        </div>
+        <span class="shell-search-result" role="status" aria-live="polite" aria-atomic="true">{{ searchResultText }}</span>
+        <div class="shell-search-actions">
+          <button class="btn-ghost" :aria-pressed="searchCaseSensitive" aria-label="区分大小写" title="区分大小写" @click="searchCaseSensitive = !searchCaseSensitive">Aa</button>
+          <button class="btn-ghost" :disabled="!searchQuery || !searchResult.resultCount" aria-label="上一个匹配" title="上一个匹配（Shift+Enter）" @click="findMatch(true)"><ChevronUp class="h-4 w-4" /></button>
+          <button class="btn-ghost" :disabled="!searchQuery || !searchResult.resultCount" aria-label="下一个匹配" title="下一个匹配（Enter）" @click="findMatch()"><ChevronDown class="h-4 w-4" /></button>
+          <button class="btn-ghost" aria-label="关闭终端查找" title="关闭查找（Esc）" @click="closeSearch()"><X class="h-4 w-4" /></button>
+        </div>
       </div>
       <div class="relative flex min-h-0 flex-1 flex-col">
         <Skeleton v-if="!termReady" class="skeleton-workspace" rows="10" label="终端加载中" />
@@ -42,6 +55,8 @@
       </div>
       <div class="shell-output-tools">
         <span class="shell-output-hint" role="status">{{ copyFeedback || (hasTranscript && !connected ? '输出已保留 · 新建会话会清空上次输出' : 'Ctrl+C 中断 · Ctrl+D 退出') }}</span>
+        <button class="btn-ghost" :disabled="!hasTranscript" :aria-expanded="searchOpen" aria-label="查找终端输出" title="查找终端输出（Ctrl/Cmd+F）" @click="openSearch"><Search class="h-3.5 w-3.5" />查找</button>
+        <button class="btn-ghost" :disabled="atBottom" aria-label="回到最新终端输出" @click="scrollToLatest"><ArrowDownToLine class="h-3.5 w-3.5" />最新输出</button>
         <button class="btn-ghost" :disabled="!hasSelection || copying" aria-label="复制终端选中文字" @click="copySelection"><Check v-if="copyFeedback === '已复制选中文字'" class="h-3.5 w-3.5" /><Copy v-else class="h-3.5 w-3.5" />复制选区</button>
         <button class="btn-ghost" :disabled="!hasTranscript" aria-label="清除终端滚动记录" title="仅清除本地滚动记录，保留当前行和未提交输入" @click="clearScrollback"><Eraser class="h-3.5 w-3.5" />清除记录</button>
       </div>
@@ -53,10 +68,11 @@ import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
-import { Check, ChevronDown, ChevronRight, Copy, Eraser, LoaderCircle, Plug, RefreshCw, SlidersHorizontal, SquareTerminal, Unplug } from 'lucide-vue-next';
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Eraser, LoaderCircle, Plug, RefreshCw, Search, SlidersHorizontal, SquareTerminal, Unplug, X } from 'lucide-vue-next';
 import Skeleton from '../components/common/Skeleton.vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { api, wsUrl } from '../api/client.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
@@ -70,7 +86,18 @@ const capabilities = ref({ shellEnabled: false }), termEl = ref(null), loading =
 const targetOptionsOpen = ref(true);
 const phase = ref('idle'), notice = ref(''), hasTranscript = ref(false), sessionTarget = ref('');
 const hasSelection = ref(false), copying = ref(false), copyFeedback = ref('');
-let term, fit, resizeObserver, readyTimer, copyTimer;
+const searchOpen = ref(false), searchInput = ref(null), searchQuery = ref(''), searchCaseSensitive = ref(false);
+const searchResult = ref({ resultIndex: -1, resultCount: 0 }), atBottom = ref(true);
+const SEARCH_HIGHLIGHT_LIMIT = 1000;
+const searchDecorations = { matchBackground: '#24554a', matchBorder: '#478574', matchOverviewRuler: '#478574', activeMatchBackground: '#865c16', activeMatchBorder: '#fbbf24', activeMatchColorOverviewRuler: '#fbbf24' };
+const searchResultText = computed(() => {
+  if (!searchQuery.value) return '输入关键词';
+  const { resultIndex, resultCount } = searchResult.value;
+  if (!resultCount) return '未找到匹配';
+  if (resultCount >= SEARCH_HIGHLIGHT_LIMIT) return `至少 ${SEARCH_HIGHLIGHT_LIMIT} 处`;
+  return resultIndex < 0 ? `${resultCount} 处匹配` : `${resultIndex + 1} / ${resultCount}`;
+});
+let term, fit, search, resizeObserver, readyTimer, copyTimer;
 let disposed = false, requestId = 0;
 const connecting = computed(() => ['connecting', 'initializing'].includes(phase.value));
 const statusLabel = computed(() => ({ idle: '未连接', connecting: '正在连接…', initializing: '正在启动 Shell…', ready: '已连接', ended: '已断开', failed: '连接未完成' })[phase.value]);
@@ -119,11 +146,13 @@ const canConnect = computed(() => termReady.value && !loading.value && !loadErro
 usePullRefresh(() => loadData());
 onMounted(async () => {
   window.addEventListener('composeops:host-changed', onHostChanged);
-  term = new Terminal({ disableStdin: true, screenReaderMode: true, fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, monospace', fontSize: 13, cursorBlink: true, theme: { background: '#0b0d10', foreground: '#e5e7eb', cursor: '#34d399', selectionBackground: '#24554a' } });
+  term = new Terminal({ allowProposedApi: true, disableStdin: true, screenReaderMode: true, fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, monospace', fontSize: 13, cursorBlink: true, theme: { background: '#0b0d10', foreground: '#e5e7eb', cursor: '#34d399', selectionBackground: '#24554a' } });
   fit = new FitAddon(); term.loadAddon(fit); term.open(termEl.value);
+  resetSearchAddon();
   term.onData(data => { if (connected.value) socket.send(data); });
   term.onResize(({ cols, rows }) => socket.send(JSON.stringify({ type: 'resize', cols, rows })));
   term.onSelectionChange(() => { hasSelection.value = !!term.getSelection(); });
+  term.onScroll(updateScrollPosition); term.onWriteParsed(updateScrollPosition);
   resizeObserver = new ResizeObserver(() => fit.fit()); resizeObserver.observe(termEl.value);
   await nextTick(); if (disposed) return;
   fit.fit(); termReady.value = true;
@@ -151,7 +180,7 @@ async function loadData() {
 }
 function connect() {
   if (!canConnect.value || connected.value || connecting.value) return;
-  disconnect(); error.value = ''; notice.value = ''; copyFeedback.value = ''; term.reset(); hasTranscript.value = false; hasSelection.value = false;
+  disconnect(); closeSearch(false); searchQuery.value = ''; error.value = ''; notice.value = ''; copyFeedback.value = ''; term.reset(); resetSearchAddon(); hasTranscript.value = false; hasSelection.value = false; atBottom.value = true;
   sessionTarget.value = `${selectedContainer.value.name} · ${cmd.value}`;
   phase.value = 'connecting'; socket.connect();
 }
@@ -179,7 +208,66 @@ watch(() => [route.query.projectId, route.query.containerId, route.query.cmd], (
   notice.value = '目标已切换，请建立新会话';
 });
 function sendKey(char) { if (connected.value) { socket.send(char); term?.focus(); } }
-function clearScrollback() { term?.clear(); term?.focus(); }
+function resetSearchAddon() {
+  // clear/reset do not invalidate addon-search's line cache; replace it using its public lifecycle.
+  search?.dispose();
+  search = new SearchAddon({ highlightLimit: SEARCH_HIGHLIGHT_LIMIT }); term.loadAddon(search);
+  search.onDidChangeResults(result => { if (!disposed && searchOpen.value) searchResult.value = result; });
+  searchResult.value = { resultIndex: -1, resultCount: 0 };
+}
+function updateScrollPosition() { const buffer = term?.buffer.active; atBottom.value = !buffer || buffer.viewportY >= buffer.baseY; }
+function scrollToLatest() { closeSearch(false); term?.scrollToBottom(); updateScrollPosition(); term?.focus(); }
+async function openSearch() {
+  if (!termReady.value || !hasTranscript.value) return;
+  const selection = term?.getSelection();
+  searchOpen.value = true;
+  await nextTick();
+  if (disposed || !searchOpen.value) return;
+  // Fit the new layout before selecting a match; delayed reflow clears xterm's selection.
+  fit.fit();
+  if (selection && !/[\r\n]/.test(selection) && selection !== searchQuery.value) searchQuery.value = selection;
+  else findMatch(false, true);
+  searchInput.value?.focus(); searchInput.value?.select();
+}
+function closeSearch(restoreFocus = true) {
+  searchOpen.value = false; search?.clearDecorations(); term?.clearSelection();
+  searchResult.value = { resultIndex: -1, resultCount: 0 };
+  if (restoreFocus && !disposed) term?.focus();
+}
+function findMatch(previous = false, incremental = false) {
+  if (!search || !searchOpen.value) return;
+  if (!searchQuery.value) {
+    search.clearDecorations(); term?.clearSelection(); searchResult.value = { resultIndex: -1, resultCount: 0 }; return;
+  }
+  const options = { caseSensitive: searchCaseSensitive.value, incremental, decorations: searchDecorations };
+  if (previous) search.findPrevious(searchQuery.value, options);
+  else search.findNext(searchQuery.value, options);
+  updateScrollPosition();
+}
+watch(searchQuery, () => findMatch(false, true));
+watch(searchCaseSensitive, () => {
+  // addon-search 0.16 caches highlights by term; invalidate when options change too.
+  search?.clearDecorations(); findMatch(false, true);
+});
+// Capture before xterm handles keys: search shortcuts must never become shell input.
+function onTerminalKeydown(event) {
+  if (event.isComposing || event.keyCode === 229) return;
+  const find = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f';
+  const navigate = event.key === 'F3' && !event.ctrlKey && !event.metaKey && !event.altKey;
+  const close = event.key === 'Escape' && searchOpen.value;
+  if ((!find && !navigate && !close) || !hasTranscript.value) return;
+  event.preventDefault(); event.stopPropagation();
+  if (close) closeSearch();
+  else if (navigate && searchOpen.value && searchQuery.value) findMatch(event.shiftKey);
+  else void openSearch();
+}
+function onSearchKeydown(event) {
+  if (event.isComposing || event.keyCode === 229 || event.key !== 'Enter') return;
+  event.preventDefault(); event.stopPropagation(); findMatch(event.shiftKey);
+}
+function clearScrollback() {
+  term?.clear(); resetSearchAddon(); findMatch(false, true); updateScrollPosition(); term?.focus();
+}
 async function copySelection() {
   const text = term?.getSelection(); if (!text || copying.value) return;
   copying.value = true; clearTimeout(copyTimer);
