@@ -44,7 +44,8 @@ try {
       if (socket.url().includes('/ws/exec?')) socket.on('framereceived', ({ payload }) => outputFrames.push(String(payload)));
       if (socket.url().includes('/ws/exec?')) socket.on('framesent', ({ payload }) => {
         // Cursor-position reports answer the shell's DSR requests; they are not user input.
-        if (!String(payload).startsWith('{') && !/^\x1b\[\d+;\d+R$/.test(String(payload))) inputFrames.push(String(payload));
+        const text = String(payload), cursorReport = text.startsWith('\x1b[') && /^\d+;\d+R$/.test(text.slice(2));
+        if (!text.startsWith('{') && !cursorReport) inputFrames.push(text);
       });
     });
     await page.goto(`${base}/#/shell?projectId=${encodeURIComponent(project.id)}&containerId=${project.containers[0].id}`);

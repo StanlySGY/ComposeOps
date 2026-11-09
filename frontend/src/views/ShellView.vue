@@ -98,13 +98,29 @@ const searchResultText = computed(() => {
   return resultIndex < 0 ? `${resultCount} 处匹配` : `${resultIndex + 1} / ${resultCount}`;
 });
 let term, fit, search, resizeObserver, readyTimer, copyTimer;
+let startupOutput = [], startupBytes = 0;
 let disposed = false, requestId = 0;
 const connecting = computed(() => ['connecting', 'initializing'].includes(phase.value));
 const statusLabel = computed(() => ({ idle: '未连接', connecting: '正在连接…', initializing: '正在启动 Shell…', ready: '已连接', ended: '已断开', failed: '连接未完成' })[phase.value]);
 function clearReadyTimer() { clearTimeout(readyTimer); readyTimer = null; }
-function writeOutput(data) { hasTranscript.value = true; term?.write(data); }
+function writeOutput(data) {
+  hasTranscript.value = true;
+  if (connecting.value) {
+    startupOutput.push(data); startupBytes += typeof data === 'string' ? data.length : data.byteLength;
+    if (startupBytes > 64 * 1024) {
+      socket.close(); clearReadyTimer(); phase.value = 'failed';
+      flushStartupOutput(); error.value = 'Shell 启动输出过多，请检查容器后重新连接';
+    }
+    return;
+  }
+  term?.write(data);
+}
+function flushStartupOutput() {
+  for (const data of startupOutput) term?.write(data);
+  startupOutput = []; startupBytes = 0;
+}
 function endSession(message) {
-  clearReadyTimer(); phase.value = 'ended'; notice.value = message;
+  clearReadyTimer(); phase.value = 'ended'; flushStartupOutput(); notice.value = message;
   if (hasTranscript.value) term?.write(`\r\n\x1b[33m—— ${message} ——\x1b[0m\r\n`);
 }
 // Docker exec无法续接；断开后必须由用户显式创建新会话。
@@ -116,7 +132,7 @@ const socket = useWebSocket(
       phase.value = 'initializing'; fit.fit();
       socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       readyTimer = setTimeout(() => {
-        socket.close(); clearReadyTimer(); phase.value = 'failed';
+        socket.close(); clearReadyTimer(); phase.value = 'failed'; flushStartupOutput();
         error.value = 'Shell 初始化超时，请检查容器状态后重新连接';
       }, 30000);
     },
@@ -126,19 +142,21 @@ const socket = useWebSocket(
         const frame = JSON.parse(event.data);
         if (frame.type === 'ready') {
           clearReadyTimer(); phase.value = 'ready'; hasTranscript.value = true;
+          // Parse early DSR/terminal reports only after stdin is enabled, so their replies reach the shell.
+          flushStartupOutput();
           void nextTick(() => { if (connected.value && !disposed) { fit.fit(); term.focus(); } });
         } else if (frame.type === 'error') {
-          error.value = frame.data; clearReadyTimer(); socket.close(); phase.value = 'failed';
+          error.value = frame.data; clearReadyTimer(); socket.close(); phase.value = 'failed'; flushStartupOutput();
           notice.value = '连接已结束，可检查后重新连接';
         }
       } catch { writeOutput(event.data); }
     },
-    onError: () => { clearReadyTimer(); socket.close(); phase.value = 'failed'; error.value = '终端连接失败，请检查网络与容器状态后重试'; },
+    onError: () => { clearReadyTimer(); socket.close(); phase.value = 'failed'; flushStartupOutput(); error.value = '终端连接失败，请检查网络与容器状态后重试'; },
     onClose: () => endSession('会话已结束，可新建会话继续操作'),
   }
 );
 const connected = computed(() => phase.value === 'ready' && socket.connected.value);
-watch(connected, value => { if (term) term.options.disableStdin = !value; if (value) targetOptionsOpen.value = false; });
+watch(connected, value => { if (term) term.options.disableStdin = !value; if (value) targetOptionsOpen.value = false; }, { flush: 'sync' });
 const selectedProject = computed(() => projects.value.find(p => p.id === projectId.value));
 const containers = computed(() => selectedProject.value?.containers || []);
 const selectedContainer = computed(() => containers.value.find(container => container.id === containerId.value));

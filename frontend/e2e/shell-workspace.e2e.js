@@ -43,6 +43,14 @@ test('握手后等待真正就绪，禁止输入并可取消', async ({ page }) 
   await page.getByRole('button', { name: '取消连接', exact: true }).click();
   await expect(page.getByRole('button', { name: '连接', exact: true })).toBeEnabled(); expect(await commandCount(page)).toBe(0); expect(errors).toEqual([]);
 });
+test('先于就绪消息到达的光标查询会在就绪后回复，启动时不能输入命令', async ({ page }) => {
+  const errors = await install(page);
+  await page.evaluate(() => window.shellFixture.sockets.at(-1).output('startup\r\n\x1b[6n'));
+  await expect(terminal(page)).toHaveAttribute('readonly'); expect(await commandCount(page)).toBe(0);
+  await page.evaluate(() => window.shellFixture.sockets.at(-1).control({ type: 'ready' }));
+  await expect.poll(() => page.evaluate(() => window.shellFixture.sockets.at(-1).sent.some(value => value.startsWith('\x1b[') && /^\d+;\d+R$/.test(value.slice(2))))).toBe(true);
+  expect(errors).toEqual([]);
+});
 test('就绪后输入与中断发送到当前会话，断开保留可见输出', async ({ page }, info) => {
   const errors = await install(page); await ready(page);
   await terminal(page).pressSequentially('pwd'); await terminal(page).press('Enter'); expect(await commandCount(page)).toBeGreaterThan(0);

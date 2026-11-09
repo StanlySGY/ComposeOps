@@ -11,8 +11,8 @@ vi.mock('../src/composables/useWebSocket.js', () => ({ useWebSocket(url, options
   mocks.channels.push(channel); return channel;
 } }));
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
-  constructor() { this.cols = 80; this.rows = 24; this.dispose = vi.fn(); mocks.terminals.push(this); }
-  loadAddon() {} open() {} focus = vi.fn(); reset() {} write() {}
+  constructor(options) { this.options = options; this.cols = 80; this.rows = 24; this.dispose = vi.fn(); mocks.terminals.push(this); }
+  loadAddon() {} open() {} focus = vi.fn(); reset() {} write = vi.fn();
   clearSelection = vi.fn(); scrollToBottom = vi.fn(); onScroll() {} onWriteParsed() {}
   buffer = { active: { viewportY: 0, baseY: 0 } };
   clear = vi.fn(); getSelection() { return ""; } onSelectionChange() {} options = {};
@@ -160,6 +160,23 @@ describe('终端目标与会话一致性', () => {
 describe('终端就绪反馈与操作连续性', () => {
   const ready = () => mocks.channels[0].options.onMessage({ data: JSON.stringify({ type: 'ready' }) });
   const button = label => wrapper.findAll('button').find(b => b.text() === label);
+  it('早到的Shell输出在就绪后解析，自动终端回复不会被禁用输入吞掉', async () => {
+    await start(); const terminal = mocks.terminals[0], channel = mocks.channels[0];
+    terminal.write.mockImplementation(() => { if (!terminal.options.disableStdin) terminal.input('\x1b[1;1R'); });
+    channel.options.onMessage({ data: new Uint8Array([27, 91, 54, 110]).buffer });
+    expect(terminal.write).not.toHaveBeenCalled();
+    ready();
+    expect(terminal.options.disableStdin).toBe(false);
+    expect(terminal.write).toHaveBeenCalledOnce();
+    expect(channel.sent.at(-1)).toBe('\x1b[1;1R');
+  });
+  it('启动失败仍显示早到的诊断输出且不发送任何终端回复', async () => {
+    await start(); const terminal = mocks.terminals[0], channel = mocks.channels[0]; const before = channel.sent.length;
+    channel.options.onMessage({ data: 'shell startup error' });
+    channel.options.onMessage({ data: JSON.stringify({ type: 'error', data: 'Shell未能启动' }) });
+    expect(terminal.write).toHaveBeenCalledWith('shell startup error');
+    expect(terminal.options.disableStdin).toBe(true); expect(channel.sent).toHaveLength(before);
+  });
   it('WebSocket已打开但Shell未就绪时仍等待且不发送键盘输入', async () => {
     await start();
     expect(wrapper.get('.terminal-session-bar').text()).toContain('正在启动 Shell');
