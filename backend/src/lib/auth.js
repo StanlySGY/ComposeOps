@@ -51,7 +51,7 @@ export function changePassword(currentPassword, nextPassword) {
 
 /**
  * 跨域嵌入模式(EMBED_MODE=1):Cookie 放开 SameSite 以便在 iframe/第三方上下文里保持登录。
- * 默认 Strict:面板有 Shell/容器控制能力,SameSite=None 会让跨站请求带上会话 Cookie,
+ * 默认 Lax:面板有 Shell/容器控制能力,SameSite=None 会让跨站请求带上会话 Cookie,
  * 等 CSRF 面积扩大;只有真的要跨源嵌入时才该打开。
  */
 const embedMode = () => process.env.EMBED_MODE === '1';

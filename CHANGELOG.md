@@ -7,18 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- 维护依赖升级：Vite 8.3.5、Playwright 1.64.1；Checkout Action 7、Docker Login Action 4、Buildx Action 4。npm workspaces 仍只维护根级 package-lock.json。
-- Monaco 0.57 暂缓采用：真实预览 E2E 暴露 monaco-yaml Worker 的 requestHandler 缺失；固定 Monaco 0.52.2，并通过 npm dedupe 保证编辑器与 monaco-yaml 共用同一份依赖。
-- 全站主内容区采用 fluid-first 响应式宽度策略:数据、监控与运维页面铺满可用工作区;设置页保留 1440px 阅读宽度;宽屏边距随视口渐进伸缩,移除通用页面的 1360px 宽度上限。
-- 历史指标页统一使用全站 Surface 设计 Token 与面板/空状态组件；图表区域改为可收缩宽度，时间范围控件可换行，避免窄屏固定最小宽度造成横向滚动。
-- Compose 编辑器工具栏拆分为项目上下文、编辑辅助和保存三个具名操作组；实时日志工具栏拆分为来源/过滤与流控制两个具名组，保留现有操作与快捷键。
-- 历史指标页增加节点切换、项目切换和组件卸载时的请求失效保护；运维中心增加任务详情请求序号保护，以及带方向键/Home/End 的 ARIA Tab 导航。
-- 新增监控布局、旧节点迟到请求、任务详情竞态、运维 Tab 键盘导航与 Compose/日志工具栏语义分组回归测试。
-- 两份早期改进规划与竞品研究文档增加归档边界；更新项目上下文以区分代码仓库基线和历史生产环境记录，并补充 2026-11-05 维护审计及当前 CI/Pages 证据。
-- ARM64 镜像验收改用公开仓库可用的原生 `ubuntu-24.04-arm` runner，并断言运行架构，避免 QEMU 交叉构建拖满 CI 超时。
+## [1.6.0] - 2026-11-09
+
+本版汇总 v1.5.1 之后的运维可靠性、Agent 和界面改进，面向单用户个人服务器与自托管部署。
 
 ### Added
+- 原生 amd64/arm64 镜像门禁覆盖 v1.5.1 升级、升级前快照回退，以及明文到加密迁移、加密备份和外置密钥恢复；保留 amd64 的 1.4.0 升级基线。
+- 新增公开升级与回退指南；中英文安装入口统一固定 1.6.0，版本校验覆盖根锁文件与两份 README。
+- Release 直接发布双架构验收导出的镜像，核对镜像 ID、架构和提交标签后再合并稳定版 manifest，避免验收后重新构建出不同产物。
 - Autonomous Ops Command Center：统一汇聚 Agent 计划/后台任务、工作流实例、批量任务、事件和操作审计；支持按关键词、状态和来源筛选，并查看各来源原始详情与可证实的执行时间线。
 - 长期运维任务（Ticket）独立于 Agent Session，支持可交接 Assignment、不可变版本化 Mandate、结构化报告与人工验收；新建任务只定义目标，不自动启动 Agent。
 - 持久化 Effect Worker 支持人工审批、Mandate 快照复核、幂等派发、租约/心跳、结果留痕与崩溃恢复；执行白名单仅含 service.inspect / container.inspect 两种低风险只读 Docker 查询。未知动作、非低风险、远程 Host 与额外参数在执行前拒绝；不支持 Compose 写操作、镜像拉取、容器/卷变更、SSH 或 Shell。执行中断转为 outcome_unknown 并要求人工核对，不自动重放。
@@ -31,12 +27,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitOps 集成回归：真实隔离 HTTP Git 仓库克隆、远端新提交同步、提交历史、无效分支失败，以及同仓库同步/回滚/配置变更互斥。
 
 ### Changed
+- 统一暗色界面、登录与 Agent 插画、空态和状态反馈；总览提供异常优先的项目直达，手机保留项目状态摘要。
+- 页面来源返回、筛选与滚动恢复、触屏图表、键盘焦点、输出跟随及减少动态效果统一打磨；Compose 保存、环境变量和部署进度支持清晰的取消与失败恢复。
+- 发布验收清单改为当前门禁与验证边界，旧记录单独归档；安全文档统一 Cookie 默认策略与可选加密说明。
+- 维护依赖升级：Vite 8.3.5、Playwright 1.64.1；Checkout Action 7、Docker Login Action 4、Buildx Action 4。npm workspaces 仍只维护根级 package-lock.json。
+- Monaco 0.57 暂缓采用：真实预览 E2E 暴露 monaco-yaml Worker 的 requestHandler 缺失；固定 Monaco 0.52.2，并通过 npm dedupe 保证编辑器与 monaco-yaml 共用同一份依赖。
+- 全站主内容区采用 fluid-first 响应式宽度策略:数据、监控与运维页面铺满可用工作区;设置页保留 1440px 阅读宽度;宽屏边距随视口渐进伸缩,移除通用页面的 1360px 宽度上限。
+- 历史指标页统一使用全站 Surface 设计 Token 与面板/空状态组件；图表区域改为可收缩宽度，时间范围控件可换行，避免窄屏固定最小宽度造成横向滚动。
+- Compose 编辑器工具栏拆分为项目上下文、编辑辅助和保存三个具名操作组；实时日志工具栏拆分为来源/过滤与流控制两个具名组，保留现有操作与快捷键。
+- 历史指标页增加节点切换、项目切换和组件卸载时的请求失效保护；运维中心增加任务详情请求序号保护，以及带方向键/Home/End 的 ARIA Tab 导航。
+- 新增监控布局、旧节点迟到请求、任务详情竞态、运维 Tab 键盘导航与 Compose/日志工具栏语义分组回归测试。
+- 两份早期改进规划与竞品研究文档增加归档边界；更新项目上下文以区分代码仓库基线和历史生产环境记录，并补充 2026-11-05 维护审计及当前 CI/Pages 证据。
+- ARM64 镜像验收改用公开仓库可用的原生 `ubuntu-24.04-arm` runner，并断言运行架构，避免 QEMU 交叉构建拖满 CI 超时。
+
 - /ops-center 升级为统一运维任务中心；原定时运维计划页面保留并迁移至 /maintenance-plan，事件中心、工作流中心和 Agent 执行历史继续作为专业视图保留。
 - GitHub Pages 预览改为复用正式应用的 App、路由、页面与样式，以离线示例适配器提供数据；移除独立宣传页式控制台。
 - 增加真实页面、AI 审批、渠道独立保存与网络隔离的桌面/移动端回归验证。
 - 默认关闭 Fastify 代理头信任；需要反向代理时显式配置可信代理，Origin 校验使用 Fastify 解析后的 Host，避免直接采信未受信任的 X-Forwarded-Host/Proto。
 
 ### Fixed
+- 修复项目身份缺少宿主维度、跨节点监控和请求竞态；数据库导出、远程归档下载与 SSE 慢消费者增加背压和失败清理。
+- 修复服务动作可达性、Agent 上下文打开链路、日志断线补读与缓存页订阅生命周期；市场模板并发更新避免旧快照覆盖新数据。
 - 修正升级恢复入口：只向非运行项目展示真实存在升级前 Compose 备份的恢复操作，并明确说明配置恢复不等于镜像 digest 回退。
 - 多文件升级备份改为单事务批次写入；恢复前完整读取当前配置，任一文件写入失败时补偿恢复已触及文件，避免留下新旧混合配置。
 - Compose 编辑保存与升级/整项目回滚共用项目级操作锁，避免升级备份快照生成后编辑器并发改写配置；保留文件级锁和版本冲突校验。
@@ -53,6 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent 审批参数编辑后重新执行持久化拒绝策略检查；工具异常时审计明确记录后置检查未运行的原因，并在审计原因中脱敏 token 形态凭据。
 - 公共 Agent SSE 事件对工具结果/错误与普通文本统一应用值级秘密脱敏，MCP 文本和结构化结果继续验证 token 形态凭据不泄露。
 - 模型 content/reasoning 的流式 chunk 使用有状态秘密前缀暂存，跨 chunk token/Bearer/已收割值及正常 EOF 截断均脱敏后再发射；完整返回内容与流式增量保持一致。
+
+### Upgrade notes
+- 推荐从固定镜像 1.5.1 升级；升级前保存数据库快照和原 Compose 配置，保留既有项目名、端口、挂载和数据卷。
+- 数据库迁移后不要直接换回旧镜像读取新数据库。回退必须配套升级前快照；业务卷与 Compose/env 文件需单独备份。
+- 静态加密仍为可选项。已加密实例继续使用原有双 Compose 文件与外置密钥；丢失密钥无法恢复加密备份。
+- 详见 [升级与回退](docs/public/UPGRADE.md) 和 [发布验收范围](docs/public/RELEASE_CHECKLIST.md)。
 
 ## [1.5.1] - 2026-10-06
 

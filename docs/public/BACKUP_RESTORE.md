@@ -2,6 +2,8 @@
 
 适用 1.5.0+，默认容器名 `opsdash`、数据库 `/app/backend/data/opsdash.db`。自定义 DB_PATH 时相应调整路径。备份包含管理员、会话、渠道密钥和历史，应按凭据文件保管；设置页 JSON 导出不能替代它。
 
+版本升级和回退顺序见 [升级与回退](UPGRADE.md)。已启用加密时，每条 Compose 命令都必须带原有加密 overlay 和外置密钥配置，详见 [加密备份与恢复](DATABASE_ENCRYPTION.md#4-加密备份与恢复)。
+
 ## 在线备份
 
 应用运行时可执行；使用 SQLite 在线备份 API，包含尚未 checkpoint 的 WAL 提交。不要直接复制运行中的 opsdash.db。
@@ -48,4 +50,4 @@ docker compose up -d --no-build --wait opsdash
 
 ## 自动检查
 
-`scripts/image-smoke.mjs` 在独立容器与卷中验证首次设置密码、配置持久化、从 1.4.0 升级、在线备份及新卷恢复后登录。它不会覆盖真实实例数据。
+`scripts/image-smoke.mjs` 在独立容器与卷中验证首次设置密码、配置持久化、从 1.4.0 / 1.5.1 升级、在线备份及新卷恢复后登录，并用升级前快照在独立卷验证旧版本回退。首次安装路径还验证明文到加密迁移、加密备份和外置密钥恢复；1.5.1 升级及加密恢复均接入原生 amd64/arm64 CI。它不会覆盖真实实例数据。

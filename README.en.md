@@ -30,7 +30,7 @@ Auto-discover Compose projects, manage services, edit configs, stream logs, diag
 
 [Interactive preview](https://stanlysgy.github.io/ComposeOps/) · [Backup and restore](docs/public/BACKUP_RESTORE.md)
 
-The offline preview runs the actual application UI with fictional data and never connects to Docker or AI. See [preview scope](docs/public/PREVIEW.md). The installation manifest pins version 1.5.0; AI is optional.
+The offline preview runs the actual application UI with fictional data and never connects to Docker or AI. See [preview scope](docs/public/PREVIEW.md). The installation manifest pins version 1.6.0; AI is optional.
 
 ## 🚀 Why ComposeOps
 
@@ -237,7 +237,7 @@ These modules target power users who want to codify their ops experience. The co
 
 ```bash
 mkdir composeops && cd composeops
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.5.0/deploy/compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.6.0/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 
@@ -252,6 +252,8 @@ docker compose up -d --build
 ```
 
 Open **http://<host-ip>:28765** in your browser (default mapping `0.0.0.0:28765 -> 3001`; change to `127.0.0.1:28765:3001` for localhost-only). First-time setup will prompt for an admin password (min 10 characters).
+
+Existing installation? Read the [upgrade and rollback guide](docs/public/UPGRADE.md) before changing the image version.
 
 ### Remote Access
 
@@ -278,7 +280,7 @@ TRUST_PROXY=1
 ### 🔐 Authentication & Authorization
 
 - ✅ Scrypt password hashing (Node.js native crypto)
-- ✅ Session-based authentication (30-day HttpOnly, SameSite=Strict cookies)
+- ✅ Session-based authentication (30-day HttpOnly, SameSite=Lax cookies; Secure on HTTPS)
 - ✅ API key management for programmatic access
 - ✅ CSRF protection via Origin header validation
 
@@ -291,9 +293,9 @@ TRUST_PROXY=1
 
 ### 🔑 API Key Protection
 
-- ✅ AI provider keys stored in local SQLite (file permission 0600), never in browser
+- ✅ AI provider keys stored in local SQLite (file permission 0600); ordinary responses are masked, and an authenticated administrator can explicitly reveal a saved key
 - ✅ Server-side proxy for all AI API calls; masked in UI responses
-- ⚠️ The database file itself is not encrypted — keep host access under control
+- Plaintext storage is the default; [SQLite encryption at rest](docs/public/DATABASE_ENCRYPTION.md) is opt-in. Keep the external key separate from the database and its backups.
 
 ### ⚠️ Threat Model
 
@@ -304,7 +306,7 @@ TRUST_PROXY=1
 
 **What we protect against:**
 - ✅ Accidental destructive operations (confirmation dialogs)
-- ✅ Container escape via shell (restricted to managed containers)
+- ✅ Shell access is restricted to managed containers; Docker socket access still grants host-level control
 - ✅ Unauthorized project access (explicit management required)
 - ✅ Session hijacking (HttpOnly + SameSite cookies)
 

@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-Security fixes target the latest stable release. Back up before upgrading older versions; automated upgrade coverage currently starts at 1.4.0.
+Security fixes target the latest stable release. Back up before upgrading older versions; automated upgrade coverage includes 1.4.0 and the previous stable release, 1.5.1.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.5.x   | :white_check_mark: |
-| < 1.5   | :x:                |
+| 1.6.x   | :white_check_mark: |
+| < 1.6   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -62,13 +62,13 @@ This is equivalent to root access on the host system. Therefore:
 ### Authentication
 
 - **Strong passwords**: Minimum 10 characters enforced
-- **Session security**: HttpOnly cookies with SameSite=Strict
+- **Session security**: 30-day HttpOnly cookies with SameSite=Lax by default and Secure on HTTPS. Explicit HTTPS embedding mode uses SameSite=None and Partitioned
 - **No built-in 2FA**: Consider using a reverse proxy with OAuth2/OIDC
 - **Password reset**: Currently requires database access (planned improvement)
 
 ### API Keys
 
-- **Storage**: API keys (for AI integrations) are stored in SQLite database
+- **Storage**: API keys are stored in SQLite (plaintext by default). Optional [encryption at rest](docs/public/DATABASE_ENCRYPTION.md) requires an external key, stored and backed up separately from the database
 - **Export protection**: Keys are NOT included in settings export
 - **Transmission**: Use HTTPS for all remote access
 - **Rotation**: Manually rotate keys regularly in Settings

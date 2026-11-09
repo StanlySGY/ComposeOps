@@ -1,6 +1,11 @@
 name: Quality checks
 on:
   workflow_call:
+    inputs:
+      export-images:
+        description: Save the exact tested images for a stable release
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -57,6 +62,7 @@ jobs:
           context: .
           load: true
           tags: composeops:ci-test
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Install browser test dependencies
@@ -69,7 +75,7 @@ jobs:
           node scripts/project-workspace-browser.mjs composeops:ci-test
           node scripts/project-workspace-browser.mjs composeops:ci-test --workspace
           node scripts/reviewed-deployment-integration.mjs
-      - name: Fresh installation and online backup restore
+      - name: Fresh installation, online backup and encrypted restore
         run: node scripts/image-smoke.mjs composeops:ci-test
       - name: Compose multi-file rollback and failure compensation
         run: node scripts/compose-recovery-integration.mjs
@@ -77,6 +83,21 @@ jobs:
         run: COMPOSEOPS_DOCKER_ACCEPTANCE=1 node --test --test-concurrency=1 backend/test/volume-backup-api.integration.test.js
       - name: Upgrade from supported baseline
         run: node scripts/image-smoke.mjs composeops:ci-test stanly1997/opsdash:1.4.0
+      - name: Upgrade and rollback from previous stable release
+        run: node scripts/image-smoke.mjs composeops:ci-test stanly1997/opsdash:1.5.1
+      - name: Export tested amd64 image
+        if: inputs.export-images
+        run: |
+          mkdir -p verified-image
+          docker save composeops:ci-test -o verified-image/image.tar
+          docker image inspect --format '{{.Id}}' composeops:ci-test > verified-image/image-id.txt
+      - uses: actions/upload-artifact@v4
+        if: inputs.export-images
+        with:
+          name: composeops-image-amd64
+          path: verified-image/
+          compression-level: 0
+          retention-days: 3
   image-arm64:
     name: ARM64 image installation and restore
     needs: code
@@ -98,7 +119,23 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: composeops:ci-arm64
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: ARM64 fresh installation and online backup restore
+      - name: ARM64 installation, online backup and encrypted restore
         run: node scripts/image-smoke.mjs composeops:ci-arm64
+      - name: ARM64 upgrade and rollback from previous stable release
+        run: node scripts/image-smoke.mjs composeops:ci-arm64 stanly1997/opsdash:1.5.1
+      - name: Export tested arm64 image
+        if: inputs.export-images
+        run: |
+          mkdir -p verified-image
+          docker save composeops:ci-arm64 -o verified-image/image.tar
+          docker image inspect --format '{{.Id}}' composeops:ci-arm64 > verified-image/image-id.txt
+      - uses: actions/upload-artifact@v4
+        if: inputs.export-images
+        with:
+          name: composeops-image-arm64
+          path: verified-image/
+          compression-level: 0
+          retention-days: 3

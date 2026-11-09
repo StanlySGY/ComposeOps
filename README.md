@@ -26,9 +26,9 @@
 > **这不是什么**：不支持多租户与团队协作（多人请用 Portainer）；不是 PaaS，不接管构建发布流程（那请看 Coolify / Komodo）。
 > **定位**：在这类工具里，ComposeOps 的差异点是 **AI 运维 Agent**——不止能看，还能在你确认后替你动手排障。
 
-[在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [备份与恢复](docs/public/BACKUP_RESTORE.md) · [SQLite 静态加密与密钥轮换](docs/public/DATABASE_ENCRYPTION.md)
+[在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [升级与回退](docs/public/UPGRADE.md) · [备份与恢复](docs/public/BACKUP_RESTORE.md) · [SQLite 静态加密与密钥轮换](docs/public/DATABASE_ENCRYPTION.md)
 
-预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.5.1；AI 为可选功能。
+预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.6.0；AI 为可选功能。
 
 ## 🚀 为什么选择 ComposeOps
 
@@ -250,7 +250,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 ```bash
 mkdir composeops && cd composeops
 # 下载固定版本、无需源码构建的安装清单
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.5.1/deploy/compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.6.0/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 
@@ -311,7 +311,7 @@ tailscale serve --bg http://127.0.0.1:28765
 
 - ✅ 存储于本地 SQLite（文件权限 0600），不随设置导出
 - ✅ 界面回显自动掩码
-- ⚠️ 数据库文件本身未加密——请确保宿主机访问受控
+- 默认以明文存储；可显式启用 [SQLite 静态加密](docs/public/DATABASE_ENCRYPTION.md)。密钥须独立保管，备份与密钥分别保存。
 
 ### 威胁模型
 

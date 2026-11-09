@@ -22,41 +22,80 @@ jobs:
   quality:
     needs: metadata
     uses: ./.github/workflows/quality.yml
+    with:
+      export-images: true
   docker:
-    name: Publish verified images
+    name: Publish tested ${{ matrix.arch }} image
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            image: composeops:ci-test
+          - arch: arm64
+            image: composeops:ci-arm64
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: composeops-image-${{ matrix.arch }}
+          path: verified-image
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Verify image identity and publish architecture
+        env:
+          TESTED_IMAGE: ${{ matrix.image }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker load -i verified-image/image.tar
+          test "$(docker image inspect --format '{{.Id}}' "$TESTED_IMAGE")" = "$(cat verified-image/image-id.txt)"
+          test "$(docker image inspect --format '{{.Architecture}}' "$TESTED_IMAGE")" = "$ARCH"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$TESTED_IMAGE")" = "$GITHUB_SHA"
+          VERSION="${GITHUB_REF_NAME#v}"
+          PUBLISH_IMAGE="stanly1997/opsdash:$VERSION-$ARCH"
+          docker tag "$TESTED_IMAGE" "$PUBLISH_IMAGE"
+          docker push "$PUBLISH_IMAGE"
+          mkdir -p digests
+          docker image inspect --format '{{index .RepoDigests 0}}' "$PUBLISH_IMAGE" > "digests/$ARCH.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: composeops-digest-${{ matrix.arch }}
+          path: digests/
+          retention-days: 7
+  manifest:
+    name: Publish multi-platform version after both images pass
+    needs: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: composeops-digest-*
+          path: digests
+          merge-multiple: true
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Resolve version
-        id: version
+      - name: Create and verify stable manifest
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "full=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
-          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            stanly1997/opsdash:latest
-            stanly1997/opsdash:${{ steps.version.outputs.full }}
-            stanly1997/opsdash:${{ steps.version.outputs.major }}
-            stanly1997/opsdash:${{ steps.version.outputs.minor }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          docker buildx imagetools create \
+            --tag "stanly1997/opsdash:$VERSION" \
+            --tag "stanly1997/opsdash:${VERSION%.*}" \
+            --tag "stanly1997/opsdash:${VERSION%%.*}" \
+            --tag stanly1997/opsdash:latest \
+            "$(cat digests/amd64.txt)" "$(cat digests/arm64.txt)"
+          docker buildx imagetools inspect "stanly1997/opsdash:$VERSION" --raw > manifest.json
+          python3 -c 'import json; m=json.load(open("manifest.json")); assert {(x["platform"]["os"], x["platform"]["architecture"]) for x in m["manifests"]} == {("linux", "amd64"), ("linux", "arm64")}'
   release:
     name: Publish release after images are available
-    needs: docker
+    needs: manifest
     runs-on: ubuntu-latest
     permissions:
       contents: write
