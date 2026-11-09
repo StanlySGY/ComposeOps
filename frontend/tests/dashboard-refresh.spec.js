@@ -50,15 +50,15 @@ describe('总览数据与跳转', () => {
     state.store.projects = [];
     await start();
     expect(wrapper.text()).toContain('23%');
-    expect(wrapper.get('a[href="/marketplace"]').text()).toContain('浏览应用市场');
+    expect(wrapper.findAll('a[href="/marketplace?from=dashboard"]').some(link => link.text().includes('浏览应用市场'))).toBe(true);
   });
   it('刷新使用最新项目数据且指标可以直达详情页', async () => {
     await start();
     await wrapper.get('button').trigger('click');
     await flushPromises();
     expect(state.store.refresh).toHaveBeenLastCalledWith(true);
-    expect(wrapper.findAll('a[href="/monitor"]')).toHaveLength(2);
-    expect(wrapper.get('a[href="/inspection"]').text()).toContain('95');
+    expect(wrapper.findAll('a[href="/monitor?from=dashboard"]')).toHaveLength(2);
+    expect(wrapper.get('a[aria-label="查看巡检报告"]').text()).toContain('95');
   });
   it('常用运维入口直达服务、Compose、日志和 AI 助手', async () => {
     await start();

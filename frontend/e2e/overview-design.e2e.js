@@ -59,7 +59,7 @@ test('首次服务视图优先展示项目，概况可展开并记住偏好', as
 test('最近事件进入对应记录页面，键盘可跳过全站导航', async ({ page, isMobile }) => {
   await page.goto('./#/dashboard');
   await page.getByRole('link', { name: '查看操作记录：保存配置' }).click();
-  await expect(page).toHaveURL(/#\/events\?tab=operations$/);
+  await expect(page).toHaveURL(/#\/events\?tab=operations&from=dashboard$/);
   await page.goBack();
   await expect(page).toHaveURL(/#\/dashboard$/);
   await expect(page.getByRole('heading', { name: '运维总览', exact: true })).toBeVisible();
@@ -67,7 +67,7 @@ test('最近事件进入对应记录页面，键盘可跳过全站导航', async
   // during that restoration can move the target between pointerdown/up in WebKit.
   await expect(page.locator('.page-fade-enter-active,.page-fade-leave-active')).toHaveCount(0);
   await page.getByRole('link', { name: '查看告警记录：wiki-api 异常退出' }).click();
-  await expect(page).toHaveURL(/#\/events$/);
+  await expect(page).toHaveURL(/#\/events\?from=dashboard$/);
   if (!isMobile) {
     await page.goto('./#/dashboard');
     // The app shell appears before the lazy route; Tab cannot land on a refresh

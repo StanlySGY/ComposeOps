@@ -2,13 +2,13 @@
   <main class="login-page min-h-dvh relative isolate grid place-items-center overflow-hidden px-4 py-8 sm:px-6">
     <div class="login-glow login-glow-one" aria-hidden="true"></div>
     <div class="login-glow login-glow-two" aria-hidden="true"></div>
-    <div class="login-layout relative z-10 grid w-full max-w-5xl items-center gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16">
+    <div class="login-layout relative z-10 grid w-full max-w-6xl items-center gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-20">
       <section class="login-intro hidden lg:block">
         <div class="mb-7 flex items-center gap-3">
           <BrandMark class="login-brand-mark" />
           <div>
             <p class="text-lg font-semibold tracking-tight text-surface-100">ComposeOps</p>
-            <p class="mt-0.5 text-xs text-surface-400">DOCKER OPERATIONS WORKSPACE</p>
+            <p class="mt-0.5 text-xs text-surface-400">你的容器运维工作台</p>
           </div>
         </div>
         <p class="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">一处掌控，清晰运维</p>
@@ -16,10 +16,13 @@
           让复杂的容器运维，<span class="login-headline-accent">回归简单。</span>
         </h2>
         <p class="mt-5 max-w-lg text-sm leading-7 text-surface-400">集中查看服务状态、管理 Compose 配置、追踪日志与自动化任务。先看清状态，再安全地执行操作。</p>
-        <picture class="login-illustration" aria-hidden="true">
-          <source media="(min-width: 1024px)" :srcset="`${clusterSmall} 720w, ${clusterLarge} 1200w`" sizes="512px" type="image/webp" />
-          <img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" width="1200" height="516" alt="" decoding="async" draggable="false" />
-        </picture>
+        <div class="login-visual" aria-hidden="true">
+          <picture v-if="!illustrationFailed" class="login-illustration">
+            <source media="(min-width: 1024px)" :srcset="`${clusterSmall} 720w, ${clusterLarge} 1200w`" sizes="(min-width: 1280px) 688px, 520px" type="image/webp" />
+            <img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" width="1200" height="438" alt="" decoding="async" draggable="false" @error="illustrationFailed = true" />
+          </picture>
+          <BrandMark v-else class="login-art-fallback" />
+        </div>
         <div class="login-features grid max-w-lg grid-cols-3 gap-4">
           <div v-for="feature in features" :key="feature.title" class="login-feature">
             <component :is="feature.icon" class="mb-2.5 h-4 w-4 text-blue-300" />
@@ -43,7 +46,7 @@
         </div>
         <div class="mb-6 flex items-start justify-between gap-4">
           <div>
-            <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300">SECURE WORKSPACE</p>
+            <p class="login-form-eyebrow"><span aria-hidden="true"></span>安全访问 · 私人工作区</p>
             <h1 id="login-title" class="mt-2 text-2xl font-semibold tracking-tight text-surface-50">{{ auth.setupRequired ? '创建管理员' : '欢迎回来' }}</h1>
             <p class="mt-2 text-sm leading-6 text-surface-400">
               {{ auth.setupRequired ? '设置管理员密码，完成控制台初始化。' : '验证身份后，继续管理你的容器服务。' }}
@@ -85,8 +88,8 @@ import { ref } from 'vue';
 import { ArrowUp, Eye, EyeOff, LogIn, ShieldCheck, Activity, FileCode2, ScrollText } from 'lucide-vue-next';
 import { useAuthStore } from '../stores/auth.js';
 import BrandMark from '../components/common/BrandMark.vue';
-import clusterSmall from '../assets/login-cluster-720.webp';
-import clusterLarge from '../assets/login-cluster-1200.webp';
+import clusterSmall from '../assets/login-control-plane-720.webp?no-inline';
+import clusterLarge from '../assets/login-control-plane-1200.webp?no-inline';
 
 const auth = useAuthStore();
 const features = [
@@ -101,6 +104,7 @@ const loading = ref(false);
 const error = ref('');
 const showPassword = ref(false);
 const capsLock = ref(false);
+const illustrationFailed = ref(false);
 function updateCapsLock(event) { capsLock.value = event.getModifierState?.('CapsLock') || false; }
 
 async function submit() {
@@ -150,9 +154,13 @@ async function submit() {
 .login-brand-mark { width: 44px; height: 44px; }
 
 .login-brand-mark-small { width: 36px; height: 36px; border-radius: 10px; }
-.login-headline-accent { display: block; color: #93c5fd; }
-.login-illustration { display: block; margin: 1.25rem -1rem 1rem; pointer-events: none; mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent), linear-gradient(to bottom, transparent, #000 12%, #000 84%, transparent); mask-composite: intersect; }
+.login-headline-accent { display: block; color: #a7e4d1; }
+.login-visual { display: grid; place-items: center; aspect-ratio: 1200 / 438; margin: 1.75rem -1rem 1.5rem; pointer-events: none; }
+.login-illustration { display: block; width: 100%; mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent), linear-gradient(to bottom, transparent, #000 10%, #000 78%, transparent); mask-composite: intersect; }
 .login-illustration img { display: block; width: 100%; height: auto; }
+.login-art-fallback { width: 72px; height: 72px; opacity: .65; }
+.login-form-eyebrow { display: flex; align-items: center; gap: 7px; font-size: 11px; letter-spacing: .08em; color: var(--color-surface-400); }
+.login-form-eyebrow > span { width: 5px; height: 5px; border-radius: 50%; background: var(--color-status-ok); }
 .login-features { padding-top: 1.25rem; border-top: 1px solid rgba(148, 163, 184, 0.13); }
 .login-feature + .login-feature { border-left: 1px solid rgba(148, 163, 184, 0.13); padding-left: 1rem; }
 .login-card { box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035); transition: border-color 180ms ease, box-shadow 180ms ease; }

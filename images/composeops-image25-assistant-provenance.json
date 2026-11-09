@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-09",
+  "provider": "l0veyou-image-gen",
+  "toolRevision": "3ffcb7eaf42e50e50778c6ebf0e00cba4925e25a",
+  "requestedModel": "gpt-image-2-5-full",
+  "modelLabel": "GPT Image 2.5 满血版（站点标注）",
+  "taskId": "d2247bb79880ffb7d95ff6231abc67b0",
+  "prompt": "为 ComposeOps 暗色运维工作台创作一张与石墨金属、烟灰玻璃、翡翠色细光轨主视觉同系列的产品插画。主题是“把信息整理成可执行的判断”：一枚厚实、圆角倒角的透明烟灰玻璃控制核心坐在低矮的石墨色精密金属底座上，核心内部仅一小块柔和翡翠光。核心后方两片很薄的半透明烟灰玻璃信息卡错位展开，一片竖直一片略微倾斜，卡片只有若隐若现的实体蚀刻线，没有界面或文字。核心前方台面上两条极细绿色光轨有序汇合。采用高端工业产品近正交等距摄影，金属的细腻磨砂与玻璃真实厚度清楚，柔和冷色侧光，接触阴影克制，轮廓安静而精致。主体居中占画面约70%，四周均匀留白，背景极深蓝灰 #10141a，缩至220像素宽仍然轮廓清楚。不要机器人、脑、眼睛、人、盾牌、魔法、漂浮粒子、光环、霓虹、服务器机房、品牌、文字、字母、数字、UI界面或水印。横向4:3。",
+  "source": "images/20261109-094555-composeops-guided-core.png",
+  "sourceSha256": "9214af350576f01048a7bfc8082d44dd5fcb4ac03613103a8818e98ff01d395a",
+  "ratio": "4:3",
+  "size": [
+    1024,
+    768
+  ],
+  "padding": [
+    64,
+    48
+  ],
+  "selected": true,
+  "supersedes": "composeops-scenes-provenance.json#assistant",
+  "derived": [
+    {
+      "path": "frontend/src/assets/scenes/assistant-400.webp",
+      "width": 400,
+      "height": 300,
+      "bytes": 5440,
+      "sha256": "3dcbe082474e1c7709dbb4f31c0c68c110aa884dd88014bd3677adb4d3c534b3"
+    },
+    {
+      "path": "frontend/src/assets/scenes/assistant-800.webp",
+      "width": 800,
+      "height": 600,
+      "bytes": 16386,
+      "sha256": "a25d0ccb94a24448e1b6897233b7b5745343efd6d587c740e31ce86c492d791e"
+    }
+  ]
+}

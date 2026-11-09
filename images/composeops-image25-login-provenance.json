@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-09",
+  "provider": "l0veyou-image-gen",
+  "toolRevision": "3ffcb7eaf42e50e50778c6ebf0e00cba4925e25a",
+  "requestedModel": "gpt-image-2-5-full",
+  "modelLabel": "GPT Image 2.5 满血版（站点标注）",
+  "taskId": "723ee06c6e72538cc1ed1ca7bd47b805",
+  "prompt": "为中文 Docker Compose 运维产品 ComposeOps 设计一张成熟、克制的品牌主视觉。画面是一座桌面尺度的精密模块化运维装置：左侧三片薄的石墨金属计算层板整齐叠放，中央一枚半透明烟灰玻璃方形控制核心，右侧两个低矮的独立模块；三组实体沿一条简洁的翡翠绿色细光轨相连，表达多个服务被有序编排。几何体有精细倒角和可信的金属、玻璃厚度，玻璃核心内只有一小段柔和的绿色光；连接关系清楚，避免随机线路与装饰碎片。使用高端工业产品静物摄影的近正交等距视角，主体大且紧凑，占画面宽约75%、高约65%，下缘有轻微真实接触阴影。极深蓝灰均匀背景 #10141a，顶部和四角自然留白，精细但柔和的冷色侧光，黑色层次清楚，少量银色边缘，翡翠色仅用于连接。不要服务器机房、城市、复杂电路板、人物、机器人、盾牌、锁、星空、光环、粒子、雾、强烈霓虹、文字、字母、数字、UI截图、品牌标识或水印。用于暗色软件登录页，缩至480像素宽仍需清晰、安静、精致。横向16:9。",
+  "source": "images/20261109-092018-composeops-control-plane.png",
+  "sourceSha256": "0a31b9f1e2a98948231705e9864217dd939a463f6ada2f5efad36219bc12e555",
+  "ratio": "16:9",
+  "size": [
+    1536,
+    864
+  ],
+  "crop": [
+    48,
+    180,
+    1500,
+    710
+  ],
+  "selected": true,
+  "derived": [
+    {
+      "path": "frontend/src/assets/login-control-plane-720.webp",
+      "width": 720,
+      "height": 263,
+      "bytes": 10712,
+      "sha256": "9e8f8017ccf3c1bd553dc3f765236a715bebfdd42dea928231f57ae36ac68363"
+    },
+    {
+      "path": "frontend/src/assets/login-control-plane-1200.webp",
+      "width": 1200,
+      "height": 438,
+      "bytes": 22458,
+      "sha256": "1f27618a8b76a17c88a6a4fc50b68a4f7d37e04ad857ec4019c5fc0a397b990c"
+    }
+  ]
+}

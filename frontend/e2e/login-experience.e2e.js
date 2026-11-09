@@ -24,10 +24,11 @@ async function loginFixture(page, { setup = false, failFirst = false } = {}) {
 
 test('登录视觉按屏幕加载，密码显示与失败后键盘重试连贯', async ({ page, isMobile }) => {
   const artRequests = [];
-  page.on('request', request => { if (request.url().includes('login-cluster-')) artRequests.push(request.url()); });
+  page.on('request', request => { if (request.url().includes('login-control-plane-')) artRequests.push(request.url()); });
   await loginFixture(page, { failFirst: true });
   await page.goto('./#/dashboard');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('欢迎回来');
+  await page.screenshot({ path: test.info().outputPath('login.png'), animations: 'disabled' });
   const password = page.getByLabel('管理员密码', { exact: true });
   await password.fill('fictional-password-123');
   await page.getByRole('button', { name: '显示密码', exact: true }).click();
@@ -72,10 +73,14 @@ test('初始化校验保留表单，匹配密码后可进入工作台', async ({
 
 test('装饰素材不可用时仍能登录，减少动态效果与窄屏布局生效', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.route('**/*login-cluster-*.webp', route => route.abort());
+  await page.route('**/*login-control-plane-*.webp', route => route.abort());
   await loginFixture(page);
   await page.goto('./#/dashboard');
   const password = page.getByLabel('管理员密码', { exact: true });
+  if ((await page.viewportSize()).width >= 1024) {
+    await expect(page.locator('.login-art-fallback')).toBeVisible();
+    await expect(page.locator('.login-illustration')).toHaveCount(0);
+  }
   await password.fill('fictional-password-123');
   expect(await page.locator('.login-card').evaluate(card => parseFloat(getComputedStyle(card).transitionDuration))).toBeLessThan(0.01);
   await page.setViewportSize({ width: 360, height: 640 });

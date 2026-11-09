@@ -20,10 +20,10 @@
     <template v-else>
       <EnvironmentBrief :projects="store.projects" :incomplete="!!loadError" />
       <div class="metric-grid">
-        <MetricTile title="项目总数" aria-label="查看全部项目" :value="projectCount" :sub="`健康 ${healthyProjects}`" :icon="Boxes" to="/services" />
-        <MetricTile title="容器总数" aria-label="查看容器状态" :value="containerCount" :sub="`运行 ${runningContainers}`" :icon="Container" tone="text-status-ok" to="/services" />
-        <MetricTile title="环境 CPU" aria-label="查看 CPU 实时监控" :value="cpu == null ? '—' : `${cpu}%`" :sub="cpuState" :icon="Cpu" :tone="cpuTone" :trend="monitorTrends.cpu" to="/monitor" />
-        <MetricTile title="环境内存" aria-label="查看内存实时监控" :value="memory == null ? '—' : `${memory}%`" :sub="memoryState" :icon="MemoryStick" :tone="memoryTone" :trend="monitorTrends.mem" to="/monitor" />
+        <MetricTile title="项目总数" aria-label="查看全部项目" :value="projectCount" :sub="`健康 ${healthyProjects}`" :icon="Boxes" to="/services?from=dashboard" />
+        <MetricTile title="容器总数" aria-label="查看容器状态" :value="containerCount" :sub="`运行 ${runningContainers}`" :icon="Container" tone="text-status-ok" to="/services?from=dashboard" />
+        <MetricTile title="环境 CPU" aria-label="查看 CPU 实时监控" :value="cpu == null ? '—' : `${cpu}%`" :sub="cpuState" :icon="Cpu" :tone="cpuTone" :trend="monitorTrends.cpu" to="/monitor?from=dashboard" />
+        <MetricTile title="环境内存" aria-label="查看内存实时监控" :value="memory == null ? '—' : `${memory}%`" :sub="memoryState" :icon="MemoryStick" :tone="memoryTone" :trend="monitorTrends.mem" to="/monitor?from=dashboard" />
       </div>
 
       <div class="overview-columns">
@@ -31,7 +31,7 @@
           <section class="section-panel overview-attention" :class="{ 'has-attention': attentionProjects }" aria-labelledby="attention-heading">
             <div class="overview-section-heading">
               <div><h2 id="attention-heading"><span class="overview-section-icon" :class="attentionProjects ? 'text-status-warn' : 'text-status-ok'"><component :is="attentionProjects ? AlertTriangle : CircleCheckBig" class="h-4 w-4" /></span>需要处理<span class="count-badge">{{ attentionProjects }}</span></h2><p>停止、部分运行或健康检查异常的项目</p></div>
-              <router-link to="/services?filter=attention" class="overview-text-link">查看全部<ArrowRight class="h-3.5 w-3.5" /></router-link>
+              <router-link to="/services?filter=attention&from=dashboard" class="overview-text-link">查看全部<ArrowRight class="h-3.5 w-3.5" /></router-link>
             </div>
             <div v-if="attentionProjectList.length" class="overview-attention-list">
               <article v-for="project in attentionProjectList" :key="project.id" class="overview-project">
@@ -48,11 +48,11 @@
             </div>
             <div v-else-if="loadError" class="overview-calm-state"><AlertTriangle class="h-6 w-6 text-status-warn" /><div><strong>状态待确认</strong><p>部分数据未能加载，请重试后查看完整状态。</p></div></div>
             <div v-else-if="projectCount" class="overview-calm-state"><CircleCheckBig class="h-7 w-7 text-status-ok" /><div><strong>当前项目状态正常</strong><p>未发现停止或健康检查异常的项目。</p></div></div>
-            <div v-else class="overview-empty"><EmptyState compact icon="Boxes" title="暂未发现 Compose 项目" description="扫描已有项目，或从应用市场开始部署。" /><router-link to="/services" class="btn-secondary">查看服务</router-link><router-link to="/marketplace" class="btn-primary ml-2">浏览应用市场</router-link></div>
+            <div v-else class="overview-empty"><EmptyState compact icon="Boxes" title="暂未发现 Compose 项目" description="扫描已有项目，或从应用市场开始部署。" /><router-link to="/services?from=dashboard" class="btn-secondary">查看服务</router-link><router-link to="/marketplace?from=dashboard" class="btn-primary ml-2">浏览应用市场</router-link></div>
           </section>
 
           <section class="section-panel overview-activity" aria-labelledby="activity-heading">
-            <div class="overview-section-heading"><div><h2 id="activity-heading"><History class="h-4 w-4 text-surface-400" />最近事件</h2><p>配置变更、告警与执行记录</p></div><router-link to="/events?tab=timeline" class="overview-text-link">查看全部<ArrowRight class="h-3.5 w-3.5" /></router-link></div>
+            <div class="overview-section-heading"><div><h2 id="activity-heading"><History class="h-4 w-4 text-surface-400" />最近事件</h2><p>配置变更、告警与执行记录</p></div><router-link to="/events?tab=timeline&from=dashboard" class="overview-text-link">查看全部<ArrowRight class="h-3.5 w-3.5" /></router-link></div>
             <ol v-if="recentEvents.length" class="overview-timeline">
               <li v-for="event in recentEvents" :key="event.key">
                 <router-link :to="eventTarget(event)" class="overview-event" :aria-label="`查看${sourceLabel(event.source)}记录：${event.title}`">
@@ -67,7 +67,7 @@
         </div>
 
         <div class="overview-secondary">
-          <router-link to="/inspection" class="section-panel overview-inspection" aria-label="查看巡检报告">
+          <router-link to="/inspection?from=dashboard" class="section-panel overview-inspection" aria-label="查看巡检报告">
             <div class="overview-section-heading"><h2><ShieldCheck class="h-4 w-4 text-surface-400" />最近巡检</h2><ArrowUpRight class="h-4 w-4 text-surface-400" /></div>
             <div class="overview-score"><div class="overview-score-ring" :class="inspectionTone"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="score-track" cx="50" cy="50" r="44" /><circle class="score-fill" cx="50" cy="50" r="44" pathLength="100" :stroke-dasharray="`${Math.max(0, Math.min(100, Number(inspectionScore) || 0))} 100`" /></svg><strong>{{ inspectionScore }}</strong></div><span>/ 100<small>巡检评分</small></span></div>
             <p class="overview-inspection-summary">{{ inspectionSummary }}</p>
@@ -109,7 +109,8 @@ const quickActions = [
   { to: '/gitops', icon: GitBranch, label: 'GitOps', description: '仓库同步 · 漂移检查' },
 ];
 function eventTarget(event) {
-  return { operation: '/events?tab=operations', agent: '/agent/history', alert: '/events', cron: '/cron' }[event.source] || '/events?tab=timeline';
+  const [path, query = ''] = ({ operation: '/events?tab=operations', agent: '/agent/history', alert: '/events', cron: '/cron' }[event.source] || '/events?tab=timeline').split('?');
+  return deepLink(path, { ...Object.fromEntries(new URLSearchParams(query)), from: 'dashboard' });
 }
 
 const store = useServicesStore();
