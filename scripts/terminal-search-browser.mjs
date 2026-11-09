@@ -38,16 +38,21 @@ try {
     const context = await browser.newContext({ viewport });
     const [cookieName, cookieValue] = cookie.split('=');
     await context.addCookies([{ name: cookieName, value: cookieValue, url: base }]);
-    const page = await context.newPage(), errors = [], inputFrames = [];
+    const page = await context.newPage(), errors = [], inputFrames = [], outputFrames = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('websocket', socket => {
+      if (socket.url().includes('/ws/exec?')) socket.on('framereceived', ({ payload }) => outputFrames.push(String(payload)));
       if (socket.url().includes('/ws/exec?')) socket.on('framesent', ({ payload }) => {
-        if (!String(payload).startsWith('{')) inputFrames.push(String(payload));
+        // Cursor-position reports answer the shell's DSR requests; they are not user input.
+        if (!String(payload).startsWith('{') && !/^\x1b\[\d+;\d+R$/.test(String(payload))) inputFrames.push(String(payload));
       });
     });
     await page.goto(`${base}/#/shell?projectId=${encodeURIComponent(project.id)}&containerId=${project.containers[0].id}`);
     await expect(page.locator('.terminal-session-bar strong')).toHaveText('已连接', { timeout: 15000 });
     const terminal = page.locator('.xterm-helper-textarea');
+    // BusyBox ash requests the cursor position before finishing its initial prompt.
+    // Wait for its redraw acknowledgement before injecting an entire command at once.
+    await expect.poll(() => outputFrames.join('')).toContain('\x1b[J');
     await terminal.pressSequentially("printf '\\n%s%s first\\n%s%s second\\n%s%s third\\n' TERM FIND term find TERM FIND; i=0; while [ $i -lt 120 ]; do echo line-$i; i=$((i+1)); done");
     await terminal.press('Enter');
     await page.getByRole('button', { name: '查找终端输出', exact: true }).click();
