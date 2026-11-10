@@ -16,6 +16,7 @@ mkdirSync(artifacts, { recursive: true });
 const docker = args => execFileSync('docker', args, { encoding: 'utf8', timeout: 120000 }).trim();
 const compose = args => docker(['compose', '-p', projectName, '-f', composeFile, ...args]);
 let browser;
+let currentSession;
 try {
   writeFileSync(composeFile, 'services:\n  app:\n    image: node:22-alpine\n    command: ["sleep", "3600"]\n');
   compose(['up', '-d']);
@@ -39,6 +40,7 @@ try {
     const [cookieName, cookieValue] = cookie.split('=');
     await context.addCookies([{ name: cookieName, value: cookieValue, url: base }]);
     const page = await context.newPage(), errors = [], inputFrames = [], outputFrames = [];
+    currentSession = { viewport, errors, inputFrames, outputFrames };
     page.on('pageerror', error => errors.push(error.message));
     page.on('websocket', socket => {
       if (socket.url().includes('/ws/exec?')) socket.on('framereceived', ({ payload }) => outputFrames.push(String(payload)));
@@ -56,6 +58,10 @@ try {
     await expect.poll(() => outputFrames.join('')).toContain('\x1b[J');
     await terminal.pressSequentially("printf '\\n%s%s first\\n%s%s second\\n%s%s third\\n' TERM FIND term find TERM FIND; i=0; while [ $i -lt 120 ]; do echo line-$i; i=$((i+1)); done");
     await terminal.press('Enter');
+    // Input delivery and Docker output are asynchronous on hosted CI runners.
+    // Start searching only after the real command has produced its full output.
+    await expect.poll(() => outputFrames.join(''), { timeout: 15000 }).toContain('TERMFIND first');
+    await expect.poll(() => outputFrames.join(''), { timeout: 15000 }).toContain('line-119');
     await page.getByRole('button', { name: '查找终端输出', exact: true }).click();
     const query = page.getByRole('textbox', { name: '终端查找内容' }), result = page.locator('.shell-search-result');
     await query.fill('TERMFIND'); await expect(result).toHaveText(/\d \/ 3/);
@@ -78,6 +84,10 @@ try {
     console.log(`PASS real Docker exec ${viewport.width}px: search, case, navigation, input isolation, pending command, retained output`);
     await context.close();
   }
+} catch (error) {
+  writeFileSync(`${artifacts}/failure-session.json`, JSON.stringify(currentSession || {}, null, 2), { mode: 0o600 });
+  console.error('Terminal session evidence:', JSON.stringify(currentSession || {}));
+  throw error;
 } finally {
   await browser?.close();
   try { docker(['rm', '-f', name]); } catch {}
