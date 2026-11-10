@@ -109,11 +109,11 @@ export function updateIncidentObservation(id, snapshot, identity, at = new Date(
   const continuous = healthy && gap <= OBSERVATION_MAX_AGE_MS && incident.latest.healthy === true && !incident.latest.error;
   const stableRuntime = continuous && snapshot.startedAt === incident.latest.startedAt && snapshot.restartCount === incident.latest.restartCount;
   // HTTP refreshes cannot accelerate a recovery window or inflate the sample count.
-  const counted = gap >= 10_000;
+  const counted = gap >= 10_000 && (!snapshot.probe || snapshot.probe.sampleId !== incident.latest.probe?.sampleId);
   const count = healthy ? (stableRuntime ? incident.healthyCount + (counted ? 1 : 0) : 1) : 0;
   const since = healthy ? (stableRuntime ? incident.healthySince || at : at) : null;
   const verification = { healthy, samples: count, requiredSamples: HEALTHY_SAMPLES, windowMs: since ? Date.parse(at) - Date.parse(since) : 0,
-    requiredWindowMs: HEALTHY_WINDOW_MS, scope: snapshot.health ? 'container_healthcheck' : 'container_running',
+    requiredWindowMs: HEALTHY_WINDOW_MS, scope: snapshot.probe ? 'application_http' : snapshot.health ? 'container_healthcheck' : 'container_running',
     reason: !identityMatches ? '目标身份发生变化，需要人工重新核对' : snapshot.error || snapshot.fault || '' };
   let status = 'investigating';
   if (effect) status = ({ awaiting_approval: 'awaiting_approval', queued: 'queued', leased: 'queued', executing: 'executing',
@@ -130,7 +130,7 @@ export function updateIncidentObservation(id, snapshot, identity, at = new Date(
   if (healthy && effect && ['awaiting_approval', 'queued'].includes(effect.status)) cancelOpsEffect(id, effect.id, '观测到容器恢复，取消待执行处置', 'sre-observer');
   // Persist the report before closing the incident. A crash between these writes is replay-safe.
   if (resolved && !detail.reports.some(report => report.reportType === 'incident-verification')) {
-    submitOpsReport(id, { reportType: 'incident-verification', summary: `故障恢复验证通过。验证范围：${snapshot.health ? 'Docker 健康检查' : '容器进程存活，未配置应用健康检查'}。`,
+    submitOpsReport(id, { reportType: 'incident-verification', summary: `故障恢复验证通过。验证范围：${snapshot.probe ? '应用 HTTP 探针及容器运行状态' : snapshot.health ? 'Docker 健康检查' : '容器进程存活，未配置应用健康检查'}。`,
       evidence: [{ kind: 'incident', sourceId: id, observedAt: at, summary: `连续 ${count} 次健康观测，持续 ${Math.round(verification.windowMs / 1000)} 秒。` }],
     }, 'sre-verifier');
   }

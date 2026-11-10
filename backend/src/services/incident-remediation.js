@@ -5,6 +5,9 @@ import { getDockerForHost, getHost } from './docker-hosts.js';
 import { hostRevision, containerSnapshot, withReadTimeout, PROJECT_LABEL } from './incident-observer.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 import { evaluateAgentPolicy, recordAgentAuditEvent, fingerprintAgentParams } from './agent/policy-store.js';
+import { getSreProfile } from './sre-profiles.js';
+import { runHttpProbe } from './sre-probes.js';
+import { validateAutoAuthorization } from './sre-autonomy.js';
 
 function policyParams(incident) {
   return { projectId: incident.projectId, hostId: incident.hostId, containerId: incident.resourceId };
@@ -60,13 +63,14 @@ export function validateIncidentEffect(effect) {
     if (JSON.stringify(effect.target) !== JSON.stringify(incidentTarget(incident))) throw incidentError('处置目标与故障身份快照不一致');
     if (JSON.stringify(effect.payload) !== JSON.stringify({ incidentId: incident.id, recipeVersion: INCIDENT_RECIPE })) throw incidentError('处置参数不符合已登记流程');
     if (effect.idempotencyKey !== INCIDENT_RECIPE || effect.startedAt) throw incidentError('故障处置不能重复派发，请人工核对');
+    validateAutoAuthorization(effect);
     return '';
   } catch (error) { return error.message; }
 }
 
 /** The durable ledger is the only dispatcher. No side effect is invoked before the project lock, identity and approval checks. */
 export async function executeIncidentRestart(effect, { workerId, dockerForHost = getDockerForHost, hostForId = getHost,
-  onStarted = () => {}, restartTimeoutMs = 45000 } = {}) {
+  onStarted = () => {}, restartTimeoutMs = 45000, probe = runHttpProbe } = {}) {
   return withProjectOperationLock(effect.target.projectId, async () => {
     const invalid = validateIncidentEffect(effect);
     if (invalid) throw incidentError(invalid);
@@ -79,7 +83,20 @@ export async function executeIncidentRestart(effect, { workerId, dockerForHost =
     const container = docker.getContainer(incident.resourceId);
     const item = await withReadTimeout(container.inspect());
     if (item.Id !== incident.resourceId || item.Created !== incident.identity.createdAt || item.Config?.Labels?.[PROJECT_LABEL] !== incident.projectName) throw incidentError('容器身份或项目归属已变化');
-    if (!containerSnapshot(item).fault) throw incidentError('目标当前没有可处置故障，取消旧处置');
+    let fault = containerSnapshot(item).fault;
+    if (incident.identity.probe) {
+      const profile = getSreProfile(incident.identity.probe.profileId);
+      if (!profile.enabled || profile.version !== incident.identity.probe.version || profile.engineId !== info.ID || profile.hostRevision !== incident.identity.hostRevision || profile.hostId !== incident.hostId || profile.projectId !== incident.projectId
+        || profile.serviceName !== item.Config?.Labels?.['com.docker.compose.service']) throw incidentError('应用探针目标或版本已变化');
+      const currentProbe = await probe(profile.config);
+      if (currentProbe.outcome === 'unknown') throw incidentError('无法复核应用探针，取消派发');
+      if (String(effect.approvedBy).startsWith('sre-policy:')) {
+        const replicas = await withReadTimeout(docker.listContainers({ all: true, filters: { label: [`${PROJECT_LABEL}=${incident.projectName}`, `com.docker.compose.service=${profile.serviceName}`] } }));
+        if (replicas.length !== 1 || replicas[0].Id !== incident.resourceId || currentProbe.outcome !== 'bad') throw incidentError('自动处置只接受持续探针失败的单副本服务');
+      }
+      fault ||= currentProbe.outcome === 'bad' ? '应用探针失败' : '';
+    }
+    if (!fault) throw incidentError('目标当前没有可处置故障，取消旧处置');
     if (hostRevision(hostForId(incident.hostId)) !== incident.identity.hostRevision || !getProjectPreference(incident.projectId).managed) throw incidentError('执行前节点或纳管范围发生变化');
     checkPolicy(incident, effect.id);
     // Recheck after async reads, then atomically transition the existing ledger before invoking Docker.
@@ -88,7 +105,7 @@ export async function executeIncidentRestart(effect, { workerId, dockerForHost =
     heartbeatOpsEffect(effect.id, workerId);
     startOpsEffect(effect.id, workerId);
     onStarted();
-    addIncidentEvidence(incident.id, 'execution', '人工已批准，正在重启指定容器一次', { effectId: effect.id, actor: effect.approvedBy });
+    addIncidentEvidence(incident.id, 'execution', '授权已复核，正在重启指定容器一次', { effectId: effect.id, actor: effect.approvedBy });
     recordAgentAuditEvent({ executionId: effect.id, eventType: 'execution_started', actor: effect.approvedBy,
       toolName: INCIDENT_ACTION, decision: 'approved', details: { incidentId: incident.id, recipeVersion: INCIDENT_RECIPE } });
     let timer;

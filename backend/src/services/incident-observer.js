@@ -6,6 +6,9 @@ import { readContainerLogs } from '../lib/docker-exec.js';
 import { getAiConfig, callOpenAI, fenceUntrusted, newFenceNonce, UNTRUSTED_GUARD } from './ai.js';
 import { isGuardianEnabled } from './guardian.js';
 import { getIncident, recordIncidentObservation, updateIncidentObservation, addIncidentEvidence, safeIncidentData, incidentError } from './incident-store.js';
+import { listSreProfiles } from './sre-profiles.js';
+import { createProbeRunner, probeSnapshot } from './sre-probes.js';
+import { considerAutomaticRecovery } from './sre-autonomy.js';
 let activeDiagnoses = 0;
 
 export const PROJECT_LABEL = 'com.docker.compose.project';
@@ -34,13 +37,17 @@ export async function withReadTimeout(work, timeoutMs = 8000) {
 }
 
 export function createIncidentObserver({ scan = scanAllProjects, dockerForHost = getDockerForHost, hostForId = getHost,
-  now = () => Date.now(), pollMs = 15000, logger = console, diagnose = diagnoseIncident } = {}) {
+  now = () => Date.now(), pollMs = 15000, logger = console, diagnose = diagnoseIncident, probeRunner = createProbeRunner(), autoRecover = considerAutomaticRecovery } = {}) {
   let timer = null, pending = null, stopped = true;
+  let probePending = null;
   let generation = 0;
   async function collect() {
     const currentGeneration = generation;
+    // HTTP endpoints have their own bounded queue; a slow endpoint cannot stop Docker observations.
+    probePending = probeRunner.runOnce({ isCurrent: () => currentGeneration === generation }).catch(error => logger.warn?.({ error: String(safeIncidentData(error.message)) }, '应用探针采集失败'));
     const projects = await withReadTimeout(scan(), 10000);
     if (currentGeneration !== generation) return;
+    const profiles = listSreProfiles();
     const open = db.prepare('SELECT id FROM ops_incidents WHERE resolved_at IS NULL').all().map(row => getIncident(row.id));
     const targets = new Map();
     for (const project of projects.filter(item => item.managed)) {
@@ -72,7 +79,14 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
           if (hostRevision(hostForId(project.hostId)) !== revision) throw incidentError('采集期间节点配置已变化');
           if (item.Id !== resourceId || item.Config?.Labels?.[PROJECT_LABEL] !== project.projectName) throw incidentError('容器身份或项目归属发生变化');
           const identity = { hostRevision: revision, engineId: info.ID, containerId: item.Id, createdAt: item.Created, composeProject: project.projectName };
-          const snapshot = containerSnapshot(item);
+          let snapshot = containerSnapshot(item);
+          const profile = profiles.find(profile => profile.hostId === project.hostId && profile.projectId === project.id && profile.serviceName === snapshot.service);
+          if (profile && (profile.enabled || incident?.identity.probe)) {
+            snapshot = probeSnapshot(profile, snapshot, now());
+            if (profile.engineId !== info.ID || profile.hostRevision !== revision) { snapshot.healthy = false; snapshot.error = '应用目标的 Docker 节点身份发生变化，请重新审阅目标'; }
+            snapshot.probe.replicas = project.containers?.filter(container => container.service === snapshot.service).length || 0;
+            identity.probe = { profileId: profile.id, version: profile.version };
+          }
           const result = recordIncidentObservation({ project, snapshot, identity, at: new Date(now()).toISOString() });
           observed += 1;
           if (result && !result.resolvedAt && !incident) {
@@ -84,6 +98,9 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
           }
           if (result && !result.resolvedAt && !result.diagnosis && isGuardianEnabled() && activeDiagnoses < 2) {
             void diagnose(result.id).catch(error => logger.warn?.({ error: String(safeIncidentData(error.message)) }, 'AI 值守诊断暂未完成'));
+          }
+          if (result && !result.resolvedAt && currentGeneration === generation) {
+            try { await autoRecover(result.id); } catch (error) { logger.warn?.({ error: String(safeIncidentData(error.message)) }, '自动处置未派发'); }
           }
         } catch (error) {
           if (currentGeneration !== generation) break;
@@ -109,7 +126,7 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
     });
   }
   return { runOnce, start() { if (!stopped) return; stopped = false; tick(); timer = setInterval(tick, Math.max(15000, pollMs)); timer.unref?.(); },
-    stop() { stopped = true; generation += 1; clearInterval(timer); timer = null; return pending?.catch(() => {}) || Promise.resolve(); } };
+    stop() { stopped = true; generation += 1; clearInterval(timer); timer = null; return Promise.allSettled([pending, probePending]); } };
 }
 
 export async function diagnoseIncident(id, { call = callOpenAI, config = getAiConfig(), now = Date.now() } = {}) {

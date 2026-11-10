@@ -838,6 +838,41 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 23,
+    name: '应用可靠性目标、探针历史与有界自治授权',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS sre_profiles (
+          id TEXT PRIMARY KEY, host_id TEXT NOT NULL, project_id TEXT NOT NULL,
+          project_name TEXT NOT NULL, service_name TEXT NOT NULL, host_revision TEXT NOT NULL, engine_id TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,
+          config_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          updated_by TEXT NOT NULL, UNIQUE(host_id, project_id, service_name)
+        );
+        CREATE TABLE IF NOT EXISTS sre_probe_samples (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id TEXT NOT NULL, version INTEGER NOT NULL,
+          sampled_at INTEGER NOT NULL, outcome TEXT NOT NULL, latency_ms INTEGER, status_code INTEGER,
+          reason TEXT NOT NULL DEFAULT '', UNIQUE(profile_id, version, sampled_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_probe_window ON sre_probe_samples(profile_id, version, sampled_at);
+        CREATE TABLE IF NOT EXISTS sre_autonomy_policies (
+          id TEXT PRIMARY KEY, profile_id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 1,
+          profile_version INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+          expires_at INTEGER NOT NULL, cooldown_ms INTEGER NOT NULL, max_daily INTEGER NOT NULL,
+          maintenance_until INTEGER NOT NULL DEFAULT 0, approved_by TEXT NOT NULL,
+          approved_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sre_auto_authorizations (
+          incident_id TEXT PRIMARY KEY, effect_id TEXT UNIQUE, policy_id TEXT NOT NULL,
+          policy_version INTEGER NOT NULL, profile_version INTEGER NOT NULL,
+          target_json TEXT NOT NULL, reserved_at INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'reserved',
+          reason TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_auto_budget ON sre_auto_authorizations(policy_id, reserved_at);
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

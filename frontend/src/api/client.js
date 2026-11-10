@@ -122,6 +122,11 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
+  getSreProfiles: (signal) => request('/sre/profiles', { signal }),
+  getSreTargets: (signal) => request('/sre/targets', { signal }),
+  saveSreProfile: (profile) => request('/sre/profiles' + (profile.id ? '/' + encodeURIComponent(profile.id) : ''), { method: profile.id ? 'PUT' : 'POST', body: JSON.stringify(profile) }),
+  pauseSreProfile: (id) => request('/sre/profiles/' + encodeURIComponent(id) + '/pause', { method: 'POST' }),
+  saveSreAutonomy: (id, policy) => request('/sre/profiles/' + encodeURIComponent(id) + '/autonomy', { method: 'PUT', body: JSON.stringify(policy) }),
   getIncidents: (params = {}, signal) => request('/incidents?' + new URLSearchParams(params), { signal }),
   getIncident: (id, signal) => request('/incidents/' + encodeURIComponent(id), { signal }),
   diagnoseIncident: (id) => request('/incidents/' + encodeURIComponent(id) + '/diagnose', { method: 'POST', body: '{}' }),

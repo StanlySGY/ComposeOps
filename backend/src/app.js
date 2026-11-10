@@ -34,6 +34,7 @@ import { closeAllWorkspaceRunners } from './services/compose-workspace.js';
 import { stopAllGitOpsWatchers } from './services/gitops.js';
 import { stopStateRecorder } from './services/container-events.js';
 import incidentRoutes from './routes/incidents.js';
+import sreRoutes from './routes/sre.js';
 import { stopIncidentObserver } from './services/incident-observer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,6 +159,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       await api.register(eventCenterRoutes, { prefix: '/events' });
       await api.register(opsTicketRoutes, { prefix: '/ops-tickets' });
       await api.register(incidentRoutes, { prefix: '/incidents' });
+      await api.register(sreRoutes, { prefix: '/sre' });
       await api.register(stateHistoryRoutes, { prefix: '/state' });
     },
     { prefix: '/api/v1' }

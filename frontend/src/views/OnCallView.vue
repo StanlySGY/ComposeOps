@@ -2,7 +2,7 @@
   <div class="page-shell oncall-view">
     <div class="page-header">
       <div><div class="eyebrow">持续观察 · 受控处置 · 验证恢复</div><h1 class="page-title">AI 值守</h1><p class="page-subtitle">跟踪已纳管应用的故障，让每次处置都有证据和结果。</p></div>
-      <button class="btn-secondary" :disabled="loading || busy" @click="refresh"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />刷新</button>
+      <div class="flex flex-wrap gap-2"><router-link to="/reliability?from=oncall" class="btn-secondary">可靠性目标</router-link><button class="btn-secondary" :disabled="loading || busy" @click="refresh"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />刷新</button></div>
     </div>
     <div class="oncall-status text-xs text-surface-400" role="status">
       <span class="flex items-center gap-2"><span class="status-dot" :class="observerHealthy ? 'bg-status-ok' : 'bg-status-warn'"></span>{{ observerHealthy ? '只读值守运行中' : '值守状态待确认' }}</span>
@@ -61,7 +61,7 @@
           </div>
           <div class="section-panel p-4 sm:p-5">
             <h3 class="font-semibold">恢复验收</h3><p class="mt-2 text-sm" :class="incidentStatusTone(incident.status)">{{ incident.resolvedAt ? '已验证恢复' : `${incident.healthyCount} / 3 次连续健康观测` }}</p>
-            <p class="mt-2 text-xs leading-6 text-surface-400">至少 3 次连续健康观测，持续 30 秒。{{ incident.verification.scope === 'container_healthcheck' ? '本事件依据 Docker HEALTHCHECK 验证。' : '未配置 HEALTHCHECK，只能验证容器进程存活，无法证明应用可用。' }}</p>
+            <p class="mt-2 text-xs leading-6 text-surface-400">至少 3 次连续健康观测，持续 30 秒。{{ incident.verification.scope === 'application_http' ? '本事件依据独立 HTTP 探针及容器状态验证；重复读取同一探针样本不计数。' : incident.verification.scope === 'container_healthcheck' ? '本事件依据 Docker HEALTHCHECK 验证。' : '未配置 HEALTHCHECK，只能验证容器进程存活，无法证明应用可用。' }}</p>
             <p v-if="incident.verification.reason" class="mt-2 text-xs text-status-warn">{{ incident.verification.reason }}</p>
           </div>
           <div class="section-panel p-4 sm:p-5"><h3 class="font-semibold">证据时间线</h3><ol class="mt-4 space-y-4"><li v-for="entry in detail.evidence" :key="entry.id" class="border-l-2 border-surface-700 pl-3"><p class="text-xs text-surface-400">#{{ entry.id }} · {{ time(entry.observedAt) }}</p><p class="mt-1 text-sm">{{ entry.summary }}</p><details class="mt-2 text-xs text-surface-400"><summary class="cursor-pointer">查看采集内容</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-surface-950 p-3">{{ JSON.stringify(entry.data, null, 2) }}</pre></details></li></ol></div>
