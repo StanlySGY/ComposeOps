@@ -25,6 +25,8 @@
       <div class="project-actions" role="group" :aria-label="`${project.projectName} 项目操作`">
         <CapabilityLink class="btn-primary" :disabled="!project.managed" reason="纳管项目后可查看日志" :to="toolLocation('logs', attentionContainer?.id)"><ScrollText :size="16" />{{ attention ? '查看异常日志' : '项目日志' }}</CapabilityLink>
         <CapabilityLink class="btn-secondary" :disabled="!project.editable" reason="需要可访问的 Compose 目录" :to="toolLocation('compose')"><FileCode2 :size="16" />配置</CapabilityLink>
+        <CapabilityLink class="btn-secondary" :disabled="!project.editable" reason="需要可访问的 Compose 目录" :to="toolLocation('review')"><FileCode2 :size="16" />评审</CapabilityLink>
+        <CapabilityLink class="btn-ghost" :disabled="!project.managed" reason="项目尚未纳管" :to="{ ...toolLocation('review'), query: { ...toolLocation('review').query, tab: 'rollback' } }"><History :size="16" />回滚</CapabilityLink>
         <button class="btn-ghost" :disabled="!project.editable || locked" @click="$emit('env')"><KeyRound :size="16" />环境变量</button>
         <button class="btn-ghost" :disabled="!project.managed || locked" @click="$emit('activity')"><History :size="16" />活动</button>
         <span v-if="actionRunning" class="text-xs text-muted" role="status"><LoaderCircle class="inline w-3.5 h-3.5 animate-spin" />正在执行…</span>

@@ -22,6 +22,10 @@ const sessions = [];
 const histories = new Map();
 const jobs = new Map();
 const pending = new Map();
+const deploymentReviews = new Map();
+let aiRetentionDays = 90;
+let lastAiRetention = null;
+const aiRetention = () => ({ days: aiRetentionDays, cutoff: new Date(Date.now() - aiRetentionDays * 86400000).toISOString(), counts: { history: 0, usage: 0, plans: 0, executions: 0 }, lastResult: lastAiRetention });
 let serial = 1;
 const previewHost = { id: 'local', name: '本机 · 示例', type: 'local', active: true, status: 'online', host: 'homelab-demo', port: 2375, group: 'production' };
 const sockets = new Set();
@@ -89,6 +93,7 @@ export async function previewFetch(input, options = {}) {
     '/personal/updates': { enabled: false, lastResults: [], lastCheck: at },
     '/personal/operations': { operations },
     '/personal/maintenance/usage': storage,
+    '/personal/maintenance/ai-retention': aiRetention(),
     '/ops/notifications/events': { events: ['exit', 'oom', 'unhealthy'] },
     '/ops/blueprints': { blueprints: [] },
     '/ops/guardian': { enabled: false },
@@ -245,6 +250,31 @@ export async function previewFetch(input, options = {}) {
     for (const p of selected) { p.status = body.action === 'stop' ? 'stopped' : 'running'; for (const c of p.containers) { c.state = body.action === 'stop' ? 'exited' : 'running'; c.health = body.action === 'stop' ? '' : 'healthy'; } }
     const job = { id, action: body.action, status: 'success', total: selected.length, completed: selected.length, items: selected.map(p => ({ projectId: p.id, projectName: p.projectName, status: 'success', output: '模拟操作完成，未连接 Docker。', exitCode: 0 })) };
     jobs.set(id, job); broadcast(); return json(job);
+  }
+  if (path === '/personal/maintenance/ai-retention' && method === 'PUT') {
+    if (!Number.isInteger(body.days) || body.days < 7 || body.days > 3650) return json({ message: '请输入 7–3650 天' }, 400);
+    aiRetentionDays = body.days; return json(aiRetention());
+  }
+  if (path === '/personal/maintenance/ai-retention/prune' && method === 'POST') {
+    if (body.days !== aiRetentionDays) return json({ message: '期限已变化，请重新预览' }, 409);
+    lastAiRetention = { ...aiRetention(), at: new Date().toISOString() }; return json(aiRetention());
+  }
+  if (project && path.endsWith('/deployment-review') && method === 'POST') {
+    const token = 'offline-review-' + serial++;
+    const content = compose.get(pid);
+    deploymentReviews.set(token, { pid, content });
+    const document = parseDocument(content);
+    return json({ token, projectId: pid, projectName: project.projectName, hostId: 'local', files: project.composeFiles,
+      content, expiresAt: Date.now() + 900000,
+      issues: [...document.errors.map(error => ({ level: 'error', message: error.message })), { level: 'warn', message: '离线预览模拟合并配置，未运行 Docker。' }],
+      preview: { added: [], removed: [], changed: [], restarted: [], portConflicts: [] } });
+  }
+  if (path === '/ops/deploy-preview' && method === 'POST') return json({ summary: { create: 0, recreate: 0, keep: 1, pulls: 0, conflicts: 0, orphan: 0 }, pullsNeeded: [], conflicts: [], volumeRisks: [], bindRisks: [], services: [], aiSummary: '离线宿主检查完成，仅使用示例数据。' });
+  if (project && path.endsWith('/actions') && method === 'POST' && body.reviewToken) {
+    const reviewed = deploymentReviews.get(body.reviewToken);
+    if (!reviewed || reviewed.pid !== pid || reviewed.content !== compose.get(pid)) return json({ message: '配置已变化，本次未部署，请重新评审' }, 409);
+    deploymentReviews.delete(body.reviewToken);
+    return eventStream([{ type: 'stdout', data: '离线部署模拟完成，没有启动真实容器。' }, { type: 'exit', data: { code: 0 } }]);
   }
   if (project && path.endsWith('/compose/validate') && method === 'POST') {
     const document = parseDocument(body.content || '');

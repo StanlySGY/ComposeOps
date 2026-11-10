@@ -15,6 +15,7 @@ export function projectReturnLocation(value, projectId) {
 
 export function projectToolLocation(name, project, containerId = '', context = {}) {
   const query = { projectId: project.id };
+  if (project.hostId) query.hostId = project.hostId;
   const source = returnTarget(context.from) ? context.from : 'services';
   query.from = source;
   if (typeof context.returnTo === 'string' && /^\/services(?:\?|$)/.test(context.returnTo)) query.returnTo = context.returnTo.slice(0, 2048);

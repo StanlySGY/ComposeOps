@@ -1,4 +1,4 @@
-import { addOperation, exportUserData, getSetting, importUserData, listOperations, setSetting } from '../lib/db.js';
+import { addOperation, exportUserData, getSetting, getAiRetentionStatus, pruneAiData, importUserData, listOperations, setSetting } from '../lib/db.js';
 import { getNotificationConfig, saveNotificationConfig, sendNotification } from '../services/notifications.js';
 import { checkImageUpdates, getDockerUsage, pruneDocker } from '../services/maintenance.js';
 import { restartAlertMonitor } from '../services/alert-monitor.js';
@@ -67,6 +67,22 @@ export default async function personalRoutes(fastify) {
     } catch (error) {
       return reply.code(400).send({ error: 'import_failed', message: error.message });
     }
+  });
+
+  fastify.get('/maintenance/ai-retention', async () => getAiRetentionStatus());
+  fastify.put('/maintenance/ai-retention', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['days'], properties: { days: { type: 'integer', minimum: 7, maximum: 3650 } } } },
+  }, async (request) => {
+    setSetting('retention.ai_days', String(request.body.days));
+    return getAiRetentionStatus();
+  });
+  fastify.post('/maintenance/ai-retention/prune', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['days'], properties: { days: { type: 'integer', minimum: 7, maximum: 3650 } } } },
+  }, async (request, reply) => {
+    const current = getAiRetentionStatus();
+    if (request.body.days !== current.days) return reply.code(409).send({ message: '保留期限已变化，请重新预览后确认。' });
+    pruneAiData();
+    return getAiRetentionStatus();
   });
 
   fastify.get('/maintenance/usage', {

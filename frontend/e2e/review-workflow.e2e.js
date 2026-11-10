@@ -6,26 +6,25 @@ async function openReview(page) {
   await expect(page.getByLabel('选择项目')).toBeVisible();
 }
 
-test('评审与回滚切换保留各自项目和结果，浏览器返回恢复标签', async ({ page }) => {
+test('评审与回滚通过 URL 共用项目，浏览器返回恢复上下文', async ({ page }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await openReview(page);
   await page.getByLabel('选择项目').selectOption('cache');
   await expect(page.getByRole('heading', { name: /规则风险等级/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: '规则检查建议' })).toBeVisible();
   await expect(page.getByText('分数不代表部署成功率。', { exact: false })).toBeVisible();
-  const before = await page.getByText(/cache · 检查于/).textContent();
   await page.getByRole('tab', { name: '自动回滚' }).click();
   await page.getByLabel('选择项目').selectOption('knowledge-base');
   await page.getByRole('tab', { name: '变更评审' }).click();
-  await expect(page.getByLabel('选择项目')).toHaveValue('cache');
-  await expect(page.getByText(before, { exact: true })).toBeVisible();
+  await expect(page.getByLabel('选择项目')).toHaveValue('knowledge-base');
+  await expect(page.getByText(/knowledge-base · 检查于/)).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('tab', { name: '自动回滚' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('选择项目')).toHaveValue('knowledge-base');
   await page.goForward();
-  await expect(page.getByLabel('选择项目')).toHaveValue('cache');
+  await expect(page.getByLabel('选择项目')).toHaveValue('knowledge-base');
   await page.getByRole('button', { name: '确认部署…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: '确认部署', exact: true })).toContainText('cache');
+  await expect(page.getByRole('dialog', { name: '确认部署', exact: true })).toContainText('knowledge-base');
   await page.getByRole('button', { name: '取消', exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
@@ -37,7 +36,7 @@ test('延迟和失败不显示通过状态，重试成功后才开放确认', as
     const original = window.fetch;
     window.__reviewFetch = original;
     window.fetch = async (...args) => {
-      if (String(args[0]).includes('/projects/cache/compose?')) {
+      if (String(args[0]).includes('/projects/cache/deployment-review')) {
         await new Promise(resolve => { window.__failReview = resolve; });
         return new Response(JSON.stringify({ message: '测试连接中断' }), { status: 503 });
       }
@@ -62,7 +61,7 @@ test('迟到项目响应和配置变化不会导致错误部署，320px 无横�
   await page.evaluate(() => {
     const original = window.fetch; window.__reviewFetch = original;
     window.fetch = async (...args) => {
-      if (String(args[0]).includes('/projects/cache/compose?')) await new Promise(resolve => { window.__resumeReview = resolve; });
+      if (String(args[0]).includes('/projects/cache/deployment-review')) await new Promise(resolve => { window.__resumeReview = resolve; });
       return original(...args);
     };
   });
@@ -74,17 +73,28 @@ test('迟到项目响应和配置变化不会导致错误部署，320px 无横�
   await expect(page.getByLabel('选择项目')).toHaveValue('knowledge-base');
   await expect(page.getByText(/knowledge-base · 检查于/)).toBeVisible();
   await page.getByRole('button', { name: '确认部署…', exact: true }).click();
-  await page.evaluate(() => {
-    const original = window.fetch; window.__deployRequests = 0;
-    window.fetch = (...args) => {
-      if (String(args[0]).includes('/actions')) window.__deployRequests++;
-      if (String(args[0]).includes('/projects/knowledge-base/compose?')) return Promise.resolve(new Response(JSON.stringify({ hostId: 'local', content: 'services: {}' }), { headers: { 'Content-Type': 'application/json' } }));
-      return original(...args);
-    };
+  await page.evaluate(async () => {
+    await fetch('/api/v1/projects/knowledge-base/compose', { method: 'PUT', body: JSON.stringify({ content: 'services: {}' }) });
   });
   await page.getByRole('dialog', { name: '确认部署', exact: true }).getByRole('button', { name: '确认部署', exact: true }).click();
   const output = page.getByRole('dialog', { name: /部署输出/ });
   await expect(output).toContainText('本次未部署');
-  expect(await page.evaluate(() => window.__deployRequests)).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+
+test('URL 直达评审，真实只读 POST 与事件总线不会清掉宿主检查结果', async ({ page }) => {
+  await page.goto('./#/review?projectId=cache&hostId=local&returnTo=%2Fservices%3Fq%3Dcache');
+  await expect(page.getByLabel('选择项目')).toHaveValue('cache');
+  await expect(page.getByRole('button', { name: '确认部署…', exact: true })).toBeEnabled();
+  const checked = await page.getByText(/cache · 检查于/).textContent();
+  await page.evaluate(() => { window.__changes = 0; window.addEventListener('composeops:data-changed', () => window.__changes++); });
+  await page.getByRole('button', { name: '检查宿主', exact: true }).click();
+  await expect(page.getByText('离线宿主检查完成，仅使用示例数据。')).toBeVisible();
+  await page.waitForTimeout(1000); // Beyond the real 180ms global refresh debounce.
+  await expect(page.getByText('离线宿主检查完成，仅使用示例数据。')).toBeVisible();
+  await expect(page.getByText(checked, { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__changes)).toBe(0);
+  await page.getByRole('link', { name: '返回服务', exact: true }).click();
+  await expect(page).toHaveURL(/q=cache/);
 });

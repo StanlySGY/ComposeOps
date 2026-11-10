@@ -47,3 +47,42 @@ test('metrics: 移动平均基线为 0 时不产生 NaN', () => {
   assert.equal(anomalies.length, 1);
   assert.equal(Number.isFinite(anomalies[0].deviation), true);
 });
+
+test('metrics: 原始尖峰统计不受图表聚合影响，样本数与分位数正确', () => {
+  db.exec('DELETE FROM container_metrics');
+  const now = Date.now();
+  const insert = db.prepare('INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp) VALUES(?,?,?,?,?)');
+  insert.run('spike', 'cpu', 0, '%', now - 1000);
+  insert.run('spike', 'cpu', 100, '%', now - 500);
+  const stats = getMetricsStats('spike', 'cpu', 24);
+  assert.equal(stats.count, 2); assert.equal(stats.min, 0); assert.equal(stats.max, 100);
+  assert.equal(stats.mean, 50); assert.equal(stats.p95, 100);
+  assert.equal(stats.approximation.quantiles, false);
+  const points = queryHistoricalMetrics({ containerId: 'spike', startTime: now - 86400000, endTime: now, aggregation: 300 });
+  assert.equal(points.reduce((sum, p) => sum + p.sample_count, 0), 2);
+  assert.equal(Math.max(...points.map(p => p.value_max)), 100);
+});
+
+test('metrics: 长期桶保留权重和峰值，重压缩不丢权重，部分窗口明确近似', async () => {
+  const { compactMetrics } = await import('../src/services/metrics-retention.js');
+  db.exec('DELETE FROM container_metrics');
+  const now = Date.now(); const bucket = Math.floor((now - 10 * 86400000) / 300000) * 300000;
+  const insert = db.prepare('INSERT INTO container_metrics(container_id, metric_type, value, unit, timestamp) VALUES(?,?,?,?,?)');
+  for (const [value, time] of [[0, 1000], [100, 2000], [30, 301000]]) insert.run('weighted', 'cpu', value, '%', bucket + time);
+  await compactMetrics(db, now);
+  insert.run('weighted', 'cpu', 20, '%', bucket + 3000);
+  await compactMetrics(db, now);
+  const stats = getMetricsStats('weighted', 'cpu', 24 * 12);
+  assert.equal(stats.count, 4); assert.equal(stats.mean, 37.5);
+  assert.equal(stats.min, 0); assert.equal(stats.max, 100);
+  assert.equal(stats.approximation.quantiles, true);
+  assert.equal(stats.approximation.aggregates, false);
+  const graph = queryHistoricalMetrics({ containerId: 'weighted', startTime: bucket, endTime: now, aggregation: 3600 });
+  assert.equal(graph.reduce((sum, p) => sum + p.sample_count, 0), 4);
+  assert.equal(graph.reduce((sum, p) => sum + p.value_sum, 0), 150);
+  // A compacted bucket overlapping the requested start is included and labelled approximate.
+  const partialHours = (Date.now() - bucket - 1500) / 3600000;
+  assert.equal(getMetricsStats('weighted', 'cpu', partialHours).approximation.partialWindow, true);
+  db.exec('UPDATE container_metrics SET stats_approximate = 1');
+  assert.equal(getMetricsStats('weighted', 'cpu', 24 * 12).approximation.legacy, true);
+});

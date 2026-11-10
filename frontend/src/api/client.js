@@ -27,7 +27,7 @@ function doFetch(path, opts = {}) {
     headers['Content-Type'] = 'application/json';
   }
   return fetch(`${BASE}${path}`, {
-    ...opts,
+    ...Object.fromEntries(Object.entries(opts).filter(([key]) => !['readOnly', 'notify', 'force', 'cacheable', 'cacheKey'].includes(key))),
     headers,
   }).then(async (res) => {
     if (!res.ok) {
@@ -75,8 +75,10 @@ async function request(path, opts = {}) {
   if (!isGet(opts)) {
     const data = await doFetch(path, opts);
     // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
-    invalidateSwr('/');
-    if (!/^\/(auth|ai\/agent\/(sessions|approval|feedback|compact))/.test(path) && !/\/(ping|check|preview|validate|anomalies|test)(?:[/?]|$)/.test(path)) notifyDataChanged({ source: 'api', path });
+    if (!opts.readOnly) {
+      invalidateSwr('/');
+      if (opts.notify !== false) notifyDataChanged({ source: 'api', path });
+    }
     return data;
   }
   const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
@@ -121,15 +123,18 @@ export function bumpHostEpoch() {
 
 export const api = {
   recordCostSnapshot: () => request('/cost-analysis/snapshot', { method: 'POST' }),
+  getAiRetention: () => request('/personal/maintenance/ai-retention'),
+  saveAiRetention: (days) => request('/personal/maintenance/ai-retention', { method: 'PUT', body: JSON.stringify({ days }) }),
+  pruneAiRetention: (days) => request('/personal/maintenance/ai-retention/prune', { method: 'POST', body: JSON.stringify({ days }) }),
   previewRetentionPolicy: () => request('/metrics/retention-policy'),
   listInspectionReports: (limit = 100) => request(`/ops/inspection/reports?limit=${limit}`),
   setHostGroup: (id, group) => request(`/hosts/${encodeURIComponent(id)}/group`, { method: 'PATCH', body: JSON.stringify({ group }) }),
   getAuthStatus: (signal) => request('/auth/status', { signal }),
   // setupToken:服务端设置 SETUP_TOKEN 环境变量时,首次初始化必须携带该引导令牌
-  setup: (password, setupToken = '') => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password, setupToken }) }),
-  login: (password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
-  logout: () => request('/auth/logout', { method: 'POST' }),
-  changePassword: (payload) => request('/auth/password', { method: 'POST', body: JSON.stringify(payload) }),
+  setup: (password, setupToken = '') => request('/auth/setup', { notify: false, method: 'POST', body: JSON.stringify({ password, setupToken }) }),
+  login: (password) => request('/auth/login', { notify: false, method: 'POST', body: JSON.stringify({ password }) }),
+  logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
+  changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getProjects: (force = false) => request('/projects', { force }),
   getMountPlan: async () => normalizeMountPlan(await request('/projects/mount-plan')),
   saveProjectManagement: (projectIds, mountProjectIds = []) => request('/projects/management', { method: 'PUT', body: JSON.stringify({ projectIds, mountProjectIds }) }),
@@ -164,6 +169,7 @@ export const api = {
   },
   createProjectBatchJob: async (projectIds, action) => normalizeBackgroundJob(await request('/jobs', { method: 'POST', body: JSON.stringify({ projectIds, action }) })),
   saveProjectPreference: (id, payload) => request(`/projects/${id}/preferences`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  reviewDeployment: (projectId) => request(`/projects/${projectId}/deployment-review`, { readOnly: true, method: 'POST' }),
   getComposeFile: (projectId, fileIndex = 0, force = false) => request(`/projects/${projectId}/compose?fileIndex=${fileIndex}`, { force }),
   saveComposeFile: (projectId, fileIndex, content, expectedContent) =>
     request(`/projects/${projectId}/compose`, { method: 'PUT', body: JSON.stringify({ fileIndex, content, expectedContent }) }),
@@ -179,7 +185,7 @@ export const api = {
   getHosts: (force = false) => request('/hosts', { force }),
   saveHost: (payload) => request('/hosts', { method: 'POST', body: JSON.stringify(payload) }),
   deleteHost: (id) => request(`/hosts/${id}`, { method: 'DELETE' }),
-  pingHost: (id, probe) => request(`/hosts/${id}/ping`, { method: 'POST', body: JSON.stringify(probe ? { probe } : {}) }),
+  pingHost: (id, probe) => request(`/hosts/${id}/ping`, { readOnly: true, method: 'POST', body: JSON.stringify(probe ? { probe } : {}) }),
   setActiveHost: (hostId) => request('/hosts/active', { method: 'PUT', body: JSON.stringify({ hostId }) }),
   // image update radar
   getProjectUpdates: (projectId, force = false) => request(`/projects/${projectId}/updates?force=${force ? '1' : '0'}`),
@@ -245,19 +251,19 @@ export const api = {
   // ai
   getAiConfig: () => request('/ai/config'),
   saveAiConfig: (payload) => request('/ai/config', { method: 'POST', body: JSON.stringify(payload) }),
-  fetchAiModels: (payload = {}) => request('/ai/fetch-models', { method: 'POST', body: JSON.stringify(payload) }),
+  fetchAiModels: (payload = {}) => request('/ai/fetch-models', { readOnly: true, method: 'POST', body: JSON.stringify(payload) }),
   saveAiChannel: (id, payload) => request(`/ai/channels/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteAiChannel: (id, revision) => request(`/ai/channels/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ revision }) }),
   reorderAiChannels: (ids, previousIds) => request('/ai/channels/order', { method: 'POST', body: JSON.stringify({ ids, previousIds }) }),
-  revealAiChannelKey: (id) => request(`/ai/channels/${encodeURIComponent(id)}/reveal-key`, { method: 'POST', cache: 'no-store' }),
-  testAiChannel: (id) => request(`/ai/channels/${encodeURIComponent(id)}/test`, { method: 'POST' }),
-  getProjectLogs: (projectId, containerId, tail = 200) => request('/ai/logs', { method: 'POST', body: JSON.stringify({ projectId, containerId, tail }) }),
+  revealAiChannelKey: (id) => request(`/ai/channels/${encodeURIComponent(id)}/reveal-key`, { readOnly: true, method: 'POST', cache: 'no-store' }),
+  testAiChannel: (id) => request(`/ai/channels/${encodeURIComponent(id)}/test`, { notify: false, method: 'POST' }),
+  getProjectLogs: (projectId, containerId, tail = 200) => request('/ai/logs', { readOnly: true, method: 'POST', body: JSON.stringify({ projectId, containerId, tail }) }),
   getAiHistory: (sessionId, limit = 200, beforeId = null) => request(`/ai/history?${new URLSearchParams({ ...(sessionId ? { sessionId } : {}), ...(beforeId ? { beforeId } : {}), limit })}`),
   getAiSessions: (limit = 30, kind = '') => request(`/ai/sessions?limit=${limit}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`),
-  createAgentSession: () => request('/ai/agent/sessions', { method: 'POST' }),
+  createAgentSession: () => request('/ai/agent/sessions', { notify: false, method: 'POST' }),
   renameAgentSession: (sessionId, title) => request(`/ai/agent/sessions/${encodeURIComponent(sessionId)}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   getAiMemories: (limit = 20, query = '') => request(`/ai/agent/memories?limit=${limit}${query ? `&query=${encodeURIComponent(query)}` : ''}`),
-  compactAgentSession: (sessionId, keepRecent = 6) => request('/ai/agent/compact', { method: 'POST', body: JSON.stringify({ sessionId, keepRecent }) }),
+  compactAgentSession: (sessionId, keepRecent = 6) => request('/ai/agent/compact', { notify: false, method: 'POST', body: JSON.stringify({ sessionId, keepRecent }) }),
   getAgentUsage: (days = 30) => request(`/ai/agent/usage?days=${encodeURIComponent(days)}`),
   clearAiHistory: (sessionId) => request(`/ai/history${sessionId ? `?sessionId=${sessionId}` : ''}`, { method: 'DELETE' }),
   clearAiSessions: (sessionIds) => request('/ai/history/batch-delete', { method: 'POST', body: JSON.stringify({ sessionIds }) }),
@@ -268,9 +274,9 @@ export const api = {
   getAgentTasks: (limit = 50, filters = {}) => request('/ai/agent/tasks?' + new URLSearchParams({ limit: String(limit), ...(filters.status ? { status: filters.status } : {}), ...(filters.sessionId ? { sessionId: String(filters.sessionId) } : {}) })),
   getAgentTask: (id, waitMs = 0) => request('/ai/agent/tasks/' + encodeURIComponent(id) + '?waitMs=' + encodeURIComponent(waitMs)),
   stopAgentTask: (id) => request('/ai/agent/tasks/' + encodeURIComponent(id) + '/stop', { method: 'POST' }),
-  agentApprove: (payload) => request('/ai/agent/approve', { method: 'POST', body: JSON.stringify(payload) }),
-  agentFeedback: (payload) => request('/ai/agent/feedback', { method: 'POST', body: JSON.stringify(payload) }),
-  setAgentApprovalMode: (payload) => request('/ai/agent/approval-mode', { method: 'POST', body: JSON.stringify(payload) }),
+  agentApprove: (payload) => request('/ai/agent/approve', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
+  agentFeedback: (payload) => request('/ai/agent/feedback', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
+  setAgentApprovalMode: (payload) => request('/ai/agent/approval-mode', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getAgentExecutions: (planId = '', limit = 100) => request(`/ai/agent/executions?${new URLSearchParams({ ...(planId ? { planId: String(planId) } : {}), limit: String(limit) })}`),
   getAgentPolicyGroups: () => request('/ai/agent/policy-groups'),
   createAgentPolicyGroup: (payload) => request('/ai/agent/policy-groups', { method: 'POST', body: JSON.stringify(payload) }),
@@ -282,9 +288,9 @@ export const api = {
   deleteAgentPolicyRule: (id) => request(`/ai/agent/policy-rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getAgentAuditEvents: (limit = 100, filters = {}) => request(`/ai/agent/audit-events?${new URLSearchParams({ limit: String(limit), ...(filters.planId ? { planId: filters.planId } : {}), ...(filters.executionId ? { executionId: filters.executionId } : {}) })}`),
   // compose 语义校验 / 变更预览
-  validateCompose: (projectId, fileIndex, content) => request(`/projects/${projectId}/compose/validate`, { method: 'POST', body: JSON.stringify({ fileIndex, content }) }),
+  validateCompose: (projectId, fileIndex, content) => request(`/projects/${projectId}/compose/validate`, { readOnly: true, method: 'POST', body: JSON.stringify({ fileIndex, content }) }),
   previewCompose: async (projectId, content, fileIndex = 0) => {
-    const result = await request(`/projects/${projectId}/compose/preview`, { method: 'POST', body: JSON.stringify({ content, fileIndex }) });
+    const result = await request(`/projects/${projectId}/compose/preview`, { readOnly: true, method: 'POST', body: JSON.stringify({ content, fileIndex }) });
     return result?.preview || null;
   },
   // system
@@ -294,7 +300,7 @@ export const api = {
   savePreferences: (payload) => request('/personal/preferences', { method: 'PUT', body: JSON.stringify(payload) }),
   getNotifications: () => request('/personal/notifications'),
   saveNotifications: (payload) => request('/personal/notifications', { method: 'PUT', body: JSON.stringify(payload) }),
-  testNotifications: (payload) => request('/personal/notifications/test', { method: 'POST', body: JSON.stringify(payload) }),
+  testNotifications: (payload) => request('/personal/notifications/test', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getOperations: () => request('/personal/operations', { cacheable: true }),
   getDockerUsage: async (hostId = '') => normalizeDockerUsage(await request(`/personal/maintenance/usage${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`)),
   getCostAnalysisReport: async () => normalizeCostReport(await request('/cost-analysis/report')),
@@ -306,14 +312,14 @@ export const api = {
   // MCP 服务管理
   getMcpConfig: () => request('/system/mcp'),
   saveMcpConfig: (payload) => request('/system/mcp', { method: 'POST', body: JSON.stringify(payload) }),
-  revealMcpToken: () => request('/system/mcp/reveal-token', { method: 'POST' }),
+  revealMcpToken: () => request('/system/mcp/reveal-token', { readOnly: true, method: 'POST' }),
   // 部署预言:up 前静态推演(会重建什么/端口冲突/卷风险)
-  previewDeploy: (projectId, ai = false) => request('/ops/deploy-preview', { method: 'POST', body: JSON.stringify({ projectId, ai }) }),
+  previewDeploy: (projectId, ai = false) => request('/ops/deploy-preview', { readOnly: true, method: 'POST', body: JSON.stringify({ projectId, ai }) }),
   exportUrl: `${BASE}/personal/export`,
   importData: (payload) => request('/personal/import', { method: 'POST', body: JSON.stringify(payload) }),
   // marketplace
   getMarketplaceStats: () => request('/marketplace/stats'),
-  discoverAiTemplate: (query, signal) => request('/marketplace/templates/ai-discover', { method: 'POST', body: JSON.stringify({ query }), signal }),
+  discoverAiTemplate: (query, signal) => request('/marketplace/templates/ai-discover', { readOnly: true, method: 'POST', body: JSON.stringify({ query }), signal }),
   searchMarketplaceTemplates: (params) => request(`/marketplace/templates/search?${params.toString()}`),
   toggleMarketplaceFavorite: (templateId, isFavorited) => request(`/marketplace/favorites/${templateId}`, { method: isFavorited ? 'DELETE' : 'POST' }),
   createMarketplaceTemplate: (payload) => request('/marketplace/templates/custom', { method: 'POST', body: JSON.stringify(payload) }),
@@ -498,7 +504,7 @@ export const metricsApi = {
   
   
   detectAnomalies: ({ containerId, metricType, hours = 24, startTime, endTime, algorithms = ['z_score', 'moving_average', 'trend'] }) =>
-    request('/metrics/anomalies', { 
+    request('/metrics/anomalies', { readOnly: true,
       method: 'POST', 
       body: JSON.stringify({ containerId, metricType, hours, startTime, endTime, algorithms })
     }),

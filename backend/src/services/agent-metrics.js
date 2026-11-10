@@ -56,7 +56,8 @@ export async function queryContainerMetrics(containerIdOrName, metric = 'cpu', p
     trend: calculateTrend(historical.data?.length ? historical.data : [parsed.numeric]),
     unit: parsed.unit,
     timestamp: new Date().toISOString(),
-    period
+    period,
+    historicalApproximation: historical.approximation || null,
   };
 }
 
@@ -151,31 +152,14 @@ function formatBytes(bytes) {
  * 获取历史指标数据
  */
 async function getHistoricalMetrics(containerIdOrName, metric, period, hostId = 'local') {
-  const db = (await import('../lib/db.js')).default;
+  const { getMetricsStats, queryHistoricalMetrics } = await import('./metrics.js');
   const storedMetric = metric === 'network' ? 'network_rx' : metric === 'disk' ? 'disk_read' : metric;
-  
-  // 解析时间窗口
   const periodMs = parsePeriod(period);
-  const startTime = Date.now() - periodMs;
-  
-  // 查询历史数据
-  const rows = db.prepare(`
-    SELECT value, timestamp
-    FROM container_metrics
-    WHERE container_id = ? AND metric_type = ? AND timestamp >= ? AND host_id = ?
-    ORDER BY timestamp ASC
-  `).all(containerIdOrName, storedMetric, startTime, hostId);
-  
-  if (rows.length === 0) {
-    return { avg: null, max: null, data: [] };
-  }
-  
-  const values = rows.map(r => r.value);
-  return {
-    avg: Math.round((values.reduce((sum, v) => sum + v, 0) / values.length) * 100) / 100,
-    max: Math.max(...values),
-    data: values
-  };
+  const endTime = Date.now();
+  const stats = getMetricsStats(containerIdOrName, storedMetric, periodMs / 3600000, hostId);
+  if (!stats) return { avg: null, max: null, data: [] };
+  const rows = queryHistoricalMetrics({ containerId: containerIdOrName, hostId, metricType: storedMetric, startTime: endTime - periodMs, endTime, aggregation: 'auto' });
+  return { avg: roundMetric(stats.mean), max: stats.max, data: rows.map(row => row.value), approximation: stats.approximation };
 }
 
 /**

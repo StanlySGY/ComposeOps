@@ -13,6 +13,7 @@ const { getAiUsageSummary, recordAiUsage } = database;
 const {
   pruneComposeBackups,
   runDataMaintenance,
+  startDataMaintenance,
   pruneDataHistory,
 } = await import('../src/services/maintenance.js');
 
@@ -118,7 +119,7 @@ test('pruneDataHistory 按 stateHistoryDays 清理容器状态历史', () => {
 test('runDataMaintenance 幂等且返回各表删除计数', () => {
   db.prepare('DELETE FROM ai_history').run();
   db.prepare('DELETE FROM operation_history').run();
-  db.prepare("INSERT INTO ai_history(role, content, created_at) VALUES('user','old', datetime('now','-40 days'))").run();
+  db.prepare("INSERT INTO ai_history(role, content, created_at) VALUES('user','old', datetime('now','-100 days'))").run();
   db.prepare("INSERT INTO operation_history(project_id, action, status, created_at) VALUES('p9','up','success', datetime('now','-60 days'))").run();
 
   const result = runDataMaintenance();
@@ -146,4 +147,64 @@ test('pruneAgentPlans 通过 CASCADE 联删子表 executions', () => {
   assert.equal(pruned.changes, 1);
   // CASCADE:executions 应被连带删除
   assert.equal(db.prepare('SELECT COUNT(*) AS c FROM agent_executions').get().c, 0);
+});
+
+for (const days of [30, 90, 180]) {
+  test(`统一 AI 保留 ${days} 天：预览、直接清理、启动与周期维护使用相同边界`, () => {
+    const now = Date.parse('2026-11-10T12:00:00.000Z');
+    database.setSetting('retention.ai_days', String(days));
+    const cutoff = now - days * 86400000;
+    const seed = () => {
+      db.exec('DELETE FROM ai_history; DELETE FROM ai_usage; DELETE FROM agent_executions; DELETE FROM agent_plans;');
+      for (const [id, timestamp] of [['old', cutoff - 1000], ['edge', cutoff], ['new', cutoff + 1000]]) {
+        const at = new Date(timestamp).toISOString();
+        db.prepare("INSERT INTO ai_history(role, content, created_at) VALUES('user', ?, ?)").run(id, at);
+        db.prepare("INSERT INTO ai_usage(session_id, model, created_at) VALUES(1, ?, ?)").run(id, at);
+        db.prepare("INSERT INTO agent_plans(id, session_id, user_message, plan_json, status, created_at) VALUES(?,0,'m','{}','completed',?)").run(id, at);
+        db.prepare("INSERT INTO agent_executions(id, plan_id, tool_name, status, created_at) VALUES(?,?,'test','success',?)").run(id, id, at);
+      }
+    };
+    seed();
+    assert.deepEqual(database.previewAiData(undefined, now).counts, { plans: 1, executions: 1, history: 1, usage: 1 });
+    assert.deepEqual(database.pruneAiData(undefined, now), { plans: 1, executions: 1, history: 1, usage: 1 });
+    // Both startup and periodic callbacks use this exact production entry point.
+    for (let run = 0; run < 2; run++) {
+      seed();
+      const result = runDataMaintenance({ now });
+      assert.equal(result.aiHistoryDeleted, 1);
+      assert.equal(result.aiUsageDeleted, 1);
+      assert.equal(result.agentPlansDeleted, 1);
+      assert.equal(result.agentExecutionsDeleted, 1);
+      assert.deepEqual(db.prepare('SELECT content FROM ai_history ORDER BY content').all().map(row => row.content), ['edge', 'new']);
+      const last = database.getAiRetentionStatus().lastResult;
+      assert.equal(last.days, days); assert.equal(last.at, new Date(now).toISOString());
+      assert.equal(last.counts.history, 1);
+    }
+    database.setSetting('retention.ai_days', '90');
+  });
+}
+
+test('90 天配置不会被默认维护提前删除 45 天的对话与用量', () => {
+  database.setSetting('retention.ai_days', '90');
+  db.prepare("INSERT INTO ai_history(role, content, created_at) VALUES('user','keep45',datetime('now','-45 days'))").run();
+  pruneDataHistory();
+  assert.equal(db.prepare("SELECT count(*) AS count FROM ai_history WHERE content='keep45'").get().count, 1);
+});
+
+test('启动和周期回调均读取同一已保存策略，修改期限后下一轮即时生效', t => {
+  const now = Date.now();
+  db.exec('DELETE FROM ai_history');
+  database.setSetting('retention.ai_days', '90');
+  const add = (name, days) => db.prepare("INSERT INTO ai_history(role,content,created_at) VALUES('user',?,?)").run(name, new Date(now - days * 86400000).toISOString());
+  add('keep45', 45); add('delete95', 95);
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const stop = startDataMaintenance(120000);
+  try {
+    t.mock.timers.tick(60000);
+    assert.deepEqual(db.prepare('SELECT content FROM ai_history').all().map(row => row.content), ['keep45']);
+    database.setSetting('retention.ai_days', '180'); add('keep95', 95);
+    t.mock.timers.tick(60000);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ai_history').get().n, 2);
+    assert.equal(database.getAiRetentionStatus().lastResult.days, 180);
+  } finally { stop(); t.mock.timers.reset(); database.setSetting('retention.ai_days', '90'); }
 });

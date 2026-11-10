@@ -19,7 +19,7 @@ test('v19 副本备份→v20 迁移→还原：保留旧项目身份及全部历
   legacy.prepare('INSERT INTO project_preferences(project_id, managed, note) VALUES(?, 1, ?)').run(id, '保留备注');
   legacy.prepare("INSERT INTO operation_history(project_id, action, status) VALUES(?, 'pull', 'success')").run(id);
   legacy.vacuumInto(backup);
-  assert.deepEqual(runMigrations(legacy), [20]);
+  assert.deepEqual(runMigrations(legacy), [20, 21]);
   const owner = legacy.prepare("SELECT value FROM settings WHERE key = 'projects.legacy_host_id'").get().value;
   assert.equal(owner, 'remote-a');
   assert.equal(composeProjectId('/same/path', 'app', 'remote-a', owner), id);

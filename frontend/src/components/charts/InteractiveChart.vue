@@ -186,8 +186,9 @@
     <!-- Zoom controls -->
     <div class="chart-range-labels" v-if="visiblePoints.length"><span>{{ pointTime(visiblePoints[0]) }}</span><span>{{ pointTime(visiblePoints.at(-1)) }}</span></div>
     <p v-if="keyboardEnabled && hoverIndex !== null && visiblePoints[hoverIndex]" class="sr-only" aria-live="polite">{{ pointTime(visiblePoints[hoverIndex]) }}，{{ formatValue(visiblePoints[hoverIndex].value) }}</p>
+    <p v-if="visiblePoints.some(p => p.stats_approximate)" class="text-xs text-muted">包含旧版数据或跨查询边界的压缩桶，峰值、均值与样本数为近似值。</p>
     <div class="zoom-controls" role="group" aria-label="图表缩放">
-      <span class="chart-zoom-summary" aria-live="polite">{{ zoomLevel > 1 ? `已放大 ${zoomLevel.toFixed(1)} 倍 · ${visiblePoints.length} 个样本` : `${visiblePoints.length} 个样本` }}</span>
+      <span class="chart-zoom-summary" aria-live="polite">{{ zoomLevel > 1 ? `已放大 ${zoomLevel.toFixed(1)} 倍 · ${visiblePoints.length} 个绘图点` : `${visiblePoints.length} 个绘图点` }}</span>
       <button @click="zoomIn" :disabled="zoomLevel >= maxZoom || visiblePoints.length < 2" class="zoom-btn" title="放大" aria-label="放大图表">
         <ZoomIn class="w-4 h-4" />
       </button>
@@ -315,9 +316,10 @@ const stats = computed(() => {
     return { min: '-', avg: '-', max: '-', current: '-' };
   }
   const values = visiblePoints.value.map(p => p.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const min = Math.min(...visiblePoints.value.map(p => p.value_min ?? p.value));
+  const max = Math.max(...visiblePoints.value.map(p => p.value_max ?? p.value));
+  const samples = visiblePoints.value.reduce((sum, p) => sum + (p.sample_count || 1), 0);
+  const avg = visiblePoints.value.reduce((sum, p) => sum + (p.value_sum ?? p.value * (p.sample_count || 1)), 0) / samples;
   const current = values[values.length - 1];
   
   return {

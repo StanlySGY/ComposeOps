@@ -33,7 +33,7 @@ const routes = [
   // 旧入口重定向:转换→配置、历史指标→实时监控、变更与回滚→/review、知识图谱→资产中心、时间机器/记录→事件中心
   { path: '/converter', redirect: '/compose' },
   { path: '/metrics', redirect: '/monitor' },
-  { path: '/rollback', redirect: { path: '/review', query: { tab: 'rollback' } } },
+  { path: '/rollback', redirect: to => ({ path: '/review', query: { ...to.query, tab: 'rollback' } }) },
   { path: '/knowledge', redirect: '/cmdb' },
   { path: '/timeline', redirect: '/events' },
   { path: '/operations', redirect: (to) => ({ path: '/events', query: { ...to.query, tab: 'operations' } }) },
@@ -60,7 +60,7 @@ export function preloadRouteChunks() {
 
 // Container alert links may target another node. Switch before loading the destination.
 router.beforeEach(async (to) => {
-  if (!to.query.hostId || !['/logs', '/services', '/shell', '/agent', '/resources'].includes(to.path)) return;
+  if (!to.query.hostId || !['/logs', '/services', '/shell', '/agent', '/resources', '/review', '/compose'].includes(to.path)) return;
   const store = useHostsStore();
   await store.load(true);
   const id = String(to.query.hostId);

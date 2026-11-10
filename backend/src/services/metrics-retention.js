@@ -24,12 +24,16 @@ export async function compactMetrics(database, now = Date.now()) {
 
   const series = database.prepare(`SELECT DISTINCT host_id, container_id, metric_type FROM container_metrics
     WHERE timestamp >= ? AND timestamp < ?`).all(start, end);
-  const buckets = database.prepare(`SELECT MIN(id) AS keeper, AVG(value) AS value,
+  const buckets = database.prepare(`SELECT MIN(id) AS keeper,
+      SUM(COALESCE(value_sum, value)) AS value_sum, SUM(sample_count) AS sample_count,
+      MIN(COALESCE(value_min, value)) AS value_min, MAX(COALESCE(value_max, value)) AS value_max,
+      MIN(COALESCE(range_start, timestamp)) AS range_start, MAX(COALESCE(range_end, timestamp)) AS range_end,
+      MAX(stats_approximate) AS stats_approximate,
       CAST(timestamp / ${BUCKET_MS} AS INTEGER) * ${BUCKET_MS} AS bucket, COUNT(*) AS samples
     FROM container_metrics INDEXED BY idx_metrics_host_container
     WHERE host_id = ? AND container_id = ? AND metric_type = ? AND timestamp >= ? AND timestamp < ?
     GROUP BY CAST(timestamp / ${BUCKET_MS} AS INTEGER) HAVING COUNT(*) > 1 LIMIT 500`);
-  const update = database.prepare('UPDATE container_metrics SET value = ?, timestamp = ? WHERE id = ?');
+  const update = database.prepare('UPDATE container_metrics SET value = ?, timestamp = ?, sample_count = ?, value_sum = ?, value_min = ?, value_max = ?, range_start = ?, range_end = ?, stats_approximate = ? WHERE id = ?');
   // Without this hint SQLite can choose metric_type/time and scan every
   // container's CPU series again for each individual container/bucket.
   const remove = database.prepare(`DELETE FROM container_metrics INDEXED BY idx_metrics_host_container
@@ -42,7 +46,7 @@ export async function compactMetrics(database, now = Date.now()) {
       const batch = buckets.all(hostId, containerId, metricType, start, end);
       let removed = 0;
       for (const metric of batch) {
-        update.run(metric.value, metric.bucket, metric.keeper);
+        update.run(metric.value_sum / metric.sample_count, metric.bucket, metric.sample_count, metric.value_sum, metric.value_min, metric.value_max, metric.range_start, metric.range_end, metric.stats_approximate, metric.keeper);
         removed += remove.run(hostId, containerId, metricType, metric.bucket, metric.bucket + BUCKET_MS, metric.keeper).changes;
       }
       database.exec('COMMIT');

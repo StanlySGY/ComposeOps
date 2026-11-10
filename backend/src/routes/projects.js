@@ -1,6 +1,6 @@
 import { getActiveHost } from '../services/docker-hosts.js';
-import { assertReviewedDeployment } from '../services/reviewed-deployment.js';
-import { findProject, scanProjects } from '../services/scanner.js';
+import { assertReviewedDeployment, createDeploymentReview } from '../services/reviewed-deployment.js';
+import { findProject, scanProjects, invalidateScanCache } from '../services/scanner.js';
 import { buildMountPlan } from '../services/mount-plan.js';
 import { readCompose, saveCompose } from '../services/compose-runner.js';
 import { pruneWorkspaceRunners, readWorkspaceCompose, saveWorkspaceCompose } from '../services/compose-workspace.js';
@@ -560,10 +560,19 @@ export default async function projectRoutes(fastify) {
   });
 
   // action 不设 enum:见文件头第 3 条,唯一事实来源是 compose-runner 的 ACTIONS。
+  fastify.post('/:id/deployment-review', { schema: { params: idParams } }, async (request, reply) => {
+    const host = getActiveHost();
+    invalidateScanCache();
+    const project = await projectOr404(request.params.id, reply);
+    if (!project || !requireEditable(project, reply)) return;
+    try { return await createDeploymentReview({ ...project, host }); }
+    catch (error) { return reply.code(error.statusCode || 422).send({ message: error.statusCode ? error.message : '完整配置评审失败，请检查项目文件与节点连接' }); }
+  });
+
   fastify.post('/:id/actions', {
     schema: {
       params: idParams,
-      body: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', maxLength: 32 }, expectedHostId: { type: 'string', minLength: 1, maxLength: 128 }, expectedContent: { type: 'string', maxLength: CONTENT_MAX } } },
+      body: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', maxLength: 32 }, reviewToken: { type: 'string', minLength: 1, maxLength: 128 }, expectedHostId: { type: 'string', minLength: 1, maxLength: 128 }, expectedContent: { type: 'string', maxLength: CONTENT_MAX } } },
     },
   }, async (request, reply) => {
     const host = getActiveHost();
@@ -572,7 +581,16 @@ export default async function projectRoutes(fastify) {
     const project = { ...found, host };
     const action = request.body?.action;
     const review = request.body || {};
-    const checkReview = () => assertReviewedDeployment(project, action, review);
+    const checkReview = async (consume = false) => {
+      if (review.reviewToken) {
+        invalidateScanCache();
+        const latest = await findProject(project.id);
+        if (!latest || JSON.stringify(latest.composeFiles) !== JSON.stringify(project.composeFiles) || latest.workingDir !== project.workingDir) {
+          throw Object.assign(new Error('项目文件组已变化，请重新评审'), { statusCode: 409 });
+        }
+        await assertReviewedDeployment({ ...latest, host: getActiveHost() }, action, review, { consume });
+      } else await assertReviewedDeployment(project, action, review);
+    };
     let prepared;
     try {
       await checkReview();
@@ -608,7 +626,7 @@ export default async function projectRoutes(fastify) {
     let child;
     prepared.run((type, text) => { output += text; send(type, text); }, (process) => { child = process; }, { beforeRun: async () => {
       if (reply.raw.destroyed) throw new Error('部署连接已关闭，本次未启动');
-      await checkReview();
+      await checkReview(true);
       if (reply.raw.destroyed) throw new Error('部署连接已关闭，本次未启动');
     } })
       .then(finish)

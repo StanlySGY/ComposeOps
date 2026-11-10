@@ -64,7 +64,7 @@ export function getDatabaseEncryptionStatus(location, options = {}) {
     database = new MultiCipherDatabase(absolute, { readonly: true, fileMustExist: true });
     database.pragma(`key = ${quoteLiteral(key)}`);
     database.pragma('foreign_keys = OFF');
-    assertEncryptedKeyWorks(database);
+    assertEncryptedKeyWorks(database, false);
     return { path: absolute, status: 'encrypted', encryptedHeader: true, keyVerified: true };
   } catch {
     return { path: absolute, status: 'encrypted-or-corrupt', encryptedHeader: true, keyVerified: false };
@@ -88,12 +88,12 @@ function runIntegrityCheck(database) {
   }
 }
 
-function assertEncryptedKeyWorks(database) {
+function assertEncryptedKeyWorks(database, fullIntegrity = true) {
   try {
     // A wrong key often appears to open successfully until SQLite reads the first page.
     database.pragma('cipher_version');
     database.prepare('SELECT name FROM sqlite_master LIMIT 1').all();
-    runIntegrityCheck(database);
+    if (fullIntegrity) runIntegrityCheck(database);
   } catch (error) {
     throw new Error('无法打开加密数据库：密钥不正确或数据库文件已损坏', { cause: error });
   }
@@ -291,7 +291,9 @@ function openEncryptedDatabase(location, options, key) {
     database.pragma(`key = ${quoteLiteral(key)}`);
     // Preserve the legacy adapter's explicit foreign-key-off behavior after encryption is enabled.
     database.pragma('foreign_keys = OFF');
-    assertEncryptedKeyWorks(database);
+    // Normal opens validate the key/schema only. Backup, restore, migration and key rotation
+    // retain explicit full checks, without rescanning every worker/startup connection.
+    assertEncryptedKeyWorks(database, false);
     return database;
   } catch (error) {
     try { database.close(); } catch { /* ignore cleanup failures */ }
@@ -350,6 +352,7 @@ export default class Database {
     const absolute = inMemory ? ':memory:' : path.resolve(location);
     const key = readDatabaseEncryptionKey();
     const kind = inMemory ? 'missing' : fileKind(absolute);
+    if (!inMemory && options.fileMustExist && kind === 'missing') throw new Error('数据库文件不存在');
     if (inMemory) {
       // Encryption is an at-rest control; in-memory test/ephemeral databases must not require a file key.
       this._db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });

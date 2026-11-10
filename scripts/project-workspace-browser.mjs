@@ -15,11 +15,15 @@ const name = 'composeops-ux-candidate-' + suffix;
 const projectName = 'composeops-ux-target-' + suffix;
 const root = mkdtempSync('/tmp/composeops-ux-target-');
 const compose = root + '/compose.yml';
+const override = root + '/override.yml';
+const envFile = root + '/.env';
 const docker = args => execFileSync('docker', args, { encoding: 'utf8', timeout: 120000 }).trim();
-const composeArgs = ['compose', '-p', projectName, '-f', compose];
+const composeArgs = ['compose', '-p', projectName, '-f', compose, '-f', override];
 let browser;
 try {
   writeFileSync(compose, 'services:\n  app:\n    image: node:22-alpine\n    command: ["sh", "-c", "echo UX_WORKSPACE_READY; sleep 3600"]\n');
+  writeFileSync(override, 'services:\n  app:\n    environment:\n      REVIEW_MARKER: ${REVIEW_MARKER}\n');
+  writeFileSync(envFile, 'REVIEW_MARKER=reviewed\n');
   docker([...composeArgs, 'up', '-d']);
   docker(['run', '-d', '--name', name, '-p', '127.0.0.1::3001', '-v', '/var/run/docker.sock:/var/run/docker.sock', ...(workspaceMode ? [] : ['-v', root + ':' + root]), '-e', 'LOG_LEVEL=error', '-e', 'OPS_EFFECT_WORKER_ENABLED=0', '-e', 'ENABLE_SHELL=1', candidate]);
   const base = 'http://' + docker(['port', name, '3001/tcp']);
@@ -38,6 +42,23 @@ try {
   await request('/projects/management', 'PUT', { projectIds: [project.id], mountProjectIds: [project.id] });
   const managed = await request('/projects/' + project.id);
   assert.equal(managed.mounted, !workspaceMode, 'test the intended execution mode');
+  const reviewPath = '/projects/' + project.id + '/deployment-review';
+  const reviewed = await request(reviewPath, 'POST');
+  assert.equal(reviewed.files.length, 2, 'review covers both files in the actual execution context');
+  assert.ok(reviewed.content.includes('[REDACTED]'), 'effective environment values stay hidden');
+  writeFileSync(envFile, 'REVIEW_MARKER=changed\n');
+  const action = token => fetch(base + '/api/v1/projects/' + project.id + '/actions', {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'up', reviewToken: token }),
+  });
+  const rejected = await action(reviewed.token);
+  assert.equal(rejected.status, 409, await rejected.text());
+  assert.ok(docker(['inspect', ...docker([...composeArgs, 'ps', '-q']).split('\n'), '--format', '{{json .Config.Env}}']).includes('REVIEW_MARKER=reviewed'));
+  writeFileSync(envFile, 'REVIEW_MARKER=reviewed\n');
+  const accepted = await action((await request(reviewPath, 'POST')).token);
+  assert.equal(accepted.status, 200);
+  assert.match(await accepted.text(), /"type":"exit","data":\{"code":0\}/);
+  console.log('PASS real backend ' + (workspaceMode ? 'workspace' : 'direct') + ': merged review, environment drift rejection and reviewed deployment');
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined), headless: true, args: ['--no-sandbox'] });
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport });

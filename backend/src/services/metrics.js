@@ -18,45 +18,6 @@ function getAggregationInterval(timeRangeMs) {
 }
 
 /**
- * 聚合历史指标数据
- */
-function aggregateMetrics(metrics, intervalSeconds) {
-  if (intervalSeconds <= 2) return metrics; // 返回原始数据
-
-  const buckets = new Map();
-  
-  for (const metric of metrics) {
-    const intervalMs = intervalSeconds * 1000;
-    const bucketTimestamp = Math.floor(metric.timestamp / intervalMs) * intervalMs;
-    const key = `${metric.host_id}-${metric.container_id}-${metric.metric_type}-${bucketTimestamp}`;
-    
-    if (!buckets.has(key)) {
-      buckets.set(key, {
-        host_id: metric.host_id,
-        container_id: metric.container_id,
-        metric_type: metric.metric_type,
-        values: [],
-        timestamp: bucketTimestamp,
-        unit: metric.unit,
-      });
-    }
-    
-    buckets.get(key).values.push(metric.value);
-  }
-
-  // 计算每个桶的平均值
-  return Array.from(buckets.values()).map(bucket => ({
-    host_id: bucket.host_id,
-    container_id: bucket.container_id,
-    metric_type: bucket.metric_type,
-    value: bucket.values.reduce((sum, v) => sum + v, 0) / bucket.values.length,
-    unit: bucket.unit,
-    timestamp: bucket.timestamp,
-    sample_count: bucket.values.length,
-  }));
-}
-
-/**
  * Z-Score 异常检测算法
  * 标准差超过3倍认为是异常点
  */
@@ -218,102 +179,71 @@ export function detectAnomalies(metrics, algorithms = ['z_score', 'moving_averag
 /**
  * 查询历史指标数据
  */
-export function queryHistoricalMetrics({
-  containerId,
-  hostId,
-  metricType,
-  startTime,
-  endTime,
-  aggregation = 'auto',
-}) {
-  const params = [];
-  let query = 'SELECT host_id, container_id, metric_type, value, unit, timestamp FROM container_metrics WHERE 1=1';
-
-  if (hostId) { query += ' AND host_id = ?'; params.push(hostId); }
-  if (containerId) {
-    query += ' AND container_id = ?';
-    params.push(containerId);
+function metricFilter({ containerId, hostId, metricType, startTime, endTime }) {
+  const clauses = ['1=1']; const params = [];
+  for (const [column, value] of [['host_id', hostId], ['container_id', containerId], ['metric_type', metricType]]) {
+    if (value) { clauses.push(`${column} = ?`); params.push(value); }
   }
-
-  if (metricType) {
-    query += ' AND metric_type = ?';
-    params.push(metricType);
+  const hasStart = startTime != null && Number.isFinite(Number(startTime));
+  const hasEnd = endTime != null && Number.isFinite(Number(endTime));
+  if (hasStart) {
+    // Retained buckets use their start timestamp; include a partial bucket then flag its uncertainty.
+    clauses.push('timestamp >= ? AND COALESCE(range_end, timestamp) >= ?');
+    params.push(Number(startTime) - 300000, Number(startTime));
   }
-
-  const hasStartTime = startTime !== undefined && startTime !== null && Number.isFinite(Number(startTime));
-  const hasEndTime = endTime !== undefined && endTime !== null && Number.isFinite(Number(endTime));
-  if (hasStartTime) {
-    query += ' AND timestamp >= ?';
-    params.push(Number(startTime));
-  }
-
-  if (hasEndTime) {
-    query += ' AND timestamp <= ?';
-    params.push(Number(endTime));
-  }
-
-  query += ' ORDER BY timestamp ASC';
-
-  const metrics = db.prepare(query).all(...params);
-
-  // 自动聚合
-  if (aggregation === 'auto' && hasStartTime && hasEndTime) {
-    const timeRange = Number(endTime) - Number(startTime);
-    const { interval } = getAggregationInterval(timeRange);
-    return aggregateMetrics(metrics, interval);
-  }
-
-  // 手动指定聚合间隔
-  if (typeof aggregation === 'number' && aggregation > 2) {
-    return aggregateMetrics(metrics, aggregation);
-  }
-
-  return metrics;
+  if (hasEnd) { clauses.push('timestamp <= ? AND COALESCE(range_start, timestamp) <= ?'); params.push(Number(endTime), Number(endTime)); }
+  return { where: clauses.join(' AND '), params, hasStart, hasEnd };
 }
 
-/**
- * 获取容器指标统计信息
- */
+export function queryHistoricalMetrics(options) {
+  const { startTime, endTime, aggregation = 'auto' } = options;
+  const { where, params, hasStart, hasEnd } = metricFilter(options);
+  const interval = aggregation === 'auto' && hasStart && hasEnd
+    ? getAggregationInterval(Number(endTime) - Number(startTime)).interval
+    : (typeof aggregation === 'number' && Number.isFinite(aggregation) ? aggregation : 0);
+  const approximation = ['stats_approximate', ...(hasStart ? [`COALESCE(range_start, timestamp) < ${Number(startTime)}`] : []), ...(hasEnd ? [`COALESCE(range_end, timestamp) > ${Number(endTime)}`] : [])].join(' OR ');
+  if (interval <= 2) return db.prepare(`SELECT host_id, container_id, metric_type, value, unit, timestamp,
+    sample_count, COALESCE(value_sum, value) AS value_sum, COALESCE(value_min, value) AS value_min,
+    COALESCE(value_max, value) AS value_max, (${approximation}) AS stats_approximate FROM container_metrics WHERE ${where} ORDER BY timestamp`).all(...params);
+  // Only aggregated points cross the SQLite/JS boundary, never the entire raw window.
+  const bucket = Math.max(1, Math.floor(interval * 1000));
+  return db.prepare(`SELECT host_id, container_id, metric_type, unit,
+    CAST(timestamp / ${bucket} AS INTEGER) * ${bucket} AS timestamp,
+    SUM(COALESCE(value_sum, value)) / SUM(sample_count) AS value,
+    SUM(COALESCE(value_sum, value)) AS value_sum, SUM(sample_count) AS sample_count,
+    MIN(COALESCE(value_min, value)) AS value_min, MAX(COALESCE(value_max, value)) AS value_max,
+    MAX(${approximation}) AS stats_approximate
+    FROM container_metrics WHERE ${where}
+    GROUP BY host_id, container_id, metric_type, CAST(timestamp / ${bucket} AS INTEGER) ORDER BY timestamp`).all(...params);
+}
+
+/** Raw windows have exact quantiles; retained buckets use weighted means and explicitly report approximation. */
 export function getMetricsStats(containerId, metricType, hours = 24, hostId) {
-  const endTime = Date.now();
-  const startTime = endTime - hours * 3600 * 1000;
-
-  const metrics = queryHistoricalMetrics({
-    containerId,
-    hostId,
-    metricType,
-    startTime,
-    endTime,
-  });
-
-  if (metrics.length === 0) {
-    return null;
-  }
-
-  const values = metrics.map(m => m.value);
-  const sum = values.reduce((acc, v) => acc + v, 0);
-  const mean = sum / values.length;
-  const sortedValues = [...values].sort((a, b) => a - b);
-  const min = sortedValues[0];
-  const max = sortedValues[sortedValues.length - 1];
-  const median = sortedValues[Math.floor(sortedValues.length / 2)];
-  const p95 = sortedValues[Math.floor(sortedValues.length * 0.95)];
-  const p99 = sortedValues[Math.floor(sortedValues.length * 0.99)];
-
+  const endTime = Date.now(); const startTime = endTime - hours * 3600000;
+  const { where, params } = metricFilter({ containerId, metricType, hostId, startTime, endTime });
+  const stats = db.prepare(`SELECT SUM(sample_count) AS count,
+    SUM(COALESCE(value_sum, value)) / SUM(sample_count) AS mean,
+    MIN(COALESCE(value_min, value)) AS min, MAX(COALESCE(value_max, value)) AS max,
+    MIN(unit) AS unit, MAX(stats_approximate) AS legacy,
+    MAX(sample_count > 1) AS compacted,
+    MAX(COALESCE(range_start, timestamp) < ? OR COALESCE(range_end, timestamp) > ?) AS partial
+    FROM container_metrics WHERE ${where}`).get(startTime, endTime, ...params);
+  if (!stats.count) return null;
+  // Window functions sort inside SQLite; only three quantiles return to JS.
+  const quantiles = db.prepare(`WITH distribution AS (
+      SELECT value, SUM(sample_count) AS weight FROM container_metrics WHERE ${where} GROUP BY value
+    ), ordered AS (
+      SELECT value, SUM(weight) OVER (ORDER BY value ROWS UNBOUNDED PRECEDING) AS cumulative FROM distribution
+    ) SELECT MIN(CASE WHEN cumulative > ? THEN value END) AS median,
+      MIN(CASE WHEN cumulative > ? THEN value END) AS p95,
+      MIN(CASE WHEN cumulative > ? THEN value END) AS p99 FROM ordered`)
+    .get(...params, Math.floor(stats.count * .5), Math.floor(stats.count * .95), Math.floor(stats.count * .99));
   return {
-    count: metrics.length,
-    mean,
-    median,
-    min,
-    max,
-    p95,
-    p99,
-    unit: metrics[0].unit,
-    timeRange: {
-      start: startTime,
-      end: endTime,
-      hours,
-    },
+    count: stats.count, mean: stats.mean, min: stats.min, max: stats.max, ...quantiles, unit: stats.unit,
+    approximation: { quantiles: !!(stats.compacted || stats.legacy || stats.partial),
+      aggregates: !!(stats.legacy || stats.partial), legacy: !!stats.legacy, partialWindow: !!stats.partial },
+    quantileMethod: stats.compacted || stats.legacy ? 'weighted-bucket-means' : 'raw-order-statistic',
+    timeRange: { start: startTime, end: endTime, hours },
   };
 }
 

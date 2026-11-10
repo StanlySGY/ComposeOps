@@ -1,7 +1,7 @@
 import { getActivityDocker, getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
-import db, { pruneAgentPlans, pruneAiUsage, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
+import db, { pruneAiData, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { pruneEvents } from './event-center.js';
 import { pruneStateHistory } from './state-history.js';
 import { checkAllUpdates } from './image-updater.js';
@@ -95,44 +95,24 @@ export async function pruneDocker({ images = true, buildCache = true, containers
  * ------------------------------------------------------------------------- */
 
 const DATA_DEFAULTS = {
-  agentPlansDays: 90,        // agent_plans(含 CASCADE agent_executions)保留天数
   operationHistoryDays: 30,  // operation_history 保留天数
-  aiHistoryDays: 30,         // ai_history 保留天数
   stateHistoryDays: 90,      // container_state_events 保留天数(每行不足 200 B,90 天足够回看宕机规律)
   composeBackupKeep: COMPOSE_BACKUP_KEEP, // 与 addComposeBackup 共用同一常量,避免"写入留 20 份、清理裁 5 份"的漂移
   runIntervalMs: 6 * 60 * 60 * 1000, // 每 6 小时
 };
 
 /** 清理超过保留天数的 AI 对话历史。 */
-export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, agentPlansDays, stateHistoryDays } = {}) {
-  const clear = {
-    aiHistoryDays,
-    operationHistoryDays,
-    agentPlansDays,
-    stateHistoryDays,
-  };
-  const days = clear.aiHistoryDays ?? DATA_DEFAULTS.aiHistoryDays;
-  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
-  const ai = db.prepare(
-    "DELETE FROM ai_history WHERE julianday('now') - julianday(created_at) > ?"
-  ).run(safeDays);
-  const aiUsage = pruneAiUsage(safeDays);
-
-  const opDays = clear.operationHistoryDays ?? DATA_DEFAULTS.operationHistoryDays;
-  const operations = pruneOperationHistory(opDays);
-
-  const planDays = clear.agentPlansDays ?? DATA_DEFAULTS.agentPlansDays;
-  const agent = pruneAgentPlans(planDays);
-
-  // 状态历史只追加,不清理会随 health_status 抖动无限增长。
+export function pruneDataHistory({ aiHistoryDays, operationHistoryDays, stateHistoryDays, now = Date.now() } = {}) {
+  const ai = pruneAiData(aiHistoryDays, now);
+  const operations = pruneOperationHistory(operationHistoryDays ?? DATA_DEFAULTS.operationHistoryDays);
   let stateEvents = 0;
-  try { stateEvents = pruneStateHistory(clear.stateHistoryDays ?? DATA_DEFAULTS.stateHistoryDays).changes; } catch { /* 表缺失等异常不阻断其他清理。 */ }
-
+  try { stateEvents = pruneStateHistory(stateHistoryDays ?? DATA_DEFAULTS.stateHistoryDays).changes; } catch { /* 状态表故障不阻断其他维护。 */ }
   return {
-    aiHistoryDeleted: ai.changes,
-    aiUsageDeleted: aiUsage.changes,
+    aiHistoryDeleted: ai.history,
+    aiUsageDeleted: ai.usage,
+    agentExecutionsDeleted: ai.executions,
     operationHistoryDeleted: operations.changes,
-    agentPlansDeleted: agent.changes,
+    agentPlansDeleted: ai.plans,
     stateHistoryDeleted: stateEvents,
   };
 }
@@ -152,8 +132,8 @@ export function pruneComposeBackups(keep = DATA_DEFAULTS.composeBackupKeep) {
 }
 
 /** 执行全部数据清理,返回各表删除行数。 */
-export function runDataMaintenance() {
-  const history = pruneDataHistory();
+export function runDataMaintenance(options) {
+  const history = pruneDataHistory(options);
   const backups = pruneComposeBackups();
   // event_records 此前无任何调度方调用,只增不删;纳入周期清理。
   let events = 0;

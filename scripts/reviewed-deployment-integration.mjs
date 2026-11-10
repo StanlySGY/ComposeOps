@@ -7,12 +7,17 @@ import path from 'node:path';
 const directory = mkdtempSync(path.join(os.tmpdir(), 'composeops-review-integration-'));
 const projectName = `co-review-${Date.now()}`;
 const composeFile = path.join(directory, 'compose.yaml');
-const content = 'services:\n  probe:\n    image: busybox:1.36\n    command: ["sleep", "300"]\n';
+const content = 'services:\n  probe:\n    image: busybox:${TAG}\n    command: ["sleep", "300"]\n';
+const overrideFile = path.join(directory, 'override.yaml');
+const envFile = path.join(directory, '.env');
+const overrideContent = 'services: { probe: { environment: { REVIEW_MARKER: reviewed } } }';
 writeFileSync(composeFile, content);
+writeFileSync(overrideFile, overrideContent);
+writeFileSync(envFile, 'TAG=1.36');
 process.env.DB_PATH = path.join(directory, 'test.db');
 process.env.SERVE_FRONTEND = '0';
 const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-const compose = (...args) => docker('compose', '--project-name', projectName, '-f', composeFile, ...args);
+const compose = (...args) => docker('compose', '--project-name', projectName, '-f', composeFile, '-f', overrideFile, ...args);
 let app;
 try {
   compose('create');
@@ -29,18 +34,30 @@ try {
   await app.register(routes, { prefix: '/projects' });
   const read = await app.inject({ method: 'GET', url: `/projects/${project.id}/compose` });
   assert.equal(read.statusCode, 200); assert.equal(read.json().hostId, 'local');
-  const payload = { action: 'up', expectedContent: content, expectedHostId: 'local' };
+  const issue = async () => {
+    const result = await app.inject({ method: 'POST', url: `/projects/${project.id}/deployment-review` });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().files.length, 2);
+    return { action: 'up', reviewToken: result.json().token };
+  };
   const url = `/projects/${project.id}/actions`;
-  for (const wrong of [{ expectedContent: 'services: {}' }, { expectedHostId: 'another-node' }]) {
-    const response = await app.inject({ method: 'POST', url, payload: { ...payload, ...wrong } });
-    assert.equal(response.statusCode, 409);
+  for (const [file, changed, original] of [
+    [composeFile, content.replace('sleep', 'echo'), content],
+    [overrideFile, overrideContent.replace('reviewed', 'changed'), overrideContent],
+    [envFile, 'TAG=1.35', 'TAG=1.36'],
+  ]) {
+    const payload = await issue(); writeFileSync(file, changed);
+    const rejected = await app.inject({ method: 'POST', url, payload });
+    assert.equal(rejected.statusCode, 409, rejected.body);
     assert.equal(docker('inspect', '-f', '{{.State.Running}}', container).trim(), 'false');
+    writeFileSync(file, original);
   }
+  const payload = await issue();
   const response = await app.inject({ method: 'POST', url, payload });
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /"type":"exit","data":\{"code":0\}/);
   assert.equal(docker('inspect', '-f', '{{.State.Running}}', container).trim(), 'true');
-  console.log(JSON.stringify({ passed: true, wrongContentBlocked: true, wrongHostBlocked: true, matchingReviewStartedTemporaryContainer: true }));
+  console.log(JSON.stringify({ passed: true, multiFileAndEnvironmentDriftBlocked: true, matchingReviewStartedTemporaryContainer: true }));
 } finally {
   await app?.close();
   try { compose('down', '--remove-orphans'); }

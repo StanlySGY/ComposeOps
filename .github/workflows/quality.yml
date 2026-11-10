@@ -12,8 +12,7 @@ jobs:
   code:
     name: Tests, lint and builds
     runs-on: ubuntu-latest
-    # 四种浏览器配置已扩展至 932 个场景，保留安装、构建与失败重试时间。
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
@@ -28,20 +27,44 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm --prefix frontend run build:preview
-      - name: Install browser
-        run: npx playwright install --with-deps chromium webkit
-        working-directory: frontend
-      - name: Preview browser checks
-        run: npm --prefix frontend run test:preview
       - uses: actions/upload-artifact@v4
         with:
           name: composeops-preview
           path: frontend/preview-dist
           retention-days: 7
+  browser:
+    name: Browser checks (${{ matrix.project }})
+    needs: code
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { project: desktop, engine: chromium }
+          - { project: mobile, engine: chromium }
+          - { project: webkit, engine: webkit }
+          - { project: webkit-mobile, engine: webkit }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: composeops-preview
+          path: frontend/preview-dist
+      - name: Install browser
+        run: npx playwright install --with-deps ${{ matrix.engine }}
+        working-directory: frontend
+      - name: Complete preview checks for this browser
+        run: npm --prefix frontend run test:preview -- --project=${{ matrix.project }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: browser-failure-traces
+          name: browser-failure-traces-${{ matrix.project }}
           path: frontend/test-results
           if-no-files-found: ignore
   image:
@@ -75,6 +98,7 @@ jobs:
           node scripts/project-workspace-browser.mjs composeops:ci-test
           node scripts/project-workspace-browser.mjs composeops:ci-test --workspace
           node scripts/reviewed-deployment-integration.mjs
+          node scripts/terminal-search-browser.mjs composeops:ci-test
       - name: Fresh installation, online backup and encrypted restore
         run: node scripts/image-smoke.mjs composeops:ci-test
       - name: Compose multi-file rollback and failure compensation

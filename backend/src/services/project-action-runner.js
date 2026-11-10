@@ -22,13 +22,13 @@ export async function prepareProjectAction(project, action) {
   assertProjectHostUnchanged(project);
   assertProjectActionAllowed(project, action);
   if (project.editable && project.mounted) {
-    const safeFiles = await Promise.all(project.composeFiles.map((_, index) => resolveProjectFile(project, index)));
     return {
       mode: 'compose',
       // options.timeoutMs:后台任务(compose background=true)需要放宽超时,前台保持 5 分钟默认。
       run(onOutput = () => {}, onChild = () => {}, options = {}) {
         return withProjectOperationLock(project.id, async () => {
           await options.beforeRun?.();
+          const safeFiles = await Promise.all(project.composeFiles.map((_, index) => resolveProjectFile(project, index)));
           assertProjectHostUnchanged(project);
           return new Promise((resolve, reject) => {
             const child = spawnCompose({ ...project, composeFiles: safeFiles }, action);

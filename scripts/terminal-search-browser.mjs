@@ -1,7 +1,7 @@
 // Exercise the production bundle against a real Docker exec, using only a temporary project.
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
@@ -33,7 +33,7 @@ try {
   const project = (await request('/projects?refresh=1')).projects.find(p => p.projectName === projectName);
   assert.ok(project);
   await request('/projects/management', 'PUT', { projectIds: [project.id], mountProjectIds: [] });
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '/usr/bin/google-chrome', headless: true });
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined), headless: true });
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport });
     const [cookieName, cookieValue] = cookie.split('=');

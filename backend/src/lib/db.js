@@ -793,6 +793,18 @@ const MIGRATIONS = [
       database.exec('CREATE INDEX IF NOT EXISTS idx_metrics_host_container ON container_metrics(host_id, container_id, timestamp)');
     },
   },
+  {
+    version: 21,
+    name: '指标聚合保留峰值、权重和覆盖时间',
+    up(database) {
+      addColumn(database, 'container_metrics', 'sample_count', 'INTEGER NOT NULL DEFAULT 1');
+      for (const column of ['value_sum', 'value_min', 'value_max']) addColumn(database, 'container_metrics', column, 'REAL');
+      for (const column of ['range_start', 'range_end']) addColumn(database, 'container_metrics', column, 'INTEGER');
+      addColumn(database, 'container_metrics', 'stats_approximate', 'INTEGER NOT NULL DEFAULT 0');
+      // 旧版曾丢弃历史桶的权重与峰值，无法恢复，必须明确标记。
+      database.prepare('UPDATE container_metrics SET stats_approximate = 1 WHERE timestamp < ?').run(Date.now() - 7 * 86400000);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -906,13 +918,6 @@ export function recordAiUsage({ sessionId = 0, model = 'unknown', usage = {} } =
     total,
   );
   return Number(result.lastInsertRowid);
-}
-
-export function pruneAiUsage(days = 30) {
-  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
-  return db.prepare(
-    "DELETE FROM ai_usage WHERE julianday('now') - julianday(created_at) > ?"
-  ).run(safeDays);
 }
 
 /**
@@ -1575,14 +1580,6 @@ export function pruneOperationHistory(days = 30) {
   const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
   return db.prepare(
     "DELETE FROM operation_history WHERE julianday('now') - julianday(created_at) > ?"
-  ).run(safeDays);
-}
-
-/** 归档/清理过期告警事件:优先保留未读/未静音(详见 events.js)。 */
-export function pruneAgentPlans(days = 30) {
-  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
-  return db.prepare(
-    "DELETE FROM agent_plans WHERE julianday('now') - julianday(created_at) > ?"
   ).run(safeDays);
 }
 
@@ -2517,21 +2514,50 @@ function safeParse(value, fallback) {
 
 // ===== 会话/Agent 审计数据保留策略 =====
 
-/** 清理超过保留期的 AI 会话消息与 Agent 审计数据,返回各表删除行数。 */
-export function pruneAiData(retentionDays = 90) {
-  const days = Math.max(7, Math.min(Number(retentionDays) || 90, 3650));
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-  const tx = db.transaction(() => {
-    const plans = db.prepare(`
-      DELETE FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE created_at < ?)
-    `).run(cutoff);
-    // 反馈(rating/feedback_text)是 agent_plans 的列,随计划一并删除,无独立表
-    const oldPlans = db.prepare('DELETE FROM agent_plans WHERE created_at < ?').run(cutoff);
-    const history = db.prepare('DELETE FROM ai_history WHERE created_at < ?').run(cutoff);
-    const usage = db.prepare('DELETE FROM ai_usage WHERE created_at < ?').run(cutoff);
-    return { plans: oldPlans.changes, executions: plans.changes, history: history.changes, usage: usage.changes };
-  });
-  return tx();
+/** AI 历史只有一个保留期限来源；边界时刻保留，早于边界才清理。 */
+export function normalizeAiRetentionDays(value = getSetting('retention.ai_days', '90')) {
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? Math.max(7, Math.min(Math.floor(days), 3650)) : 90;
+}
+
+function aiRetentionCutoff(days, now) {
+  return new Date(Number(now) - normalizeAiRetentionDays(days) * 86400000).toISOString();
+}
+
+export function previewAiData(retentionDays, now = Date.now()) {
+  const days = normalizeAiRetentionDays(retentionDays);
+  const cutoff = aiRetentionCutoff(days, now);
+  const count = (table) => db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE julianday(created_at) < julianday(?)`).get(cutoff).count;
+  return {
+    days, cutoff,
+    counts: {
+      plans: count('agent_plans'), history: count('ai_history'), usage: count('ai_usage'),
+      executions: db.prepare('SELECT COUNT(*) AS count FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?))').get(cutoff).count,
+    },
+  };
+}
+
+/** 全部定时和手动清理共用事务、期限与计数，并持久化最近成功结果。 */
+export function pruneAiData(retentionDays, now = Date.now()) {
+  const days = normalizeAiRetentionDays(retentionDays);
+  const cutoff = aiRetentionCutoff(days, now);
+  return db.transaction(() => {
+    const executions = db.prepare('DELETE FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?))').run(cutoff).changes;
+    const plans = db.prepare('DELETE FROM agent_plans WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const history = db.prepare('DELETE FROM ai_history WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const usage = db.prepare('DELETE FROM ai_usage WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const counts = { plans, executions, history, usage };
+    const at = new Date(now).toISOString();
+    setSetting('retention.ai_last_pruned_at', at);
+    setSetting('retention.ai_last_result', JSON.stringify({ days, cutoff, at, counts }));
+    return counts;
+  })();
+}
+
+export function getAiRetentionStatus() {
+  let lastResult = null;
+  try { lastResult = JSON.parse(getSetting('retention.ai_last_result', 'null')); } catch { /* 旧记录损坏不影响预览。 */ }
+  return { ...previewAiData(), lastResult };
 }
 
 export default db;

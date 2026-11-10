@@ -244,7 +244,7 @@ export async function saveProjectEnv(project, { raw, entries }, fileName = ENV_F
   const backupName = `${target}.backup.${Date.now()}.${randomBytes(3).toString('hex')}`;
   const backupPath = path.posix.join(root, backupName);
 
-  return withEnvFileLock(`${project.id}:${envPath}`, async () => {
+  return withProjectOperationLock(project.id, () => withEnvFileLock(`${project.id}:${envPath}`, async () => {
     if (project.mounted) {
       const existingStat = await assertRegularEnvTarget(envPath);
       try {
@@ -264,7 +264,7 @@ export async function saveProjectEnv(project, { raw, entries }, fileName = ENV_F
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
       return result;
     });
-  });
+  }));
 }
 
 
