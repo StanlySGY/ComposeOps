@@ -10,7 +10,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
 COPY frontend/package.json frontend/package.json
-RUN npm config set registry https://registry.npmmirror.com \
+ARG NPM_REGISTRY="https://registry.npmmirror.com"
+RUN npm config set registry "$NPM_REGISTRY" \
+ && npm config set replace-registry-host registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
  && npm ci --workspace frontend --no-audit --no-fund
@@ -33,6 +35,7 @@ COPY frontend/package.json frontend/package.json
 # Seed the CA bundle from the already pinned official Docker CLI image so HTTPS apt works in slim.
 COPY --from=docker:cli /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ARG APT_MIRROR="mirrors.tuna.tsinghua.edu.cn"
+ARG NPM_REGISTRY="https://registry.npmmirror.com"
 # The official Node image already ships matching headers in /usr/local/include/node;
 # reuse them for node-gyp instead of depending on a second nodejs.org download.
 RUN if [ -n "$APT_MIRROR" ]; then \
@@ -40,7 +43,8 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     fi \
  && apt-get update -o Acquire::Retries=5 -o Acquire::https::Timeout=30 \
  && apt-get install -y --no-install-recommends python3 make g++ \
- && npm config set registry https://registry.npmmirror.com \
+ && npm config set registry "$NPM_REGISTRY" \
+ && npm config set replace-registry-host registry.npmmirror.com \
  && npm config set fetch-timeout 300000 \
  && npm config set fetch-retries 5 \
  && npm_config_nodedir=/usr/local npm ci --workspace backend --no-audit --no-fund \
