@@ -76,7 +76,9 @@ async function request(path, opts = {}) {
     const data = await doFetch(path, opts);
     // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
     invalidateSwr('/');
-    if (!/^\/(auth|ai\/agent\/(sessions|approval|feedback|compact))/.test(path) && !/\/(ping|check|preview|validate|anomalies|test)(?:[/?]|$)/.test(path)) notifyDataChanged({ source: 'api', path });
+    // deploy-preview 等只读推演端点也在名单内:否则宿主检查会广播 data-changed,
+    // 触发页面防抖重载,把刚渲染的宿主实况预演结果整个抹掉。
+    if (!/^\/(auth|ai\/agent\/(sessions|approval|feedback|compact))/.test(path) && !/\/(ping|check|(?:deploy-)?preview|validate|anomalies|test)(?:[/?]|$)/.test(path)) notifyDataChanged({ source: 'api', path });
     return data;
   }
   const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
