@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, readdirSync, writeFileSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -38,7 +38,12 @@ test('缺失或损坏的数据库不生成可用备份，也不留下 partial �
     writeFileSync(path.join(dir, 'corrupt.db'), 'this is not sqlite');
     await assert.rejects(backupDatabase(path.join(dir, 'corrupt.db'), path.join(dir, 'backup.db')));
     assert.throws(() => verifyDatabase(path.join(dir, 'corrupt.db')));
-    assert.deepEqual(readdirSync(dir), ['corrupt.db']);
+    assert.deepEqual(readdirSync(dir).sort(), ['corrupt.db', 'corrupt.db.backup-status.json', 'missing.db.backup-status.json']);
+    for (const name of ['corrupt.db', 'missing.db']) {
+      const observation = path.join(dir, `${name}.backup-status.json`);
+      assert.equal(JSON.parse(readFileSync(observation, 'utf8')).state, 'failed');
+      assert.equal(statSync(observation).mode & 0o777, 0o600);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -56,6 +61,8 @@ test('完整校验发现非 schema 页损坏，拒绝发布备份', async () => 
     try { writeSync(fd, Buffer.alloc(100, 0xff), 0, 100, (root - 1) * pageSize); } finally { closeSync(fd); }
     assert.throws(() => verifyDatabase(file));
     await assert.rejects(backupDatabase(file, path.join(dir, 'backup.db')));
-    assert.deepEqual(readdirSync(dir), ['damaged.db']);
+    assert.deepEqual(readdirSync(dir).sort(), ['damaged.db', 'damaged.db.backup-status.json']);
+    assert.equal(JSON.parse(readFileSync(`${file}.backup-status.json`, 'utf8')).state, 'failed');
+    assert.equal(statSync(`${file}.backup-status.json`).mode & 0o777, 0o600);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

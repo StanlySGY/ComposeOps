@@ -2,6 +2,7 @@ import Database from './sqlite.js';
 import { randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { writeBackupObservation } from './backup-observation.js';
 
 function verifyConnection(database) {
   const results = database.pragma('integrity_check');
@@ -18,6 +19,21 @@ export function verifyDatabase(file) {
 
 /** SQLite 快照导出：源库和产物各做一次完整校验，再原子发布。 */
 export async function backupDatabase(source, destination, { onProgress = () => {} } = {}) {
+  const startedAt = Date.now();
+  source = path.resolve(source);
+  await writeBackupObservation(source, { state: 'running', startedAt });
+  try {
+    const result = await createDatabaseSnapshot(source, destination, { onProgress });
+    const finishedAt = Date.now();
+    const observationRecorded = await writeBackupObservation(source, { state: 'succeeded', startedAt, finishedAt, durationMs: finishedAt - startedAt, bytes: result.bytes });
+    return { ...result, durationMs: finishedAt - startedAt, observationRecorded };
+  } catch (error) {
+    const finishedAt = Date.now();
+    await writeBackupObservation(source, { state: 'failed', startedAt, finishedAt, durationMs: finishedAt - startedAt, reason: '备份或完整性校验失败，请查看备份任务输出' });
+    throw error;
+  }
+}
+async function createDatabaseSnapshot(source, destination, { onProgress }) {
   const started = performance.now();
   const progress = (stage) => onProgress({ stage, elapsedMs: Math.round(performance.now() - started) });
   source = path.resolve(source);

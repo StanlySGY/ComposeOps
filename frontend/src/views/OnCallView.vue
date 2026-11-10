@@ -47,6 +47,7 @@
             <AgentMarkdown v-if="incident.diagnosis" class="agent-markdown mt-4 text-sm" :content="incident.diagnosis" />
             <p v-else class="mt-4 text-sm text-surface-300">{{ observer.aiConfigured ? '证据已保存，可发起 AI 分析或直接查看下方记录。' : '尚未配置 AI 服务。只读值守、证据采集和人工审批处置仍可使用。' }}<router-link v-if="!observer.aiConfigured" to="/settings" class="text-link ml-2">配置 AI</router-link></p>
             <p v-if="incident.diagnosisError" class="mt-3 text-xs text-status-warn">诊断暂未完成：{{ incident.diagnosisError }}</p>
+            <details v-if="incident.diagnosisReport?.metadata" class="mt-3 text-xs text-surface-400"><summary class="cursor-pointer">诊断来源与模型记录</summary><p class="mt-2">模型 {{ incident.diagnosisReport.metadata.responseModel || incident.diagnosisReport.metadata.requestedModel }} · {{ incident.diagnosisReport.metadata.latencyMs }} ms · 费用未知</p><div v-for="source in incident.diagnosisReport.sources || []" :key="source.id" class="mt-3"><p>{{ source.id }} · {{ time(source.at) }}</p><pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(source.data, null, 2) }}</pre></div></details>
           </div>
           <div class="section-panel p-4 sm:p-5">
             <div class="flex items-center gap-2"><ShieldCheck class="h-4 w-4 text-status-ok" /><h3 class="font-semibold">受控处置</h3></div>
@@ -65,6 +66,7 @@
             <p class="mt-2 text-xs leading-6 text-surface-400">至少 3 次连续健康观测，持续 30 秒。{{ incident.verification.scope === 'application_http' ? '本事件依据独立 HTTP 探针及容器状态验证；重复读取同一探针样本不计数。' : incident.verification.scope === 'container_healthcheck' ? '本事件依据 Docker HEALTHCHECK 验证。' : '未配置 HEALTHCHECK，只能验证容器进程存活，无法证明应用可用。' }}</p>
             <p v-if="incident.verification.reason" class="mt-2 text-xs text-status-warn">{{ incident.verification.reason }}</p>
           </div>
+          <IncidentCorrelation :key="incident.id" :incident-id="incident.id" />
           <div class="section-panel p-4 sm:p-5"><h3 class="font-semibold">证据时间线</h3><ol class="mt-4 space-y-4"><li v-for="entry in detail.evidence" :key="entry.id" class="border-l-2 border-surface-700 pl-3"><p class="text-xs text-surface-400">#{{ entry.id }} · {{ time(entry.observedAt) }}</p><p class="mt-1 text-sm">{{ entry.summary }}</p><details class="mt-2 text-xs text-surface-400"><summary class="cursor-pointer">查看采集内容</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-surface-950 p-3">{{ JSON.stringify(entry.data, null, 2) }}</pre></details></li></ol></div>
         </template>
       </section>
@@ -87,6 +89,7 @@ import { incidentStatusLabel, incidentStatusTone, effectStatusLabel } from '../l
 import EmptyState from '../components/common/EmptyState.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import AgentMarkdown from '../components/common/AgentMarkdown.vue';
+import IncidentCorrelation from '../components/IncidentCorrelation.vue';
 
 const closeDraft = ref(null), observedNow = ref(Date.now());
 const route = useRoute(), router = useRouter();

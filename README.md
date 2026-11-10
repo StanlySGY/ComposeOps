@@ -99,7 +99,9 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 
 ### 📚 公开文档
 
-- [AI SRE 平台：应用目标、有界自治、可靠变更、恢复演练与证据复盘（开发分支）](docs/public/AI_SRE.md)
+- [AI SRE 平台：应用目标、有界自治、可靠发布、业务恢复与证据复盘](docs/public/AI_SRE.md)
+- [应用接入向导](docs/public/APPLICATION_ONBOARDING.md) · [多服务发布](docs/public/APPLICATION_RELEASES.md) · [数据库与业务恢复](docs/public/BUSINESS_RECOVERY.md)
+- [平台健康与多窗口告警](docs/public/PLATFORM_MONITORING.md) · [故障关联与遥测接入](docs/public/INCIDENT_CORRELATION.md) · [AI 诊断评测](docs/public/DIAGNOSIS_EVALUATION.md)
 - WHY_COMPOSEOPS：`docs/public/WHY_COMPOSEOPS.md`
 - FAQ：`docs/public/FAQ.md`
 - ROADMAP：`docs/public/ROADMAP.md`

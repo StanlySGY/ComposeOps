@@ -1,10 +1,16 @@
 <template>
   <div class="page-shell reliability-view">
-    <div class="page-header"><div><div class="eyebrow">目标 · 观测 · 授权 · 效果</div><h1 class="page-title">应用可靠性</h1><p class="page-subtitle">为应用定义可用性目标，用持续证据约束自动处置。</p></div><div class="flex flex-wrap gap-2"><router-link to="/oncall?from=reliability" class="btn-secondary">故障工作台</router-link><button class="btn-primary" :disabled="busy" @click="edit()">添加应用目标</button></div></div>
+    <div class="page-header"><div><div class="eyebrow">目标 · 观测 · 授权 · 效果</div><h1 class="page-title">应用可靠性</h1><p class="page-subtitle">为应用定义可用性目标，用持续证据约束自动处置。</p></div><div class="flex flex-wrap gap-2"><router-link to="/reliability?tab=onboarding" class="btn-primary">应用接入向导</router-link><router-link to="/oncall?from=reliability" class="btn-secondary">故障工作台</router-link><button class="btn-primary" :disabled="busy" @click="edit()">添加应用目标</button></div></div>
     <p v-if="error" class="alert-error" role="alert">{{ error }}<button class="text-link" @click="load">刷新数据</button></p>
     <p v-if="notice" class="text-sm text-status-ok" role="status">{{ notice }}</p>
     <nav class="flex flex-wrap gap-2" aria-label="可靠性功能"><button v-for="item in tabs" :key="item.key" class="btn-secondary" :class="{ 'border-emerald-500 text-emerald-300': tab === item.key }" :aria-current="tab === item.key ? 'page' : undefined" @click="router.replace({ query: { ...route.query, tab: item.key } })">{{ item.label }}</button></nav>
-    <ReliabilityOperations v-if="tab !== 'targets'" :tab="tab" :profiles="profiles" />
+    <ApplicationOnboarding v-if="tab === 'onboarding'" />
+    <ReliabilityReleases v-else-if="tab === 'releases'" :profiles="profiles" />
+    <ReliabilityBusiness v-else-if="tab === 'business'" />
+    <ReliabilityTelemetry v-else-if="tab === 'telemetry'" />
+    <ReliabilityEvaluations v-else-if="tab === 'evaluations'" />
+    <ReliabilityHealth v-else-if="['platform', 'alerts'].includes(tab)" :key="tab" :tab="tab" :profiles="profiles" />
+    <ReliabilityOperations v-else-if="tab !== 'targets'" :tab="tab" :profiles="profiles" />
     <template v-else>
     <section class="section-panel p-4" aria-label="最近 30 天处置效果">
       <h2 class="text-sm font-semibold">最近 30 天处置效果</h2>
@@ -48,12 +54,18 @@
 import { computed, ref, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ReliabilityOperations from '../components/ReliabilityOperations.vue';
+import ReliabilityHealth from '../components/ReliabilityHealth.vue';
+import ReliabilityEvaluations from '../components/ReliabilityEvaluations.vue';
+import ReliabilityTelemetry from '../components/ReliabilityTelemetry.vue';
+import ReliabilityBusiness from '../components/ReliabilityBusiness.vue';
+import ReliabilityReleases from '../components/ReliabilityReleases.vue';
+import ApplicationOnboarding from '../components/ApplicationOnboarding.vue';
 import { api } from '../api/client.js';
 import BaseModal from '../components/common/BaseModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 const route = useRoute(), router = useRouter();
-const tabs = [{ key: 'targets', label: '应用目标' }, { key: 'changes', label: '可靠变更' }, { key: 'recovery', label: '恢复演练' }, { key: 'reports', label: '效果复盘' }];
+const tabs = [{ key: 'onboarding', label: '接入向导' }, { key: 'targets', label: '应用目标' }, { key: 'releases', label: '应用发布' }, { key: 'changes', label: '单服务变更' }, { key: 'business', label: '业务恢复' }, { key: 'recovery', label: '恢复演练' }, { key: 'alerts', label: '可靠性告警' }, { key: 'platform', label: '平台健康' }, { key: 'telemetry', label: '遥测接入' }, { key: 'evaluations', label: '诊断评测' }, { key: 'reports', label: '效果复盘' }];
 const tab = computed(() => tabs.some(item => item.key === route.query.tab) ? route.query.tab : 'targets');
 const archiveTarget = ref(null);
 const profiles = ref([]), targets = ref([]), insights = ref({}), error = ref(''), notice = ref(''), formError = ref('');

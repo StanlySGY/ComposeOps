@@ -1460,6 +1460,8 @@ body {
 .page-fade-enter-from { opacity: 0; transform: translateY(5px); }
 .page-fade-leave-to { opacity: 0; }
 .modal-backdrop, .command-backdrop, .drawer-backdrop { backdrop-filter: blur(8px); }
+/* 长表单必须在视口内滚动，避免居中弹窗的顶部和提交按钮超出屏幕。 */
+.modal { max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
 /* 浮层是 Liquid Glass 的主场:重玻璃材质 + 顶部镜面高光 + 深投影(iOS 26 sheet/palette) */
 .modal, .event-panel, .command-dialog, .activity-drawer {
   background: rgba(28, 32, 40, 0.86);

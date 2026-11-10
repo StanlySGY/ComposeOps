@@ -3,12 +3,15 @@ import db, { getSetting, setSetting, getProjectPreference } from '../lib/db.js';
 import { getDockerForHost, getHost } from './docker-hosts.js';
 import { scanAllProjects } from './scanner.js';
 import { readContainerLogs } from '../lib/docker-exec.js';
-import { getAiConfig, callOpenAI, fenceUntrusted, newFenceNonce, UNTRUSTED_GUARD } from './ai.js';
+import { getAiConfig, callOpenAI } from './ai.js';
+import { diagnoseEvidence, renderDiagnosis, selectDiagnosisSources } from './diagnosis-protocol.js';
+import { collectIncidentCorrelation } from './incident-correlation.js';
 import { isGuardianEnabled } from './guardian.js';
 import { getIncident, recordIncidentObservation, updateIncidentObservation, addIncidentEvidence, safeIncidentData, incidentError } from './incident-store.js';
 import { listSreProfiles, getSreProfile } from './sre-profiles.js';
 import { createProbeRunner, probeSnapshot } from './sre-probes.js';
 import { considerAutomaticRecovery } from './sre-autonomy.js';
+import { workerHeartbeat } from './sre-heartbeats.js';
 let activeDiagnoses = 0;
 
 export const PROJECT_LABEL = 'com.docker.compose.project';
@@ -38,7 +41,7 @@ export async function withReadTimeout(work, timeoutMs = 8000) {
 
 export function createIncidentObserver({ scan = scanAllProjects, dockerForHost = getDockerForHost, hostForId = getHost,
   now = () => Date.now(), pollMs = 15000, logger = console, diagnose = diagnoseIncident, probeRunner = createProbeRunner(), autoRecover = considerAutomaticRecovery } = {}) {
-  let timer = null, pending = null, stopped = true;
+  let timer = null, pending = null, stopped = true, workStartedAt = null;
   let probePending = null;
   let generation = 0;
   async function collect() {
@@ -151,13 +154,18 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
     return status;
   }
   function runOnce() {
-    if (!pending) pending = collect().finally(() => { pending = null; });
+    if (!pending) {
+      workStartedAt = now();
+      pending = collect().finally(() => { pending = null; workStartedAt = null; workerHeartbeat('incident-observer', { state: stopped ? 'stopped' : 'idle', progress: true, at: now() }); });
+    }
     return pending;
   }
   function tick() {
+    if (!stopped) workerHeartbeat('incident-observer', { state: pending ? 'working' : 'idle', workStartedAt, at: now() });
     const currentGeneration = generation;
     if (!stopped) void runOnce().catch(error => {
       if (stopped || currentGeneration !== generation) return;
+      workerHeartbeat('incident-observer', { state: 'error', error: error.message, at: now() });
       setSetting('sre.last_observation', JSON.stringify({ checkedAt: new Date(now()).toISOString(), error: String(safeIncidentData(error.message)) }));
       logger.error?.('AI 值守采集失败：' + String(safeIncidentData(error.message)));
     });
@@ -166,7 +174,7 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
     stop() { stopped = true; generation += 1; clearInterval(timer); timer = null; return Promise.allSettled([pending, probePending]); } };
 }
 
-export async function diagnoseIncident(id, { call = callOpenAI, config = getAiConfig(), now = Date.now() } = {}) {
+export async function diagnoseIncident(id, { call = callOpenAI, config = getAiConfig(), now = Date.now(), correlate = collectIncidentCorrelation } = {}) {
   const incident = getIncident(id);
   if (incident.resolvedAt) throw incidentError('故障已恢复，可查看已有证据和诊断');
   if (!config.apiKey) throw incidentError('请先配置 AI 服务；只读值守与人工处置仍可使用', 400);
@@ -178,17 +186,15 @@ export async function diagnoseIncident(id, { call = callOpenAI, config = getAiCo
   activeDiagnoses += 1;
   try {
     const evidence = db.prepare('SELECT id,kind,data_json,observed_at FROM ops_incident_evidence WHERE incident_id=? ORDER BY id DESC LIMIT 12').all(id);
-    const context = safeIncidentData({ incident, evidence: evidence.map(row => ({ id: row.id, kind: row.kind, data: JSON.parse(row.data_json), observedAt: row.observed_at })) });
-    const nonce = newFenceNonce();
-    const result = await withReadTimeout(call({ ...config, stream: false, messages: [
-      { role: 'system', content: `你是 ComposeOps 的 AI 值守员。只分析证据，不执行动作。根因是假设而非事实；引用证据编号和时间，缺失证据必须说明。给出影响、最多三条处置建议及风险。不要声称已恢复，恢复由独立健康观测判定。${UNTRUSTED_GUARD}` },
-      { role: 'user', content: '请用中文给出：观测事实、根因假设、影响、建议动作、证据不足之处。\n' + fenceUntrusted('INCIDENT_EVIDENCE', JSON.stringify(context), nonce) },
-    ] }), 90000);
-    const diagnosis = String(safeIncidentData(result.content || '')).trim().slice(0, 16000);
-    if (!diagnosis) throw incidentError('AI 未返回有效诊断');
-    const changed = db.prepare('UPDATE ops_incidents SET diagnosis=?,diagnosis_at=?,diagnosis_error=?,diagnosis_lease_until=0 WHERE id=? AND diagnosis_lease_until=?')
-      .run(diagnosis, new Date(now).toISOString(), '', id, lease);
-    if (changed.changes) addIncidentEvidence(id, 'diagnosis', 'AI 诊断已生成（假设，未经验证）', { diagnosis, evidenceIds: evidence.map(row => row.id) });
+    let correlation;
+    try { correlation = await withReadTimeout(correlate(id), 20000); } catch { correlation = { timeline: [], gaps: ['关联采集未完成，当前诊断只依据已有证据'] }; }
+    const sources = selectDiagnosisSources([{ id: 'current-observation', kind: 'container', at: incident.observedAt, data: incident.latest },
+      ...evidence.filter(row => row.kind !== 'diagnosis').map(row => ({ id: 'evidence:' + row.id, kind: row.kind, data: JSON.parse(row.data_json), at: row.observed_at }))], correlation.timeline);
+    const report = await diagnoseEvidence(sources, { hostId: incident.hostId, projectId: incident.projectId, serviceName: incident.serviceName, openedAt: incident.openedAt, gaps: correlation.gaps }, { call, config });
+    const diagnosis = renderDiagnosis(report.diagnosis);
+    const changed = db.prepare('UPDATE ops_incidents SET diagnosis=?,diagnosis_json=?,diagnosis_at=?,diagnosis_error=?,diagnosis_lease_until=0 WHERE id=? AND diagnosis_lease_until=?')
+      .run(diagnosis, JSON.stringify({ ...report, sources }), new Date(now).toISOString(), '', id, lease);
+    if (changed.changes) addIncidentEvidence(id, 'diagnosis', '结构化 AI 诊断已生成（假设，未经验证）', { diagnosis, protocolVersion: 1, evidenceIds: sources.map(row => row.id), metadata: report.metadata });
     return getIncident(id);
   } catch (error) {
     db.prepare('UPDATE ops_incidents SET diagnosis_error=?,diagnosis_at=?,diagnosis_lease_until=0 WHERE id=? AND diagnosis_lease_until=?')

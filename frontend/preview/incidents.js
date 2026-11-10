@@ -1,4 +1,5 @@
 // Fictional on-call data. All changes stay in this page's memory; no external calls.
+import { previewCorrelation } from './sre-telemetry.js';
 const at = '2026-11-10T08:00:00Z';
 const incident = {
   id: 'demo-incident', ticketId: 'demo-incident', hostId: 'local', projectId: 'knowledge-base', projectName: 'knowledge-base',
@@ -14,6 +15,7 @@ const ticket = () => ({ id: incident.id, title: incident.title, status: 'active'
 const detail = () => ({ incident, ticket: ticket(), effects, evidence, mandates: [], assignments: [], reports: [], activity: [] });
 
 export function previewIncidentFetch(path, method) {
+  if (path === '/incidents/demo-incident/correlation' && method === 'GET') return response(previewCorrelation(incident));
   if (path === '/incidents' && method === 'GET') return response({ incidents: [incident],
     stats: { open: 1, approvals: Number(incident.status === 'awaiting_approval'), verifying: Number(incident.status === 'verifying'), resolved: 0 },
     observer: { running: true, last: { checkedAt: new Date().toISOString() }, aiConfigured: true, autoDiagnosis: false }, worker: { enabled: true, preview: true } });

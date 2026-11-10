@@ -172,7 +172,7 @@ async function* dumpStdout(source, state) {
       const piece = chunk.subarray(offset, offset + take);
       offset += take;
       remaining -= take;
-      if (type === 1) { state.rawBytes += piece.length; yield piece; }
+      if (type === 1) { state.rawBytes += piece.length; if (state.rawBytes > state.maxRawBytes) throw new Error('数据库备份超过容量限制'); yield piece; }
       else state.stderr = (state.stderr + piece.toString('utf8')).slice(-4096);
     }
   }
@@ -180,14 +180,14 @@ async function* dumpStdout(source, state) {
 }
 
 /** 后台只写文件；完成、退出码和解压校验全部通过后原子发布。 */
-export async function persistDumpStream(source, filePath, inspect, { signal, timeoutMs = 900000 } = {}) {
+export async function persistDumpStream(source, filePath, inspect, { signal, timeoutMs = 900000, maxRawBytes = Infinity } = {}) {
   const partial = `${filePath}.${randomUUID()}.partial`;
   const controller = new AbortController();
   const abortSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const timeout = setTimeout(() => controller.abort(new Error('数据库备份超时')), timeoutMs);
   const abort = () => source.destroy(abortSignal.reason);
   abortSignal.addEventListener('abort', abort, { once: true });
-  const state = { rawBytes: 0, stderr: '' };
+  const state = { rawBytes: 0, stderr: '', maxRawBytes };
   try {
     abortSignal.throwIfAborted();
     await pipeline(dumpStdout(source, state), createGzip(), createWriteStream(partial, { flags: 'wx', mode: 0o600 }), { signal: abortSignal });

@@ -390,7 +390,7 @@ async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stre
     onActivity?.();
     if (bufferedTools && result.content) onToken?.(redactSecrets(result.content));
     if (fullReasoning) onReasoning?.(redactSecretStreamTail(fullReasoning.slice(0, MAX_REASONING_CHARS)));
-    return result;
+    return { ...result, responseModel: typeof data.model === 'string' ? data.model.slice(0, 200) : null, systemFingerprint: typeof data.system_fingerprint === 'string' ? data.system_fingerprint.slice(0, 200) : null };
   }
 
   if (!resp.body) throw invalid();

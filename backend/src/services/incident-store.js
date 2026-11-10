@@ -32,6 +32,7 @@ function mapIncident(row) {
     resourceId: row.resource_id, projectName: row.project_name, serviceName: row.service_name,
     title: row.title, status: row.status, identity: parse(row.identity_json), latest: parse(row.latest_json),
     diagnosis: row.diagnosis, diagnosisAt: row.diagnosis_at, diagnosisError: row.diagnosis_error,
+    diagnosisReport: parse(row.diagnosis_json),
     effectId: row.effect_id, healthyCount: row.healthy_count, healthySince: row.healthy_since,
     verification: parse(row.verification_json), openedAt: row.opened_at, observedAt: row.observed_at,
     resolvedAt: row.resolved_at, closedAt: row.closed_at, closureReason: row.closure_reason, updatedAt: row.updated_at,

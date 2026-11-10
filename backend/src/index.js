@@ -19,6 +19,7 @@ import { startStateRecorder, stopStateRecorder } from './services/container-even
 import { getCostAnalysisReport } from './services/cost-analysis.js';
 import { startSreRuntime, stopSreRuntime, recoverSreRuntime } from './services/sre-runtime.js';
 import { startIncidentObserver, stopIncidentObserver } from './services/incident-observer.js';
+import { startPlatformMonitor, stopPlatformMonitor } from './services/sre-platform.js';
 
 const PORT = parseInt(process.env.PORT || process.env.APP_PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -72,7 +73,7 @@ const start = async () => {
     }
     startAlertMonitor();
     startHealthAlerter();
-    if (process.env.DISABLE_BACKGROUND_JOBS !== '1') { startIncidentObserver({ logger: fastify.log }); startSreRuntime({ logger: fastify.log }); }
+    if (process.env.DISABLE_BACKGROUND_JOBS !== '1') { startIncidentObserver({ logger: fastify.log }); startSreRuntime({ logger: fastify.log }); startPlatformMonitor({ logger: fastify.log }); }
     startCronScheduler();
     startWorkflowCronTriggers();
     startTaskWatchdog();
@@ -100,6 +101,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   fastify.log.info({ signal }, 'shutting down');
+  try { await Promise.race([stopPlatformMonitor(), new Promise(resolve => setTimeout(resolve, 5000))]); } catch { /* 独立检查器会继续观测面板停机。 */ }
   try { stopMetricsTimers?.(); } catch { /* 未启动时无需清理 */ }
   try { stopStateRecorder(); } catch { /* 未启动时无需清理 */ }
   try { await Promise.race([stopSreRuntime(), new Promise(resolve => setTimeout(resolve, 5000))]); } catch { /* durable runs remain unknown on interrupted shutdown */ }

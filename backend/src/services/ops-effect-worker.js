@@ -2,6 +2,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import docker from './docker.js';
 import db from '../lib/db.js';
+import { workerHeartbeat } from './sre-heartbeats.js';
 import { redactSecretValue } from '../lib/secret-redactor.js';
 import {
   claimNextOpsEffect, startOpsEffect, heartbeatOpsEffect,
@@ -215,13 +216,16 @@ export function createOpsEffectWorker({
   }
 
   function tick() {
-    if (state !== 'running' || inFlight) return;
+    if (state !== 'running') return;
+    workerHeartbeat('effect-worker', { state: inFlight ? 'working' : lastError ? 'error' : 'idle', workStartedAt: inFlight && lastStartedAt ? Date.parse(lastStartedAt) : null, error: lastError });
+    if (inFlight) return;
     inFlight = runOnce()
+      .then(result => { lastError = result?.error || ''; return result; })
       .catch((error) => {
         lastError = safeError(error);
         logger.error?.({ error: lastError }, 'Effect Worker poll failed');
       })
-      .finally(() => { inFlight = null; });
+      .finally(() => { inFlight = null; workerHeartbeat('effect-worker', { state: state !== 'running' ? 'stopped' : lastError ? 'error' : 'idle', progress: true, error: lastError }); });
   }
 
   function start() {
@@ -238,6 +242,7 @@ export function createOpsEffectWorker({
     if (timer) clearInterval(timer);
     timer = null;
     state = 'stopped';
+    workerHeartbeat('effect-worker', { state: 'stopped' });
     return inFlight || Promise.resolve();
   }
 

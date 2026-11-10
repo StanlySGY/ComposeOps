@@ -1,4 +1,10 @@
 import { previewSreDeliveryFetch } from './sre-delivery.js';
+import { previewSreObservability } from './sre-observability.js';
+import { previewDiagnosisEvaluation } from './diagnosis-evaluation.js';
+import { previewSreTelemetry } from './sre-telemetry.js';
+import { previewSreBusiness } from './sre-business.js';
+import { previewSreReleases } from './sre-releases.js';
+import { previewSreOnboarding } from './sre-onboarding.js';
 // Offline examples only. No HTTP probes, Docker operations or automatic repairs run here.
 const now = Date.now();
 const profiles = [{ id: 'demo-sre', version: 1, hostId: 'local', projectId: 'knowledge-base', projectName: 'knowledge-base', serviceName: 'wiki-api', enabled: true,
@@ -7,6 +13,12 @@ const profiles = [{ id: 'demo-sre', version: 1, hostId: 'local', projectId: 'kno
   statistics: { observedAvailabilityPercent: 98.5, coveragePercent: 92, unknownMs: 3600000, samples: 1200, budgetRemainingMs: -3000000 }, policy: null }];
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 export function previewSreFetch(path, method, body) {
+  const onboarding = previewSreOnboarding(path, method, body, profiles); if (onboarding) return onboarding;
+  const release = previewSreReleases(path, method, body, profiles); if (release) return release;
+  const business = previewSreBusiness(path, method, body); if (business) return business;
+  const telemetry = previewSreTelemetry(path, method, body); if (telemetry) return telemetry;
+  const evaluation = previewDiagnosisEvaluation(path, method); if (evaluation) return evaluation;
+  const observability = previewSreObservability(path, method, body, profiles); if (observability) return observability;
   const delivery = previewSreDeliveryFetch(path, method, body); if (delivery) return delivery;
   if (path === '/sre/profiles' && method === 'GET') return response({ profiles, insights: { incidents: 3, resolved: 2, recoverySamples: 2, medianRecoveryMs: 600000, recurringTargets: 1, automaticDispatches: 0, manualDispatches: 2, effectOutcomes: { succeeded: 2, outcome_unknown: 1 } } });
   if (path === '/sre/targets' && method === 'GET') return response({ targets: [{ hostId: 'local', projectId: 'knowledge-base', projectName: 'knowledge-base', services: ['wiki-api', 'postgres'] }] });

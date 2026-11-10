@@ -34,7 +34,7 @@ export function getSreProfile(id) {
   return profile;
 }
 export function listSreProfiles({ archived = false } = {}) { return db.prepare('SELECT * FROM sre_profiles' + (archived ? '' : ' WHERE archived_at IS NULL') + ' ORDER BY updated_at DESC').all().map(map); }
-export async function saveSreProfile(input, actor = 'admin', { scan = scanProjects, hostForId = getHost, dockerForHost = getDockerForHost, now = Date.now() } = {}) {
+export async function saveSreProfile(input, actor = 'admin', { scan = scanProjects, hostForId = getHost, dockerForHost = getDockerForHost, now = Date.now(), createId } = {}) {
   if (typeof input.enabled !== 'undefined' && typeof input.enabled !== 'boolean') throw incidentError('启用状态无效', 400);
   const archived = !input.id && db.prepare('SELECT * FROM sre_profiles WHERE host_id=? AND project_id=? AND service_name=? AND archived_at IS NOT NULL').get(input.hostId || 'local', input.projectId || '', input.serviceName || '');
   const previous = input.id ? getSreProfile(input.id) : map(archived);
@@ -48,7 +48,7 @@ export async function saveSreProfile(input, actor = 'admin', { scan = scanProjec
   const revision = hostRevision(hostForId(hostId));
   const info = await withReadTimeout(dockerForHost(hostId).info());
   if (!info.ID || hostRevision(hostForId(hostId)) !== revision || !getProjectPreference(projectId).managed) throw incidentError('保存期间应用或节点身份发生变化');
-  const id = previous?.id || 'srep_' + randomUUID();
+  const id = previous?.id || createId || 'srep_' + randomUUID();
   const version = (previous?.version || 0) + 1;
   if (previous?.archivedAt && db.prepare('SELECT COUNT(*) AS n FROM sre_profiles WHERE archived_at IS NULL').get().n >= 200) throw incidentError('可靠性目标已达 200 个上限');
   if (previous) {

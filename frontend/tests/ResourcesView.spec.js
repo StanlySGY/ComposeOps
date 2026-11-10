@@ -29,8 +29,8 @@ async function start(keepAlive = false) {
   wrapper = mount(component, { attachTo: document.body, global: { plugins: [router], stubs } });
   await flushPromises();
 }
-beforeEach(() => { setActivePinia(createPinia()); api.getStorageResources.mockReset().mockImplementation(async () => inventory()); api.removeStorageResource.mockReset().mockResolvedValue({ ok: true }); });
-afterEach(() => { wrapper?.unmount(); wrapper = null; document.body.innerHTML = ''; });
+beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); setActivePinia(createPinia()); api.getStorageResources.mockReset().mockImplementation(async () => inventory()); api.removeStorageResource.mockReset().mockResolvedValue({ ok: true }); });
+afterEach(() => { wrapper?.unmount(); wrapper = null; useToastStore().clear(); vi.useRealTimers(); document.body.innerHTML = ''; });
 
 describe('resource cleanup workflow', () => {
   it('visible select-all preserves hidden selections, and confirmation names all targets', async () => {

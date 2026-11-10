@@ -5,9 +5,13 @@ import path from 'path';
 import { createHash } from 'node:crypto';
 import { isSensitiveKey } from './redaction.js';
 import { redactSecretValue } from './secret-redactor.js';
+import { installSreObservabilitySchema } from './sre-observability-schema.js';
+import { installSreAnalysisSchema } from './sre-analysis-schema.js';
+import { installSreBusinessSchema } from './sre-business-schema.js';
+import { installSreOnboardingSchema } from './sre-onboarding-schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/opsdash.db');
+export const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/opsdash.db');
 
 // 父目录可能不存在(CI fresh checkout / 首次运行):better-sqlite3 只建文件不建目录。
 mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -911,6 +915,10 @@ const MIGRATIONS = [
       `);
     },
   },
+  { version: 25, name: '平台心跳、容量观测与持久多窗口告警', up: installSreObservabilitySchema },
+  { version: 26, name: '结构化诊断评测与范围隔离的遥测证据', up: installSreAnalysisSchema },
+  { version: 27, name: '业务数据库备份和隔离应用恢复', up: installSreBusinessSchema },
+  { version: 28, name: '可恢复幂等的应用接入向导', up: installSreOnboardingSchema },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

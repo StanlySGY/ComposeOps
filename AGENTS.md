@@ -22,6 +22,15 @@
 - Agent 增强二批(借鉴 EnsoCode/OneSSH):**值级脱敏** `lib/secret-redactor.js`——工具结果/挂载日志/页面状态/用户消息先收割敏感值(KEY=VALUE 且键名命中敏感正则),出站文本统一 `redactSecrets`(已知值 + sk-/ghp_/xox/AKIA/Bearer 静态形态 → `[REDACTED]`);**后台任务** `agent/background-tasks.js`——`compose.up/pull` 支持 `background: true` 立即返回 taskId(后台路径超时放宽 15 分钟),`task.list/output/stop` 三工具,完成后同会话下一轮 LLM 调用前搭车注入 `<background-task-update>`(pre-call drain,无送达黑洞;compose 模式可真杀子进程,workspace 模式断流伪停止,containers 模式只标记);**静默轮次恢复**——模型空轮(无文本无工具)剔掉后 system 追加一次性 nudge 重跑,第二次静默按失败收场;**会话压缩** `agent/compaction.js`——确定性事实抽取为种子的固定格式摘要(模型失败回退纯事实),`POST /ai/agent/compact` 推进分界并落 `compact_summary`,引擎每轮把摘要注入 system,工作台会话菜单有"压缩历史"按钮;**记忆 OneSSH 式**——`listAiMemories` 按 importance×veracity 权重×72h 半衰期 recency 加权召回,`recordAiMemoryRecall` 只在 memory.search 显式检索时计数(被动注入不计数,防 recall_count 通胀),`sleepAiMemories` 去重/衰减(30 天未用 ×0.9)/清理(90 天未召回低价值),`memory.save` 支持 importance/veracity。
 - 路由层:`router.js` 的 `preloadRouteChunks()` 在空闲时预取全部 chunk;App.vue 对需要连续上下文的页面做 keep-alive,包括服务/日志/拓扑与重编辑页面。服务/日志页在 `onDeactivated` 中暂停 WebSocket/SSE/轮询,并在 `onActivated` 恢复;ServiceProjectCard 的容器指标订阅也必须配对释放/恢复。新增实时/定时页面时不得只加入缓存白名单,必须实现并测试激活/失活资源生命周期。共享 `.app-main` 滚动位置按路由名保存和恢复;服务/拓扑进入日志时传入 `from` 来源,日志查询变化只更新当前日志上下文,离开日志页或无查询参数的导航不得误清空上下文。页面切换走 `page-fade` 过渡。
 
+## AI SRE 第二轮（v25–28）
+
+- `/reliability` 包含接入向导、应用目标、应用发布、单服务变更、业务恢复、卷恢复演练、可靠性告警、平台健康、遥测接入、诊断评测、效果复盘。新增页面轮询均须配对处理激活/失活。
+- 业务恢复只读源数据库，以原生 dump 和独立网络/新卷/无挂载应用验证 SQL+HTTP；不能将卷归档或 SELECT 1 当作业务恢复通过。每次演练固定备份 SHA、目标身份和配置版本，清理前复核 Engine 与资源标签，未知结果禁止自动重放。
+- 多服务发布使用 `application-release-v1` 和现有持久队列/项目锁；绑定完整配置、全部镜像及兼容声明，依赖顺序更新、逐项验收、失败停止，反序回退必须预先授权。禁止把多服务记录交给单服务审批或执行。
+- v25 平台心跳/告警，v26 结构化诊断与范围遥测，v27 业务备份/恢复，v28 可恢复接入草稿。`/healthz/platform/` 只接受专用监测凭据；`/otlp/v1/logs|traces` 使用节点/项目/服务范围凭据，均不接受普通会话作为替代。
+- 独立监测脚本 `scripts/platform-checker.mjs` 不读 DB、不访问 Docker；生产应由单实例 systemd 管理，凭据/状态位于仓库外。同宿主检查不能覆盖整机断电。诊断评测低分或失败必须保留，不要修改故障标准来美化通过率。
+- 可复现验收：`scripts/business-recovery-drill.mjs`、`scripts/release-acceptance.mjs`、`scripts/platform-checker-acceptance.mjs`；模型评测需显式调用且仅发送脱敏测试数据。详细边界见 `docs/public/AI_SRE.md` 链接的各模块文档。
+
 ## 常用命令
 - 仓库已迁移 npm workspaces:**安装只在根目录 `npm install`**,lockfile 只有根上一份(`package-lock.json`),workspace 包内不再有独立 lockfile——别再生成,否则 CI/Docker 构建又会错位
 - 前端构建: `npm run build`(根执行;零 Warning;`chunkSizeWarningLimit: 3000`)

@@ -122,6 +122,7 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
+  getSreResource: (path, signal) => request('/sre/' + path, { signal }),
   getSreOperations: (signal) => request('/sre/operations', { signal }),
   sreOperation: (path, data = {}, method = 'POST') => request('/sre/' + path, { method, body: JSON.stringify(data) }),
   getRecoveryCandidates: (params, signal) => request('/sre/recovery/candidates?' + new URLSearchParams(params), { signal }),
@@ -134,6 +135,7 @@ export const api = {
   saveSreAutonomy: (id, policy) => request('/sre/profiles/' + encodeURIComponent(id) + '/autonomy', { method: 'PUT', body: JSON.stringify(policy) }),
   getIncidents: (params = {}, signal) => request('/incidents?' + new URLSearchParams(params), { signal }),
   getIncident: (id, signal) => request('/incidents/' + encodeURIComponent(id), { signal }),
+  getIncidentCorrelation: (id, signal) => request('/incidents/' + encodeURIComponent(id) + '/correlation', { signal }),
   diagnoseIncident: (id) => request('/incidents/' + encodeURIComponent(id) + '/diagnose', { method: 'POST', body: '{}' }),
   proposeIncidentRestart: (id) => request('/incidents/' + encodeURIComponent(id) + '/propose-restart', { method: 'POST', body: '{}' }),
   recordCostSnapshot: () => request('/cost-analysis/snapshot', { method: 'POST' }),

@@ -13,13 +13,18 @@ test('v19 副本备份→v20 迁移→还原：保留旧项目身份及全部历
   db.vacuumInto(source);
   let legacy = new Database(source);
   const id = composeProjectId('/same/path', 'app');
+  // 撤回 v25–28 的新增结构后再模拟 v19；仅改 user_version 不等于旧版本数据库。
+  for (const table of ['sre_worker_heartbeats', 'sre_platform_samples', 'sre_alert_rules', 'sre_alert_states', 'sre_alert_deliveries',
+    'sre_diagnosis_evaluations', 'sre_telemetry_credentials', 'sre_telemetry_quotas', 'sre_telemetry',
+    'sre_business_plans', 'sre_business_backups', 'sre_business_runs', 'sre_onboarding']) legacy.exec(`DROP TABLE ${table}`);
+  legacy.exec('ALTER TABLE sre_changes DROP COLUMN started_at; ALTER TABLE ops_incidents DROP COLUMN diagnosis_json');
   legacy.pragma('user_version = 19');
   legacy.exec("DELETE FROM settings WHERE key = 'projects.legacy_host_id'");
   legacy.prepare("INSERT OR REPLACE INTO settings VALUES('docker.active_host', ?)").run('remote-a');
   legacy.prepare('INSERT INTO project_preferences(project_id, managed, note) VALUES(?, 1, ?)').run(id, '保留备注');
   legacy.prepare("INSERT INTO operation_history(project_id, action, status) VALUES(?, 'pull', 'success')").run(id);
   legacy.vacuumInto(backup);
-  assert.deepEqual(runMigrations(legacy), [20, 21, 22, 23, 24]);
+  assert.deepEqual(runMigrations(legacy), [20, 21, 22, 23, 24, 25, 26, 27, 28]);
   const owner = legacy.prepare("SELECT value FROM settings WHERE key = 'projects.legacy_host_id'").get().value;
   assert.equal(owner, 'remote-a');
   assert.equal(composeProjectId('/same/path', 'app', 'remote-a', owner), id);

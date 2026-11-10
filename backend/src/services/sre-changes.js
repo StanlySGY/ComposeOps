@@ -82,6 +82,7 @@ export async function reviewSreChange(input, actor = 'admin', options = {}) {
 }
 export function approveSreChange(id, input, actor = 'admin') {
   const change = getSreChange(id), profile = getSreProfile(change.profileId);
+  if (change.review.recipe !== 'pinned-image-v1') throw incidentError('请通过对应发布流程审批', 400);
   if (input.confirm !== 'APPLY_PINNED_IMAGE' || input.fingerprint !== hash(change.review) || typeof input.allowRollback !== 'boolean') throw incidentError('请明确确认当前评审和回退范围', 400);
   if (change.status !== 'reviewed' || change.expiresAt <= Date.now() || profile.version !== change.review.profileVersion || !profile.enabled) throw incidentError('评审已过期或应用目标发生变化');
   policy(profile, id, actor);
@@ -174,8 +175,10 @@ export async function verifySreChange(change, expectedImage, deps) {
 }
 /** CAS before dispatch; a restarted process only marks in-flight changes unknown and never replays them. */
 export async function executeSreChange(id, options = {}) {
+  if (getSreChange(id).review.recipe === 'application-release-v1') return (await import('./sre-releases.js')).executeSreRelease(id, options);
   const deps = { ...defaults, materialize, verifyMaterial, backupInputs, dispatch, verify: verifySreChange, ...options };
-  const claimed = db.prepare("UPDATE sre_changes SET status='checking',updated_at=? WHERE id=? AND status='queued'").run(Date.now(), id);
+  const startedAt = Date.now();
+  const claimed = db.prepare("UPDATE sre_changes SET status='checking',updated_at=?,started_at=? WHERE id=? AND status='queued'").run(startedAt, startedAt, id);
   if (!claimed.changes) return getSreChange(id);
   let change = getSreChange(id), dispatched = false;
   try {
@@ -231,6 +234,7 @@ export function recoverSreChanges() {
   return db.prepare("UPDATE sre_changes SET status='outcome_unknown',error='执行器中断；请核对实际镜像、应用健康及变更材料，不自动重放',updated_at=? WHERE status IN ('checking','executing','verifying','rolling_back','verifying_rollback')").run(Date.now()).changes;
 }
 export async function acknowledgeSreChange(id, reason, actor = 'admin', options = {}) {
+  if (getSreChange(id).review.recipe === 'application-release-v1') return (await import('./sre-releases.js')).acknowledgeSreRelease(id, reason, actor, options);
   const change = getSreChange(id), deps = { ...defaults, ...options };
   if (change.status !== 'outcome_unknown' || typeof reason !== 'string' || reason.trim().length < 8 || reason.length > 1000) throw incidentError('仅可在人工核对后关闭未知结果，请填写至少 8 字说明', 400);
   return withProjectOperationLock(change.projectId, async () => {
@@ -245,3 +249,4 @@ export async function acknowledgeSreChange(id, reason, actor = 'admin', options 
     return update(id, 'closed', result, '人工核对后关闭；原执行结果仍未知，不计入成功');
   });
 }
+export const sreDeploymentIO = { materialize, verifyMaterial, backupInputs, dispatch };
