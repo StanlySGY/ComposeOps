@@ -43,7 +43,7 @@ try {
   const managed = await request('/projects/' + project.id);
   assert.equal(managed.mounted, !workspaceMode, 'test the intended execution mode');
   const reviewPath = '/projects/' + project.id + '/deployment-review';
-  const reviewed = await request(reviewPath, 'POST');
+  const reviewed = await request(reviewPath, 'POST', {});
   assert.equal(reviewed.files.length, 2, 'review covers both files in the actual execution context');
   assert.ok(reviewed.content.includes('[REDACTED]'), 'effective environment values stay hidden');
   writeFileSync(envFile, 'REVIEW_MARKER=changed\n');
@@ -55,7 +55,7 @@ try {
   assert.equal(rejected.status, 409, await rejected.text());
   assert.ok(docker(['inspect', ...docker([...composeArgs, 'ps', '-q']).split('\n'), '--format', '{{json .Config.Env}}']).includes('REVIEW_MARKER=reviewed'));
   writeFileSync(envFile, 'REVIEW_MARKER=reviewed\n');
-  const accepted = await action((await request(reviewPath, 'POST')).token);
+  const accepted = await action((await request(reviewPath, 'POST', {})).token);
   assert.equal(accepted.status, 200);
   assert.match(await accepted.text(), /"type":"exit","data":\{"code":0\}/);
   console.log('PASS real backend ' + (workspaceMode ? 'workspace' : 'direct') + ': merged review, environment drift rejection and reviewed deployment');
