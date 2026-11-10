@@ -265,8 +265,8 @@ test('Effect Worker: reports its read-only capability and stops its polling loop
     logger: silentLogger,
   });
   assert.equal(worker.getStatus().state, 'stopped');
-  assert.equal(worker.getStatus().readOnlyOnly, true);
-  assert.deepEqual(worker.getStatus().supportedActions.map((item) => item.effectType), ['service.inspect', 'container.inspect']);
+  assert.equal(worker.getStatus().readOnlyOnly, false);
+  assert.deepEqual(worker.getStatus().supportedActions.map((item) => item.effectType), ['service.inspect', 'container.inspect', 'incident.restart']);
   worker.start();
   assert.equal(worker.getStatus().state, 'running');
   assert.equal(worker.getStatus().enabled, true);

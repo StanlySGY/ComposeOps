@@ -5,6 +5,7 @@ import { useToastStore } from './stores/toast.js';
 const routes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', name: 'dashboard', component: () => import('./views/DashboardView.vue') },
+  { path: '/oncall', name: 'oncall', component: () => import('./views/OnCallView.vue') },
   { path: '/services', name: 'services', component: () => import('./views/ServicesView.vue') },
   { path: '/compose', name: 'compose', component: () => import('./views/ComposeView.vue') },
   { path: '/logs', name: 'logs', component: () => import('./views/LogsView.vue') },

@@ -200,7 +200,7 @@ export function approveOpsEffect(ticketId,effectId,actor='admin'){
  requireTicket(ticketId);const r=db.prepare('SELECT * FROM ops_effects WHERE id=? AND ticket_id=?').get(effectId,ticketId);if(!r)fail('Effect 不存在','effect_not_found',404);
  if(r.mode!=='execute'||r.status!=='awaiting_approval')fail('只有等待审批的执行意图可以批准','effect_not_approvable',409);
  const m=assertEffectMandate(r);
- db.transaction(()=>{db.prepare("UPDATE ops_effects SET status='queued',approved_by=?,approved_at=?,updated_at=? WHERE id=? AND status='awaiting_approval'").run(safe(actor,80,'审批人')||'admin',now(),now(),effectId);activity(ticketId,'effect_approved_queued',{effectId,mandateId:m.id,note:'审批仅授权入队；受控 Worker 只执行已登记的只读动作，审批本身不触发外部操作'},actor);})();
+ db.transaction(()=>{db.prepare("UPDATE ops_effects SET status='queued',approved_by=?,approved_at=?,updated_at=? WHERE id=? AND status='awaiting_approval'").run(safe(actor,80,'审批人')||'admin',now(),now(),effectId);activity(ticketId,'effect_approved_queued',{effectId,mandateId:m.id,note:'审批仅授权入队；受控 Worker 只执行已登记且通过目标校验的动作，审批本身不触发外部操作'},actor);})();
  return effectRow(db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId));
 }
 export function cancelOpsEffect(ticketId,effectId,reason='',actor='admin'){
@@ -268,6 +268,13 @@ export function completeOpsEffect(effectId,workerId,input={}){
  if(r.status!=='executing'||r.lease_owner!==owner||Date.parse(r.lease_expires_at||'')<=Date.now())fail('Effect 不属于该 Worker 的有效执行租约','effect_lease_invalid',409);
  const result=obj(input.result,'执行结果',32000),error=safe(input.error,2000,'执行错误'),status=input.success===true?'succeeded':'failed';
  db.transaction(()=>{db.prepare('UPDATE ops_effects SET status=?,result_json=?,error=?,finished_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?').run(status,encoded(result),error,now(),now(),effectId);activity(r.ticket_id,'effect_completed',{effectId,status,error});})();
+ return effectRow(db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId));
+}
+export function markOpsEffectUnknown(effectId, workerId, error) {
+ const row=db.prepare("SELECT * FROM ops_effects WHERE id=? AND status='executing' AND lease_owner=?").get(effectId,workerId);
+ if(!row)fail('执行租约已失效','effect_lease_invalid',409);
+ const reason=safe(error,2000,'不确定结果说明',true);
+ db.transaction(()=>{db.prepare("UPDATE ops_effects SET status='outcome_unknown',error=?,finished_at=?,updated_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=?").run(reason,now(),now(),effectId);activity(row.ticket_id,'effect_outcome_unknown',{effectId,reason});})();
  return effectRow(db.prepare('SELECT * FROM ops_effects WHERE id=?').get(effectId));
 }
 export function reconcileOpsEffect(ticketId,effectId,outcome,note,actor='admin'){

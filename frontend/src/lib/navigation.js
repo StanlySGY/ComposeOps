@@ -4,6 +4,7 @@ import { projectReturnLocation } from './project-navigation.js';
 // Shared labels keep the header, breadcrumbs and browser tab in agreement.
 export const PAGE_DETAILS = {
   dashboard: { label: '运维总览', group: '工作台' },
+  oncall: { label: 'AI 值守', group: '观测' },
   services: { label: '服务总览', group: '运行' },
   compose: { label: 'Compose 配置', group: '运行', parent: 'services' },
   logs: { label: '实时日志', group: '运行', parent: 'services' },

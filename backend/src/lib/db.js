@@ -805,6 +805,39 @@ const MIGRATIONS = [
       database.prepare('UPDATE container_metrics SET stats_approximate = 1 WHERE timestamp < ?').run(Date.now() - 7 * 86400000);
     },
   },
+  {
+    version: 22,
+    name: 'AI 值守故障、证据与独立恢复验收',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS ops_incidents (
+          id TEXT PRIMARY KEY REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          correlation_key TEXT NOT NULL,
+          host_id TEXT NOT NULL, project_id TEXT NOT NULL, resource_id TEXT NOT NULL,
+          project_name TEXT NOT NULL, service_name TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'investigating',
+          identity_json TEXT NOT NULL, latest_json TEXT NOT NULL,
+          diagnosis TEXT NOT NULL DEFAULT '', diagnosis_at TEXT, diagnosis_error TEXT NOT NULL DEFAULT '',
+          diagnosis_lease_until INTEGER NOT NULL DEFAULT 0,
+          effect_id TEXT REFERENCES ops_effects(id) ON DELETE RESTRICT,
+          healthy_count INTEGER NOT NULL DEFAULT 0, healthy_since TEXT,
+          verification_json TEXT NOT NULL DEFAULT '{}',
+          opened_at TEXT NOT NULL, observed_at TEXT NOT NULL, resolved_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_ops_incident_open
+          ON ops_incidents(correlation_key) WHERE resolved_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_ops_incident_status ON ops_incidents(status, updated_at);
+        CREATE TABLE IF NOT EXISTS ops_incident_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          incident_id TEXT NOT NULL REFERENCES ops_incidents(id) ON DELETE RESTRICT,
+          kind TEXT NOT NULL, summary TEXT NOT NULL, data_json TEXT NOT NULL,
+          observed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ops_incident_evidence ON ops_incident_evidence(incident_id, id);
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

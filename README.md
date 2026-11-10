@@ -99,6 +99,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 
 ### 📚 公开文档
 
+- [AI SRE 第一阶段：AI 值守、审批处置与独立恢复验证（开发分支）](docs/public/AI_SRE.md)
 - WHY_COMPOSEOPS：`docs/public/WHY_COMPOSEOPS.md`
 - FAQ：`docs/public/FAQ.md`
 - ROADMAP：`docs/public/ROADMAP.md`

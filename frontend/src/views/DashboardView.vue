@@ -19,6 +19,7 @@
     <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="4" label="总览数据加载中" />
     <template v-else>
       <EnvironmentBrief :projects="store.projects" :incomplete="!!loadError" />
+      <OnCallSummary />
       <div class="metric-grid">
         <MetricTile title="项目总数" aria-label="查看全部项目" :value="projectCount" :sub="`健康 ${healthyProjects}`" :icon="Boxes" to="/services?from=dashboard" />
         <MetricTile title="容器总数" aria-label="查看容器状态" :value="containerCount" :sub="`运行 ${runningContainers}`" :icon="Container" tone="text-status-ok" to="/services?from=dashboard" />
@@ -97,6 +98,7 @@ import EnvironmentBrief from '../components/dashboard/EnvironmentBrief.vue';
 import { monitorTrends, pushMonitorTrend } from '../lib/monitor-trends.js';
 
 import { projectAttention, projectLogTarget } from '../lib/project-health.js';
+import OnCallSummary from '../components/OnCallSummary.vue';
 
 const quickActions = [
   { to: '/services', icon: Boxes, label: '管理服务', description: '查看项目与容器状态' },

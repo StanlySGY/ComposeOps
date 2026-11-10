@@ -80,6 +80,7 @@ const navGroups = [
   {
     label: '观测',
     items: [
+      { to: '/oncall', icon: ShieldCheck, label: 'AI 值守' },
       { to: '/topology', icon: Network, label: '拓扑' },
       { to: '/monitor', icon: ChartNoAxesCombined, label: '实时监控' },
       { to: '/events', icon: BellRing, label: '事件中心' },

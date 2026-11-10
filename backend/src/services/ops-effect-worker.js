@@ -5,8 +5,10 @@ import db from '../lib/db.js';
 import { redactSecretValue } from '../lib/secret-redactor.js';
 import {
   claimNextOpsEffect, startOpsEffect, heartbeatOpsEffect,
-  completeOpsEffect, rejectOpsEffect,
+  completeOpsEffect, rejectOpsEffect, markOpsEffectUnknown,
 } from './ops-tickets.js';
+import { executeIncidentRestart, validateIncidentEffect } from './incident-remediation.js';
+import { INCIDENT_ACTION } from './incident-store.js';
 
 const PROJECT_LABEL = 'com.docker.compose.project';
 const SERVICE_LABEL = 'com.docker.compose.service';
@@ -18,6 +20,7 @@ const MAX_CONTAINERS = 200;
 const ACTIONS = Object.freeze({
   'service.inspect': Object.freeze({ readOnly: true, idempotent: true, maxRisk: 'low' }),
   'container.inspect': Object.freeze({ readOnly: true, idempotent: true, maxRisk: 'low' }),
+  'incident.restart': Object.freeze({ readOnly: false, idempotent: false, maxRisk: 'high', humanApprovalRequired: true }),
 });
 const riskRank = { low: 0, medium: 1, high: 2, critical: 3 };
 const safeError = (error) => redactSecretValue(String(error?.message || error || 'Worker 执行失败')).slice(0, 1000);
@@ -30,9 +33,10 @@ function projectName(target) {
 
 function validateEffect(effect) {
   const action = ACTIONS[effect.effectType];
-  if (!action) return '不支持动作 ' + effect.effectType + '；当前仅允许 service.inspect 和 container.inspect';
+  if (!action) return '不支持动作 ' + effect.effectType + '；仅允许已登记的检查动作和故障处置流程';
   if (effect.mode !== 'execute') return '只有 Execute 模式的意图可以进入派发';
   if (!effect.approvedBy || !effect.approvedAt) return '缺少人工审批记录，拒绝派发';
+  if (effect.effectType === INCIDENT_ACTION) return validateIncidentEffect(effect);
   if (riskRank[effect.risk] === undefined || riskRank[effect.risk] > riskRank[action.maxRisk]) return '当前动作最高只接受 ' + action.maxRisk + ' 风险，拒绝 ' + effect.risk + ' 风险请求';
   if (!action.readOnly || !action.idempotent) return '动作未通过只读与幂等安全约束';
   if (effect.target?.hostId) return '当前 Worker 仅连接本机 Docker Engine，不支持远程 Host 派发';
@@ -108,6 +112,7 @@ export function createOpsEffectWorker({
   pollMs = 3000,
   leaseSeconds = 60,
   logger = console,
+  incidentDependencies = {},
 } = {}) {
   const interval = Math.max(1000, Math.min(Number(pollMs) || 3000, 60000));
   const lease = Math.max(10, Math.min(Number(leaseSeconds) || 60, 600));
@@ -122,7 +127,7 @@ export function createOpsEffectWorker({
 
   const status = () => ({
     state, enabled: state === 'running', workerId, pollMs: interval, leaseSeconds: lease,
-    readOnlyOnly: true,
+    readOnlyOnly: false,
     supportedActions: Object.entries(ACTIONS).map(([effectType, meta]) => ({ effectType, ...meta })),
     unsupportedExamples: ['image.pull', 'compose.up', 'compose.down', 'container.restart', 'container.remove', 'volume.delete', 'shell.exec'],
     queueDepth: Number(db.prepare("SELECT COUNT(*) AS count FROM ops_effects WHERE status='queued'").get().count) || 0,
@@ -152,8 +157,10 @@ export function createOpsEffectWorker({
     let heartbeatTimer = null;
     let heartbeatError = null;
     try {
-      startOpsEffect(effect.id, workerId);
-      started = true;
+      if (effect.effectType !== INCIDENT_ACTION) {
+        startOpsEffect(effect.id, workerId);
+        started = true;
+      }
       lastStartedAt = new Date().toISOString();
       heartbeatTimer = setInterval(() => {
         try { heartbeatOpsEffect(effect.id, workerId, lease); }
@@ -161,7 +168,9 @@ export function createOpsEffectWorker({
       }, Math.max(3000, Math.floor((lease * 1000) / 3)));
       heartbeatTimer.unref?.();
 
-      const result = effect.effectType === 'service.inspect'
+      const result = effect.effectType === INCIDENT_ACTION
+        ? await executeIncidentRestart(effect, { ...incidentDependencies, workerId, onStarted: () => { started = true; } })
+        : effect.effectType === 'service.inspect'
         ? await inspectService({ dockerClient, target: effect.target })
         : await inspectContainer({ dockerClient, target: effect.target });
 
@@ -176,6 +185,10 @@ export function createOpsEffectWorker({
       lastError = message;
       if (!started) {
         const current = db.prepare('SELECT status FROM ops_effects WHERE id=?').get(effect.id);
+        if (current?.status === 'leased') {
+          const rejected = rejectOpsEffect(effect.id, workerId, message);
+          return { processed: true, status: rejected.status, effect: rejected, error: message };
+        }
         return { processed: true, status: current?.status || 'rejected', effectId: effect.id, error: message };
       }
       if (heartbeatError) {
@@ -183,6 +196,10 @@ export function createOpsEffectWorker({
         return { processed: true, status: 'lease_lost', effectId: effect.id, error: message };
       }
       try {
+        if (error.outcomeUnknown || effect.effectType === INCIDENT_ACTION) {
+          const unknown = markOpsEffectUnknown(effect.id, workerId, message);
+          return { processed: true, status: unknown.status, effect: unknown, error: message };
+        }
         const completed = completeOpsEffect(effect.id, workerId, { success: false, error: message, result: { readOnly: true } });
         processed += 1;
         lastFinishedAt = new Date().toISOString();
@@ -242,7 +259,7 @@ export function stopOpsEffectWorker() {
 export function getOpsEffectWorkerStatus() {
   if (singleton) return singleton.getStatus();
   return {
-    state: 'stopped', enabled: false, readOnlyOnly: true,
+    state: 'stopped', enabled: false, readOnlyOnly: false,
     supportedActions: Object.entries(ACTIONS).map(([effectType, meta]) => ({ effectType, ...meta })),
     unsupportedExamples: ['image.pull', 'compose.up', 'compose.down', 'container.restart', 'container.remove', 'volume.delete', 'shell.exec'],
     queueDepth: Number(db.prepare("SELECT COUNT(*) AS count FROM ops_effects WHERE status='queued'").get().count) || 0,

@@ -2,6 +2,7 @@ import { previewSchedule, validateCron, nextRunTime } from '../../backend/src/li
 import { parseDocument } from 'yaml';
 import { at, projects, metrics, inspection, operations, alerts, storage, costReport, resources, marketplaceTemplates, channels, preferences, backups, logs, compose } from './fixtures.js';
 
+import { previewIncidentFetch } from './incidents.js';
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const unsupported = () => json({ message: '此操作未在离线预览中模拟，请在自己的部署中使用。没有执行任何真实操作。' }, 501);
@@ -76,6 +77,8 @@ export async function previewFetch(input, options = {}) {
   if (url.origin !== location.origin) return unsupported();
   const path = url.pathname.replace(/^\/api\/v1/, '');
   const method = (options.method || input?.method || 'GET').toUpperCase();
+  const incidentResponse = previewIncidentFetch(path, method);
+  if (incidentResponse) return incidentResponse;
   let body = {};
   try { body = JSON.parse(options.body || '{}'); } catch { return json({ message: '示例请求格式无效' }, 400); }
   const pid = path.split('/')[2];

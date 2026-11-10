@@ -122,6 +122,10 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
+  getIncidents: (params = {}, signal) => request('/incidents?' + new URLSearchParams(params), { signal }),
+  getIncident: (id, signal) => request('/incidents/' + encodeURIComponent(id), { signal }),
+  diagnoseIncident: (id) => request('/incidents/' + encodeURIComponent(id) + '/diagnose', { method: 'POST', body: '{}' }),
+  proposeIncidentRestart: (id) => request('/incidents/' + encodeURIComponent(id) + '/propose-restart', { method: 'POST', body: '{}' }),
   recordCostSnapshot: () => request('/cost-analysis/snapshot', { method: 'POST' }),
   getAiRetention: () => request('/personal/maintenance/ai-retention'),
   saveAiRetention: (days) => request('/personal/maintenance/ai-retention', { method: 'PUT', body: JSON.stringify({ days }) }),
