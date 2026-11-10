@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import db, { getSetting, setSetting } from '../lib/db.js';
+import db, { getSetting, setSetting, getProjectPreference } from '../lib/db.js';
 import { getDockerForHost, getHost } from './docker-hosts.js';
 import { scanAllProjects } from './scanner.js';
 import { readContainerLogs } from '../lib/docker-exec.js';
 import { getAiConfig, callOpenAI, fenceUntrusted, newFenceNonce, UNTRUSTED_GUARD } from './ai.js';
 import { isGuardianEnabled } from './guardian.js';
 import { getIncident, recordIncidentObservation, updateIncidentObservation, addIncidentEvidence, safeIncidentData, incidentError } from './incident-store.js';
-import { listSreProfiles } from './sre-profiles.js';
+import { listSreProfiles, getSreProfile } from './sre-profiles.js';
 import { createProbeRunner, probeSnapshot } from './sre-probes.js';
 import { considerAutomaticRecovery } from './sre-autonomy.js';
 let activeDiagnoses = 0;
@@ -48,12 +48,13 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
     const projects = await withReadTimeout(scan(), 10000);
     if (currentGeneration !== generation) return;
     const profiles = listSreProfiles();
-    const open = db.prepare('SELECT id FROM ops_incidents WHERE resolved_at IS NULL').all().map(row => getIncident(row.id));
+    const open = db.prepare('SELECT id FROM ops_incidents WHERE resolved_at IS NULL AND closed_at IS NULL').all().map(row => getIncident(row.id));
     const targets = new Map();
     for (const project of projects.filter(item => item.managed)) {
       for (const container of project.containers || []) targets.set(`${project.hostId}:${container.id}`, { project, resourceId: container.id });
     }
     for (const incident of open) {
+      if (incident.resourceId.startsWith('application:')) continue;
       const key = `${incident.hostId}:${incident.resourceId}`;
       const target = targets.get(key);
       if (target) target.incident = incident;
@@ -81,6 +82,7 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
           const identity = { hostRevision: revision, engineId: info.ID, containerId: item.Id, createdAt: item.Created, composeProject: project.projectName };
           let snapshot = containerSnapshot(item);
           const profile = profiles.find(profile => profile.hostId === project.hostId && profile.projectId === project.id && profile.serviceName === snapshot.service);
+          if (profile && getSreProfile(profile.id).version !== profile.version) continue;
           if (profile && (profile.enabled || incident?.identity.probe)) {
             snapshot = probeSnapshot(profile, snapshot, now());
             if (profile.engineId !== info.ID || profile.hostRevision !== revision) { snapshot.healthy = false; snapshot.error = '应用目标的 Docker 节点身份发生变化，请重新审阅目标'; }
@@ -108,6 +110,41 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
           if (incident) updateIncidentObservation(incident.id, { ...incident.latest, healthy: false, error: String(safeIncidentData(error.message)) }, incident.identity, new Date(now()).toISOString());
         }
       }
+    }));
+    // A configured application can fail with zero containers. Preserve an application-level
+    // incident without inventing a restart target or treating an unreachable node as healthy.
+    const appQueue = profiles.filter(item => item.enabled && getProjectPreference(item.projectId).managed);
+    await Promise.all(Array.from({ length: Math.min(4, appQueue.length) }, async () => {
+    while (appQueue.length) {
+      const profile = appQueue.shift();
+      if (currentGeneration !== generation) break;
+      const resourceId = 'application:' + profile.id;
+      const previous = open.find(item => item.resourceId === resourceId);
+      const discovered = projects.find(item => item.id === profile.projectId && item.hostId === profile.hostId && item.managed);
+      if (!previous && discovered?.containers?.some(item => item.service === profile.serviceName)) continue;
+      try {
+        const revision = hostRevision(hostForId(profile.hostId)), docker = dockerForHost(profile.hostId);
+        if (!infos.has(profile.hostId)) infos.set(profile.hostId, withReadTimeout(docker.info()));
+        const info = await infos.get(profile.hostId);
+        if (info.ID !== profile.engineId || revision !== profile.hostRevision) throw incidentError('应用目标的节点身份已变化');
+        const listed = await withReadTimeout(docker.listContainers({ all: true, filters: { label: [`${PROJECT_LABEL}=${profile.projectName}`, `${SERVICE_LABEL}=${profile.serviceName}`] } }));
+        const items = await Promise.all(listed.map(row => withReadTimeout(docker.getContainer(row.Id).inspect())));
+        if (currentGeneration !== generation) break;
+        if (getSreProfile(profile.id).version !== profile.version || !getSreProfile(profile.id).enabled) continue;
+        if (hostRevision(hostForId(profile.hostId)) !== revision) throw incidentError('采集期间节点已变化');
+        const identity = { hostRevision: revision, engineId: info.ID, applicationId: profile.id, probe: { profileId: profile.id, version: profile.version } };
+        const snapshot = probeSnapshot(profile, { id: resourceId, name: profile.serviceName, service: profile.serviceName,
+          state: items.length ? '服务已出现' : '服务容器不存在', healthy: items.length > 0 && items.every(item => containerSnapshot(item).healthy),
+          fault: items.length ? '' : '服务容器不存在', startedAt: items.map(item => item.State?.StartedAt).sort().join(','), restartCount: items.reduce((sum, item) => sum + (item.RestartCount || 0), 0) }, now());
+        const project = { id: profile.projectId, projectName: profile.projectName, hostId: profile.hostId };
+        const result = recordIncidentObservation({ project, snapshot, identity, at: new Date(now()).toISOString() });
+        if (result && !previous) addIncidentEvidence(result.id, 'application_target', '应用无可重启容器，保留人工调查；不会自动创建或重启替代容器', { profileId: profile.id });
+        observed++;
+      } catch (error) {
+        failures++;
+        if (previous && currentGeneration === generation) updateIncidentObservation(previous.id, { ...previous.latest, healthy: false, error: String(safeIncidentData(error.message)) }, previous.identity, new Date(now()).toISOString());
+      }
+    }
     }));
     const status = { observed, failures, checkedAt: new Date(now()).toISOString() };
     if (currentGeneration === generation) setSetting('sre.last_observation', JSON.stringify(status));

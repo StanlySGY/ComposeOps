@@ -35,6 +35,7 @@ import { stopAllGitOpsWatchers } from './services/gitops.js';
 import { stopStateRecorder } from './services/container-events.js';
 import incidentRoutes from './routes/incidents.js';
 import sreRoutes from './routes/sre.js';
+import { stopSreRuntime } from './services/sre-runtime.js';
 import { stopIncidentObserver } from './services/incident-observer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -220,6 +221,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     stopAllGitOpsWatchers();
     stopStateRecorder();
     await stopIncidentObserver();
+    await stopSreRuntime();
     await closeAllWorkspaceRunners();
   });
 

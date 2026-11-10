@@ -34,7 +34,7 @@ export function proposeIncidentRestart(id, actor = 'admin') {
     if (incident.effectId !== old.id) throw incidentError('处置记录未与故障关联，请在任务中人工核对，不能自动接管');
     return { effect: old, replayed: true };
   }
-  if (incident.resolvedAt || !incident.latest.fault || incident.latest.error) throw incidentError('当前证据不足以生成重启处置，请等待有效故障观测');
+  if (incident.resolvedAt || incident.closedAt || !incident.latest.fault || incident.latest.error) throw incidentError('当前证据不足以生成重启处置，请等待有效故障观测');
   if (Date.now() - Date.parse(incident.observedAt) > OBSERVATION_MAX_AGE_MS) throw incidentError('故障证据已过期，请等待下一轮采集');
   if (!getProjectPreference(incident.projectId).managed) throw incidentError('项目已取消纳管，不能生成处置');
   if (hostRevision(getHost(incident.hostId)) !== incident.identity.hostRevision) throw incidentError('节点配置已变化，需要重新核对');
@@ -59,7 +59,7 @@ export function validateIncidentEffect(effect) {
     const incident = getIncident(effect.ticketId);
     if (['succeeded', 'failed', 'cancelled'].includes(getOpsTicketDetail(effect.ticketId).ticket.status)) throw incidentError('关联长期任务已结束，不能继续处置');
     if (effect.effectType !== INCIDENT_ACTION || effect.risk !== 'high' || effect.mode !== 'execute') throw incidentError('故障处置动作、风险或模式无效');
-    if (incident.effectId !== effect.id || incident.resolvedAt) throw incidentError('该动作不属于未恢复的故障事件');
+    if (incident.effectId !== effect.id || incident.resolvedAt || incident.closedAt) throw incidentError('该动作不属于未恢复的故障事件');
     if (JSON.stringify(effect.target) !== JSON.stringify(incidentTarget(incident))) throw incidentError('处置目标与故障身份快照不一致');
     if (JSON.stringify(effect.payload) !== JSON.stringify({ incidentId: incident.id, recipeVersion: INCIDENT_RECIPE })) throw incidentError('处置参数不符合已登记流程');
     if (effect.idempotencyKey !== INCIDENT_RECIPE || effect.startedAt) throw incidentError('故障处置不能重复派发，请人工核对');

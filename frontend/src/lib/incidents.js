@@ -1,5 +1,5 @@
 export function incidentStatusLabel(value) {
-  return ({ investigating: '待调查', awaiting_approval: '待审批', queued: '等待执行', executing: '正在处置', verifying: '验证恢复中', needs_attention: '需要人工介入', resolved: '已验证恢复' })[value] || '状态待确认';
+  return ({ investigating: '待调查', awaiting_approval: '待审批', queued: '等待执行', executing: '正在处置', verifying: '验证恢复中', needs_attention: '需要人工介入', closed: '已关闭（未验收）', resolved: '已验证恢复' })[value] || '状态待确认';
 }
 export function incidentStatusTone(value) {
   return value === 'resolved' ? 'text-status-ok' : ['awaiting_approval', 'needs_attention'].includes(value) ? 'text-status-warn' : 'text-sky-300';

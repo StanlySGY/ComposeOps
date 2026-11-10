@@ -189,23 +189,37 @@ async function ensureHelperImage(docker) {
 }
 
 /** 跑一次性 helper 容器执行命令,返回 { exitCode, output }。 */
-async function runHelper(docker, cmd, binds) {
+async function runHelper(docker, cmd, binds, { onResource = () => {}, timeoutMs = 0 } = {}) {
   await ensureHelperImage(docker);
+  const resourceName = 'composeops-backup-' + randomBytes(12).toString('hex');
+  await onResource({ kind: 'container', id: resourceName, state: 'reserved' });
   const container = await docker.createContainer({
-    Image: HELPER_IMAGE,
+    name: resourceName, Image: HELPER_IMAGE,
     Cmd: ['sh', '-c', cmd],
     // The helper only needs its bind mounts; a transient network endpoint is unnecessary.
     HostConfig: { Binds: binds, NetworkMode: 'none' },
     Labels: { 'composeops.role': 'volume-backup' },
   });
   try {
+    await onResource({ kind: 'container', id: resourceName, state: 'created' });
     await container.start();
-    const wait = await container.wait();
+    let timeout;
+    const wait = timeoutMs > 0
+      ? await Promise.race([container.wait(), new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('备份验证 helper 超过 5 分钟')), timeoutMs); })]).finally(() => clearTimeout(timeout))
+      : await container.wait();
     const logStream = await container.logs({ stdout: true, stderr: true, follow: false });
     const output = await collectDockerOutput(logStream);
     return { exitCode: wait.StatusCode ?? wait, output: output.trim() };
   } finally {
-    await container.remove({ force: true }).catch(() => {});
+    try {
+      await container.remove({ force: true });
+      await onResource({ kind: 'container', id: resourceName, state: 'removed' });
+    } catch (error) {
+      await onResource({ kind: 'container', id: resourceName, state: 'cleanup_failed' });
+      // Cleanup failure intentionally overrides success; leaving resources is not a successful run.
+      // eslint-disable-next-line no-unsafe-finally
+      throw Object.assign(new Error('备份 helper 清理失败：' + error.message), { cleanupFailed: true, resourceId: container.id });
+    }
   }
 }
 
@@ -431,7 +445,7 @@ export async function restoreVolumeBackup(id) {
  * ② 解进一次性卷统计文件数。任何一步失败都把 verify_status 落库为 failed。
  * "能还原的备份才叫备份"——演练结果随备份记录持久化,供 UI 展示可信度。
  */
-export async function verifyVolumeBackup(id) {
+export async function verifyVolumeBackup(id, { onResource = () => {} } = {}) {
   const initial = getVolumeBackup(id);
   if (!initial) throw Object.assign(new Error('备份记录不存在'), { statusCode: 404 });
   return withProjectOperationLock(initial.projectId, async () => {
@@ -452,7 +466,7 @@ export async function verifyVolumeBackup(id) {
   const listing = await runHelper(
     docker,
     `tar tzf "/backup/${file}" >/dev/null && tar tzf "/backup/${file}" | wc -l`,
-    [await resolveBackupBind(host, docker, 'ro')],
+    [await resolveBackupBind(host, docker, 'ro')], { onResource, timeoutMs: 300000 },
   ).catch((error) => { throw fail(`helper 容器执行失败:${error.message}`); });
   if (listing.exitCode !== 0) {
     throw fail(`备份已损坏(exit ${listing.exitCode}):${listing.output.slice(0, 200)}`);
@@ -460,13 +474,15 @@ export async function verifyVolumeBackup(id) {
   const entries = Number(listing.output.split('\n').pop()) || 0;
 
   // ② 还原演练：解包到一次性临时卷并统计文件数，不修改原卷
-  const tmpVolume = `composeops-verify-${randomBytes(4).toString('hex')}`;
-  await docker.createVolume({ Name: tmpVolume, Labels: { 'composeops.role': 'volume-verify' } });
+  const tmpVolume = `composeops-verify-${randomBytes(12).toString('hex')}`;
+  await onResource({ kind: 'volume', id: tmpVolume, state: 'reserved' });
   try {
+    await docker.createVolume({ Name: tmpVolume, Labels: { 'composeops.role': 'volume-verify' } });
+    await onResource({ kind: 'volume', id: tmpVolume, state: 'created' });
     const restore = await runHelper(
       docker,
       `tar xzf "/backup/${file}" -C /src && find /src -type f | wc -l && du -sh /src | cut -f1`,
-      [`${tmpVolume}:/src:rw`, await resolveBackupBind(host, docker, 'ro')],
+      [`${tmpVolume}:/src:rw`, await resolveBackupBind(host, docker, 'ro')], { onResource, timeoutMs: 300000 },
     ).catch((error) => { throw fail(`helper 容器执行失败:${error.message}`); });
     if (restore.exitCode !== 0) {
       throw fail(`还原演练失败(exit ${restore.exitCode}):${restore.output.slice(0, 200)}`);
@@ -478,9 +494,20 @@ export async function verifyVolumeBackup(id) {
     updateVolumeBackupVerify(record.id, { status, files });
     recordEvent({ eventType: 'backup', source: 'volume-verify', title: `备份演练完成 · ${record.volume}`, detail: `${files} 个文件`, status: 'resolved', payload: { backupId: record.id, to: `/resources?tab=backups&from=events` } });
     addOperation({ action: 'volume.verify', status: 'success', detail: `${record.projectName}/${record.volume} ← ${file}:${files} 个文件` });
-    return { ok: true, status, entries, files, sizeHuman, durationMs: Date.now() - started };
+    return { ok: true, status, entries, files, sizeHuman, durationMs: Date.now() - started, cleanup: 'removed', scope: 'isolated_archive_extraction' };
     } finally {
-      await docker.getVolume(tmpVolume).remove().catch(() => {});
+      try {
+        await docker.getVolume(tmpVolume).remove();
+        await onResource({ kind: 'volume', id: tmpVolume, state: 'removed' });
+      } catch (error) {
+        if (error.statusCode === 404) await onResource({ kind: 'volume', id: tmpVolume, state: 'removed' });
+        else {
+          await onResource({ kind: 'volume', id: tmpVolume, state: 'cleanup_failed' });
+          // Persist the cleanup failure instead of returning an apparently verified recovery.
+          // eslint-disable-next-line no-unsafe-finally
+          throw Object.assign(fail('隔离恢复卷清理失败：' + tmpVolume), { cleanupFailed: true, resourceId: tmpVolume });
+        }
+      }
     }
   });
 }

@@ -139,3 +139,18 @@ test('卷备份遇到磁盘空间不足时保留既有备份并说明不会自�
   assert.equal(listVolumeBackups(diskFullProject.id).length, 1, 'failed backup must not create a database record');
   assert.match(helperCommand, /trap 'rm -f "\$tmp"' EXIT/, 'failed tar must remove its partial archive');
 });
+test('隔离演练先登记可追溯 helper 名称，清理失败不能返回已验证成功', async (t) => {
+  const { verifyVolumeBackup } = await import('../src/services/volume-backup.js');
+  const id = addVolumeBackup({ projectId: 'cleanup-test', projectName: 'cleanup-test', volume: 'test-volume', file: 'cleanup.tar.gz', bytes: 123, host: 'local' });
+  const resources = []; let createdName = '', stage = 0;
+  t.mock.method(docker, 'getImage', () => ({ inspect: async () => ({}) }));
+  t.mock.method(docker, 'createContainer', async options => {
+    assert.equal(resources.at(-1).state, 'reserved'); assert.equal(resources.at(-1).id, options.name); createdName = options.name;
+    const current = stage++;
+    return { id: 'fixture-' + current, start: async () => {}, wait: async () => ({ StatusCode: 0 }), logs: async () => frame(current === 0 ? '2\n' : '1\n4K\n'), remove: async () => {} };
+  });
+  t.mock.method(docker, 'createVolume', async () => ({}));
+  t.mock.method(docker, 'getVolume', () => ({ remove: async () => { throw new Error('busy'); } }));
+  await assert.rejects(verifyVolumeBackup(id, { onResource: resource => resources.push(resource) }), /清理失败/);
+  assert.match(createdName, /^composeops-backup-/); assert.equal(resources.at(-1).state, 'cleanup_failed'); assert.equal(getVolumeBackup(id).verifyStatus, 'failed');
+});

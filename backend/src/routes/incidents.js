@@ -1,4 +1,4 @@
-import { listIncidents, getIncidentDetail, incidentError, incidentStats } from '../services/incident-store.js';
+import { listIncidents, getIncidentDetail, incidentError, incidentStats, closeIncident } from '../services/incident-store.js';
 import { diagnoseIncident, incidentObserverStatus } from '../services/incident-observer.js';
 import { proposeIncidentRestart } from '../services/incident-remediation.js';
 import { getOpsEffectWorkerStatus } from '../services/ops-effect-worker.js';
@@ -10,9 +10,10 @@ async function rejectParameters(request) {
 }
 export default async function incidentRoutes(fastify) {
   fastify.get('/', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
-    hostId: { type: 'string', maxLength: 160 }, status: { type: 'string', enum: ['open', 'investigating', 'awaiting_approval', 'queued', 'executing', 'verifying', 'needs_attention', 'resolved'] },
+    hostId: { type: 'string', maxLength: 160 }, status: { type: 'string', enum: ['open', 'investigating', 'awaiting_approval', 'queued', 'executing', 'verifying', 'needs_attention', 'resolved', 'closed'] },
     limit: { type: 'integer', minimum: 1, maximum: 200 },
   } } } }, async request => ({ incidents: listIncidents(request.query), stats: incidentStats(), observer: incidentObserverStatus(), worker: getOpsEffectWorkerStatus() }));
+  fastify.post('/:id/close', { schema: { params, body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', minLength: 4, maxLength: 500 } } } } }, async request => ({ incident: closeIncident(request.params.id, request.body.reason, request.user?.username || 'admin') }));
   fastify.get('/:id', { schema: { params } }, async request => getIncidentDetail(request.params.id));
   fastify.post('/:id/diagnose', { schema: noInput, preValidation: rejectParameters }, async request => ({ incident: await diagnoseIncident(request.params.id) }));
   fastify.post('/:id/propose-restart', { schema: noInput, preValidation: rejectParameters }, async (request, reply) => {

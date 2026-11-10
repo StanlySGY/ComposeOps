@@ -163,3 +163,35 @@ test('停止观察后在途 HTTP 结果不能写回，未纳管项目不会发�
   await createProbeRunner({ probe: async () => { calls++; return { outcome: 'good' }; } }).runOnce();
   assert.equal(calls, 0);
 });
+test('服务所有容器消失仍建立应用故障，不制造重启目标，重新出现后凭独立探针验收', async () => {
+  const f = await fixture(); pauseSreProfile(f.profile.id);
+  const profile = await saveSreProfile({ ...getSreProfile(f.profile.id), enabled: true, config: f.profile.config }, 'tester', { scan: async () => [f.project], dockerForHost: profileDocker });
+  let clock = Date.now(), exists = false, automatic = 0;
+  const { createIncidentObserver } = await import('../src/services/incident-observer.js');
+  const docker = { info: async () => ({ ID: 'engine' }), listContainers: async () => exists ? [{ Id: f.item.Id }] : [], getContainer: () => ({ inspect: async () => f.item }) };
+  const observer = createIncidentObserver({ scan: async () => [], dockerForHost: () => docker, now: () => clock,
+    probeRunner: { runOnce: async () => {} }, autoRecover: async () => { automatic++; }, logger: { warn() {} } });
+  recordProbeSample(profile, { outcome: 'bad', statusCode: 503 }, clock);
+  await observer.runOnce();
+  const row = db.prepare('SELECT id FROM ops_incidents WHERE resource_id=? AND closed_at IS NULL').get('application:' + profile.id);
+  assert.ok(row); assert.equal(getIncident(row.id).latest.fault, '服务容器不存在'); assert.equal(automatic, 0);
+  const { proposeIncidentRestart } = await import('../src/services/incident-remediation.js');
+  assert.throws(() => proposeIncidentRestart(row.id), /身份信息/);
+  exists = true;
+  for (let i = 0; i < 3; i++) { clock += 30000; recordProbeSample(profile, { outcome: 'good', statusCode: 200 }, clock); await observer.runOnce(); }
+  assert.equal(getIncident(row.id).status, 'resolved'); assert.equal(getIncident(row.id).verification.scope, 'application_http');
+  await observer.stop();
+});
+test('应用缺容器检查在暂停后收到迟到结果也不能重新创建故障', async () => {
+  const f = await fixture(); let finish, entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const { createIncidentObserver } = await import('../src/services/incident-observer.js');
+  const observer = createIncidentObserver({ scan: async () => [], probeRunner: { runOnce: async () => {} }, logger: { warn() {} },
+    dockerForHost: () => ({ info: async () => ({ ID: 'engine' }), listContainers: async options => {
+      if (options.filters.label.includes('com.docker.compose.project=' + f.project.projectName)) { entered(); return new Promise(resolve => { finish = resolve; }); }
+      return [];
+    } }) });
+  const pending = observer.runOnce(); await ready; pauseSreProfile(f.profile.id); finish([]); await pending;
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ops_incidents WHERE resource_id=? AND closed_at IS NULL').get('application:' + f.profile.id).n, 0);
+  await observer.stop();
+});

@@ -873,6 +873,44 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 24,
+    name: '可靠变更、恢复演练、证据复盘与历史归档',
+    up(database) {
+      addColumn(database, 'sre_profiles', 'archived_at', 'INTEGER');
+      addColumn(database, 'ops_incidents', 'closed_at', 'TEXT');
+      addColumn(database, 'ops_incidents', 'closure_reason', "TEXT NOT NULL DEFAULT ''");
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_sre_probe_retention ON sre_probe_samples(sampled_at);
+        DROP INDEX IF EXISTS ux_ops_incident_open;
+        CREATE UNIQUE INDEX ux_ops_incident_open ON ops_incidents(correlation_key) WHERE resolved_at IS NULL AND closed_at IS NULL;
+        CREATE TABLE IF NOT EXISTS sre_changes (
+          id TEXT PRIMARY KEY, status TEXT NOT NULL, host_id TEXT NOT NULL, project_id TEXT NOT NULL,
+          profile_id TEXT NOT NULL, review_json TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+          reviewed_by TEXT NOT NULL, approved_by TEXT, approved_at INTEGER, error TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_change_queue ON sre_changes(status, created_at);
+        CREATE TABLE IF NOT EXISTS sre_recovery_plans (
+          id TEXT PRIMARY KEY, host_id TEXT NOT NULL, project_id TEXT NOT NULL, project_name TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,
+          config_json TEXT NOT NULL, identity_json TEXT NOT NULL, next_run_at INTEGER,
+          updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sre_recovery_runs (
+          id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, version INTEGER NOT NULL, status TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
+          requested_by TEXT NOT NULL, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER,
+          error TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_drill_queue ON sre_recovery_runs(status, created_at);
+        CREATE TABLE IF NOT EXISTS sre_retrospectives (
+          id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, requested_by TEXT NOT NULL,
+          status TEXT NOT NULL, evidence_json TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT ''
+        );
+      `);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

@@ -57,6 +57,7 @@ export function validateAutoAuthorization(effect, now = Date.now()) {
 }
 export async function considerAutomaticRecovery(incidentId, { now = Date.now() } = {}) {
   const incident = getIncident(incidentId);
+  if (incident.closedAt || db.prepare("SELECT 1 FROM sre_changes WHERE project_id=? AND status IN ('queued','checking','executing','verifying','rolling_back','verifying_rollback','outcome_unknown')").get(incident.projectId)) return null;
   const profileId = incident.latest.probe?.profileId;
   if (!profileId || incident.resolvedAt || incident.effectId || incident.latest.error || !incident.latest.fault || now - Date.parse(incident.openedAt) < 30000) return null;
   const profile = getSreProfile(profileId), policy = getAutonomyPolicy(profileId), sample = latestProbe(profile);
@@ -72,7 +73,7 @@ export async function considerAutomaticRecovery(incidentId, { now = Date.now() }
     const recent = db.prepare('SELECT reserved_at FROM sre_auto_authorizations WHERE policy_id=? AND reserved_at>? ORDER BY reserved_at DESC').all(policy.id, now - 86400000);
     if (recent.length >= policy.maxDaily || recent[0] && now - recent[0].reserved_at < policy.cooldownMs) return false;
     const unresolved = db.prepare(`SELECT 1 FROM sre_auto_authorizations a JOIN ops_incidents i ON i.id=a.incident_id
-      WHERE i.project_id=? AND i.host_id=? AND i.resolved_at IS NULL LIMIT 1`).get(incident.projectId, incident.hostId);
+      WHERE i.project_id=? AND i.host_id=? AND i.resolved_at IS NULL AND i.closed_at IS NULL LIMIT 1`).get(incident.projectId, incident.hostId);
     if (unresolved) return false;
     db.prepare('INSERT INTO sre_auto_authorizations(incident_id,policy_id,policy_version,profile_version,target_json,reserved_at) VALUES(?,?,?,?,?,?)')
       .run(incidentId, policy.id, policy.version, profile.version, JSON.stringify(target), now);

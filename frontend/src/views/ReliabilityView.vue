@@ -3,6 +3,9 @@
     <div class="page-header"><div><div class="eyebrow">目标 · 观测 · 授权 · 效果</div><h1 class="page-title">应用可靠性</h1><p class="page-subtitle">为应用定义可用性目标，用持续证据约束自动处置。</p></div><div class="flex flex-wrap gap-2"><router-link to="/oncall?from=reliability" class="btn-secondary">故障工作台</router-link><button class="btn-primary" :disabled="busy" @click="edit()">添加应用目标</button></div></div>
     <p v-if="error" class="alert-error" role="alert">{{ error }}<button class="text-link" @click="load">刷新数据</button></p>
     <p v-if="notice" class="text-sm text-status-ok" role="status">{{ notice }}</p>
+    <nav class="flex flex-wrap gap-2" aria-label="可靠性功能"><button v-for="item in tabs" :key="item.key" class="btn-secondary" :class="{ 'border-emerald-500 text-emerald-300': tab === item.key }" :aria-current="tab === item.key ? 'page' : undefined" @click="router.replace({ query: { ...route.query, tab: item.key } })">{{ item.label }}</button></nav>
+    <ReliabilityOperations v-if="tab !== 'targets'" :tab="tab" :profiles="profiles" />
+    <template v-else>
     <section class="section-panel p-4" aria-label="最近 30 天处置效果">
       <h2 class="text-sm font-semibold">最近 30 天处置效果</h2>
       <div class="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-4"><div v-for="item in metrics" :key="item.label"><p class="text-xs text-surface-400">{{ item.label }}</p><strong class="mt-1 block text-xl tabular-nums">{{ item.value }}</strong></div></div>
@@ -19,9 +22,10 @@
         <p class="mt-3 text-xs leading-5 text-surface-400">缺测 {{ duration(profile.statistics.unknownMs) }} · {{ profile.statistics.samples }} 个样本。覆盖率不足时，已观测可用率不能代表整个窗口。</p>
         <p v-if="profile.latest?.reason" class="mt-2 text-xs text-status-warn">{{ profile.latest.reason }}</p>
         <div class="mt-4 border-t border-surface-800 pt-4"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="text-sm font-semibold">有界自动修复</h3><span class="text-xs" :class="policyActive(profile) ? 'text-status-ok' : 'text-surface-400'">{{ policyLabel(profile) }}</span></div><p class="mt-2 text-xs leading-5 text-surface-400">仅对持续探针失败的单副本服务重启一次；每个故障最多一次，结果不明时停止。多副本服务保留人工处置。</p><p v-if="profile.policy" class="mt-2 text-xs text-surface-400">每 24 小时最多 {{ profile.policy.maxDaily }} 次 · 冷却 {{ duration(profile.policy.cooldownMs) }} · 授权至 {{ time(profile.policy.expiresAt) }}</p></div>
-        <div class="mt-4 flex flex-wrap gap-2"><button class="btn-secondary btn-sm" :disabled="busy" @click="edit(profile)">编辑目标</button><button class="btn-secondary btn-sm" :disabled="busy || !profile.enabled" @click="authorize(profile)">审阅自动授权</button><button v-if="profile.policy?.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="disablePolicy(profile)">停止自动处置</button><button v-if="profile.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="pause(profile)">暂停探针与授权</button></div>
+        <div class="mt-4 flex flex-wrap gap-2"><button class="btn-secondary btn-sm" :disabled="busy" @click="edit(profile)">编辑目标</button><button class="btn-secondary btn-sm" :disabled="busy || !profile.enabled" @click="authorize(profile)">审阅自动授权</button><button v-if="profile.policy?.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="disablePolicy(profile)">停止自动处置</button><button v-if="profile.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="pause(profile)">暂停探针与授权</button><button class="btn-secondary btn-sm" :disabled="busy" @click="archiveTarget = profile">归档目标</button></div>
       </section>
     </div>
+    </template>
     <BaseModal :show="!!draft" :title="draft?.id ? '编辑应用可靠性目标' : '添加应用可靠性目标'" :close-disabled="busy" size-class="max-w-xl" @close="draft = null">
       <form v-if="draft" class="space-y-4" @submit.prevent="save"><fieldset :disabled="busy" class="space-y-4">
         <p v-if="formError" class="alert-error" role="alert">{{ formError }}</p>
@@ -36,15 +40,22 @@
     <BaseModal :show="!!policyDraft && !confirmPolicy" title="审阅应用自动修复授权" :close-disabled="busy" size-class="max-w-xl" @close="policyDraft = null">
       <form v-if="policyDraft" class="space-y-4" @submit.prevent="confirmPolicy = true"><fieldset class="space-y-4" :disabled="busy"><p class="text-sm font-semibold">{{ policyDraft.profile.projectName }} / {{ policyDraft.profile.serviceName }} · {{ policyDraft.profile.hostId }}</p><p class="text-xs leading-6 text-surface-400">授权 container-restart-v1 流程在持续故障时自动执行，无需逐次点击批准。重启会造成短暂中断；拒绝策略、版本和身份检查仍然生效。</p><div class="grid grid-cols-2 gap-3"><label class="form-grid-label"><span>有效天数</span><input v-model.number="policyDraft.days" class="input w-full" type="number" min="1" max="30" required /></label><label class="form-grid-label"><span>每 24 小时最多次数</span><input v-model.number="policyDraft.maxDaily" class="input w-full" type="number" min="1" max="10" required /></label><label class="form-grid-label"><span>冷却分钟数</span><input v-model.number="policyDraft.cooldownMinutes" class="input w-full" type="number" min="5" max="1440" required /></label><label class="form-grid-label"><span>维护暂停小时数</span><input v-model.number="policyDraft.maintenanceHours" class="input w-full" type="number" min="0" max="720" required /></label></div><div class="flex justify-end gap-2"><button type="button" class="btn-secondary" @click="policyDraft = null">取消</button><button type="submit" class="btn-primary">核对并继续</button></div></fieldset></form>
     </BaseModal>
+    <ConfirmDialog :show="!!archiveTarget" title="归档应用目标" confirm-text="确认归档" tone="warning" :busy="busy" :message="archiveTarget ? `${archiveTarget.projectName} / ${archiveTarget.serviceName}` : ''" @cancel="archiveTarget = null" @confirm="archive"><p class="text-sm">停止探针与自动授权，关闭旧版本故障。历史证据保留，归档不代表恢复。</p></ConfirmDialog>
     <ConfirmDialog :show="confirmPolicy" title="启用有界自动重启" confirm-text="确认授权" :busy="busy" tone="warning" :message="policyDraft ? `${policyDraft.profile.projectName} / ${policyDraft.profile.serviceName} · ${policyDraft.profile.hostId}` : ''" @cancel="confirmPolicy = false" @confirm="savePolicy"><p class="text-sm leading-6">每 24 小时最多 {{ policyDraft?.maxDaily }} 次，冷却 {{ policyDraft?.cooldownMinutes }} 分钟，有效 {{ policyDraft?.days }} 天。仅对当前应用目标版本授权，可随时停止。</p><p v-if="formError" class="alert-error" role="alert">{{ formError }}</p></ConfirmDialog>
   </div>
 </template>
 <script setup>
 import { computed, ref, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import ReliabilityOperations from '../components/ReliabilityOperations.vue';
 import { api } from '../api/client.js';
 import BaseModal from '../components/common/BaseModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
+const route = useRoute(), router = useRouter();
+const tabs = [{ key: 'targets', label: '应用目标' }, { key: 'changes', label: '可靠变更' }, { key: 'recovery', label: '恢复演练' }, { key: 'reports', label: '效果复盘' }];
+const tab = computed(() => tabs.some(item => item.key === route.query.tab) ? route.query.tab : 'targets');
+const archiveTarget = ref(null);
 const profiles = ref([]), targets = ref([]), insights = ref({}), error = ref(''), notice = ref(''), formError = ref('');
 const loading = ref(false), loaded = ref(false), busy = ref(false), draft = ref(null), policyDraft = ref(null), confirmPolicy = ref(false), targetKey = ref(''), checkedNow = ref(Date.now());
 let active = false, disposed = false, version = 0, timer, controller, targetsController;
@@ -88,6 +99,7 @@ async function mutate(action, message, done = () => {}) {
   finally { if (!disposed) busy.value = false; }
 }
 function save() { const value = JSON.parse(JSON.stringify(draft.value)); return mutate(() => api.saveSreProfile(value), '应用目标已保存，自动授权需要独立确认。', () => { draft.value = null; }); }
+function archive() { const id = archiveTarget.value.id; return mutate(() => api.archiveSreProfile(id), '应用目标已归档，历史证据保留。', () => { archiveTarget.value = null; }); }
 function pause(profile) { return mutate(() => api.pauseSreProfile(profile.id), '已暂停探针并撤销自动处置授权。'); }
 function authorize(profile) { formError.value = ''; policyDraft.value = { profile: JSON.parse(JSON.stringify(profile)), days: 7, maxDaily: profile.policy?.maxDaily || 1, cooldownMinutes: (profile.policy?.cooldownMs || 3600000) / 60000, maintenanceHours: 0 }; }
 function disablePolicy(profile) { return mutate(() => api.saveSreAutonomy(profile.id, { version: profile.policy.version, enabled: false }), '自动处置已停止。'); }

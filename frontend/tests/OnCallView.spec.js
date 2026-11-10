@@ -92,3 +92,12 @@ it('总览提供待审批故障入口，读取失败不显示环境健康', asyn
   await vi.advanceTimersByTimeAsync(15000); await flushPromises();
   expect(wrapper.text()).toContain('值守数据暂不可用');
 });
+it('断网后的旧观测过期，不再显示值守运行中；缺容器事件链接使用应用上下文', async () => {
+  incident.resourceId = 'application:profile-1'; detail.effects = []; incident.effectId = null;
+  await render(); expect(wrapper.text()).toContain('只读值守运行中');
+  const links = wrapper.findAll('a').map(item => item.attributes('href'));
+  expect(links.filter(link => link.startsWith('/logs') || link.startsWith('/agent')).every(link => !link.includes('containerId='))).toBe(true);
+  api.getIncidents.mockRejectedValue(new Error('offline'));
+  await vi.advanceTimersByTimeAsync(75000); await flushPromises();
+  expect(wrapper.text()).toContain('值守状态待确认'); expect(wrapper.text()).not.toContain('只读值守运行中');
+});

@@ -3,7 +3,7 @@ import db, { getProjectPreference } from '../lib/db.js';
 import { scanProjects } from './scanner.js';
 import { getHost, getDockerForHost } from './docker-hosts.js';
 import { hostRevision, withReadTimeout } from './incident-observer.js';
-import { incidentError } from './incident-store.js';
+import { incidentError, closeProfileIncidents } from './incident-store.js';
 import { recordAgentAuditEvent } from './agent/policy-store.js';
 
 export const PROBE_INTERVAL_MS = 30000;
@@ -27,19 +27,20 @@ export function validateProbeConfig(input = {}) {
 }
 const map = row => row && ({ id: row.id, hostId: row.host_id, projectId: row.project_id, projectName: row.project_name,
   serviceName: row.service_name, hostRevision: row.host_revision, engineId: row.engine_id, version: row.version, enabled: !!row.enabled,
-  config: JSON.parse(row.config_json), createdAt: row.created_at, updatedAt: row.updated_at, updatedBy: row.updated_by });
+  archivedAt: row.archived_at, config: JSON.parse(row.config_json), createdAt: row.created_at, updatedAt: row.updated_at, updatedBy: row.updated_by });
 export function getSreProfile(id) {
   const profile = map(db.prepare('SELECT * FROM sre_profiles WHERE id=?').get(id));
   if (!profile) throw incidentError('应用可靠性目标不存在', 404);
   return profile;
 }
-export function listSreProfiles() { return db.prepare('SELECT * FROM sre_profiles ORDER BY updated_at DESC').all().map(map); }
+export function listSreProfiles({ archived = false } = {}) { return db.prepare('SELECT * FROM sre_profiles' + (archived ? '' : ' WHERE archived_at IS NULL') + ' ORDER BY updated_at DESC').all().map(map); }
 export async function saveSreProfile(input, actor = 'admin', { scan = scanProjects, hostForId = getHost, dockerForHost = getDockerForHost, now = Date.now() } = {}) {
   if (typeof input.enabled !== 'undefined' && typeof input.enabled !== 'boolean') throw incidentError('启用状态无效', 400);
-  const previous = input.id ? getSreProfile(input.id) : null;
+  const archived = !input.id && db.prepare('SELECT * FROM sre_profiles WHERE host_id=? AND project_id=? AND service_name=? AND archived_at IS NOT NULL').get(input.hostId || 'local', input.projectId || '', input.serviceName || '');
+  const previous = input.id ? getSreProfile(input.id) : map(archived);
   const hostId = previous?.hostId || String(input.hostId || 'local'), projectId = previous?.projectId || String(input.projectId || '');
   const serviceName = previous?.serviceName || String(input.serviceName || '');
-  if (previous && input.version !== previous.version) throw incidentError('目标已被其他操作更新，请刷新后重试');
+  if (previous && !archived && input.version !== previous.version) throw incidentError('目标已被其他操作更新，请刷新后重试');
   if (previous && (input.hostId && input.hostId !== hostId || input.projectId && input.projectId !== projectId || input.serviceName && input.serviceName !== serviceName)) throw incidentError('不能改变目标归属，请创建独立目标');
   const project = (await scan(hostId)).find(item => item.id === projectId);
   if (!project?.managed || !getProjectPreference(projectId).managed || !project.containers.some(item => item.service === serviceName)) throw incidentError('请选择已纳管项目中存在的 Compose 服务', 403);
@@ -49,14 +50,19 @@ export async function saveSreProfile(input, actor = 'admin', { scan = scanProjec
   if (!info.ID || hostRevision(hostForId(hostId)) !== revision || !getProjectPreference(projectId).managed) throw incidentError('保存期间应用或节点身份发生变化');
   const id = previous?.id || 'srep_' + randomUUID();
   const version = (previous?.version || 0) + 1;
+  if (previous?.archivedAt && db.prepare('SELECT COUNT(*) AS n FROM sre_profiles WHERE archived_at IS NULL').get().n >= 200) throw incidentError('可靠性目标已达 200 个上限');
+  if (previous) {
+    if (getSreProfile(id).version !== previous.version) throw incidentError('目标已被更新，请刷新');
+    closeProfileIncidents(id, '应用可靠性目标配置已替换，旧版本观测终止', actor);
+  }
   db.transaction(() => {
     if (previous) {
-      const change = db.prepare('UPDATE sre_profiles SET config_json=?,enabled=?,version=?,host_revision=?,engine_id=?,updated_at=?,updated_by=? WHERE id=? AND version=?')
+      const change = db.prepare('UPDATE sre_profiles SET archived_at=NULL,config_json=?,enabled=?,version=?,host_revision=?,engine_id=?,updated_at=?,updated_by=? WHERE id=? AND version=?')
         .run(JSON.stringify(config), Number(input.enabled !== false), version, revision, info.ID, now, actor, id, previous.version);
       if (!change.changes) throw incidentError('目标已被更新，请刷新');
       db.prepare('UPDATE sre_autonomy_policies SET enabled=0,version=version+1,updated_at=? WHERE profile_id=?').run(now, id);
     } else {
-      if (db.prepare('SELECT COUNT(*) AS n FROM sre_profiles').get().n >= 200) throw incidentError('可靠性目标已达 200 个上限');
+      if (db.prepare('SELECT COUNT(*) AS n FROM sre_profiles WHERE archived_at IS NULL').get().n >= 200) throw incidentError('可靠性目标已达 200 个上限');
       if (db.prepare('SELECT 1 FROM sre_profiles WHERE host_id=? AND project_id=? AND service_name=?').get(hostId, projectId, serviceName)) throw incidentError('该应用服务已有可靠性目标');
       db.prepare('INSERT INTO sre_profiles(id,host_id,project_id,project_name,service_name,host_revision,engine_id,config_json,enabled,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(id, hostId, projectId, project.projectName, serviceName, revision, info.ID, JSON.stringify(config), Number(input.enabled !== false), now, now, actor);
@@ -67,10 +73,20 @@ export async function saveSreProfile(input, actor = 'admin', { scan = scanProjec
 }
 export function pauseSreProfile(id, actor = 'admin') {
   const profile = getSreProfile(id), now = Date.now();
+  closeProfileIncidents(id, '应用可靠性目标已暂停，观测终止', actor);
   db.transaction(() => {
     db.prepare('UPDATE sre_profiles SET enabled=0,version=version+1,updated_at=?,updated_by=? WHERE id=?').run(now, actor, id);
     db.prepare('UPDATE sre_autonomy_policies SET enabled=0,version=version+1,updated_at=? WHERE profile_id=?').run(now, id);
   })();
   recordAgentAuditEvent({ executionId: id, eventType: 'sre_profile_paused', actor, toolName: 'sre.profile', decision: 'paused', details: { projectId: profile.projectId } });
+  return getSreProfile(id);
+}
+
+export function archiveSreProfile(id, actor = 'admin') {
+  pauseSreProfile(id, actor);
+  db.transaction(() => {
+    db.prepare('UPDATE sre_profiles SET archived_at=? WHERE id=?').run(Date.now(), id);
+    recordAgentAuditEvent({ executionId: id, eventType: 'sre_profile_archived', actor, toolName: 'sre.profile', decision: 'archived' });
+  })();
   return getSreProfile(id);
 }

@@ -34,7 +34,7 @@ function mapIncident(row) {
     diagnosis: row.diagnosis, diagnosisAt: row.diagnosis_at, diagnosisError: row.diagnosis_error,
     effectId: row.effect_id, healthyCount: row.healthy_count, healthySince: row.healthy_since,
     verification: parse(row.verification_json), openedAt: row.opened_at, observedAt: row.observed_at,
-    resolvedAt: row.resolved_at, updatedAt: row.updated_at,
+    resolvedAt: row.resolved_at, closedAt: row.closed_at, closureReason: row.closure_reason, updatedAt: row.updated_at,
   };
 }
 export function getIncident(id) {
@@ -45,17 +45,17 @@ export function getIncident(id) {
 export function listIncidents({ hostId = '', status = '', limit = 100 } = {}) {
   const conditions = [], args = [];
   if (hostId) { conditions.push('host_id=?'); args.push(hostId); }
-  if (status === 'open') conditions.push('resolved_at IS NULL');
+  if (status === 'open') conditions.push('resolved_at IS NULL AND closed_at IS NULL');
   else if (status) { conditions.push('status=?'); args.push(status); }
   return db.prepare(`SELECT * FROM ops_incidents ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
-    ORDER BY resolved_at IS NOT NULL, updated_at DESC LIMIT ?`)
+    ORDER BY (resolved_at IS NOT NULL OR closed_at IS NOT NULL), updated_at DESC LIMIT ?`)
     .all(...args, Math.max(1, Math.min(Number(limit) || 100, 200))).map(mapIncident);
 }
 export function incidentStats() {
   const rows = db.prepare('SELECT status,COUNT(*) AS count FROM ops_incidents GROUP BY status').all();
   const stats = { open: 0, approvals: 0, verifying: 0, resolved: 0 };
   for (const row of rows) {
-    if (row.status === 'resolved') stats.resolved += row.count; else stats.open += row.count;
+    if (row.status === 'resolved') stats.resolved += row.count; else if (row.status !== 'closed') stats.open += row.count;
     if (row.status === 'awaiting_approval') stats.approvals += row.count;
     if (row.status === 'verifying') stats.verifying += row.count;
   }
@@ -65,6 +65,32 @@ export function getIncidentDetail(id) {
   const incident = getIncident(id), ticket = getOpsTicketDetail(id);
   return { incident, ...ticket, evidence: db.prepare('SELECT * FROM ops_incident_evidence WHERE incident_id=? ORDER BY id DESC LIMIT 100').all(id)
     .map(row => ({ id: row.id, kind: row.kind, summary: row.summary, data: parse(row.data_json), observedAt: row.observed_at })) };
+}
+/** Administrative closure preserves the distinction between retirement and verified recovery. */
+export function closeIncident(id, reason, actor = 'admin') {
+  const incident = getIncident(id);
+  if (incident.closedAt || incident.resolvedAt) return incident;
+  if (typeof reason !== 'string' || reason.trim().length < 4 || reason.length > 500) throw incidentError('请填写 4 至 500 字关闭原因', 400);
+  const detail = getOpsTicketDetail(id), effect = detail.effects.find(item => item.id === incident.effectId);
+  if (effect && ['leased', 'executing'].includes(effect.status)) throw incidentError('处置正在执行，请等待结果后关闭');
+  const at = new Date().toISOString();
+  if (effect && ['awaiting_approval', 'queued'].includes(effect.status)) cancelOpsEffect(id, effect.id, reason, actor);
+  db.transaction(() => {
+    db.prepare("UPDATE ops_incidents SET status='closed',closed_at=?,closure_reason=?,updated_at=? WHERE id=? AND resolved_at IS NULL AND closed_at IS NULL")
+      .run(at, String(safeIncidentData(reason)), at, id);
+    addIncidentEvidence(id, 'administrative_closure', '人工关闭，未宣称应用已恢复', { reason, actor }, at);
+    recordAgentAuditEvent({ executionId: id, eventType: 'incident_closed', actor, toolName: 'sre.incident.close', decision: 'closed', details: { reason, verifiedRecovery: false } });
+  })();
+  return getIncident(id);
+}
+export function closeProfileIncidents(profileId, reason, actor) {
+  for (const row of db.prepare('SELECT id,identity_json FROM ops_incidents WHERE resolved_at IS NULL AND closed_at IS NULL').all()) {
+    if (parse(row.identity_json).probe?.profileId !== profileId) continue;
+    try { closeIncident(row.id, reason, actor); } catch (error) {
+      if (!error.message.includes('处置正在执行')) throw error;
+      addIncidentEvidence(row.id, 'target_retired', reason + '；在途处置保留人工核对', { actor });
+    }
+  }
 }
 export function addIncidentEvidence(id, kind, summary, data = {}, at = new Date().toISOString()) {
   db.prepare('INSERT INTO ops_incident_evidence(incident_id,kind,summary,data_json,observed_at) VALUES(?,?,?,?,?)')
@@ -76,7 +102,7 @@ export function addIncidentEvidence(id, kind, summary, data = {}, at = new Date(
 }
 export function recordIncidentObservation({ project, snapshot, identity, at = new Date().toISOString() }) {
   const key = createHash('sha256').update(JSON.stringify([project.hostId, project.id, snapshot.id])).digest('hex');
-  let incident = mapIncident(db.prepare('SELECT * FROM ops_incidents WHERE correlation_key=? AND resolved_at IS NULL').get(key));
+  let incident = mapIncident(db.prepare('SELECT * FROM ops_incidents WHERE correlation_key=? AND resolved_at IS NULL AND closed_at IS NULL').get(key));
   if (!incident) {
     if (!snapshot.fault) return null;
     const previous = db.prepare('SELECT id FROM ops_incidents WHERE correlation_key=? ORDER BY rowid DESC LIMIT 1').get(key);
@@ -101,7 +127,7 @@ export function recordIncidentObservation({ project, snapshot, identity, at = ne
 
 export function updateIncidentObservation(id, snapshot, identity, at = new Date().toISOString()) {
   const incident = getIncident(id);
-  if (incident.resolvedAt || Date.parse(at) < Date.parse(incident.observedAt)) return incident;
+  if (incident.resolvedAt || incident.closedAt || Date.parse(at) < Date.parse(incident.observedAt)) return incident;
   const detail = getOpsTicketDetail(id), effect = detail.effects.find(item => item.id === incident.effectId);
   const identityMatches = JSON.stringify(identity) === JSON.stringify(incident.identity);
   const healthy = identityMatches && snapshot.healthy === true && !snapshot.error;

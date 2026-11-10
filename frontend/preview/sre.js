@@ -1,3 +1,4 @@
+import { previewSreDeliveryFetch } from './sre-delivery.js';
 // Offline examples only. No HTTP probes, Docker operations or automatic repairs run here.
 const now = Date.now();
 const profiles = [{ id: 'demo-sre', version: 1, hostId: 'local', projectId: 'knowledge-base', projectName: 'knowledge-base', serviceName: 'wiki-api', enabled: true,
@@ -6,6 +7,7 @@ const profiles = [{ id: 'demo-sre', version: 1, hostId: 'local', projectId: 'kno
   statistics: { observedAvailabilityPercent: 98.5, coveragePercent: 92, unknownMs: 3600000, samples: 1200, budgetRemainingMs: -3000000 }, policy: null }];
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 export function previewSreFetch(path, method, body) {
+  const delivery = previewSreDeliveryFetch(path, method, body); if (delivery) return delivery;
   if (path === '/sre/profiles' && method === 'GET') return response({ profiles, insights: { incidents: 3, resolved: 2, recoverySamples: 2, medianRecoveryMs: 600000, recurringTargets: 1, automaticDispatches: 0, manualDispatches: 2, effectOutcomes: { succeeded: 2, outcome_unknown: 1 } } });
   if (path === '/sre/targets' && method === 'GET') return response({ targets: [{ hostId: 'local', projectId: 'knowledge-base', projectName: 'knowledge-base', services: ['wiki-api', 'postgres'] }] });
   if (path === '/sre/profiles' && method === 'POST') {
@@ -21,6 +23,7 @@ export function previewSreFetch(path, method, body) {
     return response({ policy: profile.policy });
   }
   if (path.endsWith('/pause') && method === 'POST') { profile.enabled = false; profile.version++; if (profile.policy) { profile.policy.enabled = false; profile.policy.version++; } return response({ profile }); }
+  if (method === 'DELETE') { profiles.splice(profiles.indexOf(profile), 1); return response({ profile }); }
   if (method === 'PUT') { Object.assign(profile, { config: body.config, enabled: body.enabled, version: profile.version + 1 }); if (profile.policy) { profile.policy.enabled = false; profile.policy.version++; } return response({ profile }); }
   if (method === 'GET') return response({ profile });
   return null;
