@@ -73,7 +73,7 @@ test('拖选连续放大按当前范围计算，重置恢复所有样本', async
     await expect(page.locator('.chart-zoom-summary')).toContainText(expected);
   }
   await page.getByRole('button', { name: '重置图表缩放', exact: true }).click();
-  await expect(page.locator('.chart-zoom-summary')).toHaveText('30 个样本');
+  await expect(page.locator('.chart-zoom-summary')).toHaveText('30 个绘图点');
   await expect(page.getByRole('button', { name: '缩小图表', exact: true })).toBeDisabled();
   expect(errors).toEqual([]);
 });
@@ -87,7 +87,7 @@ test('普通滚轮可滚动页面，Ctrl 滚轮才缩放图表', async ({ page, 
   const before = await main.evaluate(element => element.scrollTop);
   await page.mouse.wheel(0, 120);
   await expect.poll(() => main.evaluate(element => element.scrollTop)).toBeGreaterThan(before);
-  await expect(page.locator('.chart-zoom-summary')).toHaveText('30 个样本');
+  await expect(page.locator('.chart-zoom-summary')).toHaveText('30 个绘图点');
   await hoverSample(page, 0.5);
   await page.keyboard.down('Control'); await page.mouse.wheel(0, -120); await page.keyboard.up('Control');
   await expect(page.locator('.chart-zoom-summary')).toContainText('已放大');
@@ -104,7 +104,7 @@ test('触屏可选择末端样本，缩放按钮与重置持续可用', async ({
   await page.getByRole('button', { name: '放大图表', exact: true }).tap();
   await expect(page.locator('.chart-zoom-summary')).toContainText('已放大 1.5 倍');
   await page.getByRole('button', { name: '重置图表缩放', exact: true }).tap();
-  await expect(page.locator('.chart-zoom-summary')).toHaveText('30 个样本');
+  await expect(page.locator('.chart-zoom-summary')).toHaveText('30 个绘图点');
   expect(errors).toEqual([]);
 });
 
@@ -135,7 +135,7 @@ test('悬停后改为单点或空数据不会产生渲染异常', async ({ page 
   await hoverSample(page); await expect(page.locator('.tooltip-value')).toHaveText('29.0%');
   await page.evaluate(() => { window.chartFixture.count = 1; });
   await page.getByRole('button', { name: '1分钟', exact: true }).click();
-  await expect(page.locator('.chart-zoom-summary')).toHaveText('1 个样本');
+  await expect(page.locator('.chart-zoom-summary')).toHaveText('1 个绘图点');
   await expect(page.locator('.chart-single-point')).toHaveCount(1);
   await expect(page.locator('.chart-tooltip')).toHaveCount(0);
   expect(await page.locator('svg.chart-canvas').innerHTML()).not.toMatch(/Infinity|NaN/);
