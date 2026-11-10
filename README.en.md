@@ -49,7 +49,7 @@ ComposeOps closes the loop:
 
 <img src="docs/screenshots/guardian-demo.gif" alt="Guardian Mode in action: a container-exit alert automatically triggers an AI diagnosis — root cause and remediation one click away" width="960">
 
-<img src="docs/screenshots/review.png" alt="Change review & deploy preview: config risk score plus containers to create/recreate/remove and affected volumes/ports" width="960">
+<img src="docs/screenshots/deploy-review-demo.gif" alt="Host check in action: from the change-review risk score, click Host Check to preview against the real host — 0 to create / 5 to recreate / 62 kept untouched, volume risks named, per-service breakdown expandable" width="960">
 
 ### Understand the value in 30 seconds
 
