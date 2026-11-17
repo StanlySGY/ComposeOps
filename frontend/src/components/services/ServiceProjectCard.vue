@@ -44,8 +44,17 @@
       <div v-else-if="!project.editable" class="project-capability-note"><FolderCog :size="15" /><span>{{ project.mountState === 'remote_api_only' ? '此节点仅提供 Docker API。可管理容器，配置编辑需要 SSH 访问。' : '当前管理已有容器。挂载 Compose 目录后可编辑并应用配置。' }}</span><router-link v-if="project.mountState !== 'remote_api_only'" :to="`/settings?tab=mounts&projectId=${project.id}`">设置挂载</router-link></div>
 
       <div class="project-container-table">
-        <div class="project-container-heading"><span>容器 / 镜像</span><span>状态与资源</span><span>快捷操作</span></div>
-        <div v-for="container in project.containers" :key="container.id" class="project-container-row" :data-container="container.id">
+        <div class="project-container-heading"><span>Compose 服务 / 容器副本</span><span>状态与资源</span><span>快捷操作</span></div>
+        <section v-for="group in serviceGroups" :key="group.name" class="service-group">
+          <header class="service-group__header">
+            <div class="min-w-0"><strong>{{ group.name }}</strong><span>{{ group.containers.length }} 个副本 · {{ group.runningCount }} 个运行</span></div>
+            <div v-if="group.name !== '未标记服务'" class="service-group__actions" role="group" :aria-label="`${group.name} 服务操作`">
+              <button class="btn-ghost btn-sm" :disabled="locked || !project.managed" @click="runServiceAction(group.name, 'start')"><Play :size="13" />启动</button>
+              <button class="btn-ghost btn-sm" :disabled="locked || !project.managed" @click="runServiceAction(group.name, 'restart')"><RotateCw :size="13" />重启</button>
+              <button class="btn-ghost btn-sm text-status-error" :disabled="locked || !project.managed" @click="runServiceAction(group.name, 'stop')"><Square :size="13" />停止</button>
+            </div>
+          </header>
+          <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id">
           <div class="project-container-identity"><Box :size="17" class="text-surface-400 shrink-0" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">{{ portText(container) }}</small></div></div>
           <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="text-xs text-muted font-mono">{{ numberValue(metrics[container.id].cpu).toFixed(1) }}% · {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="text-xs text-muted">{{ containerStateHint(container) }}</span></div>
           <div class="project-container-actions">
@@ -53,7 +62,8 @@
             <CapabilityLink :disabled="!project.managed || container.state !== 'running'" :reason="!project.managed ? '项目尚未纳管' : '容器运行后才能打开终端'" :to="toolLocation('shell', container.id)" class="container-action" aria-label="容器终端"><TerminalSquare :size="15" /><span>终端</span></CapabilityLink>
             <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="{ ...toolLocation('agent', container.id), query: { ...toolLocation('agent', container.id).query, diagnose: '1' } }" class="container-action" aria-label="AI 诊断"><Bot :size="15" /><span>诊断</span></CapabilityLink>
           </div>
-        </div>
+          </div>
+        </section>
         <p v-if="!project.containers.length" class="p-4 text-xs text-muted">还没有容器。可通过「更多操作 → 应用配置 / 启动」创建服务。</p>
       </div>
       <footer class="project-detail-footer">
@@ -64,6 +74,7 @@
     </div>
   </article>
   <ConfirmDialog :show="!!pendingAction" :title="confirmationTitle" :message="confirmationMessage" tone="warning" :confirm-text="confirmationTitle" @confirm="confirmAction" @cancel="pendingAction = ''" />
+  <ConfirmDialog :show="!!pendingServiceAction" :title="`确认${pendingServiceAction?.action === 'stop' ? '停止' : '重启'}服务`" :message="serviceConfirmationMessage" tone="warning" :confirm-text="pendingServiceAction?.action === 'stop' ? '停止服务' : '重启服务'" @confirm="confirmServiceAction" @cancel="pendingServiceAction = null" />
   <BaseModal :show="noteOpen" title="编辑项目备注" :close-disabled="noteSaving" size-class="max-w-lg" @close="noteOpen = false">
     <form id="project-note-form" class="space-y-3" @submit.prevent="saveNote">
       <label class="block text-sm">{{ project.projectName }}<textarea v-model="noteDraft" aria-label="项目备注" class="input mt-2 min-h-28 w-full resize-y" maxlength="500" placeholder="记录用途、负责人或操作提醒" :disabled="noteSaving"></textarea></label>
@@ -102,11 +113,57 @@ const props = defineProps({
 const emit = defineEmits(['toggle-expand', 'toggle-select', 'action', 'activity', 'env', 'db-dump', 'upgrade', 'refresh', 'note-saved']);
 const route = useRoute();
 const pendingAction = ref('');
+const pendingServiceAction = ref(null);
+const serviceActionRunning = ref(false);
 const noteOpen = ref(false);
 const noteDraft = ref('');
 const noteError = ref('');
 const noteSaving = ref(false);
 const runningCount = computed(() => props.project.containers.filter(c => c.state === 'running').length);
+const serviceGroups = computed(() => {
+  const groups = new Map();
+  for (const container of props.project.containers) {
+    const name = container.service || '未标记服务';
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(container);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, containers]) => ({
+    name, containers, runningCount: containers.filter(item => item.state === 'running').length,
+  }));
+});
+const serviceConfirmationMessage = computed(() => {
+  const item = pendingServiceAction.value;
+  if (!item) return '';
+  return item.action === 'stop'
+    ? `将停止 Compose 服务「${item.service}」的全部 ${item.count} 个容器副本。容器和数据卷会保留，但服务将不可访问。`
+    : `将重启 Compose 服务「${item.service}」的全部 ${item.count} 个容器副本，期间服务会短暂中断。`;
+});
+async function runServiceAction(service, action) {
+  if (locked.value || !props.project.managed) return;
+  const group = serviceGroups.value.find(item => item.name === service);
+  if (!group) return;
+  if (action === 'start') {
+    await executeServiceAction(service, action);
+    return;
+  }
+  pendingServiceAction.value = { service, action, count: group.containers.length };
+}
+async function confirmServiceAction() {
+  const item = pendingServiceAction.value;
+  pendingServiceAction.value = null;
+  if (item) await executeServiceAction(item.service, item.action);
+}
+async function executeServiceAction(service, action) {
+  if (serviceActionRunning.value) return;
+  serviceActionRunning.value = true;
+  try {
+    await api.runComposeServiceAction(props.project.id, service, action);
+    toast.success(`服务 ${service} 已${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}`);
+    emit('refresh');
+  } catch (error) {
+    toast.error(`服务操作失败：${error.message}`);
+  } finally { serviceActionRunning.value = false; }
+}
 const attentionSummary = computed(() => projectAttention(props.project));
 const attentionContainer = computed(() => props.project.containers.find(c => c.state !== 'running') || props.project.containers.find(c => c.health === 'unhealthy'));
 function toolLocation(name, containerId = '') { return projectToolLocation(name, props.project, containerId, { from: 'services', returnTo: route.fullPath }); }
@@ -216,7 +273,7 @@ function closeStats() {
   metrics.value = {};
 }
 
-const locked = computed(() => props.busy || !!props.actionRunning);
+const locked = computed(() => props.busy || !!props.actionRunning || serviceActionRunning.value);
 const dbContainers = computed(() => props.project.containers.filter((c) => /(postgres|postgis|mysql|mariadb|redis|valkey|mongo)/i.test(c.image)));
 const attention = computed(() => props.project.status !== 'running' || props.project.containers.some((container) => container.health === 'unhealthy'));
 const dependencyText = computed(() => {
@@ -306,6 +363,12 @@ function containerStateHint(container) {
 .project-capability-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--color-surface-400); padding-bottom: 12px; }
 .project-capability-note a { color: var(--link-color); }
 .project-container-table { border-top: 1px solid var(--line-subtle); }
+.service-group { border-top: 1px solid var(--line-subtle); }
+.service-group__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 2px; }
+.service-group__header strong { display: block; font-size: 12px; font-weight: 600; }
+.service-group__header span { display: block; margin-top: 3px; color: var(--color-surface-500); font-size: 10px; }
+.service-group__actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.service-group__actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
 .project-container-heading, .project-container-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .6fr) auto; gap: 20px; align-items: center; }
 .project-container-heading { padding: 10px 0; font-size: 10px; color: var(--color-surface-500); }
 .project-container-heading > :last-child { width: 180px; text-align: right; }
