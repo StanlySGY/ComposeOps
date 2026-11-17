@@ -40,8 +40,8 @@ test('ops tickets: require an authenticated same-origin admin session', async ()
   headers = { ...plainHeaders, cookie };
   const workerStatus = await app.inject({ method: 'GET', url: '/api/v1/ops-tickets/worker/status', headers });
   assert.equal(workerStatus.statusCode, 200, workerStatus.body);
-  assert.equal(workerStatus.json().readOnlyOnly, true);
-  assert.deepEqual(workerStatus.json().supportedActions.map((item) => item.effectType), ['service.inspect', 'container.inspect']);
+  assert.equal(workerStatus.json().readOnlyOnly, false);
+  assert.deepEqual(workerStatus.json().supportedActions.map((item) => item.effectType), ['service.inspect', 'container.inspect', 'incident.restart']);
 });
 
 test('ops tickets: Ticket is independent from Agent Session and idempotent', async () => {

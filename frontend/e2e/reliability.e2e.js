@@ -1,0 +1,21 @@
+import { test, expect } from '@playwright/test';
+test('应用目标展示覆盖率，自动授权经确认生效且可暂停', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./#/reliability');
+  await expect(page.getByRole('heading', { name: '应用可靠性', exact: true })).toBeVisible();
+  await expect(page.getByText('92.00%', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '审阅自动授权' }).click();
+  await page.getByRole('button', { name: '核对并继续' }).click();
+  const dialog = page.getByRole('dialog', { name: '启用有界自动重启' });
+  await expect(dialog).toContainText('knowledge-base / wiki-api');
+  await dialog.getByRole('button', { name: '确认授权' }).click();
+  await expect(page.getByText('预授权生效', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '停止自动处置' }).click();
+  await expect(page.getByText('未授权自动处置', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '编辑目标' }).click();
+  await page.getByRole('textbox', { name: 'HTTP 健康检查地址' }).fill('https://wiki.example/ready');
+  await page.getByRole('button', { name: '保存目标' }).click();
+  await expect(page.getByText('https://wiki.example/ready', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  expect(errors).toEqual([]);
+});

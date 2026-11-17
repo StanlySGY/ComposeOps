@@ -27,7 +27,9 @@ const roleResources = () => ({
   helpers: docker('ps', '-aq', '--filter', 'label=composeops.role=volume-backup').trim(),
   verificationVolumes: docker('volume', 'ls', '-q', '--filter', 'label=composeops.role=volume-verify').trim(),
 });
-const snapshot = () => helper('cd /data; find . -type f -exec sha256sum {} \\; | sort; find . -type l -exec ls -l {} \\; | sort');
+// Compare contents, ownership, modes and link destinations. ls -l includes the link
+// recreation minute, which BusyBox tar does not preserve and made this oracle time-dependent.
+const snapshot = () => helper("cd /data; find . -type f -exec sha256sum {} \\; | sort; find . -exec stat -c '%F %a %u %g %N' {} \\; | sort");
 const replaceArchive = (file, bytes) => {
   // Helpers create root-owned archives. Replace through our owned parent directory.
   const target = path.join(archiveDirectory, file);

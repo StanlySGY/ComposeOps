@@ -6,7 +6,7 @@
         <p class="page-subtitle">部署前自动审查 Compose 变更,评估影响范围与风险等级</p>
       </div>
       <div class="page-actions">
-        <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="deploying" @change="loadProject">
+        <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="deploying" @change="selectProject">
           <option value="">选择项目</option>
           <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
@@ -15,7 +15,7 @@
     </div>
     <!-- embedded 模式(变更与回滚页 tab)没有页头,单独保留选择项目的工具条,否则无法选择项目 -->
     <div v-else class="mb-3 flex flex-wrap items-center justify-end gap-2">
-      <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="deploying" @change="loadProject">
+      <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="deploying" @change="selectProject">
         <option value="">选择项目</option>
         <option v-for="p in composeProjects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
       </select>
@@ -47,7 +47,7 @@
             <div class="grid h-16 w-16 place-items-center rounded-2xl border font-mono text-2xl font-bold" :class="riskScoreClass">{{ riskScore }}</div>
             <div>
               <p class="mb-1 text-xs text-surface-400">{{ reviewed.projectName }} · 检查于 {{ checkedTime }}</p><h2 class="text-lg font-semibold text-surface-100">规则风险等级:{{ riskLabel }}</h2>
-              <p class="mt-1 text-sm text-surface-400">{{ riskSummary }}</p><p class="mt-1 text-xs text-surface-400">检查范围：首个 Compose 文件；执行时使用项目配置文件组合。</p>
+              <p class="mt-1 text-sm text-surface-400">{{ riskSummary }}</p><p class="mt-1 text-xs text-surface-400">检查范围：完整合并配置与环境输入；部署前重新核对，凭据 15 分钟内有效。</p>
             </div>
           </div>
           <div class="flex gap-3">
@@ -70,10 +70,15 @@
         </div>
       </section>
 
+      <section class="section-panel space-y-2">
+        <p class="text-sm">目标节点：{{ project?.hostName || reviewed.hostId }} · 项目：{{ reviewed.projectName }}</p>
+        <ol class="list-decimal pl-5 text-xs text-muted"><li v-for="file in reviewed.files" :key="file" class="break-all">{{ file }}</li></ol>
+        <details><summary class="cursor-pointer text-sm">查看合并配置（敏感值已隐藏）</summary><pre class="mt-2 max-h-96 overflow-auto text-xs">{{ reviewed.content }}</pre></details>
+      </section>
       <!-- 部署预演 -->
       <section class="section-panel">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div><h2 class="section-title">部署预演</h2><p class="mt-1 text-muted">部署将创建、重建、移除的容器,以及受影响的卷与端口</p></div>
+          <div><h2 class="section-title">部署预演</h2><p class="mt-1 text-muted">核对配置与当前容器的差异，以及受影响的卷与端口</p></div>
           <span class="count-badge" :class="deployImpactCount ? 'text-status-warn' : 'text-status-ok'">{{ deployImpactCount ? `${deployImpactCount} 项影响` : '无影响' }}</span>
         </div>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
@@ -90,7 +95,7 @@
             <div class="mt-2 flex flex-wrap gap-1.5"><span v-for="item in preview.restarted" :key="item.service" class="count-badge text-sky-300">{{ item.service }}</span></div>
           </div>
           <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
-            <div class="text-sm font-semibold text-status-error">将移除 {{ preview.removed.length }}</div>
+            <div class="text-sm font-semibold text-status-error">配置移除 {{ preview.removed.length }}</div>
             <div class="mt-2 flex flex-wrap gap-1.5"><span v-for="item in preview.removed" :key="item.service" class="count-badge text-status-error">{{ item.service }}</span></div>
           </div>
           <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
@@ -219,7 +224,7 @@
         <div class="rounded-lg border border-sky-900/40 bg-sky-950/20 p-2.5"><span class="text-sky-300">重启 {{ preview.restarted.length }}</span></div>
         <div class="rounded-lg border border-status-error/40 bg-status-error/15 p-2.5"><span class="text-status-error">移除 {{ preview.removed.length }}</span></div>
       </div>
-      <p v-if="preview.removed.length" class="text-xs text-status-error">有服务将被移除,部署后对应容器会停止。</p>
+      <p v-if="preview.removed.length" class="text-xs text-status-error">配置中已移除部分服务；本次部署不会自动删除对应孤立容器。</p>
       <p v-if="preview.portConflicts.length" class="text-xs text-status-warn">存在 {{ preview.portConflicts.length }} 处端口映射,请确认宿主机端口可用。</p>
       <template #footer>
         <button class="btn-secondary" @click="closeDeployConfirm">取消</button>
@@ -242,7 +247,7 @@
 
 <script setup>
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
-defineProps({ embedded: { type: Boolean, default: false } });
+const props = defineProps({ embedded: { type: Boolean, default: false }, projectId: { type: String, default: '' } });
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, RefreshCw, Rocket, ShieldCheck, Telescope } from 'lucide-vue-next';
@@ -251,10 +256,11 @@ import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 
-const emit = defineEmits(['busy']);
+const emit = defineEmits(['busy', 'project-change']);
 const store = useServicesStore();
 const composeProjects = computed(() => store.projects.filter((project) => project.editable));
-const selectedProjectId = ref('');
+const selectedProjectId = ref(props.projectId);
+let mountedReady = false;
 const loading = ref(false);
 const error = ref('');
 const issues = ref([]);
@@ -300,7 +306,7 @@ const volumeImpact = computed(() => {
   const set = new Set();
   for (const svc of services.value) {
     for (const v of svc.volumes || []) {
-      const name = String(v).split(':')[0];
+      const name = typeof v === 'object' ? (v.type === 'volume' ? v.source : '') : String(v).split(':')[0];
       if (name && !name.startsWith('/') && !name.startsWith('.')) set.add(name);
     }
   }
@@ -335,13 +341,24 @@ const riskSummary = computed(() => {
 const ruleAdvice = computed(() => {
   const advice = [];
   if (errorCount.value) advice.push({ tone: 'danger', tag: '阻断', text: `存在 ${errorCount.value} 个语义错误,建议修复后再部署,否则可能导致服务无法启动。` });
-  if (preview.value.removed.length) advice.push({ tone: 'danger', tag: '删除', text: `${preview.value.removed.length} 个服务将从 Compose 中移除,对应容器会被停止。请确认这些服务不再需要。` });
+  if (preview.value.removed.length) advice.push({ tone: 'danger', tag: '删除', text: `${preview.value.removed.length} 个服务将从 Compose 中移除,现有孤立容器不会由本次部署自动删除，请单独核对处理。` });
   if (preview.value.portConflicts.length) advice.push({ tone: 'danger', tag: '端口', text: `检测到 ${preview.value.portConflicts.length} 处端口映射,可能存在宿主机端口占用风险。` });
   if (preview.value.changed.length) advice.push({ tone: 'warning', tag: '重建', text: `${preview.value.changed.length} 个服务因镜像/环境/卷/端口变化将被重建,期间会有短暂不可用。` });
   if (preview.value.restarted.length) advice.push({ tone: 'warning', tag: '重启', text: `${preview.value.restarted.length} 个运行中容器将重启,建议在低峰期执行。` });
   if (warningCount.value) advice.push({ tone: 'warning', tag: '警告', text: `存在 ${warningCount.value} 个警告,建议检查镜像声明与环境变量定义。` });
   if (!advice.length) advice.push({ tone: 'success', tag: '通过', text: '当前规则未发现阻断项。宿主环境与实际启动结果仍需核对。' });
   return advice;
+});
+
+function selectProject() {
+  emit('project-change', selectedProjectId.value, project.value?.hostId);
+  return loadProject();
+}
+watch(() => props.projectId, id => {
+  if (id === selectedProjectId.value) return;
+  if (deploying.value) { emit('project-change', selectedProjectId.value, project.value?.hostId); return; }
+  invalidateContext(); selectedProjectId.value = id;
+  if (mountedReady) void loadProject();
 });
 
 async function loadProject() {
@@ -358,25 +375,17 @@ async function loadProject() {
   services.value = [];
   hostPreview.value = { loading: false, error: '', data: null };
   if (!id) return;
+  if (mountedReady && !composeProjects.value.some(p => p.id === id)) { error.value = '当前节点找不到此项目或未启用 Compose 权限，请重新选择。'; loading.value = false; return; }
   try {
-    const data = await api.getComposeFile(id, 0, true);
+    const data = await api.reviewDeployment(id);
     if (!current(version, id)) return;
-    const content = data.content;
-    if (typeof content !== 'string' || !content.trim()) throw new Error('配置内容为空，请先检查 Compose 文件');
-    const [validateResult, previewResult] = await Promise.all([
-      api.validateCompose(id, 0, content),
-      api.previewCompose(id, content),
-    ]);
+    if (!data?.token || !Array.isArray(data.issues) || !data.preview || !['added', 'changed', 'restarted', 'removed', 'portConflicts'].every(key => Array.isArray(data.preview[key]))) throw new Error('检查结果不完整，请重试');
+    const parsed = (await import('yaml')).parse(data.content);
     if (!current(version, id)) return;
-    if (!Array.isArray(validateResult?.issues) || !previewResult || !['added', 'changed', 'restarted', 'removed', 'portConflicts'].every(key => Array.isArray(previewResult[key]))) {
-      throw new Error('检查结果不完整，请重试');
-    }
-    const parsed = (await import('yaml')).parse(content);
-    if (!current(version, id)) return;
-    issues.value = validateResult.issues;
-    preview.value = previewResult;
+    issues.value = data.issues;
+    preview.value = data.preview;
     services.value = Object.entries(parsed?.services || {}).map(([name, cfg]) => ({ name, volumes: cfg?.volumes || [] }));
-    reviewed.value = { projectId: id, projectName: project.value?.projectName || id, content, hostId: data.hostId, checkedAt: Date.now() };
+    reviewed.value = { ...data, checkedAt: Date.now() };
   } catch (e) {
     if (current(version, id)) error.value = `变更评审失败: ${e.message}`;
   } finally {
@@ -402,13 +411,7 @@ async function confirmDeploy() {
   let exitCode = null;
   let streamReportedError = false;
   try {
-    const latest = await api.getComposeFile(snapshot.projectId, 0, true);
-    if (!current(version, snapshot.projectId)) throw new Error('评审上下文已变化，本次未部署。请重新评审。');
-    if (latest.content !== snapshot.content || latest.hostId !== snapshot.hostId) {
-      reviewed.value = null;
-      error.value = '配置或节点已变化，本次未部署。请重新评审。';
-      throw new Error(error.value);
-    }
+    if (!current(version, snapshot.projectId)) throw new Error('评审上下文已变化，请重新评审。');
     await streamComposeControl(snapshot.projectId, 'up', (frame) => {
       if (disposed) return;
       if (frame.type === 'stdout' || frame.type === 'stderr') deployOutput.value.text += frame.data;
@@ -420,7 +423,7 @@ async function confirmDeploy() {
         exitCode = Number(frame.data?.code);
         deployOutput.value.text += `\n[退出码 ${frame.data.code}]`;
       }
-    }, null, { action: 'up', expectedHostId: snapshot.hostId, expectedContent: snapshot.content }, deployController.signal);
+    }, null, { action: 'up', reviewToken: snapshot.token }, deployController.signal);
     if (streamReportedError || exitCode !== 0) {
       deployOutput.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
       if (exitCode === null && !streamReportedError) deployOutput.value.text += '\n[未收到 Compose 退出码，部署结果未确认]';
@@ -456,6 +459,7 @@ function invalidateContext() {
 function onHostChanged() {
   invalidateContext();
   selectedProjectId.value = '';
+  emit('project-change', '');
   error.value = '节点已变化，请重新选择项目进行评审。';
   deployController?.abort();
 }
@@ -469,7 +473,7 @@ function deactivate() {
   hostPreview.value.loading = false;
   deployOutput.value.open = false;
 }
-onActivated(() => { active.value = true; if (selectedProjectId.value && !reviewed.value && !deploying.value) void loadProject(); });
+onActivated(() => { active.value = true; if (mountedReady && selectedProjectId.value && !reviewed.value && !deploying.value) void loadProject(); });
 onDeactivated(deactivate);
 onBeforeUnmount(() => {
   disposed = true;
@@ -482,6 +486,8 @@ usePullRefresh(loadProject, { keepAlive: true, enabled: () => !deploying.value }
 onMounted(async () => {
   window.addEventListener('composeops:host-changed', onHostChanged);
   await store.refresh(false);
+  mountedReady = true;
   if (!disposed && store.error) error.value = `项目列表加载失败: ${store.error}`;
+  else if (!disposed && selectedProjectId.value && !reviewed.value && !loading.value) void loadProject();
 });
 </script>

@@ -1,0 +1,26 @@
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { mount, flushPromises } from '@vue/test-utils';
+import AiRetentionPanel from '../src/components/settings/AiRetentionPanel.vue';
+const api = vi.hoisted(() => ({ getAiRetention: vi.fn(), saveAiRetention: vi.fn(), pruneAiRetention: vi.fn() }));
+vi.mock('../src/api/client.js', () => ({ api }));
+let wrapper;
+const state = days => ({ days, cutoff: '2026-08-12T00:00:00Z', counts: { history: 2, usage: 1, plans: 0, executions: 0 }, lastResult: null });
+beforeEach(() => { vi.resetAllMocks(); api.getAiRetention.mockResolvedValue(state(90)); api.saveAiRetention.mockImplementation(async days => state(days)); });
+afterEach(() => wrapper?.unmount());
+it('期限必须保存后才能预览，确认使用已保存期限并显示最近结果', async () => {
+  wrapper = mount(AiRetentionPanel, { global: { stubs: { ConfirmDialog: { props: ['show'], emits: ['confirm'], template: '<button v-if="show" data-confirm @click="$emit(\'confirm\')">确认</button>' } } } });
+  await flushPromises();
+  await wrapper.get('input').setValue(180);
+  const button = text => wrapper.findAll('button').find(button => button.text() === text);
+  expect(button('预览 AI 清理').element.disabled).toBe(true);
+  await button('保存期限').trigger('click'); await flushPromises();
+  expect(api.saveAiRetention).toHaveBeenCalledWith(180);
+  api.getAiRetention.mockResolvedValue(state(180));
+  await button('预览 AI 清理').trigger('click'); await flushPromises();
+  expect(wrapper.text()).toContain('对话 2 条');
+  api.pruneAiRetention.mockResolvedValue({ ...state(180), lastResult: { days: 180, at: '2026-11-10T00:00:00Z', counts: state(180).counts } });
+  await button('清理过期 AI 历史').trigger('click');
+  await wrapper.get('[data-confirm]').trigger('click'); await flushPromises();
+  expect(api.pruneAiRetention).toHaveBeenCalledWith(180);
+  expect(wrapper.text()).toContain('最近清理');
+});

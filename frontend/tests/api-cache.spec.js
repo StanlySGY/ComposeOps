@@ -9,6 +9,26 @@ describe('API 缓存刷新', () => {
   beforeEach(() => { bumpHostEpoch(); fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); });
   afterEach(() => vi.unstubAllGlobals());
 
+  it('只读 POST 不广播写入、不失效缓存，内部元数据不进入 fetch', async () => {
+    const changed = vi.fn();
+    window.addEventListener('composeops:data-changed', changed);
+    try {
+      fetchMock.mockResolvedValueOnce(response('cached'));
+      await api.getProjects();
+      fetchMock.mockResolvedValueOnce(response('preview'));
+      await api.previewDeploy('p1');
+      expect(changed).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls[1][1]).not.toHaveProperty('readOnly');
+      fetchMock.mockReturnValueOnce(new Promise(() => {}));
+      expect((await api.getProjects()).projects[0].id).toBe('cached');
+      fetchMock.mockResolvedValueOnce(response('saved'));
+      await api.saveProjectPreference('p1', { name: 'new' });
+      expect(changed).toHaveBeenCalledOnce();
+      fetchMock.mockResolvedValueOnce(response('fresh'));
+      expect((await api.getProjects()).projects[0].id).toBe('fresh');
+    } finally { window.removeEventListener('composeops:data-changed', changed); }
+  });
+
   it('强制刷新更新后续读取的缓存', async () => {
     fetchMock.mockResolvedValueOnce(response('old'));
     await api.getProjects();

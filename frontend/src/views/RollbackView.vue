@@ -6,7 +6,7 @@
         <p class="page-subtitle">统一管理 Compose 配置、数据卷、镜像升级与 GitOps 的回滚恢复</p>
       </div>
       <div class="page-actions">
-        <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
+        <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="busy" @change="loadProject">
           <option value="">全部项目</option>
           <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
@@ -15,7 +15,7 @@
     </div>
     <!-- embedded 模式(变更与回滚页 tab)没有页头,单独保留选择项目的工具条 -->
     <div v-else class="mb-3 flex flex-wrap items-center justify-end gap-2">
-      <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" @change="loadProject">
+      <select v-model="selectedProjectId" class="input sm:w-56" aria-label="选择项目" :disabled="busy" @change="loadProject">
         <option value="">全部项目</option>
         <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
       </select>
@@ -25,6 +25,10 @@
     <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载回滚中心数据</p>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
+    <div v-if="selectedProject" class="section-panel mb-4 space-y-2 text-sm">
+      <p>目标节点：{{ selectedProject.hostName || selectedProject.hostId || 'local' }} · 项目：{{ selectedProject.projectName }}</p>
+      <ol class="list-decimal pl-5 text-xs text-muted"><li v-for="file in selectedProject.composeFiles" :key="file" class="break-all">{{ file }}</li></ol>
+    </div>
     <!-- 摘要统计 -->
     <div class="metric-grid">
       <MetricTile title="Compose 备份" :value="composeBackups.length" sub="配置版本" :icon="FileCode2" tone="text-blue-300" />
@@ -157,7 +161,7 @@
 import MetricTile from '../components/common/MetricTile.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
-defineProps({ embedded: { type: Boolean, default: false } });
+const props = defineProps({ embedded: { type: Boolean, default: false }, projectId: { type: String, default: '' } });
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { FileCode2, GitBranch, HardDrive, History, RefreshCw, RotateCcw } from 'lucide-vue-next';
@@ -167,9 +171,10 @@ import { useServicesStore } from '../stores/services.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 
-const emit = defineEmits(['busy']);
+const emit = defineEmits(['busy', 'project-change']);
 const store = useServicesStore();
-const selectedProjectId = ref('');
+const selectedProjectId = ref(props.projectId);
+const selectedProject = computed(() => store.projects.find(p => p.id === selectedProjectId.value));
 const loading = ref(false);
 const busy = ref(false);
 const error = ref('');
@@ -226,6 +231,9 @@ async function load() {
   composeBackups.value = [];
   volumeBackups.value = [];
   gitopsRepos.value = [];
+  if (requestedProjectId && !store.projects.some(project => project.id === requestedProjectId)) {
+    error.value = '当前节点找不到此项目，请重新选择。'; loading.value = false; return;
+  }
   try {
     const [volumeData, gitopsData] = await Promise.allSettled([
       api.getVolumeBackups(requestedProjectId),
@@ -275,13 +283,22 @@ async function loadComposeBackups(requestId = loadRequestId, requestedProjectId 
   };
 }
 async function loadProject() {
+  emit('project-change', selectedProjectId.value, selectedProject.value?.hostId);
   await load();
 }
+
+watch(() => props.projectId, id => {
+  if (id === selectedProjectId.value) return;
+  if (busy.value) { emit('project-change', selectedProjectId.value, selectedProject.value?.hostId); return; }
+  cancelConfirmation(); loadRequestId++; historyVersion++; showGitopsHistory.value = false;
+  selectedProjectId.value = id; needsReload = true;
+  if (mountedReady && active) void load();
+});
 
 function restoreCompose(backup) {
   confirmTarget.value = {
     title: '恢复 Compose 配置',
-    message: `确认将项目「${backup.projectName}」的配置恢复到 ${formatTime(backup.createdAt)} 的版本?`,
+    message: `节点「${selectedProject.value?.hostName || selectedProject.value?.hostId || '当前节点'}」，文件「${backup.filePath}」：确认将项目「${backup.projectName}」的配置恢复到 ${formatTime(backup.createdAt)} 的版本?`,
     tone: 'warning',
     confirmText: '恢复配置',
   };
@@ -448,6 +465,7 @@ function onHostChanged() {
   historyVersion += 1;
   cancelConfirmation();
   selectedProjectId.value = '';
+  emit('project-change', '');
   composeBackups.value = [];
   volumeBackups.value = [];
   gitopsRepos.value = [];

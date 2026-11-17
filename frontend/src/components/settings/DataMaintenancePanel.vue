@@ -1,4 +1,5 @@
 <template>
+  <AiRetentionPanel />
   <section class="space-y-3 border-t border-surface-800 pt-4">
     <h2 class="section-title">指标保留与告警评估</h2>
     <p class="text-sm text-muted">原始指标保留 7 天，7–30 天压缩为 5 分钟粒度；超过 30 天的指标会删除。</p>
@@ -15,6 +16,7 @@
   </section>
 </template>
 <script setup>
+import AiRetentionPanel from './AiRetentionPanel.vue';
 import { computed, onMounted, ref } from 'vue';
 import { api } from '../../api/client.js';
 import { useServicesStore } from '../../stores/services.js';

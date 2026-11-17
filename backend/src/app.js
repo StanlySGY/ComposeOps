@@ -33,6 +33,13 @@ import { stopCronScheduler } from './services/cron-scheduler.js';
 import { closeAllWorkspaceRunners } from './services/compose-workspace.js';
 import { stopAllGitOpsWatchers } from './services/gitops.js';
 import { stopStateRecorder } from './services/container-events.js';
+import incidentRoutes from './routes/incidents.js';
+import sreRoutes from './routes/sre.js';
+import { stopSreRuntime } from './services/sre-runtime.js';
+import { stopIncidentObserver } from './services/incident-observer.js';
+import platformMonitorRoutes from './routes/platform-monitor.js';
+import telemetryRoutes from './routes/telemetry.js';
+import { stopPlatformMonitor } from './services/sre-platform.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -155,6 +162,8 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       await api.register(workflowRoutes, { prefix: '/workflows' });
       await api.register(eventCenterRoutes, { prefix: '/events' });
       await api.register(opsTicketRoutes, { prefix: '/ops-tickets' });
+      await api.register(incidentRoutes, { prefix: '/incidents' });
+      await api.register(sreRoutes, { prefix: '/sre' });
       await api.register(stateHistoryRoutes, { prefix: '/state' });
     },
     { prefix: '/api/v1' }
@@ -165,6 +174,8 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
 
   // MCP 协议端点(不经过 /api/v1 会话鉴权:使用独立 token,见 routes/mcp.js 安全模型)
   await fastify.register(mcpRoutes, { prefix: '/mcp' });
+  await fastify.register(platformMonitorRoutes, { prefix: '/healthz/platform' });
+  await fastify.register(telemetryRoutes, { prefix: '/otlp/v1' });
 
   // 面板自身存活与节点健康分开，远端不可达不能触发面板重启。
   fastify.get('/health', async () => {
@@ -214,6 +225,9 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     stopCronScheduler();
     stopAllGitOpsWatchers();
     stopStateRecorder();
+    await stopIncidentObserver();
+    await stopSreRuntime();
+    await stopPlatformMonitor();
     await closeAllWorkspaceRunners();
   });
 

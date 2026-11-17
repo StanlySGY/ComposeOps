@@ -137,7 +137,7 @@
             </div>
             <div class="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-xs text-sky-100/80">
               <div class="flex items-center gap-2 font-semibold text-sky-200"><Info class="h-4 w-4" />观察 → 建议 → 审批 → 执行</div>
-              <p class="mt-1.5">事件和巡检可生成跟进建议。任务持续记录目标、授权与证据；请求执行的动作经人工审批后进入队列。目前仅支持项目容器列表和单容器详情两种只读检查。</p>
+              <p class="mt-1.5">事件和巡检可生成跟进建议。任务持续记录目标、授权与证据；请求执行的动作经人工审批后进入队列。支持只读检查；AI 值守产生的单次重启处置使用独立身份校验和恢复验收。</p>
             </div>
           </section>
 
@@ -226,14 +226,14 @@
 
           <section v-else-if="activeTab === 'effects'" class="space-y-3">
             <div class="card p-4">
-              <div class="ticket-section-heading"><div><h3 class="text-sm font-semibold text-surface-200">动作队列</h3><p class="mt-0.5 text-xs text-surface-400">审批、授权复核、受控只读派发与结果留痕</p></div><button :disabled="saving" class="btn-primary btn-sm" @click="showEffectForm = !showEffectForm"><Plus class="h-3.5 w-3.5" />新增意图</button></div>
+              <div class="ticket-section-heading"><div><h3 class="text-sm font-semibold text-surface-200">动作队列</h3><p class="mt-0.5 text-xs text-surface-400">审批、授权复核、受控派发与结果留痕</p></div><button :disabled="saving" class="btn-primary btn-sm" @click="showEffectForm = !showEffectForm"><Plus class="h-3.5 w-3.5" />新增意图</button></div>
               <div class="mb-3 rounded-lg border border-surface-800 bg-surface-950/40 p-3 text-xs">
                 <p v-if="workerError" class="alert-error mb-3" role="alert"><span class="min-w-0 flex-1">{{ workerError }}</span><button class="text-link shrink-0" :disabled="workerLoading" @click="loadWorkerStatus">重试执行器</button></p>
                 <div class="flex flex-wrap items-center justify-between gap-2"><strong class="text-surface-200">执行器状态</strong><span class="status-badge" :class="workerStatus?.enabled ? 'bg-status-ok/10 text-status-ok' : 'bg-surface-800 text-surface-400'">{{ workerError ? '状态未知' : workerLoading && !workerStatus ? '读取中' : workerStatus?.enabled ? '运行中' : workerStatus ? '已停止' : '尚未读取' }}</span></div>
                 <div class="mt-2 grid grid-cols-2 gap-2 text-surface-400 sm:grid-cols-4"><span>待派发：{{ workerStatus?.queueDepth ?? '—' }}</span><span>执行中：{{ workerStatus?.executing ?? '—' }}</span><span>租约中：{{ workerStatus?.leased ?? '—' }}</span><span>待核对：{{ workerStatus?.outcomeUnknown ?? '—' }}</span></div>
-                <p class="mt-2 leading-5 text-surface-300">仅支持本机只读检查。批准只是入队，执行结果需要单独核对。</p>
+                <p class="mt-2 leading-5 text-surface-300">通用意图支持本机只读检查；故障处置由 AI 值守生成。批准只是入队，结果需要单独验证。</p>
                 <p v-if="workerStatus?.lastError" class="mt-2 break-words text-status-error">最近错误：{{ workerStatus.lastError }}</p>
-                <details class="ticket-technical-details"><summary>查看执行范围与审批规则</summary><div class="mt-2 space-y-2 text-xs leading-5"><p>只读白名单：service.inspect、container.inspect。执行前重新验证审批、授权版本、范围和风险。</p><p>明确禁止：image.pull、Compose up/down、容器重启/删除、卷删除、SSH 与任意 Shell。未列入白名单的动作会在开始前拒绝并写入审计。</p><p>当前不向远程节点派发。执行中断会标记为“结果待核对”，需要人工检查，不会自动重放。</p></div></details>
+                <details class="ticket-technical-details"><summary>查看执行范围与审批规则</summary><div class="mt-2 space-y-2 text-xs leading-5"><p>动作范围：service.inspect、container.inspect，以及 AI 值守生成的 incident.restart。执行前重新验证审批、授权版本、范围和风险。</p><p>通用意图不能执行拉取、部署、删除和任意命令。单容器重启仅接受 AI 值守的固定流程、完整身份快照与单次审批。</p><p>故障处置固定到发现故障的节点；执行结果不明时需要人工核对，不会自动重放。</p></div></details>
               </div>
               <form v-if="showEffectForm" class="mb-4 grid gap-3 rounded-lg border border-surface-800 bg-surface-950/35 p-3 md:grid-cols-2" @submit.prevent="createEffect"><fieldset :disabled="saving" class="contents">
                 <label class="form-grid-label"><span>动作类型</span><select v-model="effectForm.effectType" class="input font-mono text-xs"><option value="service.inspect">service.inspect · 项目容器列表</option><option value="container.inspect">container.inspect · 单容器详情</option></select></label>
@@ -271,7 +271,7 @@
         <div class="ticket-decision-target"><p class="text-xs text-surface-400">当前任务</p><p class="mt-1 break-words font-medium">{{ decision.ticketTitle }}</p><p class="mt-2 break-all font-mono text-[10px] text-surface-400">{{ decision.item.id }}</p></div>
         <template v-if="decision.kind === 'revoke'"><p class="text-sm leading-6 text-surface-300">撤销授权 v{{ decision.item.version }} 后，关联的待审批、排队或尚未开始执行的动作将被拒绝。已经完成的操作不会撤销。</p><p class="break-words text-xs text-surface-400">{{ scopeLabel(decision.item.scope) }}</p></template>
         <template v-else-if="decision.kind === 'report'"><p class="whitespace-pre-wrap break-words text-sm text-surface-300">{{ decision.item.summary }}</p><p class="text-xs leading-5 text-surface-400">{{ decision.accepted ? '确认报告证据与验收标准相符。报告通过后，任务仍需单独更新最终状态。' : '报告将退回补充；已有内容与验收意见继续保留。' }}</p></template>
-        <template v-else><p class="text-sm text-surface-200">{{ decision.item.effectType }} · {{ decision.item.target?.composeProject || decision.item.target?.projectId || '未指定目标' }}</p><p class="break-all text-xs text-surface-400" v-if="decision.item.target?.resourceId">容器 {{ decision.item.target.resourceId }}</p><p class="text-sm leading-6 text-surface-300">{{ decision.kind === 'approve' ? '批准后进入待派发队列，执行器仍会检查授权范围与版本。当前仅支持本机只读检查；批准并不代表执行成功。' : '仅取消尚未领取或执行的动作。如果执行器已开始处理，服务端会拒绝此次取消。' }}</p></template>
+        <template v-else><p class="text-sm text-surface-200">{{ decision.item.effectType }} · {{ decision.item.target?.composeProject || decision.item.target?.projectId || '未指定目标' }}</p><p class="break-all text-xs text-surface-400" v-if="decision.item.target?.resourceId">容器 {{ decision.item.target.resourceId }}</p><p class="text-sm leading-6 text-surface-300">{{ decision.kind === 'approve' ? '批准后进入待派发队列，执行器仍会检查授权范围与版本。故障重启还会核对节点和容器身份；批准并不代表执行成功。' : '仅取消尚未领取或执行的动作。如果执行器已开始处理，服务端会拒绝此次取消。' }}</p></template>
         <label v-if="['revoke','report'].includes(decision.kind)" class="form-grid-label"><span>{{ decision.kind === 'revoke' ? '撤销原因（必填）' : '验收意见' }}</span><textarea v-model="decisionNote" class="input min-h-24" :disabled="saving" :maxlength="decision.kind === 'revoke' ? 500 : 2000" /></label>
         <p v-if="decisionError" class="alert-error" role="alert">{{ decisionError }}</p>
       </template>
@@ -614,7 +614,7 @@ async function createEffect() {
   if (effectForm.effectType === 'container.inspect' && !/^[a-f0-9]{12,64}$/i.test(effectForm.resourceId.trim())) { error.value = '请输入 12–64 位十六进制容器 ID'; await revealFeedback(); return; }
   const input = { effectType: effectForm.effectType.trim(), mode: effectForm.mode, risk: effectForm.risk, mandateId: effectForm.mode === 'execute' ? effectForm.mandateId : undefined,
     target: { projectId: effectForm.projectId.trim() || selectedTicket.value?.projectId || '', composeProject: effectForm.composeProject.trim(), resourceId: effectForm.effectType === 'container.inspect' ? effectForm.resourceId.trim() : '', hostId: effectForm.hostId.trim() }, payload };
-  return mutate(id => api.createOpsEffect(id, input), '动作已记录；请求执行的动作仍需人工审批，当前只支持低风险只读检查。', { after: () => {
+  return mutate(id => api.createOpsEffect(id, input), '动作已记录；请求执行的动作仍需人工审批，通用意图只支持低风险只读检查，故障重启需从 AI 值守发起。', { after: () => {
     Object.assign(effectForm, defaultDrafts().effect); showEffectForm.value = false; activeTab.value = 'effects';
   } });
 }

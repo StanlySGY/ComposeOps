@@ -408,7 +408,7 @@ async function loadMetrics() {
     metricTypes.forEach((m, i) => {
       metricsData.value[m.key] = results[i].data;
     });
-    historySeries.value = (seriesResult.metrics || []).map((item) => ({ timestamp: Number(item.timestamp), value: Number(item.value) })).filter((item) => Number.isFinite(item.timestamp) && Number.isFinite(item.value));
+    historySeries.value = (seriesResult.metrics || []).map((item) => ({ ...item, timestamp: Number(item.timestamp), value: Number(item.value) })).filter((item) => Number.isFinite(item.timestamp) && Number.isFinite(item.value));
     anomalies.value = anomalyResult.anomalies || [];
   } catch (err) {
     if (!disposed && requestId === metricsRequestId) {

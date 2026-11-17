@@ -200,7 +200,7 @@ describe('OpsTicketsView long-lived operations workspace', () => {
     await flushPromises();
     expect(window.confirm).not.toHaveBeenCalled();
     const confirmation = wrapper.get('[role=dialog]');
-    expect(confirmation.text()).toContain('当前仅支持本机只读检查');
+    expect(confirmation.text()).toContain('故障重启还会核对节点和容器身份');
     expect(api.approveOpsEffect).not.toHaveBeenCalled();
     await confirmation.findAll('button').find(button => button.text() === '批准并入队').trigger('click');
     await flushPromises();
@@ -208,7 +208,7 @@ describe('OpsTicketsView long-lived operations workspace', () => {
     expect(wrapper.text()).toContain('动作已入队');
     expect(wrapper.text()).toContain('执行器状态');
     expect(wrapper.text()).toContain('service.inspect');
-    expect(wrapper.text()).toContain('明确禁止');
+    expect(wrapper.text()).toContain('单容器重启仅接受 AI 值守的固定流程');
     expect(wrapper.text()).toContain('运行中');
     expect(api.getOpsEffectWorkerStatus).toHaveBeenCalled();
   });

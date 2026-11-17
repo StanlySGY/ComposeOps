@@ -5,9 +5,13 @@ import path from 'path';
 import { createHash } from 'node:crypto';
 import { isSensitiveKey } from './redaction.js';
 import { redactSecretValue } from './secret-redactor.js';
+import { installSreObservabilitySchema } from './sre-observability-schema.js';
+import { installSreAnalysisSchema } from './sre-analysis-schema.js';
+import { installSreBusinessSchema } from './sre-business-schema.js';
+import { installSreOnboardingSchema } from './sre-onboarding-schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/opsdash.db');
+export const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/opsdash.db');
 
 // 父目录可能不存在(CI fresh checkout / 首次运行):better-sqlite3 只建文件不建目录。
 mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -793,6 +797,128 @@ const MIGRATIONS = [
       database.exec('CREATE INDEX IF NOT EXISTS idx_metrics_host_container ON container_metrics(host_id, container_id, timestamp)');
     },
   },
+  {
+    version: 21,
+    name: '指标聚合保留峰值、权重和覆盖时间',
+    up(database) {
+      addColumn(database, 'container_metrics', 'sample_count', 'INTEGER NOT NULL DEFAULT 1');
+      for (const column of ['value_sum', 'value_min', 'value_max']) addColumn(database, 'container_metrics', column, 'REAL');
+      for (const column of ['range_start', 'range_end']) addColumn(database, 'container_metrics', column, 'INTEGER');
+      addColumn(database, 'container_metrics', 'stats_approximate', 'INTEGER NOT NULL DEFAULT 0');
+      // 旧版曾丢弃历史桶的权重与峰值，无法恢复，必须明确标记。
+      database.prepare('UPDATE container_metrics SET stats_approximate = 1 WHERE timestamp < ?').run(Date.now() - 7 * 86400000);
+    },
+  },
+  {
+    version: 22,
+    name: 'AI 值守故障、证据与独立恢复验收',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS ops_incidents (
+          id TEXT PRIMARY KEY REFERENCES ops_tickets(id) ON DELETE RESTRICT,
+          correlation_key TEXT NOT NULL,
+          host_id TEXT NOT NULL, project_id TEXT NOT NULL, resource_id TEXT NOT NULL,
+          project_name TEXT NOT NULL, service_name TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'investigating',
+          identity_json TEXT NOT NULL, latest_json TEXT NOT NULL,
+          diagnosis TEXT NOT NULL DEFAULT '', diagnosis_at TEXT, diagnosis_error TEXT NOT NULL DEFAULT '',
+          diagnosis_lease_until INTEGER NOT NULL DEFAULT 0,
+          effect_id TEXT REFERENCES ops_effects(id) ON DELETE RESTRICT,
+          healthy_count INTEGER NOT NULL DEFAULT 0, healthy_since TEXT,
+          verification_json TEXT NOT NULL DEFAULT '{}',
+          opened_at TEXT NOT NULL, observed_at TEXT NOT NULL, resolved_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_ops_incident_open
+          ON ops_incidents(correlation_key) WHERE resolved_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_ops_incident_status ON ops_incidents(status, updated_at);
+        CREATE TABLE IF NOT EXISTS ops_incident_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          incident_id TEXT NOT NULL REFERENCES ops_incidents(id) ON DELETE RESTRICT,
+          kind TEXT NOT NULL, summary TEXT NOT NULL, data_json TEXT NOT NULL,
+          observed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ops_incident_evidence ON ops_incident_evidence(incident_id, id);
+      `);
+    },
+  },
+  {
+    version: 23,
+    name: '应用可靠性目标、探针历史与有界自治授权',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS sre_profiles (
+          id TEXT PRIMARY KEY, host_id TEXT NOT NULL, project_id TEXT NOT NULL,
+          project_name TEXT NOT NULL, service_name TEXT NOT NULL, host_revision TEXT NOT NULL, engine_id TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,
+          config_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          updated_by TEXT NOT NULL, UNIQUE(host_id, project_id, service_name)
+        );
+        CREATE TABLE IF NOT EXISTS sre_probe_samples (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id TEXT NOT NULL, version INTEGER NOT NULL,
+          sampled_at INTEGER NOT NULL, outcome TEXT NOT NULL, latency_ms INTEGER, status_code INTEGER,
+          reason TEXT NOT NULL DEFAULT '', UNIQUE(profile_id, version, sampled_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_probe_window ON sre_probe_samples(profile_id, version, sampled_at);
+        CREATE TABLE IF NOT EXISTS sre_autonomy_policies (
+          id TEXT PRIMARY KEY, profile_id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 1,
+          profile_version INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+          expires_at INTEGER NOT NULL, cooldown_ms INTEGER NOT NULL, max_daily INTEGER NOT NULL,
+          maintenance_until INTEGER NOT NULL DEFAULT 0, approved_by TEXT NOT NULL,
+          approved_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sre_auto_authorizations (
+          incident_id TEXT PRIMARY KEY, effect_id TEXT UNIQUE, policy_id TEXT NOT NULL,
+          policy_version INTEGER NOT NULL, profile_version INTEGER NOT NULL,
+          target_json TEXT NOT NULL, reserved_at INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'reserved',
+          reason TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_auto_budget ON sre_auto_authorizations(policy_id, reserved_at);
+      `);
+    },
+  },
+  {
+    version: 24,
+    name: '可靠变更、恢复演练、证据复盘与历史归档',
+    up(database) {
+      addColumn(database, 'sre_profiles', 'archived_at', 'INTEGER');
+      addColumn(database, 'ops_incidents', 'closed_at', 'TEXT');
+      addColumn(database, 'ops_incidents', 'closure_reason', "TEXT NOT NULL DEFAULT ''");
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_sre_probe_retention ON sre_probe_samples(sampled_at);
+        DROP INDEX IF EXISTS ux_ops_incident_open;
+        CREATE UNIQUE INDEX ux_ops_incident_open ON ops_incidents(correlation_key) WHERE resolved_at IS NULL AND closed_at IS NULL;
+        CREATE TABLE IF NOT EXISTS sre_changes (
+          id TEXT PRIMARY KEY, status TEXT NOT NULL, host_id TEXT NOT NULL, project_id TEXT NOT NULL,
+          profile_id TEXT NOT NULL, review_json TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+          reviewed_by TEXT NOT NULL, approved_by TEXT, approved_at INTEGER, error TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_change_queue ON sre_changes(status, created_at);
+        CREATE TABLE IF NOT EXISTS sre_recovery_plans (
+          id TEXT PRIMARY KEY, host_id TEXT NOT NULL, project_id TEXT NOT NULL, project_name TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,
+          config_json TEXT NOT NULL, identity_json TEXT NOT NULL, next_run_at INTEGER,
+          updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sre_recovery_runs (
+          id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, version INTEGER NOT NULL, status TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
+          requested_by TEXT NOT NULL, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER,
+          error TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sre_drill_queue ON sre_recovery_runs(status, created_at);
+        CREATE TABLE IF NOT EXISTS sre_retrospectives (
+          id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, requested_by TEXT NOT NULL,
+          status TEXT NOT NULL, evidence_json TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT ''
+        );
+      `);
+    },
+  },
+  { version: 25, name: '平台心跳、容量观测与持久多窗口告警', up: installSreObservabilitySchema },
+  { version: 26, name: '结构化诊断评测与范围隔离的遥测证据', up: installSreAnalysisSchema },
+  { version: 27, name: '业务数据库备份和隔离应用恢复', up: installSreBusinessSchema },
+  { version: 28, name: '可恢复幂等的应用接入向导', up: installSreOnboardingSchema },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -906,13 +1032,6 @@ export function recordAiUsage({ sessionId = 0, model = 'unknown', usage = {} } =
     total,
   );
   return Number(result.lastInsertRowid);
-}
-
-export function pruneAiUsage(days = 30) {
-  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
-  return db.prepare(
-    "DELETE FROM ai_usage WHERE julianday('now') - julianday(created_at) > ?"
-  ).run(safeDays);
 }
 
 /**
@@ -1575,14 +1694,6 @@ export function pruneOperationHistory(days = 30) {
   const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
   return db.prepare(
     "DELETE FROM operation_history WHERE julianday('now') - julianday(created_at) > ?"
-  ).run(safeDays);
-}
-
-/** 归档/清理过期告警事件:优先保留未读/未静音(详见 events.js)。 */
-export function pruneAgentPlans(days = 30) {
-  const safeDays = Math.max(1, Math.min(Math.floor(Number(days) || 30), 3650));
-  return db.prepare(
-    "DELETE FROM agent_plans WHERE julianday('now') - julianday(created_at) > ?"
   ).run(safeDays);
 }
 
@@ -2517,21 +2628,50 @@ function safeParse(value, fallback) {
 
 // ===== 会话/Agent 审计数据保留策略 =====
 
-/** 清理超过保留期的 AI 会话消息与 Agent 审计数据,返回各表删除行数。 */
-export function pruneAiData(retentionDays = 90) {
-  const days = Math.max(7, Math.min(Number(retentionDays) || 90, 3650));
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-  const tx = db.transaction(() => {
-    const plans = db.prepare(`
-      DELETE FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE created_at < ?)
-    `).run(cutoff);
-    // 反馈(rating/feedback_text)是 agent_plans 的列,随计划一并删除,无独立表
-    const oldPlans = db.prepare('DELETE FROM agent_plans WHERE created_at < ?').run(cutoff);
-    const history = db.prepare('DELETE FROM ai_history WHERE created_at < ?').run(cutoff);
-    const usage = db.prepare('DELETE FROM ai_usage WHERE created_at < ?').run(cutoff);
-    return { plans: oldPlans.changes, executions: plans.changes, history: history.changes, usage: usage.changes };
-  });
-  return tx();
+/** AI 历史只有一个保留期限来源；边界时刻保留，早于边界才清理。 */
+export function normalizeAiRetentionDays(value = getSetting('retention.ai_days', '90')) {
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? Math.max(7, Math.min(Math.floor(days), 3650)) : 90;
+}
+
+function aiRetentionCutoff(days, now) {
+  return new Date(Number(now) - normalizeAiRetentionDays(days) * 86400000).toISOString();
+}
+
+export function previewAiData(retentionDays, now = Date.now()) {
+  const days = normalizeAiRetentionDays(retentionDays);
+  const cutoff = aiRetentionCutoff(days, now);
+  const count = (table) => db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE julianday(created_at) < julianday(?)`).get(cutoff).count;
+  return {
+    days, cutoff,
+    counts: {
+      plans: count('agent_plans'), history: count('ai_history'), usage: count('ai_usage'),
+      executions: db.prepare('SELECT COUNT(*) AS count FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?))').get(cutoff).count,
+    },
+  };
+}
+
+/** 全部定时和手动清理共用事务、期限与计数，并持久化最近成功结果。 */
+export function pruneAiData(retentionDays, now = Date.now()) {
+  const days = normalizeAiRetentionDays(retentionDays);
+  const cutoff = aiRetentionCutoff(days, now);
+  return db.transaction(() => {
+    const executions = db.prepare('DELETE FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?))').run(cutoff).changes;
+    const plans = db.prepare('DELETE FROM agent_plans WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const history = db.prepare('DELETE FROM ai_history WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const usage = db.prepare('DELETE FROM ai_usage WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const counts = { plans, executions, history, usage };
+    const at = new Date(now).toISOString();
+    setSetting('retention.ai_last_pruned_at', at);
+    setSetting('retention.ai_last_result', JSON.stringify({ days, cutoff, at, counts }));
+    return counts;
+  })();
+}
+
+export function getAiRetentionStatus() {
+  let lastResult = null;
+  try { lastResult = JSON.parse(getSetting('retention.ai_last_result', 'null')); } catch { /* 旧记录损坏不影响预览。 */ }
+  return { ...previewAiData(), lastResult };
 }
 
 export default db;

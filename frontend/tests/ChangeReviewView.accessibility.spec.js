@@ -2,9 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, h, KeepAlive, ref } from 'vue';
 
-const getComposeFile = vi.hoisted(() => vi.fn());
-const validateCompose = vi.hoisted(() => vi.fn());
-const previewCompose = vi.hoisted(() => vi.fn());
+const reviewDeployment = vi.hoisted(() => vi.fn());
 const previewDeploy = vi.hoisted(() => vi.fn());
 const streamComposeControl = vi.hoisted(() => vi.fn());
 const store = vi.hoisted(() => ({
@@ -12,7 +10,7 @@ const store = vi.hoisted(() => ({
   refresh: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../src/api/client.js', () => ({
-  api: { getComposeFile, validateCompose, previewCompose, previewDeploy },
+  api: { reviewDeployment, previewDeploy },
   streamComposeControl,
 }));
 vi.mock('../src/stores/services.js', () => ({ useServicesStore: () => store }));
@@ -22,16 +20,12 @@ import ChangeReviewView from '../src/views/ChangeReviewView.vue';
 
 let wrapper;
 beforeEach(() => {
-  getComposeFile.mockReset();
-  validateCompose.mockReset();
-  previewCompose.mockReset();
+  reviewDeployment.mockReset();
   previewDeploy.mockReset();
   streamComposeControl.mockReset();
   store.projects = [{ id: 'p1', projectName: '测试项目', editable: true }];
   store.refresh.mockClear().mockResolvedValue(undefined);
-  getComposeFile.mockResolvedValue({ hostId: 'local', content: 'services:\n  web:\n    image: nginx:latest\n' });
-  validateCompose.mockResolvedValue({ issues: [] });
-  previewCompose.mockResolvedValue({ added: [], changed: [], restarted: [], removed: [], portConflicts: [] });
+  reviewDeployment.mockImplementation(async id => ({ token: `token-${id}`, projectId: id, projectName: id === 'p1' ? '测试项目' : '项目 B', hostId: 'local', files: ['compose.yaml', 'override.yaml'], content: 'services: { web: { image: nginx } }', issues: [], preview: { added: [], changed: [], restarted: [], removed: [], portConflicts: [] } }));
   previewDeploy.mockResolvedValue({ summary: { create: 1, recreate: 0, keep: 0, pulls: 0, conflicts: 0, orphan: 0 }, pullsNeeded: [], conflicts: [], volumeRisks: [], bindRisks: [], services: [] });
   streamComposeControl.mockImplementation(async (_projectId, _action, onFrame) => { onFrame({ type: 'exit', data: { code: 0 } }); });
 });
@@ -50,7 +44,7 @@ function mountView() {
 describe('变更评审异步反馈可访问性', () => {
   it('评审加载有礼貌播报，评审失败通过 alert 呈现', async () => {
     let reject;
-    getComposeFile.mockReturnValueOnce(new Promise((_, r) => { reject = r; }));
+    reviewDeployment.mockReturnValueOnce(new Promise((_, r) => { reject = r; }));
     wrapper = mountView();
     await wrapper.get('select[aria-label="选择项目"]').setValue('p1');
     expect(wrapper.get('[role="status"][aria-live="polite"]').text()).toContain('正在加载变更评审');
@@ -141,7 +135,7 @@ describe('评审上下文与部署前置条件', () => {
 
   it('加载中和失败后均不显示通过评分，也不能打开部署确认', async () => {
     let reject;
-    getComposeFile.mockReturnValueOnce(new Promise((_, r) => { reject = r; }));
+    reviewDeployment.mockReturnValueOnce(new Promise((_, r) => { reject = r; }));
     wrapper = mountView();
     await select().setValue('p1');
     expect(wrapper.text()).toContain('正在检查当前项目');
@@ -160,15 +154,15 @@ describe('评审上下文与部署前置条件', () => {
   it('快速切换后丢弃旧配置，不以新项目 ID 校验旧配置', async () => {
     store.projects.push({ id: 'p2', projectName: '项目 B', editable: true });
     let resolveA;
-    getComposeFile.mockReturnValueOnce(new Promise(resolve => { resolveA = resolve; }));
+    reviewDeployment.mockReturnValueOnce(new Promise(resolve => { resolveA = resolve; }));
     wrapper = mountView();
     await select().setValue('p1');
     await select().setValue('p2');
     await ready();
-    const calls = validateCompose.mock.calls.length;
+    const calls = reviewDeployment.mock.calls.length;
     resolveA({ content: 'services: { old: { image: nginx } }', hostId: 'local' });
     await flushPromises();
-    expect(validateCompose).toHaveBeenCalledTimes(calls);
+    expect(reviewDeployment).toHaveBeenCalledTimes(calls);
     expect(wrapper.text()).toContain('项目 B · 检查于');
     expect(select().element.value).toBe('p2');
   });
@@ -182,7 +176,7 @@ describe('评审上下文与部署前置条件', () => {
     await wrapper.findAll('button').find(b => b.text().includes('检查宿主')).trigger('click');
     expect(previewDeploy).toHaveBeenCalledWith('p1', false);
     let resolveValidation;
-    validateCompose.mockReturnValueOnce(new Promise(resolve => { resolveValidation = resolve; }));
+    reviewDeployment.mockReturnValueOnce(new Promise(resolve => { resolveValidation = resolve; }));
     await wrapper.findAll('button').find(b => b.text() === '刷新').trigger('click');
     await flushPromises();
     await select().setValue('p2'); await ready();
@@ -195,7 +189,7 @@ describe('评审上下文与部署前置条件', () => {
   });
 
   it('缺失预览结果不能被当作零风险', async () => {
-    previewCompose.mockResolvedValueOnce(null);
+    reviewDeployment.mockResolvedValueOnce({ token: "t", issues: [], preview: null });
     wrapper = mountView(); await select().setValue('p1'); await ready();
     expect(wrapper.text()).toContain('检查结果不完整');
     expect(deploy()).toBeUndefined();
@@ -204,10 +198,10 @@ describe('评审上下文与部署前置条件', () => {
   it('确认前配置变化时拒绝部署并要求重新评审', async () => {
     wrapper = mountView(); await select().setValue('p1'); await ready();
     await deploy().trigger('click');
-    getComposeFile.mockResolvedValueOnce({ hostId: 'local', content: 'services: {}' });
+    streamComposeControl.mockRejectedValueOnce(new Error('配置或节点已变化，本次未部署，请重新评审'));
     await wrapper.findAll('.modal-stub button').find(b => b.text().includes('确认部署')).trigger('click');
     await flushPromises();
-    expect(streamComposeControl).not.toHaveBeenCalled();
+    expect(streamComposeControl).toHaveBeenCalledOnce();
     expect(wrapper.text()).toContain('配置或节点已变化，本次未部署');
     expect(deploy()).toBeUndefined();
   });
@@ -229,7 +223,7 @@ describe('评审上下文与部署前置条件', () => {
     await Promise.all([confirm.trigger('click'), confirm.trigger('click')]);
     await flushPromises();
     expect(streamComposeControl).toHaveBeenCalledTimes(1);
-    expect(streamComposeControl.mock.calls[0][4]).toEqual({ action: 'up', expectedHostId: 'local', expectedContent: 'services:\n  web:\n    image: nginx:latest\n' });
+    expect(streamComposeControl.mock.calls[0][4]).toEqual({ action: 'up', reviewToken: 'token-p1' });
   });
 });
 
@@ -237,18 +231,18 @@ describe('缓存评审生命周期', () => {
   it('切换标签后丢弃挂起请求，返回重新加载；完成结果返回后可打开确认', async () => {
     const visible = ref(true);
     let resolveOld;
-    getComposeFile.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
+    reviewDeployment.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
     wrapper = mount(defineComponent({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(ChangeReviewView) : h('div', '另一个标签') }) }), { global: { stubs: { BaseModal: { props: ['show'], template: '<div v-if="show" class="modal-stub"><slot/><slot name="footer"/></div>' } } } });
     await wrapper.get('select').setValue('p1');
     visible.value = false; await flushPromises();
     resolveOld({ content: 'services: { old: { image: nginx } }', hostId: 'local' }); await flushPromises();
-    expect(validateCompose).not.toHaveBeenCalled();
+    expect(wrapper.text()).not.toContain("规则风险等级");
     visible.value = true; await flushPromises();
     await vi.waitFor(() => expect(wrapper.text()).toContain('规则风险等级'));
-    const calls = getComposeFile.mock.calls.length;
+    const calls = reviewDeployment.mock.calls.length;
     visible.value = false; await flushPromises();
     visible.value = true; await flushPromises();
-    expect(getComposeFile).toHaveBeenCalledTimes(calls);
+    expect(reviewDeployment).toHaveBeenCalledTimes(calls);
     const deploy = wrapper.findAll('button').find(b => b.text().includes('确认部署…'));
     expect(deploy.element.disabled).toBe(false);
     await deploy.trigger('click');

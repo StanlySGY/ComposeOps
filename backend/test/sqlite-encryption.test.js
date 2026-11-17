@@ -132,3 +132,30 @@ test('SQLite encryption: key file loading validates key size and never depends o
   assert.throws(() => readDatabaseEncryptionKey({ DB_ENCRYPTION_KEY: 'weak' }), /64 位/);
   assert.throws(() => readDatabaseEncryptionKey({ DB_ENCRYPTION_KEY: keyA, DB_ENCRYPTION_KEY_FILE: file }), /只配置/);
 });
+
+test('SQLite encryption: fast key validation does not replace explicit full corruption verification', async t => {
+  configureKey(t, { key: keyA });
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'composeops-encrypted-corrupt-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'source.db');
+  const db = new Database(file);
+  db.exec('CREATE TABLE payload(value BLOB); INSERT INTO payload VALUES(zeroblob(20000))');
+  const root = db.prepare("SELECT rootpage FROM sqlite_master WHERE name='payload'").get().rootpage;
+  const pageSize = db.pragma('page_size', { simple: true }); db.close();
+  const { openSync, writeSync, closeSync } = await import('node:fs');
+  const descriptor = openSync(file, 'r+');
+  try { writeSync(descriptor, Buffer.alloc(64, 0xff), 0, 64, (root - 1) * pageSize + 100); } finally { closeSync(descriptor); }
+  assert.throws(() => verifyDatabase(file));
+  await assert.rejects(backupDatabase(file, path.join(dir, 'backup.db')));
+});
+
+test('SQLite encryption: backup rejects a plaintext source with a configured key without migrating it', async t => {
+  configureKey(t, { key: keyA });
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'composeops-backup-no-migration-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'plain.db');
+  const plain = new DatabaseSync(file); plain.exec('CREATE TABLE data(value TEXT)'); plain.close();
+  const original = readFileSync(file);
+  await assert.rejects(backupDatabase(file, path.join(dir, 'backup.db')), /只读/);
+  assert.deepEqual(readFileSync(file), original);
+});
