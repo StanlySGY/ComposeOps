@@ -59,6 +59,11 @@
     <p v-else-if="recoveryNotice" class="log-reconnect-notice" role="status">{{ recoveryNotice }}<button class="filter-reset" aria-label="关闭日志恢复提示" @click="recoveryNotice = ''">关闭</button></p>
     <!-- 查询写错时保留上一次结果,只提示不静默清空日志。 -->
     <p v-if="queryError" class="alert-warning" role="alert">查询语法有误:{{ queryError }}</p>
+    <!-- 全部项目都未纳管时给出直达入口,避免下拉空白让人摸不着头脑。 -->
+    <div v-if="needsProjectManagement" class="alert-warning flex flex-wrap items-center gap-2" role="status">
+      <span class="flex-1">当前没有已纳管的项目，纳管后即可在这里查看实时日志。</span>
+      <router-link class="btn-secondary" to="/settings?tab=mounts"><FolderCog :size="16" />项目纳管</router-link>
+    </div>
     <div v-if="levelFilter" class="filter-summary" role="group" aria-label="当前日志级别筛选"><span>仅显示 {{ levelFilter.toUpperCase() }}</span><button class="filter-reset" @click="levelFilter = ''">清除级别筛选</button></div>
     <p v-if="pausedDropped" class="text-xs text-status-warn" role="status">暂停期间仅保留最近 5000 条日志,已丢弃 {{ pausedDropped }} 条。</p>
     <div class="log-status-strip flex flex-wrap items-center gap-3 text-muted">
@@ -119,7 +124,7 @@ import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, shallowRef, triggerRef, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
-import { Braces, Columns2, Download, Filter, Layers, Pause, Play, Search, SlidersHorizontal, Sparkles, Square, Trash2 } from 'lucide-vue-next';
+import { Braces, Columns2, Download, Filter, FolderCog, Layers, Pause, Play, Search, SlidersHorizontal, Sparkles, Square, Trash2 } from 'lucide-vue-next';
 import { api, streamProjectStats, wsUrl } from '../api/client.js';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import LogPane from '../components/logs/LogPane.vue';
@@ -133,6 +138,8 @@ const route = useRoute();
 const router = useRouter();
 const logSourceRoute = ref(resolveReturnTarget(route.query.from) ? String(route.query.from) : '');
 const projects = ref([]);
+// 自动发现但未纳管的项目数量,用于日志页空状态时的纳管引导。
+const unmanagedCount = ref(0);
 const projectId = ref(route.query.projectId || '');
 const containerId = ref(route.query.containerId || '');
 const aggregateMode = ref(!!route.query.projectId && !route.query.containerId);
@@ -214,6 +221,7 @@ const containers = computed(() => projects.value.find((p) => p.id === projectId.
 const visibleContainers = computed(() => filterContainers(containers.value, containerQuery.value));
 const activeContainerName = computed(() => containers.value.find((c) => c.id === containerId.value)?.name || '');
 const projectName = computed(() => projects.value.find((p) => p.id === projectId.value)?.projectName || '');
+const needsProjectManagement = computed(() => !projects.value.length && unmanagedCount.value > 0);
 const hasErrors = computed(() => errorLines.value > 0);
 const recentErrorLogs = computed(() => lines.value.filter((line) => line.level === 'error' || line.type === 'stderr').map((line) => line.data).join('\n').slice(-50000));
 const canConnect = computed(() => projectId.value && (aggregateMode.value || containerId.value));
@@ -239,6 +247,7 @@ const filtered = computed(() => {
 });
 
 const emptyMessage = computed(() => {
+  if (needsProjectManagement.value) return '当前没有已纳管的项目，请先到「设置 → 项目纳管」授权后再查看日志。';
   if (!projectId.value) return '选择项目和日志来源后开始查看。';
   if (!canConnect.value) return '请选择容器，或开启聚合查看整个项目。';
   if (queryError.value) return '查询语法有误，已保留上一次结果。';
@@ -290,7 +299,7 @@ onDeactivated(() => {
 function onHostChanged() {
   loadId += 1;
   disconnect(); closeStats(); clearLines();
-  projects.value = []; projectId.value = ''; containerId.value = ''; selectedContainers.value = [];
+  projects.value = []; unmanagedCount.value = 0; projectId.value = ''; containerId.value = ''; selectedContainers.value = [];
   recoveryNotice.value = '节点已切换，请重新选择项目和容器。';
   if (!disposed) { syncRouteContext(); void reloadProjects(); }
 }
@@ -303,7 +312,9 @@ async function reloadProjects() {
     error.value = result.reason?.message || '项目列表刷新失败,请稍后重试';
     return;
   }
-  projects.value = (result.value?.projects || []).filter(project => project.managed);
+  const discovered = result.value?.projects || [];
+  projects.value = discovered.filter(project => project.managed);
+  unmanagedCount.value = discovered.length - projects.value.length;
   error.value = '';
   openStats();
   if (canConnect.value && projects.value.some(project => project.id === projectId.value)) connect();

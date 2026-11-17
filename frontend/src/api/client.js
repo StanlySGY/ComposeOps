@@ -77,7 +77,11 @@ async function request(path, opts = {}) {
     // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
     if (!opts.readOnly) {
       invalidateSwr('/');
-      if (opts.notify !== false) notifyDataChanged({ source: 'api', path });
+      // 保留部署预览/校验等只读推演端点的刷新隔离，同时允许调用方显式关闭通知。
+      const suppressedPrefixes = ['/auth', '/ai/agent/sessions', '/ai/agent/approval', '/ai/agent/feedback', '/ai/agent/compact'];
+      const suppressedSegments = ['/ping', '/check', '/preview', '/deploy-preview', '/validate', '/anomalies', '/test'];
+      const suppressNotify = opts.notify === false || suppressedPrefixes.some(prefix => path.startsWith(prefix)) || suppressedSegments.some(segment => path.includes(segment));
+      if (!suppressNotify) notifyDataChanged({ source: 'api', path });
     }
     return data;
   }
@@ -152,6 +156,9 @@ export const api = {
   logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getProjects: (force = false) => request('/projects', { force }),
+  getStandaloneContainers: () => request('/projects/standalone-containers'),
+  runStandaloneContainerAction: (id, action, expectedHostId) => request(`/projects/standalone-containers/${encodeURIComponent(id)}/actions`, { method: 'POST', body: JSON.stringify({ action, expectedHostId }) }),
+  runComposeServiceAction: (projectId, service, action) => request(`/projects/${encodeURIComponent(projectId)}/services/${encodeURIComponent(service)}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
   getMountPlan: async () => normalizeMountPlan(await request('/projects/mount-plan')),
   saveProjectManagement: (projectIds, mountProjectIds = []) => request('/projects/management', { method: 'PUT', body: JSON.stringify({ projectIds, mountProjectIds }) }),
   getProjectActivity: (id) => request(`/projects/${id}/activity`),

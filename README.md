@@ -47,7 +47,7 @@ ComposeOps 解决的是：
 
 <img src="docs/screenshots/guardian-demo.gif" alt="守护模式实测：容器退出告警自动触发 AI 诊断，点开即见根因假设与处置建议" width="960">
 
-<img src="docs/screenshots/review.png" alt="变更评审与部署预演：配置风险打分，将创建/重建/移除的容器与受影响卷端口一目了然" width="960">
+<img src="docs/screenshots/deploy-review-demo.gif" alt="宿主检查实测：从变更评审风险评分点「检查宿主」，对照宿主真实状态推演出将新建 0 / 将重建 5 / 预计不动 62，卷风险点名、逐服务明细可展开" width="960">
 
 ### 30 秒理解价值
 

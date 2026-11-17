@@ -81,6 +81,7 @@
         @toggle-expand="toggleExpanded(project.id)" @toggle-select="toggleSelection(project.id)" @refresh="refresh" @note-saved="project.note = $event" @activity="activityProject = project" @env="envProject = project" @upgrade="upgradeProject = project" @db-dump="dbDumpProject = project" @action="(action) => run(project, action)"
       />
     </div>
+    <StandaloneContainersPanel :host-id="hosts.activeHostId" @refresh="refresh(true)" />
     <OperationOutputDrawer v-if="output.open" :label="actionLabel(output.action)" :action="output.action" :context-valid="output.hostId === hosts.activeHostId" :name="output.name" :text="output.text" :project-id="output.projectId" :exit-code="output.exitCode" :failure-reason="output.failureReason" :running="output.running" :batch-tasks="batchTasks" :batch-progress="batchProgress" :completed-count="completedBatchTasks" @close="output.open = false" @diagnose="openDiagnosisForOutput" @inspect="inspectOutputProject" @logs="openOutputTool('logs')" @review="openOutputTool('compose')" />
     <ProjectEnvModal v-if="envProject" :project="envProject" @close="closeEnv" @refresh="refresh" @apply="handleEnvApply" />
     <AIDiagnosisModal v-if="diagnosis" :open="!!diagnosis" :project-id="diagnosis.projectId" :project-name="diagnosis.projectName" :container-id="diagnosis.containerId" :raw-logs="diagnosis.rawLogs" :env-keys="diagnosis.envKeys" :failed-command="diagnosis.failedCommand" :exit-code="diagnosis.exitCode" :env-editable="diagnosis.envEditable" @close="diagnosis = null" />
@@ -105,6 +106,7 @@ import { api, streamComposeControl, wsUrl } from '../api/client.js';
 import ProjectActivityDrawer from '../components/ProjectActivityDrawer.vue';
 import ProjectEnvModal from '../components/services/ProjectEnvModal.vue';
 import ServiceProjectCard from '../components/services/ServiceProjectCard.vue';
+import StandaloneContainersPanel from '../components/services/StandaloneContainersPanel.vue';
 import AIDiagnosisModal from '../components/services/AIDiagnosisModal.vue';
 import ProjectUpgradeModal from '../components/services/ProjectUpgradeModal.vue';
 import DbDumpModal from '../components/services/DbDumpModal.vue';

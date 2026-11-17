@@ -13,6 +13,7 @@ import { createComposeChangePreview, validateComposeSemantics } from '../service
 import { getProjectDocker } from '../services/docker-hosts.js';
 import { listProjectDbContainers, runDbDump } from '../services/db-dumper.js';
 import { scanProjectWebPorts, buildWebUiLinks } from '../services/project-ports.js';
+import { listStandaloneContainers, runStandaloneContainerAction, runComposeServiceAction } from '../services/container-management.js';
 import {
   addOperation,
   getComposeBackup,
@@ -94,6 +95,41 @@ const fileIndexField = { type: 'number' };
 
 export default async function projectRoutes(fastify) {
   fastify.get('/', async () => ({ projects: await scanProjects() }));
+
+  // 独立容器与 Compose 项目分开呈现；只接受当前活动节点扫描得到的容器 ID。
+  fastify.get('/standalone-containers', async (request, reply) => {
+    try { return await listStandaloneContainers(); }
+    catch (error) { return reply.code(error.statusCode || 502).send({ error: error.code || 'container_scan_failed', message: error.message }); }
+  });
+
+  fastify.post('/standalone-containers/:containerId/actions', {
+    schema: {
+      params: { type: 'object', required: ['containerId'], properties: { containerId: { type: 'string', minLength: 12, maxLength: 128 } } },
+      body: { type: 'object', additionalProperties: false, required: ['action', 'expectedHostId'], properties: { action: { type: 'string', maxLength: 16 }, expectedHostId: { type: 'string', minLength: 1, maxLength: 128 } } },
+    },
+  }, async (request, reply) => {
+    try {
+      return await runStandaloneContainerAction({ id: request.params.containerId, ...request.body });
+    } catch (error) {
+      return reply.code(error.statusCode || 500).send({ error: error.code || 'container_action_failed', message: error.message });
+    }
+  });
+
+  fastify.post('/:id/services/:service/actions', {
+    schema: {
+      params: { type: 'object', required: ['id', 'service'], properties: { id: { type: 'string', minLength: 1, maxLength: 128 }, service: { type: 'string', minLength: 1, maxLength: 128 } } },
+      body: { type: 'object', additionalProperties: false, required: ['action'], properties: { action: { type: 'string', maxLength: 16 } } },
+    },
+  }, async (request, reply) => {
+    const project = await projectOr404(request.params.id, reply);
+    if (!project) return;
+    try {
+      return await runComposeServiceAction(project, request.params.service, request.body.action);
+    } catch (error) {
+      return reply.code(error.statusCode || 500).send({ error: error.code || 'service_action_failed', message: error.message });
+    }
+  });
+
 
   fastify.get('/mount-plan', async () => buildMountPlan(await scanProjects()));
 

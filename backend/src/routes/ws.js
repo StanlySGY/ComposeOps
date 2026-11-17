@@ -35,12 +35,15 @@ export function teardownExecSession(socket) {
 /**
  * WebSocket 路由：实时日志流与容器 Web Shell。
  *
- * - GET/WS /api/v1/ws/logs?containerId=<id>&tail=200
+ * - GET/WS /ws/logs?projectId=<id>&containerId=<id>&tail=200
  *     绑定 Docker API /containers/{id}/logs?follow=true&stdout=true&stderr=true
- * - GET/WS /api/v1/ws/exec?containerId=<id>[&cmd=sh]
+ * - GET/WS /ws/aggregated-logs?projectId=<id>[&containers=id1,id2][&tail=200]
+ *     多容器聚合日志流,按时间归并输出
+ * - GET/WS /ws/exec?projectId=<id>&containerId=<id>[&cmd=sh]
  *     基于 xterm.js 的交互式容器 shell
  *
  * 这些路由挂在 /ws 前缀（不经过 /api/v1），方便 nginx 反代区分。
+ * 另有 /ws/containers、/ws/events、/ws/jobs 分别推送容器状态、告警事件与任务进度。
  */
 export default async function wsRoutes(fastify) {
   // ---- 容器状态实时推送 ----
