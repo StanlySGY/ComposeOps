@@ -78,9 +78,12 @@ async function request(path, opts = {}) {
     if (!opts.readOnly) {
       invalidateSwr('/');
       // 保留部署预览/校验等只读推演端点的刷新隔离，同时允许调用方显式关闭通知。
-      const suppressNotify = opts.notify === false || /^\\/(auth|ai\\/agent\\/(sessions|approval|feedback|compact))/.test(path) || /\\/(ping|check|(?:deploy-)?preview|validate|anomalies|test)(?:[/?]|$)/.test(path);
+      const suppressedPrefixes = ['/auth', '/ai/agent/sessions', '/ai/agent/approval', '/ai/agent/feedback', '/ai/agent/compact'];
+      const suppressedSegments = ['/ping', '/check', '/preview', '/deploy-preview', '/validate', '/anomalies', '/test'];
+      const suppressNotify = opts.notify === false || suppressedPrefixes.some(prefix => path.startsWith(prefix)) || suppressedSegments.some(segment => path.includes(segment));
       if (!suppressNotify) notifyDataChanged({ source: 'api', path });
-    }    return data;
+    }
+    return data;
   }
   const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
   const entry = swrCache.get(key);
