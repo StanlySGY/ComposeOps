@@ -101,12 +101,13 @@ export function createAgentTrace({ role = 'auto', planId = '', endpoint = export
         }],
       };
       try {
-        await fetchImpl(endpoint, {
+        const response = await fetchImpl(endpoint, {
           method: 'POST',
           headers: exporterHeaders(),
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(1200),
         });
+        if (!response?.ok) process.emitWarning('ComposeOps OTLP trace export returned HTTP ' + String(response?.status || 'unknown'));
       } catch (error) {
         process.emitWarning('ComposeOps OTLP trace export skipped (' + (error?.name || 'network error') + ')');
       }

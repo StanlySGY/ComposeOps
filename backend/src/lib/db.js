@@ -1836,10 +1836,10 @@ export function updateAgentBackgroundTask(id, patch = {}) {
 
 export function markAgentBackgroundTasksUnknown() {
   const rows = db.prepare("SELECT id FROM agent_background_tasks WHERE status IN ('queued', 'running', 'stopping')").all();
+  db.prepare("UPDATE agent_background_tasks SET status = 'failed', error = CASE WHEN error = '' THEN '服务进程重启时任务仍在队列中，尚未开始执行；任务参数未持久化，无法安全恢复，请重新发起。' ELSE error END, exit_code = 1, finished_at = datetime('now'), heartbeat_at = datetime('now') WHERE status = 'queued'").run();
   db.prepare("UPDATE agent_background_tasks SET status = 'outcome_unknown', error = CASE WHEN error = '' THEN '服务进程在任务结束前退出；请核对 Docker 实际状态后再决定是否重新执行。' ELSE error END, finished_at = datetime('now'), heartbeat_at = datetime('now') WHERE status IN ('running', 'stopping')").run();
   return rows.map((row) => row.id);
 }
-
 export function pruneAgentBackgroundTasks(retentionDays = 7) {
   const days = Math.max(1, Math.min(Number(retentionDays) || 7, 90));
   return db.prepare("DELETE FROM agent_background_tasks WHERE status IN ('completed', 'failed', 'stopped') AND consumed = 1 AND julianday('now') - julianday(finished_at) > ?")

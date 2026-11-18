@@ -61,12 +61,12 @@ export function toPublicAgentEvent(event) {
     return { type: 'action_completed', kind: event.kind, tool: String(event.tool || ''), projectId: event.projectId || null, hostId: event.hostId || null, ...(event.kind === 'cron_created' ? { result: redactSecretValue(event.result || {}) } : {}) };
   }
   if (event.type === 'tool_result' && event.tool === 'ui.present' && event.result?.success && Array.isArray(event.result?.result?.blocks)) {
-    return { type: 'ui_present', blocks: redactSecretValue(event.result.result.blocks).slice(0, 8) };
+    return { type: 'ui_present', toolCallId: String(event.toolCallId || ''), blocks: redactSecretValue(event.result.result.blocks).slice(0, 8) };
   }
   if (event.type === 'tool_result') {
     const result = redactSecretValue(event.result?.result);
-    if (event.tool === 'project.list_managed' && Array.isArray(result)) return { type: 'context_data', kind: 'projects', projects: result };
-    if (event.tool === 'web.search' && Array.isArray(result?.sources)) return { type: 'context_data', kind: 'search_sources', sources: result.sources };
+    if (event.tool === 'project.list_managed' && Array.isArray(result)) return { type: 'context_data', toolCallId: String(event.toolCallId || ''), kind: 'projects', projects: result };
+    if (event.tool === 'web.search' && Array.isArray(result?.sources)) return { type: 'context_data', toolCallId: String(event.toolCallId || ''), kind: 'search_sources', sources: result.sources };
     // 通用工具结果:只透出成败、耗时与脱敏摘要,不把完整结果体交给前端。
     // 失败摘要优先给可读的错误原因,绝不把 durationMs 等内部计时字段伪装成错误正文。
     // 成功结果摘要最多 600 字符,避免列表类工具被过早截断。
@@ -90,8 +90,28 @@ export function toPublicAgentEvent(event) {
     if (!summary || summary === '{}' || summary === '[]' || summary === 'null') {
       summary = unsuccessful ? '操作失败，未返回详细原因' : '执行成功，该操作没有返回数据';
     }
+    if (event.tool === 'web.interact') {
+      const page = result?.page || {};
+      const rawScreenshot = event.result?.result?.page?.screenshotBase64;
+      const screenshotBase64 = typeof page.screenshotBase64 === 'string' ? page.screenshotBase64 : '';
+      const browserPreview = typeof rawScreenshot === 'string' && rawScreenshot.length <= 120000 && /^[A-Za-z0-9+/=]{1,120000}$/.test(screenshotBase64)
+        ? { title: String(page.title || '').slice(0, 200), url: String(page.url || '').slice(0, 2048), screenshotBase64 }
+        : null;
+      const pageTitle = String(page.title || page.url || '网页').slice(0, 160);
+      const steps = Array.isArray(page.steps) ? page.steps.length : 0;
+      const summary = event.result?.success
+        ? '已读取页面「' + pageTitle + '」，当前 ' + (Number(page.tabCount) || 1) + ' 个标签页，完成 ' + steps + ' 步交互。'
+        : cleanError(event.result?.error || result?.error || '网页交互失败');
+      return {
+        type: 'tool_result', toolCallId: String(event.toolCallId || ''), tool: 'web.interact',
+        success: !!event.result?.success, durationMs: Number(event.result?.durationMs || 0),
+        summary, error: event.result?.success ? '' : summary,
+        ...(browserPreview ? { browserPreview } : {}),
+      };
+    }
     return {
       type: 'tool_result',
+      toolCallId: String(event.toolCallId || ''),
       tool: String(event.tool || ''),
       success: !!event.result?.success,
       durationMs: Number(event.result?.durationMs || 0),
@@ -102,7 +122,7 @@ export function toPublicAgentEvent(event) {
   if (event.type === 'tool_requested') {
     let paramsText = '';
     try { paramsText = JSON.stringify(redactSecretValue(event.params || {})).slice(0, 600); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
-    return { type: 'tool_requested', tool: String(event.tool || ''), paramsText };
+    return { type: 'tool_requested', toolCallId: String(event.toolCallId || ''), tool: String(event.tool || ''), paramsText };
   }
   // 思考/执行进度轨迹:元数据已脱敏,只透出阶段与一句话内容,供"执行动态"面板实时展示
   if (event.type === 'trace' && event.trace) {
@@ -130,10 +150,10 @@ export function toPublicAgentEvent(event) {
     // 执行参数必须透出:此前只带工具名,点开"参数与结果"是空的,用户看不到 Agent 到底要做什么。
     let paramsText = '';
     try { paramsText = JSON.stringify(redactSecretValue(event.params || {})).slice(0, 800); } catch { /* 参数仅用于展示,序列化失败时留空。 */ }
-    return { type: 'tool_executing', tool: String(event.tool || ''), paramsText };
+    return { type: 'tool_executing', toolCallId: String(event.toolCallId || ''), tool: String(event.tool || ''), paramsText };
   }
-  if (event.type === 'tool_rejected') return { type: 'tool_rejected', tool: String(event.tool || '') };
-  if (event.type === 'tool_error') return { type: 'tool_error', tool: String(event.tool || ''), error: cleanError(event.error) };
+  if (event.type === 'tool_rejected') return { type: 'tool_rejected', toolCallId: String(event.toolCallId || ''), tool: String(event.tool || '') };
+  if (event.type === 'tool_error') return { type: 'tool_error', toolCallId: String(event.toolCallId || ''), tool: String(event.tool || ''), error: cleanError(event.error) };
   // 本轮生效的审批模式:此前被本层丢弃,后端 /agent/approval-mode 因此成了无人的孤岛,
   // 前端也无从显示"现在到底问不问"。透出后工作台据此渲染模式选择器。
   if (event.type === 'approval_mode') return { type: 'approval_mode', mode: String(event.mode || 'ask') };

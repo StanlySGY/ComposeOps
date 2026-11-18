@@ -26,8 +26,25 @@ test('trusted UI catalog rejects arbitrary HTML and redacts secret-looking value
 
 test('public Agent events only expose the normalized structured UI payload', () => {
   const event = toPublicAgentEvent({
-    type: 'tool_result', tool: 'ui.present',
+    type: 'tool_result', toolCallId: 'ui-call-1', tool: 'ui.present',
     result: { success: true, result: { blocks: [{ type: 'notice', title: '完成', text: '结果' }], note: 'internal' } },
   });
-  assert.deepEqual(event, { type: 'ui_present', blocks: [{ type: 'notice', title: '完成', text: '结果' }] });
+  assert.deepEqual(event, { type: 'ui_present', toolCallId: 'ui-call-1', blocks: [{ type: 'notice', title: '完成', text: '结果' }] });
+});
+
+test('browser preview is bounded, only emitted for web.interact, and excludes raw page DOM from the public payload', () => {
+  const screenshotBase64 = 'A'.repeat(1024);
+  const event = toPublicAgentEvent({
+    type: 'tool_result', toolCallId: 'browser-call-1', tool: 'web.interact',
+    result: { success: true, durationMs: 25, result: { untrusted: true, page: { title: 'Example', url: 'https://example.com/', snapshot: 'private page body', screenshotBase64 } } },
+  });
+  assert.equal(event.type, 'tool_result');
+  assert.equal(event.browserPreview.title, 'Example');
+  assert.equal(event.browserPreview.screenshotBase64, screenshotBase64);
+  assert.equal(JSON.stringify(event).includes('private page body'), false);
+  const oversized = toPublicAgentEvent({
+    type: 'tool_result', toolCallId: 'browser-call-2', tool: 'web.interact',
+    result: { success: true, result: { page: { screenshotBase64: 'A'.repeat(120001) } } },
+  });
+  assert.equal(oversized.browserPreview, undefined);
 });

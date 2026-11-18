@@ -53,37 +53,36 @@ test('公开 Agent 事件隐藏工具协议和内部工具字段', () => {
 
 test('公开 Agent 事件保留用户需要的上下文和完成通知', () => {
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'project.list_managed', result: { result: [{ id: 'p1' }] } }), {
-    type: 'context_data', kind: 'projects', projects: [{ id: 'p1' }],
+    type: 'context_data', toolCallId: '', kind: 'projects', projects: [{ id: 'p1' }],
   });
   assert.deepEqual(toPublicAgentEvent({ type: 'action_completed', kind: 'cron_created', tool: 'cron.create', result: { name: 'backup' } }), {
     type: 'action_completed', kind: 'cron_created', tool: 'cron.create', projectId: null, hostId: null, result: { name: 'backup' },
   });
   // 通用工具结果只透出工具名/成败/耗时,结果体不外带;空结果给一句人话兜底,避免展开是空白
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'compose.ps', result: { success: true, result: {}, durationMs: 120 } }), {
-    type: 'tool_result', tool: 'compose.ps', success: true, durationMs: 120, summary: '执行成功，该操作没有返回数据', error: '',
+    type: 'tool_result', toolCallId: '', tool: 'compose.ps', success: true, durationMs: 120, summary: '执行成功，该操作没有返回数据', error: '',
   });
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'compose.ps', result: { success: false, error: '容器不存在', durationMs: 12 } }), {
-    type: 'tool_result', tool: 'compose.ps', success: false, durationMs: 12, summary: '容器不存在', error: '容器不存在',
+    type: 'tool_result', toolCallId: '', tool: 'compose.ps', success: false, durationMs: 12, summary: '容器不存在', error: '容器不存在',
   });
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_result', tool: 'compose.ps', result: { success: false, durationMs: 12 } }), {
-    type: 'tool_result', tool: 'compose.ps', success: false, durationMs: 12, summary: '操作失败，未返回详细原因', error: '',
+    type: 'tool_result', toolCallId: '', tool: 'compose.ps', success: false, durationMs: 12, summary: '操作失败，未返回详细原因', error: '',
   });
   assert.equal(toPublicAgentEvent({
     type: 'tool_result', tool: 'task.stop', result: { success: true, result: { message: '已停止', killed: false }, durationMs: 4 },
   }).summary, '已停止');
   // 请求工具时携带脱敏参数摘要,供工具卡片展开查看
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_requested', tool: 'config.inspect', params: { password: 'x', name: 'api' } }), {
-    type: 'tool_requested', tool: 'config.inspect', paramsText: '{"password":"[REDACTED]","name":"api"}',
+    type: 'tool_requested', toolCallId: '', tool: 'config.inspect', paramsText: '{"password":"[REDACTED]","name":"api"}',
   });
-  assert.deepEqual(toPublicAgentEvent({ type: 'tool_requested', tool: 'config.inspect' }), { type: 'tool_requested', tool: 'config.inspect', paramsText: '{}' });
+  assert.deepEqual(toPublicAgentEvent({ type: 'tool_requested', tool: 'config.inspect' }), { type: 'tool_requested', toolCallId: '', tool: 'config.inspect', paramsText: '{}' });
   // 执行阶段同样带脱敏参数:此前只带工具名,展开"参数与结果"是空的
   assert.deepEqual(toPublicAgentEvent({ type: 'tool_executing', tool: 'config.inspect', params: { token: 'x', name: 'api' } }), {
-    type: 'tool_executing', tool: 'config.inspect', paramsText: '{"token":"[REDACTED]","name":"api"}',
+    type: 'tool_executing', toolCallId: '', tool: 'config.inspect', paramsText: '{"token":"[REDACTED]","name":"api"}',
   });
-  assert.deepEqual(toPublicAgentEvent({ type: 'tool_executing', tool: 'config.inspect' }), { type: 'tool_executing', tool: 'config.inspect', paramsText: '{}' });
-  assert.deepEqual(toPublicAgentEvent({ type: 'tool_rejected', tool: 'compose.restart' }), { type: 'tool_rejected', tool: 'compose.restart' });
-  assert.deepEqual(toPublicAgentEvent({ type: 'tool_error', tool: 'compose.logs', error: '容器不存在' }), { type: 'tool_error', tool: 'compose.logs', error: '容器不存在' });
-});
+  assert.deepEqual(toPublicAgentEvent({ type: 'tool_executing', tool: 'config.inspect' }), { type: 'tool_executing', toolCallId: '', tool: 'config.inspect', paramsText: '{}' });
+  assert.deepEqual(toPublicAgentEvent({ type: 'tool_rejected', tool: 'compose.restart' }), { type: 'tool_rejected', toolCallId: '', tool: 'compose.restart' });
+  assert.deepEqual(toPublicAgentEvent({ type: 'tool_error', tool: 'compose.logs', error: '容器不存在' }), { type: 'tool_error', toolCallId: '', tool: 'compose.logs', error: '容器不存在' });});
 
 test('公开 Agent 事件对嵌套工具结果、错误和完成文本执行值级秘密脱敏', () => {
   const token = 'sk-abcdefgh12345678';

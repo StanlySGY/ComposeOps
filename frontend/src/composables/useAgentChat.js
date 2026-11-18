@@ -370,6 +370,13 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       assistant.content += `${assistant.content ? '\n\n' : ''}已达最大工具循环次数(${Number(event.maxLoops) || 20} 轮),本次执行终止。可发送"继续"接续处理,或拆小任务后重试。`;
     }
     else if (event.type === 'approval_mode') approvalMode.value = String(event.mode || 'ask');
+    else if (event.type === 'tool_result') {
+      trackTool(assistant, event);
+      const preview = event.browserPreview;
+      if (preview && typeof preview.screenshotBase64 === 'string' && preview.screenshotBase64.length <= 120000 && /^[A-Za-z0-9+/=]+$/.test(preview.screenshotBase64)) {
+        assistant.browserPreview = { title: String(preview.title || '').slice(0, 200), url: String(preview.url || '').slice(0, 2048), screenshotBase64: preview.screenshotBase64 };
+      }
+    }
     else if (event.type.startsWith('tool_')) { trackTool(assistant, event); }
     else if (event.type === 'interrupted') {
       flushTokens();

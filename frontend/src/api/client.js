@@ -292,7 +292,7 @@ export const api = {
   clearAiSessions: (sessionIds) => request('/ai/history/batch-delete', { method: 'POST', body: JSON.stringify({ sessionIds }) }),
   truncateAiHistory: (sessionId, fromMessageId) => request('/ai/history/truncate', { method: 'POST', body: JSON.stringify({ sessionId, fromMessageId }) }),
   // ai agent:执行已收敛为 Tool Loop 流式通道;会话/记忆/审计见上方与下方的端点
-  agentExecuteStream: (payload, onEvent, signal) => streamSse('/ai/agent/execute-stream', payload, onEvent, signal),
+  agentExecuteStream: (payload, onEvent, signal) => streamSse('/ai/agent/execute-stream', { ...payload, protocol: 'ag-ui' }, onEvent, signal, 'ag-ui'),
   getAgentRoles: () => request('/ai/agent/roles'),
   getAgentTasks: (limit = 50, filters = {}) => request('/ai/agent/tasks?' + new URLSearchParams({ limit: String(limit), ...(filters.status ? { status: filters.status } : {}), ...(filters.sessionId ? { sessionId: String(filters.sessionId) } : {}) })),
   getAgentTask: (id, waitMs = 0) => request('/ai/agent/tasks/' + encodeURIComponent(id) + '?waitMs=' + encodeURIComponent(waitMs)),
@@ -442,7 +442,19 @@ export async function streamComposeControl(projectId, action, onFrame, path = nu
 /**
  * AI 对话 / 诊断 SSE 流式
  */
-export async function streamSse(path, body, onFrame, signal) {
+export function normalizeAgUiEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  if (event.type === 'TEXT_MESSAGE_CONTENT') return { type: 'token', content: String(event.delta || '') };
+  if (event.type === 'RUN_FINISHED') return null;
+  if (event.type === 'RUN_ERROR') return { type: 'error', content: String(event.message || 'Agent 执行失败') };
+  if (event.type === 'CUSTOM') {
+    if (String(event.name || '').startsWith('composeops.') && event.value && typeof event.value === 'object') return event.value;
+  }
+  if (event.type === 'ACTIVITY_DELTA') return { type: 'trace', phase: String(event.activityType || 'agent'), content: String(event.delta || '') };
+  return null;
+}
+
+export async function streamSse(path, body, onFrame, signal, protocol = 'native') {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -454,10 +466,16 @@ export async function streamSse(path, body, onFrame, signal) {
   const decoder = new TextDecoder();
   let buf = '';
   const dispatchFrame = (frame) => {
-    const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+    const lines = frame.split(/\r?\n/);
+    const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
     if (!data) return;
     let event;
     try { event = JSON.parse(data); } catch { return; }
+    if (protocol === 'ag-ui') {
+      const normalized = normalizeAgUiEvent(event);
+      if (normalized) onFrame(normalized);
+      return;
+    }
     onFrame(event);
   };
   const drainFrames = (final = false) => {

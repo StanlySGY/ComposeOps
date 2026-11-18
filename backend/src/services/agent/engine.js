@@ -777,26 +777,26 @@ export class OperationsAgent {
               const poisoned = lastAssistant?.tool_calls?.find((c) => c.id === toolCall.id);
               if (poisoned?.function) poisoned.function.arguments = '{}';
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: `${errorMsg}。请重新发起工具调用,参数必须是合法 JSON(键名用双引号)。` });
-              onEvent({ type: 'tool_error', tool: toolName, error: errorMsg });
+              onEvent({ type: 'tool_error', toolCallId: toolCall.id, tool: toolName, error: errorMsg });
               continue;
             }
             
             publishTrace('tool_requested', `请求调用工具: ${toolName}`, { params: toolParams });
-            onEvent({ type: 'tool_requested', tool: toolName, params: toolParams });
+            onEvent({ type: 'tool_requested', toolCallId: toolCall.id, tool: toolName, params: toolParams });
 
             // 检查工具风险等级,决定是否需要确认
             const tool = this.getTool(toolName);
             if (!tool) {
               const errorMsg = `工具 ${toolName} 未注册`;
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
-              onEvent({ type: 'tool_error', tool: toolName, error: errorMsg });
+              onEvent({ type: 'tool_error', toolCallId: toolCall.id, tool: toolName, error: errorMsg });
               continue;
             }
 
             if (!roleAllowed(role, toolName)) {
               const errorMsg = `当前 Agent 角色不允许使用工具 ${toolName}`;
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
-              onEvent({ type: 'tool_error', tool: toolName, error: errorMsg });
+              onEvent({ type: 'tool_error', toolCallId: toolCall.id, tool: toolName, error: errorMsg });
               continue;
             }
 
@@ -808,6 +808,11 @@ export class OperationsAgent {
             const dynamicRisk = assessRisk(toolName, toolParams, { ...context, ...resolved });
             const policyProjectId = resolved.project?.id || toolParams.projectId || context.projectId || '';
             const policy = evaluateAgentPolicy({ toolName, params: toolParams, projectId: policyProjectId });
+            const policySpan = otelTrace.startSpan('tool_policy', {
+              'composeops.tool.name': toolName, 'composeops.tool.risk': dynamicRisk,
+              'composeops.policy.decision': policy.decision, 'composeops.policy.rule_id': policy.ruleId || 'none',
+            });
+            policySpan.end({ ok: policy.decision !== 'deny' });
             let parametersHash = fingerprintAgentParams(toolParams);
             const executionId = recordAgentExecution(planId, toolName, toolParams, 'pending');
             const auditActor = context.initiator || 'agent';
@@ -832,7 +837,7 @@ export class OperationsAgent {
                 reason: rejectMsg, parametersHash,
               });
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
-              onEvent({ type: 'tool_rejected', tool: toolName, reason: 'persistent_policy_denied' });
+              onEvent({ type: 'tool_rejected', toolCallId: toolCall.id, tool: toolName, reason: 'persistent_policy_denied' });
               publishTrace('tool_rejected', rejectMsg, { tool: toolName, policyRuleId: policy.ruleId });
               continue;
             }
@@ -885,17 +890,22 @@ export class OperationsAgent {
               
               // 等待前端确认(通过 Promise 机制)
               let approval;
+              const approvalSpan = otelTrace.startSpan('approval_wait', {
+                'composeops.tool.name': toolName, 'composeops.tool.risk': dynamicRisk,
+              });
               try {
                 approval = await this._waitForApproval(planId, toolCall.id, abortController.signal);
-              } finally {
-                // 无论用户批准、拒绝、兜底超时还是断连中断,确认等待都必须清理。
+                approvalSpan.end({ ok: !!approval?.approved, values: { 'composeops.approval.decision': approval?.approved ? 'approved' : 'rejected' } });
+              } catch (error) {
+                approvalSpan.end({ ok: false, values: { 'composeops.approval.decision': 'interrupted', 'error.type': error?.name || 'Error' } });
+                throw error;
               }
 
               if (!approval || !approval.approved) {
                 // 用户拒绝
                 const rejectMsg = `用户拒绝执行 ${toolName}`;
                 messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
-                onEvent({ type: 'tool_rejected', tool: toolName });
+                onEvent({ type: 'tool_rejected', toolCallId: toolCall.id, tool: toolName });
                 publishTrace('tool_rejected', rejectMsg, {});
                 updateAgentExecution(executionId, {
                   status: 'rejected', confirmationStatus: approval?.reason || 'rejected',
@@ -954,7 +964,7 @@ export class OperationsAgent {
                       reason: rejectMsg, parametersHash: editedHash,
                     });
                     messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
-                    onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg, reason: 'edited_params_policy_denied' });
+                    onEvent({ type: 'tool_rejected', toolCallId: toolCall.id, tool: toolName, error: rejectMsg, reason: 'edited_params_policy_denied' });
                     continue;
                   }
                 } catch (error) {
@@ -968,7 +978,7 @@ export class OperationsAgent {
                     actor: 'approval-gate', toolName, decision: 'not_executed', reason: rejectMsg,
                     parametersHash: editedHash });
                   messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
-                  onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg });
+                  onEvent({ type: 'tool_rejected', toolCallId: toolCall.id, tool: toolName, error: rejectMsg });
                   continue;
                 }
                 const riskRank = { low: 0, medium: 1, high: 2, critical: 3 };
@@ -983,7 +993,7 @@ export class OperationsAgent {
                     actor: 'approval-gate', toolName, decision: 'not_executed', reason: rejectMsg, parametersHash: editedHash,
                     details: { originalRisk: dynamicRisk, editedRisk } });
                   messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg });
-                  onEvent({ type: 'tool_rejected', tool: toolName, error: rejectMsg, risk: editedRisk });
+                  onEvent({ type: 'tool_rejected', toolCallId: toolCall.id, tool: toolName, error: rejectMsg, risk: editedRisk });
                   continue;
                 }
               }
@@ -998,7 +1008,7 @@ export class OperationsAgent {
             }
 
             // 执行工具
-            onEvent({ type: 'tool_executing', tool: toolName, params: effectiveParams });
+            onEvent({ type: 'tool_executing', toolCallId: toolCall.id, tool: toolName, params: effectiveParams });
             publishTrace('tool_executing', `正在执行 ${toolName}`, { params: effectiveParams });
 
             let execId = executionId;
@@ -1031,6 +1041,11 @@ export class OperationsAgent {
                 reason: result.error || '', parametersHash,
                 details: { durationMs: result.durationMs || 0, confirmationStatus },
               });
+              const verificationSpan = otelTrace.startSpan('postcondition', {
+                'composeops.tool.name': toolName,
+                'composeops.verification.status': result.postconditionStatus || 'not_reported',
+              });
+              verificationSpan.end({ ok: !!result.success, values: { 'composeops.verification.reported': !!result.postconditionStatus } });
               recordAgentAuditEvent({
                 planId, executionId: execId, eventType: 'postcondition_completed',
                 actor: 'postcondition-validator', toolName,
@@ -1038,21 +1053,24 @@ export class OperationsAgent {
                 reason: result.postconditionReason || '', parametersHash,
               });
 
+              const modelSafeResult = result?.result?.page?.screenshotBase64
+                ? { ...result, result: { ...result.result, page: { ...result.result.page, screenshotBase64: undefined } } }
+                : result;
+
               // 值级脱敏:工具结果先收割 KEY=VALUE 形态的敏感值,再在回喂文本
-              // 里把已知值与静态 token 形态(sk-/ghp_/xox/AKIA)统一抹掉。
+              // 里把已知值与静态 token 形态(sk-/ghp_/xox/AKIA)统一抹掉。媒体预览不进入模型上下文。
               try {
-                harvestSecretValues(JSON.stringify(result.success ? result.result : { error: result.error }));
+                harvestSecretValues(JSON.stringify(modelSafeResult.success ? modelSafeResult.result : { error: modelSafeResult.error }));
               } catch { /* 收割失败不阻断执行 */ }
 
               // RunawayGuard:死循环检测,命中时在结果前注入提醒(不打断 SSE 协议)
               const runawayHint = runawayGuard.observe({
                 toolName,
                 params: effectiveParams,
-                result: result.success ? result.result : null,
-                error: result.success ? null : result.error,
+                result: modelSafeResult.success ? modelSafeResult.result : null,
+                error: modelSafeResult.success ? null : modelSafeResult.error,
               });
-              const serializedResult = JSON.stringify(result);
-              const guardedResult = result?.result?.untrusted
+              const serializedResult = JSON.stringify(modelSafeResult);              const guardedResult = result?.result?.untrusted
                 ? fenceUntrusted('UNTRUSTED_TOOL_RESULT', serializedResult)
                 : serializedResult;
               const rawPayload = runawayHint
@@ -1062,7 +1080,7 @@ export class OperationsAgent {
               // 将工具结果回喂给 LLM(大结果截断,保留首尾)
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: truncateToolResult(resultPayload) });
 
-              onEvent({ type: 'tool_result', tool: toolName, result });
+              onEvent({ type: 'tool_result', toolCallId: toolCall.id, tool: toolName, result });
               if (result.success && MUTATION_TOOLS.has(toolName)) {
                 const change = { type: 'action_completed', kind: toolName === 'cron.create' ? 'cron_created' : 'mutation', tool: toolName, projectId: context.project?.id || effectiveParams.projectId || null, hostId: context.project?.hostId || null };
                 if (toolName === 'cron.create') change.result = result.result;
@@ -1090,7 +1108,7 @@ export class OperationsAgent {
                 });
               }
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
-              onEvent({ type: 'tool_error', tool: toolName, error: errorMsg });
+              onEvent({ type: 'tool_error', toolCallId: toolCall.id, tool: toolName, error: errorMsg });
               publishTrace('tool_error', `${toolName} 执行失败`, { error: errorMsg });
             }
           }

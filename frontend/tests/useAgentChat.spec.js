@@ -140,6 +140,17 @@ describe('useAgentChat', () => {
     window.removeEventListener('composeops:data-changed', listener);
   });
 
+  it('浏览器截图预览仅接受有限长度的 Base64 图片数据', async () => {
+    const chat = useAgentChat();
+    const valid = 'A'.repeat(1024);
+    apiMock.agentExecuteStream.mockImplementation(async (_payload, onEvent) => {
+      onEvent({ type: 'tool_result', tool: 'web.interact', success: true, summary: '页面已读取', browserPreview: { title: 'Example', url: 'https://example.com/', screenshotBase64: valid } });
+      onEvent({ type: 'tool_result', tool: 'web.interact', success: true, summary: '不应显示', browserPreview: { screenshotBase64: 'x'.repeat(120001) } });
+    });
+    await chat.sendMessage('打开网页并截图');
+    expect(chat.messages.value[1].browserPreview).toEqual({ title: 'Example', url: 'https://example.com/', screenshotBase64: valid });
+  });
+
   it('思考过程按轮次增量累积,done 之后仍然保留', async () => {
     const chat = useAgentChat({ channel: 'thinking-test' });
     apiMock.agentExecuteStream.mockImplementation(async (payload, onEvent) => {

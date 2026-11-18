@@ -59,7 +59,7 @@ const start = async () => {
     const interruptedJobs = initializeBackgroundJobs();
     if (interruptedJobs.length) fastify.log.warn({ jobs: interruptedJobs }, 'marked unfinished background jobs as interrupted');
     const uncertainTasks = initializeBackgroundTasks();
-    if (uncertainTasks.length) fastify.log.warn({ tasks: uncertainTasks }, 'marked unfinished Agent tasks outcome_unknown; Docker state reconciliation is required');
+    if (uncertainTasks.length) fastify.log.warn({ tasks: uncertainTasks }, 'reconciled interrupted Agent tasks: queued tasks failed safely; running tasks marked outcome_unknown and require Docker state verification');
     const interruptedAgentPlans = markInterruptedAgentPlansUnknown();
     if (interruptedAgentPlans.length) fastify.log.warn({ plans: interruptedAgentPlans }, 'marked Agent plans interrupted by previous process outcome_unknown; Docker state reconciliation is required');
     const effectRecovery = recoverExpiredOpsEffects();

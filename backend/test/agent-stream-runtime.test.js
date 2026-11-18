@@ -83,6 +83,33 @@ async function run(sessionId, onEvent = () => {}, extra = {}, signal = AbortSign
   assert.equal(events.at(-1).type, 'done');
   return events;
 }
+async function runAgUi(sessionId, onEvent = async () => {}, signal = AbortSignal.timeout(10000)) {
+  const response = await realFetch(`${base}/api/v1/ai/agent/execute-stream`, {
+    method: 'POST', headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId, message: 'AG-UI 受控测试', protocol: 'ag-ui' }), signal,
+  });
+  assert.equal(response.status, 200);
+  const events = [];
+  let buffer = '';
+  const decoder = new TextDecoder();
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let end;
+    while ((end = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+      if (!frame.includes('data:')) continue;
+      const lines = frame.split(/\r?\n/);
+      const eventName = lines.find(line => line.startsWith('event:'))?.slice(6).trim();
+      const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('\n');
+      const event = JSON.parse(data);
+      assert.equal(eventName, event.type);
+      events.push(event);
+      await onEvent(event);
+    }
+  }
+  assert.ok(events.some(event => event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'));
+  return events;
+}
 test.beforeEach(() => { resetRateLimits(); captured.length = 0; executions = []; replies = []; });
 test.after(async () => { resetBackgroundTasks(); await app.close(); fs.rmSync(tempDir, { recursive: true, force: true }); });
 
@@ -297,5 +324,31 @@ test('真实 SSE: 兼容模式完成审批、工具执行和结果回传，正�
   assert.equal(calls, 2);
   assert.equal(events.filter(event => event.type === 'token').map(event => event.content).join(''), '兼容调用已完成');
   assert.equal(getAiHistory(10, sessionId).at(-1).content, '兼容调用已完成');
+  assert.equal(agent.pendingApprovals.size, 0);
+});
+
+test('真实 AG-UI 1.0 SSE: 标准工具调用生命周期与自定义审批事件完整往返', async t => {
+  mockModel(t);
+  const { sessionId } = await request('/agent/sessions', {});
+  replies = [toolReply('agui-value'), stream([{ content: 'AG-UI 已完成' }])];
+  const events = await runAgUi(sessionId, async event => {
+    if (event.type !== 'CUSTOM' || event.name !== 'composeops.confirmation_required') return;
+    const confirmation = event.value;
+    await request('/agent/approve', { executionId: confirmation.executionId, toolCallId: confirmation.toolCallId, approved: true });
+  });
+  const types = events.map(event => event.type);
+  assert.ok(types.includes('RUN_STARTED'));
+  assert.ok(types.includes('TEXT_MESSAGE_START'));
+  assert.ok(types.includes('TEXT_MESSAGE_CONTENT'));
+  assert.ok(types.includes('TOOL_CALL_START'));
+  assert.ok(types.includes('TOOL_CALL_ARGS'));
+  assert.ok(types.includes('TOOL_CALL_END'));
+  assert.ok(types.includes('TOOL_CALL_RESULT'));
+  assert.ok(types.includes('STEP_STARTED'));
+  assert.ok(types.includes('STEP_FINISHED'));
+  assert.ok(types.includes('RUN_FINISHED'));
+  assert.ok(events.some(event => event.type === 'CUSTOM' && event.name === 'composeops.confirmation_required'));
+  assert.ok(events.some(event => event.type === 'CUSTOM' && event.name === 'composeops.done' && event.value.planId));
+  assert.deepEqual(executions, [{ value: 'agui-value' }]);
   assert.equal(agent.pendingApprovals.size, 0);
 });

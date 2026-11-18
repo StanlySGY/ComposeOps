@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const db = await import('../src/lib/db.js');
 const { createDefinition, getInstance } = await import('../src/services/workflow-engine.js');
-const { runTaskWatchdogOnce, markInterruptedAgentPlansUnknown } = await import('../src/services/task-watchdog.js');
+const { runTaskWatchdogOnce, markInterruptedAgentPlansUnknown } = await import('../src/services/task-watchdog.js');const { initializeBackgroundTasks } = await import('../src/services/agent/background-tasks.js');
 
 test('startup recovery marks interrupted Agent execution plans outcome_unknown without replay', () => {
   const planId = db.createAgentPlan(77, 'stale plan', { steps: [{ tool: 'compose.restart' }] });
@@ -40,6 +40,18 @@ test('task watchdog marks a stale Agent background task outcome_unknown without 
   const saved = db.getAgentBackgroundTask(task.id);
   assert.equal(saved.status, 'outcome_unknown');
   assert.match(saved.error, /不会重放 Docker 副作用/);
+});
+
+test('startup recovery fails queued tasks that never started and preserves unknown outcomes for running tasks', () => {
+  const queued = db.createAgentBackgroundTask({ id: 'agt-startup-queued', taskType: 'compose.up', label: 'queued deploy' });
+  const running = db.createAgentBackgroundTask({ id: 'agt-startup-running', taskType: 'compose.restart', label: 'running restart' });
+  db.updateAgentBackgroundTask(running.id, { status: 'running' });
+  const recovered = initializeBackgroundTasks();
+  assert.ok(recovered.includes(queued.id) && recovered.includes(running.id));
+  assert.equal(db.getAgentBackgroundTask(queued.id).status, 'failed');
+  assert.match(db.getAgentBackgroundTask(queued.id).error, /尚未开始执行/);
+  assert.equal(db.getAgentBackgroundTask(running.id).status, 'outcome_unknown');
+  assert.match(db.getAgentBackgroundTask(running.id).error, /核对 Docker 实际状态/);
 });
 
 test('task watchdog marks a stale running workflow and current step outcome_unknown', () => {
