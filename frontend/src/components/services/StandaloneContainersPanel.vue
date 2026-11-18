@@ -2,7 +2,7 @@
   <section class="standalone-panel card">
     <header class="standalone-panel__header">
       <div><h2>独立 Docker 容器</h2><p>不属于任何 Compose 项目的容器 · 当前节点：{{ hostName || hostId || '加载中' }}</p></div>
-      <button class="btn-secondary btn-sm" :disabled="loading" @click="load"><RefreshCw :size="14" :class="{ 'animate-spin': loading }" />刷新</button>
+      <button class="btn-secondary btn-sm" :disabled="loading" @click="load"><RefreshCw :size="14" :class="{ 'animate-spin': loading }" />刷新独立容器</button>
     </header>
     <p v-if="error" class="alert-error mx-4 mb-3" role="alert">{{ error }}</p>
     <div v-if="loading && !containers.length" class="p-5 text-sm text-muted" role="status">正在扫描独立容器…</div>

@@ -90,6 +90,7 @@ export async function previewFetch(input, options = {}) {
     '/health': { status: 'ok', docker: 'ok', preview: true },
     '/auth/status': { authenticated: true, setupRequired: false },
     '/projects': { projects },
+    '/projects/standalone-containers': { hostId: 'local', hostName: '本地 Docker', containers: [] },
     '/hosts': { hosts: [previewHost] },
     '/hosts/active': { activeHostId: 'local' },
     '/system/metrics': metrics,
