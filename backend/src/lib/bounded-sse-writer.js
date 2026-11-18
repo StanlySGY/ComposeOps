@@ -58,9 +58,8 @@ export function createBoundedSseWriter(stream, { maxQueuedBytes = 256 * 1024, on
     if (ending && queue.length === 0 && !blocked && !stream.writableEnded) stream.end();
   }
 
-  function send(event) {
+  function enqueueFrame(frame) {
     if (finished || stream.destroyed || stream.writableEnded) return false;
-    const frame = `data: ${JSON.stringify(event)}\n\n`;
     const frameBytes = Buffer.byteLength(frame);
     if (blocked || queue.length) {
       if (queuedBytes + frameBytes > maxQueuedBytes) {
@@ -80,6 +79,16 @@ export function createBoundedSseWriter(stream, { maxQueuedBytes = 256 * 1024, on
     }
   }
 
+  function send(event) {
+    return enqueueFrame(`data: ${JSON.stringify(event)}\n\n`);
+  }
+
+  /** Named SSE event framing used by protocol adapters such as AG-UI. */
+  function sendNamed(event) {
+    const type = String(event?.type || 'CUSTOM').replace(/[^A-Z0-9_]/g, '').slice(0, 64) || 'CUSTOM';
+    return enqueueFrame(`event: ${type}\ndata: ${JSON.stringify(event)}\n\n`);
+  }
+
   function end() {
     if (finished) return completion;
     ending = true;
@@ -95,6 +104,7 @@ export function createBoundedSseWriter(stream, { maxQueuedBytes = 256 * 1024, on
 
   return {
     send,
+    sendNamed,
     end,
     get queuedBytes() { return queuedBytes; },
     get blocked() { return blocked; },

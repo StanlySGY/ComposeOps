@@ -22,6 +22,18 @@ test('bounded SSE writer: preserves event order while draining a slow consumer',
   assert.equal((received.match(/data: /g) || []).length, 3);
 });
 
+test('bounded SSE writer: supports named protocol events without changing native framing', async () => {
+  const stream = new PassThrough();
+  let received = '';
+  stream.on('data', (chunk) => { received += chunk.toString(); });
+  const writer = createBoundedSseWriter(stream);
+  writer.sendNamed({ type: 'RUN_STARTED', runId: 'r1' });
+  writer.send({ type: 'token', content: 'native' });
+  await writer.end();
+  assert.match(received, /event: RUN_STARTED\ndata: .*RUN_STARTED/);
+  assert.match(received, /data: .*native/);
+});
+
 test('bounded SSE writer: streams thousands of events without loss or retained queue', async () => {
   const stream = new PassThrough({ highWaterMark: 1024 });
   let bytes = 0;

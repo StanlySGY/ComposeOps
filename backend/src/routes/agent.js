@@ -26,6 +26,7 @@ import { idField, limitField, numericId } from '../lib/schemas.js';
 import { checkRateLimit } from '../lib/rate-limit.js';
 import { redactSecretValue } from '../lib/secret-redactor.js';
 import { toPublicAgentEvent } from '../lib/agent-public-events.js';
+import { createAgUiAdapter } from '../lib/agent-agui.js';
 import { compactSessionHistory } from '../services/agent/compaction.js';
 import {
   createAgentPolicyGroup,
@@ -252,6 +253,7 @@ function aiRateLimit(limit, windowMs = 60000) {
           sessionId: numericId,
           role: { type: 'string', maxLength: 32 },
           webSearchEnabled: { type: 'boolean' },
+          protocol: { type: 'string', enum: ['native', 'ag-ui'] },
           attachedLogs: { type: 'string', maxLength: 50000 },
           history: {
             type: 'array',
@@ -275,13 +277,15 @@ function aiRateLimit(limit, windowMs = 60000) {
               mode: { type: 'string', maxLength: 120 },
               summary: { type: 'string', maxLength: 1000 },
               state: { type: 'string', maxLength: 12000 },
+              projectId: idField, projectName: { type: 'string', maxLength: 160 },
+              hostId: idField, containerId: idField, serviceName: { type: 'string', maxLength: 160 },
             },
           },
         },
       },
     },
   }, async (request, reply) => {
-    const { message, projectId, containerId, sessionId, role, webSearchEnabled = true, attachedLogs = '', history = [], pageContext = {} } = request.body || {};
+    const { message, projectId, containerId, sessionId, role, webSearchEnabled = true, attachedLogs = '', history = [], pageContext = {}, protocol = 'native' } = request.body || {};
     if (!message || !String(message).trim()) {
       return reply.code(400).send({ error: 'missing_message', message: '缺少 message' });
     }
@@ -302,10 +306,13 @@ function aiRateLimit(limit, windowMs = 60000) {
       maxQueuedBytes: 256 * 1024,
       onOverflow: () => abortController.abort(new DOMException('客户端接收速度过慢，执行已中断', 'AbortError')),
     });
+    const agUi = protocol === 'ag-ui' ? createAgUiAdapter({ threadId: sessionId ? String(sessionId) : 'anonymous', runId: randomUUID() }) : null;
     const send = (event) => {
       if (reply.raw.destroyed || reply.raw.writableEnded) return;
       const publicEvent = toPublicAgentEvent(event);
-      if (publicEvent) streamWriter.send(publicEvent);
+      if (!publicEvent) return;
+      if (agUi) for (const mapped of agUi.map(publicEvent)) streamWriter.sendNamed(mapped);
+      else streamWriter.send(publicEvent);
     };
 
     const agent = getAgent();

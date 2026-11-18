@@ -60,6 +60,9 @@ export function toPublicAgentEvent(event) {
   if (event.type === 'action_completed') {
     return { type: 'action_completed', kind: event.kind, tool: String(event.tool || ''), projectId: event.projectId || null, hostId: event.hostId || null, ...(event.kind === 'cron_created' ? { result: redactSecretValue(event.result || {}) } : {}) };
   }
+  if (event.type === 'tool_result' && event.tool === 'ui.present' && event.result?.success && Array.isArray(event.result?.result?.blocks)) {
+    return { type: 'ui_present', blocks: redactSecretValue(event.result.result.blocks).slice(0, 8) };
+  }
   if (event.type === 'tool_result') {
     const result = redactSecretValue(event.result?.result);
     if (event.tool === 'project.list_managed' && Array.isArray(result)) return { type: 'context_data', kind: 'projects', projects: result };

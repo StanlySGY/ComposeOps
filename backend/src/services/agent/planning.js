@@ -16,10 +16,54 @@ import { findProject, findProjectContainer, scanProjects } from '../scanner.js';
  */
 export async function resolveImplicitContext(userMessage = '', pageContext = {}, preferredProjectId = '') {
   const allProjects = await scanProjects();
-  const projects = preferredProjectId ? allProjects.filter((project) => project.id === preferredProjectId) : allProjects;
-  if (!projects.length) return { project: null, projectId: null, container: null, confidence: 'none' };
-  const source = [userMessage, pageContext?.summary, pageContext?.state].filter(Boolean).join(' ').toLocaleLowerCase();
-  if (!source.trim()) return { project: null, projectId: null, container: null, confidence: 'none' };
+  return resolveImplicitContextFromProjects(userMessage, pageContext, preferredProjectId, allProjects);
+}
+
+export function resolveImplicitContextFromProjects(userMessage = '', pageContext = {}, preferredProjectId = '', allProjects = []) {
+  const userText = String(userMessage || '').toLocaleLowerCase();
+  const explicitProjectMatches = allProjects.filter((project) => {
+    const name = String(project.projectName || project.name || '').trim().toLocaleLowerCase();
+    const id = String(project.id || '').trim().toLocaleLowerCase();
+    return (name.length >= 3 && userText.includes(name)) || (id.length >= 6 && userText.includes(id));
+  });
+  const selectedProjectId = preferredProjectId || (explicitProjectMatches.length === 1 ? explicitProjectMatches[0].id : pageContext?.projectId || '');
+  const projects = selectedProjectId ? allProjects.filter((project) => project.id === selectedProjectId) : allProjects;
+  if (!projects.length) return { project: null, projectId: null, container: null, serviceName: '', confidence: 'none' };
+  const pageBelongsToSelectedProject = !pageContext?.projectId || projects.some((project) => project.id === pageContext.projectId);
+  const page = pageBelongsToSelectedProject ? pageContext || {} : {};
+  const source = [userMessage, page.summary, page.state, page.projectName, page.serviceName].filter(Boolean).join(' ').toLocaleLowerCase();
+  if (!source.trim()) return { project: null, projectId: null, container: null, serviceName: '', confidence: 'none' };
+
+  const explicitContainerHits = [];
+  for (const project of projects) {
+    for (const container of project.containers || []) {
+      const name = String(container.name || '').trim().toLocaleLowerCase();
+      const service = String(container.service || '').trim().toLocaleLowerCase();
+      if ((name.length >= 5 && userText.includes(name)) || (service.length >= 4 && userText.includes(service))) {
+        explicitContainerHits.push({ project, container });
+      }
+    }
+  }
+  if (explicitContainerHits.length === 1) {
+    const hit = explicitContainerHits[0];
+    return { project: hit.project, projectId: hit.project.id, container: hit.container, serviceName: hit.container.service || '', confidence: 'service' };
+  }
+  if (explicitContainerHits.length > 1) {
+    const uniqueProjects = [...new Map(explicitContainerHits.map((hit) => [hit.project.id, hit.project])).values()];
+    if (uniqueProjects.length > 1) return { project: null, projectId: null, container: null, serviceName: '', confidence: 'ambiguous', candidates: uniqueProjects.map((project) => ({ id: project.id, name: project.projectName })) };
+  }
+
+  if (page.containerId && pageBelongsToSelectedProject) {
+    const pageContainerHits = projects.flatMap((project) => (project.containers || []).filter((container) => container.id === page.containerId).map((container) => ({ project, container })));
+    if (pageContainerHits.length === 1) {
+      const hit = pageContainerHits[0];
+      return { project: hit.project, projectId: hit.project.id, container: hit.container, serviceName: hit.container.service || page.serviceName || '', confidence: 'container' };
+    }
+  }
+
+  if ((preferredProjectId || explicitProjectMatches.length === 1) && projects.length === 1) {
+    return { project: projects[0], projectId: projects[0].id, container: null, serviceName: '', confidence: 'project' };
+  }
 
   const matches = [];
   for (const project of projects) {
@@ -41,27 +85,29 @@ export async function resolveImplicitContext(userMessage = '', pageContext = {},
     if (score) matches.push({ project, score });
   }
   matches.sort((a, b) => b.score - a.score);
-  if (!matches.length) return { project: null, projectId: null, container: null, confidence: 'none' };
+  if (!matches.length) return { project: null, projectId: null, container: null, serviceName: '', confidence: 'none' };
   const best = matches[0];
   const tied = matches.filter((item) => item.score === best.score);
   if (tied.length !== 1) {
-    return {
-      project: null, projectId: null, container: null, confidence: 'ambiguous',
-      candidates: tied.map((item) => ({ id: item.project.id, name: item.project.projectName })),
-    };
+    return { project: null, projectId: null, container: null, serviceName: '', confidence: 'ambiguous',
+      candidates: tied.map((item) => ({ id: item.project.id, name: item.project.projectName })) };
   }
 
   const containerHits = [];
+  const serviceNames = new Set();
   for (const container of best.project.containers || []) {
     const name = String(container.name || '').trim().toLocaleLowerCase();
-    const service = String(container.service || '').trim().toLocaleLowerCase();
+    const service = String(container.service || '').trim();
     if (name.length >= 5 && source.includes(name)) containerHits.push(container);
-    else if (service.length >= 4 && source.includes(service)) containerHits.push(container);
+    else if (service.length >= 4 && source.includes(service.toLocaleLowerCase())) {
+      containerHits.push(container);
+      serviceNames.add(service);
+    }
   }
   const container = containerHits.length === 1 ? containerHits[0] : null;
-  return { project: best.project, projectId: best.project.id, container, confidence: container ? 'service' : 'project' };
+  const serviceName = page.serviceName || (serviceNames.size === 1 ? [...serviceNames][0] : container?.service || '');
+  return { project: best.project, projectId: best.project.id, container, serviceName, confidence: container ? 'container' : serviceName ? 'service' : 'project' };
 }
-
 /** 解析工具执行所需的项目/容器上下文。 */
 export async function resolveToolContext(params = {}) {
   const projectId = params?.projectId;

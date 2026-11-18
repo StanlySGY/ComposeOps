@@ -1,5 +1,5 @@
 <template>
-  <article :id="`project-${project.id}`" class="card service-project-card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused, 'is-expanded': expanded }">
+  <article :id="`project-${project.id}`" :data-project-id="project.id" :data-project-name="project.projectName" :data-host-id="project.hostId || undefined" class="card service-project-card" :class="{ 'project-attention': attention, 'ring-1 ring-accent': focused, 'is-expanded': expanded }">
     <header class="service-project-card__header">
       <input type="checkbox" class="accent-accent" :checked="selected" :disabled="!project.managed || busy" :aria-label="`选择 ${project.projectName}`" @change="$emit('toggle-select')" />
       <button class="icon-btn" :title="project.favorite ? '取消收藏' : '收藏项目'" :aria-label="project.favorite ? '取消收藏' : '收藏项目'" :aria-pressed="!!project.favorite" :disabled="favoriteSaving" @click="toggleFavorite(project)"><Star class="w-4 h-4" :class="project.favorite ? 'fill-amber-400 text-status-warn' : ''" /></button>
@@ -47,7 +47,7 @@
 
       <div class="project-container-table" aria-label="Compose 服务列表">
         <div class="service-list-heading"><div><span class="service-list-eyebrow">WORKLOADS</span><strong>服务与容器</strong><span>服务级操作作用于该服务的全部副本；容器级操作只作用于单个容器</span></div><div class="service-list-tools"><span class="service-total">{{ serviceGroups.length }} 个服务 · {{ project.containers.length }} 个容器</span><button v-if="serviceGroups.length > 1" class="service-view-toggle" @click="toggleAllServiceGroups">{{ allServicesCollapsed ? '全部展开' : '全部折叠' }}</button></div></div>
-        <section v-for="group in serviceGroups" :key="group.name" class="service-group" :class="{ 'service-group--attention': group.runningCount < group.containers.length || group.unhealthyCount > 0 }">
+        <section v-for="group in serviceGroups" :key="group.name" :data-service-name="group.name" class="service-group" :class="{ 'service-group--attention': group.runningCount < group.containers.length || group.unhealthyCount > 0 }">
           <header class="service-group__header">
             <button class="service-group__summary" :aria-expanded="!isServiceCollapsed(group.name)" :aria-controls="'service-containers-' + project.id + '-' + group.name" @click="toggleServiceGroup(group.name)">
               <span class="service-group__glyph"><Boxes :size="17" /></span>
@@ -63,7 +63,7 @@
             </div>
           </header>
           <div v-if="!isServiceCollapsed(group.name)" :id="'service-containers-' + project.id + '-' + group.name" class="service-group__body">
-            <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id">
+            <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id" :data-container-id="container.id">
               <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">端口 · {{ portText(container) }}</small></div></div>
               <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
               <div class="project-container-actions" role="group" :aria-label="container.name + ' 容器级操作'">

@@ -117,6 +117,11 @@ services:
       - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},browser
       - NODE_USE_ENV_PROXY=${COMPOSEOPS_NODE_USE_ENV_PROXY:-0}
       - COMPOSEOPS_BROWSER_URL=http://browser:3002
+      # Optional OpenTelemetry GenAI trace export. Disabled when endpoint is empty.
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-composeops}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
       # Durable Effect worker is constrained to read-only Docker inspect actions; set 0 to pause dispatch.
       - OPS_EFFECT_WORKER_ENABLED=${COMPOSEOPS_EFFECT_WORKER_ENABLED:-1}
       # 按需 Compose 工作容器复用时间与最多缓存项目数。

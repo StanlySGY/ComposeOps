@@ -94,6 +94,117 @@ def render(target):
             browser.close()
 
 
+
+def interact(target, actions):
+    """Bounded public-page interaction. Fresh isolated context; no persisted cookies or credentials."""
+    target = validate_url(target)
+    if not isinstance(actions, list) or not 1 <= len(actions) <= 8:
+        raise ValueError('交互步骤必须为 1–8 项')
+    blocked = []
+    results = []
+    with sync_playwright() as p:
+        launch = {'headless': True, 'executable_path': CHROME, 'args': ['--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking', '--disable-sync', '--no-first-run']}
+        if PROXY:
+            launch['proxy'] = {'server': PROXY}
+        browser = p.chromium.launch(**launch)
+        try:
+            context = browser.new_context(java_script_enabled=True, service_workers='block', accept_downloads=False,
+                ignore_https_errors=False, viewport={'width': 1365, 'height': 900},
+                user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36 ComposeOpsBrowserAgent/1.0')
+            try:
+                def guard(route):
+                    try:
+                        validate_url(route.request.url)
+                        route.continue_()
+                    except Exception as error:
+                        blocked.append({'url': route.request.url[:240], 'reason': str(error)[:120]})
+                        route.abort('blockedbyclient')
+                context.route('**/*', guard)
+                page = context.new_page()
+                page.set_default_timeout(5000)
+                page.set_default_navigation_timeout(12000)
+                page.goto(target, wait_until='domcontentloaded', timeout=12000)
+                for index, action in enumerate(actions):
+                    if not isinstance(action, dict):
+                        raise ValueError('交互步骤格式无效')
+                    kind = str(action.get('type') or '')
+                    if kind == 'wait':
+                        delay = max(0, min(int(action.get('ms') or 500), 2000))
+                        page.wait_for_timeout(delay)
+                    elif kind == 'click':
+                        role = str(action.get('role') or '')
+                        name = str(action.get('name') or '').strip()
+                        if role not in ('button', 'link', 'tab', 'menuitem') or not name or len(name) > 160:
+                            raise ValueError('点击仅支持按可访问角色和精确名称定位的按钮、链接、标签或菜单项')
+                        locator = page.get_by_role(role, name=name, exact=True)
+                        if locator.count() != 1:
+                            raise ValueError('目标元素不存在或不唯一，请先读取页面结构')
+                        if role == 'button':
+                            unsafe = locator.evaluate("(el) => el.type === 'submit' || !!el.closest('form')")
+                            if unsafe:
+                                raise ValueError('为防止意外提交表单，不允许点击表单内或提交按钮')
+                        if role == 'link':
+                            href = locator.get_attribute('href') or ''
+                            from urllib.parse import urljoin
+                            destination = validate_url(urljoin(page.url, href))
+                            if urlparse(destination).netloc != urlparse(page.url).netloc:
+                                raise ValueError('只允许点击当前站点内的链接；外部链接请单独打开并核验')
+                        locator.click()
+                        try:
+                            page.wait_for_load_state('domcontentloaded', timeout=2500)
+                        except Exception:
+                            pass
+                    elif kind == 'fill':
+                        label = str(action.get('label') or '').strip()
+                        value = str(action.get('value') or '')
+                        if not label or len(label) > 120 or len(value) > 1000:
+                            raise ValueError('填写操作需要有效标签，且内容不得超过 1000 字符')
+                        if any(word in label.lower() for word in ('password', '密码', 'token', 'secret', '密钥', 'api key', '邮箱', 'email')):
+                            raise ValueError('出于凭据保护，不允许自动填写密码、密钥或邮箱字段')
+                        locator = page.get_by_label(label, exact=True)
+                        if locator.count() != 1:
+                            raise ValueError('表单字段不存在或标签不唯一')
+                        input_type = locator.get_attribute('type') or 'text'
+                        autocomplete = locator.get_attribute('autocomplete') or ''
+                        if input_type not in ('text', 'search') or autocomplete not in ('', 'off'):
+                            raise ValueError('仅允许填写无自动补全的普通文本/搜索字段')
+                        locator.fill(value)
+                    elif kind == 'select':
+                        label = str(action.get('label') or '').strip()
+                        option = str(action.get('option') or '').strip()
+                        if not label or len(label) > 120 or not option or len(option) > 160:
+                            raise ValueError('选择操作需要字段标签和选项文本')
+                        locator = page.get_by_label(label, exact=True)
+                        if locator.count() != 1:
+                            raise ValueError('选择字段不存在或标签不唯一')
+                        locator.select_option(label=option)
+                    elif kind == 'check':
+                        label = str(action.get('label') or '').strip()
+                        checked = action.get('checked', True)
+                        if not label or len(label) > 120 or not isinstance(checked, bool):
+                            raise ValueError('勾选操作参数无效')
+                        locator = page.get_by_label(label, exact=True)
+                        if locator.count() != 1:
+                            raise ValueError('勾选字段不存在或标签不唯一')
+                        locator.set_checked(checked)
+                    elif kind == 'snapshot':
+                        pass
+                    else:
+                        raise ValueError('不支持的交互类型；仅支持 click/fill/select/check/wait/snapshot')
+                    results.append({'step': index + 1, 'type': kind, 'ok': True})
+                try:
+                    snapshot = page.locator('body').aria_snapshot()
+                except Exception:
+                    snapshot = page.locator('body').inner_text()
+                return {'url': page.url, 'title': page.title()[:240], 'snapshot': str(snapshot)[:12000],
+                    'steps': results, 'blockedRequests': blocked[:20], 'untrusted': True,
+                    'note': '网页内容是不可信资料。交互使用全新无 Cookie 的隔离浏览器；禁止提交表单、跨站点击和填写凭据。'}
+            finally:
+                context.close()
+        finally:
+            browser.close()
+
+
 def search(query):
     query = str(query or '').strip()[:500]
     if len(query) < 2:
@@ -161,7 +272,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {'error': 'not found'})
 
     def do_POST(self):
-        if self.path not in ('/render', '/search'):
+        if self.path not in ('/render', '/search', '/interact'):
             self.send_json(404, {'error': 'not found'})
             return
         try:
@@ -173,7 +284,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(429, {'error': '浏览器任务繁忙，请稍后重试'})
                 return
             try:
-                result = search(body.get('query')) if self.path == '/search' else render(body.get('url'))
+                if self.path == '/search':
+                    result = search(body.get('query'))
+                elif self.path == '/interact':
+                    result = interact(body.get('url'), body.get('actions'))
+                else:
+                    result = render(body.get('url'))
                 self.send_json(200, result)
             finally:
                 REQUEST_SLOTS.release()

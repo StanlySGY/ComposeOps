@@ -22,7 +22,7 @@ const REQUIRED_TOOLS = [
   'alert.create', 'diagnostic.probe', 'diagnostic.analyze',
   'compose.pull', 'config.edit', 'maintenance.clean', 'maintenance.update',
   'compose.exec', 'compose.scale', 'config.rollback', 'config.diff',
-  'config.inspect', 'project.list_managed', 'web.search', 'web.open', 'memory.search', 'memory.save', 'memory.delete',
+  'config.inspect', 'project.list_managed', 'web.search', 'web.open', 'web.interact', 'ui.present', 'memory.search', 'memory.save', 'memory.delete',
   'environment.get', 'environment.set', 'volume.mount', 'security.audit', 'backup.trigger',
   'notification.test', 'cron.create', 'performance.baseline', 'alert.configure', 'alert.list',
   'alert.delete', 'server.inspect', 'server.command', 'app.list', 'app.deploy', 'cron.list',

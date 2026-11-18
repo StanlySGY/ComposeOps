@@ -323,6 +323,9 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     if (event.type === 'token') {
       queueToken(assistant, event.content);
       scrollBottom();
+    } else if (event.type === 'ui_present') {
+      const blocks = Array.isArray(event.blocks) ? event.blocks.slice(0, 8) : [];
+      assistant.uiBlocks = [...(assistant.uiBlocks || []), ...blocks].slice(-8);
     } else if (event.type === 'confirmation_required') {
       flushTokens();
       assistant.confirmation = { ...event, busy: false, error: '' };

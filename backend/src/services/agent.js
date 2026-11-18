@@ -10,6 +10,7 @@ export {
   AGENT_ROLES,
   listAgentRoles,
   resolveAgentRole,
+  selectAgentTools,
   OperationsAgent,
   getAgent,
   RISK_LEVELS,

@@ -46,6 +46,12 @@ function collectPageSnapshot() {
     .filter((field) => !SENSITIVE_FIELD_RE.test(field.label))
     .filter((field) => !SENSITIVE_VALUE_RE.test(field.value))
     .filter((field) => field.value || field.label);
+  const expandedCards = [...root.querySelectorAll('[data-project-id].is-expanded')];
+  const activeCard = expandedCards.length === 1 ? expandedCards[0] : null;
+  const expandedServices = activeCard
+    ? [...activeCard.querySelectorAll('[data-service-name]')].filter((node) => node.querySelector('.service-group__summary[aria-expanded="true"]'))
+    : [];
+  const containerRows = activeCard ? [...activeCard.querySelectorAll('.project-container-row[data-container-id]')] : [];
   const headings = [...root.querySelectorAll('h1, h2, h3, .page-title, .page-subtitle')]
     .map((node) => (node.innerText || node.textContent || '').trim())
     .filter(Boolean)
@@ -53,6 +59,11 @@ function collectPageSnapshot() {
   return {
     summary: headings.join(' · ').slice(0, 1000),
     state: JSON.stringify({ visibleText, fields }).slice(0, 12000),
+    projectId: activeCard?.dataset.projectId || '',
+    projectName: activeCard?.dataset.projectName || '',
+    hostId: activeCard?.dataset.hostId || '',
+    serviceName: expandedServices.length === 1 && expandedServices[0].dataset.serviceName !== '未标记服务' ? expandedServices[0].dataset.serviceName || '' : '',
+    containerId: containerRows.length === 1 ? containerRows[0].dataset.containerId || '' : '',
   };
 }
 
@@ -66,6 +77,8 @@ function syncPageContext() {
     mode: '运维问答与操作',
     summary: snapshot.summary || `当前页面:${PAGE_LABELS[route] || route}`,
     state: snapshot.state || '',
+    projectId: snapshot.projectId || '', projectName: snapshot.projectName || '',
+    hostId: snapshot.hostId || '', serviceName: snapshot.serviceName || '', containerId: snapshot.containerId || '',
   };
   if (manualContextRoute.value && manualContextRoute.value !== route) {
     manualContext.value = {};

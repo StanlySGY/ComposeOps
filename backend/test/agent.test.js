@@ -14,6 +14,7 @@ const {
   RISK_LEVELS,
   AGENT_ROLES,
   resolveAgentRole,
+  selectAgentTools,
   listAgentRoles,
 } = await import('../src/services/agent.js');
 const {
@@ -30,16 +31,16 @@ const {
 } = await import('../src/lib/db.js');
 const { observeAgentAlertState, readAgentAlertRules } = await import('../src/services/alert-monitor.js');
 
-test('agent: 注册 65 个工具并暴露元数据(含风险等级)', () => {
+test('agent: 注册 67 个工具并暴露元数据(含风险等级)', () => {
   const agent = getAgent();
   const tools = agent.listTools();
-  assert.equal(tools.length, 65);
+  assert.equal(tools.length, 67);
   const names = new Set(tools.map((tool) => tool.name));
   for (const expected of [
     'compose.up', 'compose.restart', 'config.edit', 'diagnostic.probe', 'maintenance.clean', 'metrics.query',
     'compose.scale', 'compose.exec', 'config.rollback', 'config.diff', 'environment.get', 'environment.set',
     'network.inspect', 'security.audit', 'volume.mount', 'backup.trigger', 'notification.test', 'cron.create', 'performance.baseline',
-    'project.list_managed', 'web.search', 'web.open', 'memory.search', 'memory.save', 'memory.delete', 'memory.sleep', 'config.inspect', 'config.propose', 'server.inspect', 'server.command', 'app.list', 'app.deploy', 'cron.list',
+    'project.list_managed', 'web.search', 'web.open', 'web.interact', 'ui.present', 'memory.search', 'memory.save', 'memory.delete', 'memory.sleep', 'config.inspect', 'config.propose', 'server.inspect', 'server.command', 'app.list', 'app.deploy', 'cron.list',
     'inspection.run', 'inspection.status', 'gitops.drift', 'task.list', 'task.output', 'task.stop', 'database.probe',
     'volume.backup', 'volume.restore', 'volume.verify', 'volume.list_backups', 'event.list', 'event.update', 'event.diagnose',
     'skill.list', 'skill.use',
@@ -155,6 +156,38 @@ test('agent: 告警规则读取与工具 undo 能力', async () => {
   assert.equal(typeof agent.getTool('volume.mount').undo, 'function');
   assert.equal(typeof agent.getTool('alert.create').undo, 'function');
   assert.equal(agent.getTool('compose.ps').undo, undefined);
+});
+
+test('agent tool discovery: narrows tools by intent without weakening read-only roles or hiding critical write gates', () => {
+  const tools = getAgent().listTools();
+  const config = selectAgentTools(tools, 'planner', '检查并修改 .env 环境变量配置');
+  const configNames = new Set(config.map((tool) => tool.name));
+  assert.ok(configNames.has('config.inspect'));
+  assert.ok(configNames.has('environment.set'));
+  assert.ok(!configNames.has('volume.restore'));
+  assert.ok(configNames.has('project.list_managed'));
+  assert.ok(configNames.has('ui.present'));
+  const browser = selectAgentTools(tools, 'planner', '点击页面中的设置标签并读取页面内容');
+  assert.ok(browser.some((tool) => tool.name === 'web.interact'));
+  const web = selectAgentTools(tools, 'planner', '搜索 Docker Compose 最新官方文档');
+  assert.ok(web.some((tool) => tool.name === 'web.search'));
+  assert.ok(web.some((tool) => tool.name === 'web.open'));
+  const readOnly = selectAgentTools(tools, 'planner', '查看服务状态');
+  assert.ok(!readOnly.some((tool) => tool.name === 'compose.stop'));
+  assert.ok(!readOnly.some((tool) => tool.name === 'compose.restart'));
+  assert.ok(!readOnly.some((tool) => tool.name === 'environment.set'));
+  assert.ok(!readOnly.some((tool) => tool.name === 'compose.pull'));
+  const restart = selectAgentTools(tools, 'planner', '重启这个服务');
+  assert.ok(restart.some((tool) => tool.name === 'compose.restart'));
+  assert.ok(!restart.some((tool) => tool.name === 'compose.stop'));
+  assert.ok(!restart.some((tool) => tool.name === 'compose.up'));
+  assert.ok(!restart.some((tool) => tool.name === 'compose.pull'));
+  const noWeb = selectAgentTools(tools, 'planner', '查看容器状态', { webSearchEnabled: false });
+  assert.ok(!noWeb.some((tool) => tool.name.startsWith('web.')));
+  const validator = selectAgentTools(tools, 'validator', '删除旧容器');
+  assert.ok(!validator.some((tool) => tool.name === 'compose.stop'));
+  assert.ok(!validator.some((tool) => tool.name === 'environment.set'));
+  assert.ok(validator.every((tool) => AGENT_ROLES.validator.allowedTools.includes(tool.name)));
 });
 
 test('agent worker profiles: automatic routing is deterministic and keeps mutation intent out of the read-only worker', () => {

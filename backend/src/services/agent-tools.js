@@ -19,6 +19,7 @@ import { registerGitopsTools } from './tools/gitops-tools.js';
 import { registerTaskTools } from './tools/task-tools.js';
 import { registerSkillTools } from './tools/skill-tools.js';
 import { registerDatabaseTools } from './tools/database-tools.js';
+import { registerUiTools } from './tools/ui-tools.js';
 import { MACRO_TOOLS } from './agent-tool-categories.js';
 
 /**
@@ -76,6 +77,8 @@ export const RISK_LEVELS = {
   'project.list_managed': 'low',
   'web.search': 'low',
   'web.open': 'low',
+  'web.interact': 'low',
+  'ui.present': 'low',
   'app.list': 'low',
   'app.deploy': 'critical',
   'memory.search': 'low',
@@ -130,5 +133,6 @@ export function registerAgentTools(agent) {
   registerTaskTools(agent);
   registerSkillTools(agent);
   registerDatabaseTools(agent);
+  registerUiTools(agent);
   return agent;
 }
