@@ -122,7 +122,7 @@ node backend/scripts/host-identity-migration-drill.js --backup=/外部目录/独
 - 前端 SSE 解析器支持 CRLF、多行 data、最后一个没有空行终止的帧，并把回调异常向上抛出，避免消费端错误被误吞。新增慢速分片回归，验证首帧在流结束前即可显示。
 - 模型内容 UI 刷新合并窗口从 120ms 缩短至 60ms（约 16fps），只做渲染节流，真实模型分片仍按到达顺序处理。
 - 用户消息编辑按钮移出消息气泡，放到气泡上方右侧的轻量工具栏；桌面悬停/键盘聚焦时显示，触屏设备常驻显示；保留编辑并重发逻辑与编辑失败恢复能力。
-- 回归：前端完整 Vitest 通过；SSE 与 AgentWorkflow 定向 **36/36** 通过；Agent SSE/会话 Playwright 桌面 **26/26** 通过；前后端 lint、生产构建、`git diff --check` 通过。后端全量 **743 通过、1 跳过、0 失败**。
+- 回归：前端完整 Vitest 通过；SSE 与 AgentWorkflow 定向 **36/36** 通过；Agent SSE/会话 Playwright 桌面 **26/26** 通过；前后端 lint、生产构建、`git diff --check` 通过。后端全量 **743 通过、1 跳过、0 失败**。提交 `34384bd` 已推送并使用加密 Compose 配置发布；`opsdash` 为 healthy，`/health` 返回 `status: ok, docker: ok`，本机及 Tailscale 地址 HTTP 200。
 
 ### 后续待办
 
