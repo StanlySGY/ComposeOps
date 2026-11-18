@@ -4,6 +4,7 @@ import ssh2 from 'ssh2';
 import test from 'node:test';
 import { createSshHostVerifier, normalizeSshFingerprint } from '../src/lib/ssh-fingerprint.js';
 import { sshExec } from '../src/services/remote-shell.js';
+import { inspectSshPrivateKey } from '../src/lib/ssh-private-key.js';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const privatePem = privateKey.export({ format: 'pem', type: 'pkcs1' });
@@ -11,6 +12,16 @@ const parsedKey = ssh2.utils.parseKey(privatePem);
 const digest = createHash('sha256').update(parsedKey.getPublicSSH()).digest();
 const fingerprintHex = digest.toString('hex');
 const fingerprintOpenSsh = `SHA256:${digest.toString('base64').replace(/=+$/, '')}`;
+
+test('SSH 私钥诊断只接受私钥内容并安全分类路径/格式错误', () => {
+  assert.deepEqual(inspectSshPrivateKey(''), { ok: true, kind: 'none' });
+  assert.equal(inspectSshPrivateKey(privatePem).ok, true);
+  assert.equal(inspectSshPrivateKey('/home/example/.ssh/id_ed25519').code, 'ssh_private_key_path');
+  assert.equal(inspectSshPrivateKey('/home/example/.ssh/id_ed25519').ok, false);
+  assert.equal(inspectSshPrivateKey('not-a-private-key').code, 'ssh_private_key_format');
+  const invalid = inspectSshPrivateKey('/secret/key');
+  assert.doesNotMatch(invalid.message, /secret|key path/i);
+});
 
 test('SSH fingerprint: accepts OpenSSH and hex formats, rejects malformed values', () => {
   assert.equal(normalizeSshFingerprint(fingerprintOpenSsh), fingerprintHex);
@@ -30,8 +41,8 @@ test('SSH fingerprint: verifier uses SHA-256 and refuses mismatched host keys', 
 });
 
 test('SSH remote shell: accepts a pinned local SSH host and rejects a different fingerprint', async (t) => {
-  const server = new ssh2.Server({ hostKeys: [privatePem] }, (client) => {    client.on('error', () => {}); // 不匹配指纹时,服务端应将握手断开视为预期事件。
-
+  const server = new ssh2.Server({ hostKeys: [privatePem] }, (client) => {
+    client.on('error', () => {}); // 不匹配指纹时,服务端应将握手断开视为预期事件。
     client.on('authentication', (context) => {
       if (context.method === 'password' && context.username === 'test' && context.password === 'test') context.accept();
       else context.reject();

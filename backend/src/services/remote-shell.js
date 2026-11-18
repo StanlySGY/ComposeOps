@@ -1,5 +1,6 @@
 import ssh2 from 'ssh2';
 import { createSshHostVerifier } from '../lib/ssh-fingerprint.js';
+import { assertSshPrivateKey } from '../lib/ssh-private-key.js';
 
 const { Client } = ssh2;
 
@@ -24,6 +25,7 @@ function connect(host) {
       reject(Object.assign(new Error('当前 SSH 节点缺少主机地址'), { statusCode: 409 }));
       return;
     }
+    if (host.privateKey) assertSshPrivateKey(host.privateKey, host.password);
     const conn = new Client();
     const timer = setTimeout(() => {
       conn.end();
@@ -44,8 +46,12 @@ function connect(host) {
       username: host.username || 'root',
       readyTimeout: 15000,
     };
-    if (host.privateKey) options.privateKey = host.privateKey;
-    if (host.password) options.password = host.password;
+    if (host.privateKey) {
+      options.privateKey = host.privateKey;
+      if (host.password) options.passphrase = host.password;
+    } else if (host.password) {
+      options.password = host.password;
+    }
     if (host.hostFingerprint) {
       options.hostHash = 'sha256';
       options.hostVerifier = createSshHostVerifier(host.hostFingerprint);

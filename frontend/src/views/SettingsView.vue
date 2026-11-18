@@ -203,6 +203,7 @@
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2"><strong class="font-mono text-sm">{{ host.name }}</strong><span class="count-badge">{{ host.type.toUpperCase() }}</span><span v-if="host.id === hostsStore.activeHostId" class="count-badge text-status-ok">当前</span></div>
             <div class="mt-1 text-muted font-mono text-xs">{{ host.type === 'local' ? '本机 Docker Socket' : `${host.host}:${host.port}` }}<template v-if="host.latencyMs"> · {{ host.latencyMs }}ms</template><template v-if="host.version"> · v{{ host.version }}</template><template v-if="host.containerCount != null"> · {{ host.containerCount }} 容器</template></div>
+            <p v-if="host.status === 'offline' && host.error" class="mt-2 break-words text-xs leading-5 text-status-error" role="alert" aria-live="assertive" aria-atomic="true">连接诊断：{{ host.error }}</p>
             <div class="mt-1 flex flex-wrap gap-1.5">
               <button class="btn-ghost" :disabled="hostsStore.pinging === host.id" @click="pingHost(host)"><Activity class="w-4 h-4" />{{ hostsStore.pinging === host.id ? '检测中' : '测试连接' }}</button>
               <button v-if="host.id !== hostsStore.activeHostId" class="btn-secondary" @click="activate(host)"><Zap class="w-4 h-4" />切换</button>
@@ -225,8 +226,8 @@
         </div>
         <template v-if="hostEditor.type === 'ssh'">
           <div class="form-grid">
-            <label class="md:col-span-2">SSH 密码<input v-model="hostEditor.password" type="password" class="input" :placeholder="hostEditor.hasPassword ? '已配置,留空保持不变' : '…'" /></label>
-            <label class="md:col-span-2">私钥(可选)<textarea v-model="hostEditor.privateKey" rows="4" class="input font-mono" :placeholder="hostEditor.hasPrivateKey ? '已配置,留空保持不变' : '-----BEGIN OPENSSH PRIVATE KEY-----…'"></textarea></label>
+            <label class="md:col-span-2">SSH 密码 / 私钥口令<input v-model="hostEditor.password" type="password" class="input" :placeholder="hostEditor.hasPassword ? '已配置,留空保持不变' : '…'" /><span class="mt-1 block text-xs text-surface-500">未使用私钥时作为 SSH 登录密码；配置私钥时作为解锁口令。</span></label>
+            <label class="md:col-span-2">私钥(可选)<textarea v-model="hostEditor.privateKey" rows="4" class="input font-mono" :placeholder="hostEditor.hasPrivateKey ? '已配置,留空保持不变' : '-----BEGIN OPENSSH PRIVATE KEY-----…'"></textarea><span class="mt-1 block text-xs text-surface-500">请粘贴完整 OpenSSH / PEM 私钥内容，不要填写本机文件路径或公钥。</span></label>
             <label class="md:col-span-2">SSH 主机密钥指纹（推荐）<input v-model="hostEditor.hostFingerprint" maxlength="128" class="input font-mono" spellcheck="false" aria-label="SHA256:… 或 64 位 SHA-256 十六进制" placeholder="SHA256:… 或 64 位 SHA-256 十六进制" /></label>
           </div>
           <p class="text-xs text-status-warn/90">请通过可信渠道核对服务器指纹。配置后会校验 SSH 主机身份并拒绝不匹配的主机；留空仅为兼容旧节点，不启用主机指纹锁定。</p>
@@ -445,7 +446,8 @@ async function saveHost() {
 }
 async function pingHost(host) {
   try {
-    await hostsStore.ping(host.id);
+    const result = await hostsStore.ping(host.id);
+    if (!result?.ok) { fail(result?.message || `节点 ${host.name} 暂不可达`); return; }
     ok(`节点 ${host.name} 连接正常`);
   } catch (e) { fail(e); }
 }

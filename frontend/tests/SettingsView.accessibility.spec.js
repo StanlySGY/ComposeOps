@@ -223,6 +223,22 @@ describe('设置页面表单可访问性', () => {
     expect(wrapper.get('input[aria-label="镜像更新检查间隔（小时）"]').exists()).toBe(true);
   });
 
+  it('远程节点探测失败显示诊断且绝不提示连接成功', async () => {
+    mocks.route.query = { tab: 'hosts' };
+    const diagnostic = 'SSH 私钥字段需要完整私钥内容；当前输入看起来像文件路径，请粘贴私钥文本，而不是路径。';
+    mocks.hostsStore.hosts = [{ id: 'h1', name: '远程节点', type: 'ssh', host: '10.0.0.8', port: 22, status: 'offline', error: diagnostic }];
+    mocks.hostsStore.ping.mockResolvedValue({ ok: false, message: diagnostic, host: { status: 'offline', error: diagnostic } });
+    await mountSettings();
+    expect(wrapper.text()).toContain(`连接诊断：${diagnostic}`);
+    await wrapper.findAll('button').find(button => button.text().includes('测试连接')).trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain(diagnostic);
+    expect(wrapper.get('[role="alert"]').attributes('aria-live')).toBe('assertive');
+    expect(wrapper.get('[role="alert"]').attributes('aria-atomic')).toBe('true');
+    expect(wrapper.text()).not.toContain('节点 远程节点 连接正常');
+    mocks.hostsStore.hosts = [];
+  });
+
   it('操作成功和失败都以辅助技术可识别的状态语义呈现', async () => {
     await mountSettings();
     await wrapper.get('button.btn-primary').trigger('click');

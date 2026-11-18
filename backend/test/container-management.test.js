@@ -10,7 +10,7 @@ const { default: Fastify } = await import('fastify');
 const { default: projectRoutes } = await import('../src/routes/projects.js');
 const { getActivityDocker } = await import('../src/services/docker-hosts.js');
 const { invalidateScanCache, scanProjects } = await import('../src/services/scanner.js');
-const { setProjectPreference } = await import('../src/lib/db.js');
+const { setProjectPreference, listOperations } = await import('../src/lib/db.js');
 
 const projectName = 'container-management-test';
 const workingDir = path.join(tempDir, 'stack');
@@ -102,7 +102,37 @@ test('standalone lifecycle action reports a failed postcondition instead of fals
   } finally { await app.close(); }
 });
 
-test('Compose service action targets every replica with the exact service label', async (t) => {  const docker = getActivityDocker();
+test('Compose service partial failure is audited and invalidates the scan', async (t) => {
+  const docker = getActivityDocker();
+  const states = new Map([['compose-web-container-0001', 'exited'], ['compose-web-container-0002', 'exited']]);
+  t.mock.method(docker, 'listContainers', async () => [composeRow('compose-web-container-0001', 'web'), composeRow('compose-web-container-0002', 'web')]);
+  t.mock.method(docker, 'getContainer', (id) => ({
+    async inspect() { return { Name: `/${id}`, Config: { Labels: { 'com.docker.compose.project': projectName, 'com.docker.compose.service': 'web' } }, State: { Status: states.get(id) } }; },
+    async start() { if (id.endsWith('0002')) throw new Error('fixture start failure'); states.set(id, 'running'); },
+  }));
+  invalidateScanCache();
+  const [project] = await scanProjects();
+  setProjectPreference(project.id, { managed: true });
+  invalidateScanCache();
+  const app = Fastify();
+  await app.register(projectRoutes, { prefix: '/projects' });
+  try {
+    const response = await app.inject({ method: 'POST', url: `/projects/${project.id}/services/web/actions`, payload: { action: 'start' } });
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.json().error, 'service_action_failed');
+    assert.equal(states.get('compose-web-container-0001'), 'running', '第一个副本已完成动作');
+    const operation = listOperations(10).find((item) => item.action === 'service.start');
+    assert.ok(operation, '部分失败也必须写入操作审计');
+    assert.equal(operation.status, 'failed');
+    assert.ok(operation.detail.includes('1/2'));
+  } finally {
+    await app.close();
+    invalidateScanCache();
+  }
+});
+
+test('Compose service action targets every replica with the exact service label', async (t) => {
+  const docker = getActivityDocker();
   const states = new Map([
     ['compose-web-container-0001', 'exited'],
     ['compose-web-container-0002', 'exited'],
@@ -133,10 +163,7 @@ test('Compose service action targets every replica with the exact service label'
   const app = Fastify();
   await app.register(projectRoutes, { prefix: '/projects' });
   try {
-    const response = await app.inject({
-      method: 'POST', url: `/projects/${project.id}/services/web/actions`,
-      payload: { action: 'start' },
-    });
+    const response = await app.inject({ method: 'POST', url: `/projects/${project.id}/services/web/actions`, payload: { action: 'start' } });
     assert.equal(response.statusCode, 200, response.body);
     assert.equal(response.json().replicas.length, 2);
     assert.equal(response.json().replicas.every((item) => item.ok), true);

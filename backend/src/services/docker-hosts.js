@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getSetting, setSetting } from '../lib/db.js';
 import { createSshHostVerifier, normalizeSshFingerprint } from '../lib/ssh-fingerprint.js';
 import localDocker from './docker.js';
+import { assertSshPrivateKey } from '../lib/ssh-private-key.js';
 
 const SETTINGS_KEY = 'docker.hosts';
 const ACTIVE_KEY = 'docker.active_host';
@@ -181,6 +182,7 @@ export function createDockerClient(host) {
   if (!host) return localDocker;
   if (host.type === 'local' || host.id === 'local') return localDocker;
   if (host.type === 'ssh') {
+    assertSshPrivateKey(host.privateKey, host.password);
     const sshOptions = {};
     if (host.privateKey) {
       sshOptions.privateKey = host.privateKey;
