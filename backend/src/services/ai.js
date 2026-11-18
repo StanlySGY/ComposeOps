@@ -683,31 +683,63 @@ async function searchBuiltin(query, diagnostics = []) {
     }
   }
 
-  // Bing HTML 搜索作为通用网页搜索主源;不需要额外 API Key,并可通过 WSL HTTP(S)_PROXY 出网。
+  // Bing RSS 优先：相较首页 HTML 更稳定，按查询语言/地区选择结果集；HTML 解析作为回退。
+  const isChinese = /[\u3400-\u9fff]/.test(q);
+  const region = isChinese ? '&cc=CN&setlang=zh-CN' : '';
+  const searchQuery = /docker\s+compose|compose\s+watch/i.test(q)
+    ? `${q} site:docs.docker.com/compose`
+    : q;
+  const parseXml = (value) => String(value || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
   try {
-    const resp = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36' },
+    const rssUrl = `https://www.bing.com/search?format=rss${region}&q=${encodeURIComponent(searchQuery)}`;
+    const resp = await fetch(rssUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) ComposeOps-AI/1.0', Accept: 'application/rss+xml, application/xml, text/xml' },
       signal: AbortSignal.timeout(10000),
     });
     if (resp.ok) {
-      const html = await resp.text();
-      const blocks = [...html.matchAll(new RegExp('<li class="b_algo"[^>]*>(.*?)</li>', 'gs'))].slice(0, 6);
-      for (const blockMatch of blocks) {
-        const block = blockMatch[1];
-        const titleMatch = block.match(new RegExp('<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', 'is')); if (!titleMatch) continue;        let url = titleMatch[1].replace(/&amp;/g, '&');
-        try {
-          const redirect = new URL(url);
-          const encoded = redirect.searchParams.get('u');
-          if (redirect.hostname.endsWith('bing.com') && encoded?.startsWith('a1')) url = Buffer.from(encoded.slice(2), 'base64').toString('utf8');
-        } catch { /* 保留搜索源原始链接 */ }
-        if (!(url.startsWith('https://') || url.startsWith('http://'))) continue;
-        const clean = (value) => String(value || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();        const snippetMatch = block.match(new RegExp('<p[^>]*>(.*?)</p>', 'is'));
-        results.push({ title: clean(titleMatch[2]), url, snippet: clean(snippetMatch?.[1] || ''), sourceType: 'search_summary' });
+      const xml = await resp.text();
+      for (const match of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
+        const block = match[1];
+        const field = (name) => parseXml(block.match(new RegExp(`<${name}>([\\s\\S]*?)<\\/${name}>`, 'i'))?.[1] || '').trim();
+        const title = field('title');
+        const url = field('link');
+        const snippet = field('description').slice(0, 360);
+        if (title && /^https?:\/\//i.test(url)) results.push({ title: title.slice(0, 160), url, snippet, sourceType: 'search_summary' });
+        if (results.length >= 8) break;
       }
-      if (!results.length) diagnostics.push('Bing: 页面未提取到结果');
-    } else diagnostics.push(`Bing: HTTP ${resp.status}`);
-  } catch (error) {
-    diagnostics.push(`Bing: ${String(error?.message || error).slice(0, 180)}`);
+      if (!results.length) diagnostics.push('Bing RSS: 未提取到结果');
+    } else diagnostics.push(`Bing RSS: HTTP ${resp.status}`);
+  } catch (error) { diagnostics.push(`Bing RSS: ${String(error?.message || error).slice(0, 180)}`); }
+
+  // RSS 不可用或结果太少时再读取 HTML 结果页。
+  if (results.length < 3) {
+    try {
+      const resp = await fetch(`https://www.bing.com/search${region}&q=${encodeURIComponent(searchQuery)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (resp.ok) {
+        const html = await resp.text();
+        const blocks = [...html.matchAll(/<li class="b_algo"[^>]*>(.*?)<\/li>/gs)].slice(0, 8);
+        for (const blockMatch of blocks) {
+          const block = blockMatch[1];
+          const titleMatch = block.match(/<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is);
+          if (!titleMatch) continue;
+          let url = titleMatch[1].replace(/&amp;/g, '&');
+          try {
+            const redirect = new URL(url);
+            const encoded = redirect.searchParams.get('u');
+            if (redirect.hostname.endsWith('bing.com') && encoded?.startsWith('a1')) url = Buffer.from(encoded.slice(2), 'base64').toString('utf8');
+          } catch { /* 保留搜索源原始链接 */ }
+          if (!/^https?:\/\//i.test(url)) continue;
+          const clean = (value) => parseXml(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+          const snippetMatch = block.match(/<p[^>]*>(.*?)<\/p>/is);
+          results.push({ title: clean(titleMatch[2]), url, snippet: clean(snippetMatch?.[1] || ''), sourceType: 'search_summary' });
+        }
+        if (!results.length) diagnostics.push('Bing HTML: 页面未提取到结果');
+      } else diagnostics.push(`Bing HTML: HTTP ${resp.status}`);
+    } catch (error) { diagnostics.push(`Bing HTML: ${String(error?.message || error).slice(0, 180)}`); }
   }
 
   try {
@@ -749,19 +781,26 @@ async function searchBuiltin(query, diagnostics = []) {
 
   // 搜索引擎偶尔会返回完全不相关的地区/缓存结果。宁可明确返回无匹配，
   // 也不要把无关页面伪装成有效证据交给 Agent。
+  const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'what', 'when', 'where', 'how', 'latest', 'official', 'documentation', 'docs', 'please', 'about', 'news', '最新', '官方', '文档', '一下', '怎么', '如何']);
   const terms = [...new Set([
-    ...(q.toLowerCase().match(/[a-z0-9][a-z0-9._+-]{1,}/g) || []),
-    ...(q.match(/[\u3400-\u9fff]{2,}/g) || []),
+    ...(q.toLowerCase().match(/[a-z0-9][a-z0-9._+-]{1,}/g) || []).filter((term) => !stopWords.has(term)),
+    ...(q.match(/[\u3400-\u9fff]{2,}/g) || []).filter((term) => !stopWords.has(term)),
   ])];
   const ranked = results.map((item, index) => {
-    const haystack = `${item.title || ''} ${item.url || ''} ${item.snippet || ''}`.toLowerCase();
-    const matched = terms.filter((term) => haystack.includes(term)).length;
+    const title = String(item.title || '').toLowerCase();
+    const url = String(item.url || '').toLowerCase();
+    const snippet = String(item.snippet || '').toLowerCase();
+    const matchedTitle = terms.filter((term) => title.includes(term)).length;
+    const matchedUrl = terms.filter((term) => url.includes(term)).length;
+    const matchedSnippet = terms.filter((term) => snippet.includes(term)).length;
+    const matched = terms.filter((term) => `${title} ${url} ${snippet}`.includes(term)).length;
     const host = (() => { try { return new URL(item.url).hostname.toLowerCase(); } catch { return ''; } })();
-    const trustedBonus = /(^|\.)docs\./.test(host) || /(^|\.)developer\./.test(host) || /(^|\.)github\.com$/.test(host) ? 0.2 : 0;
-    return { item, index, score: terms.length ? matched / terms.length + trustedBonus : 1, matched };
+    const trustedBonus = /(^|\.)docs\./.test(host) || /(^|\.)developer\./.test(host) || /(^|\.)github\.com$/.test(host) ? 0.12 : 0;
+    const score = terms.length ? (matchedTitle * 2.4 + matchedUrl * 1.2 + matchedSnippet * 0.55) / (terms.length * 2.4) + trustedBonus : 1;
+    return { item, index, score, matched };
   });
-  const relevant = ranked.filter((entry) => !terms.length || (entry.matched > 0 && entry.score >= 0.35))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const relevant = ranked.filter((entry) => !terms.length || (entry.matched > 0 && entry.score >= 0.28))
+    .sort((a, b) => b.score - a.score || b.matched - a.matched || a.index - b.index);
   if (results.length && !relevant.length) diagnostics.push('Bing: 返回结果与检索词无明显匹配,已过滤以避免误导');
   return relevant.map((entry) => entry.item)
     .filter((item, index, list) => item.url || list.findIndex((candidate) => candidate.snippet === item.snippet) === index)

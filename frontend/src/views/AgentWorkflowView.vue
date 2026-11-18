@@ -1256,4 +1256,35 @@ usePullRefresh(() => {
   .agent-page .agent-user-edit-btn { width:36px; height:36px; min-height:36px; }
 }
 
+
+/* 编辑态：把提示收敛为输入框上方的轻量状态条，避免大块警告横幅打断对话。 */
+.agent-page .agent-edit-banner {
+  display:flex; align-items:center; gap:10px; min-height:42px; margin:0 0 9px; padding:7px 11px;
+  border:1px solid rgba(148,163,184,.14); border-radius:12px; background:rgba(255,255,255,.035);
+  color:#cbd2dc; box-shadow:none;
+}
+.agent-page .agent-edit-icon {
+  display:grid; width:27px; height:27px; flex:0 0 27px; place-items:center; border-radius:8px;
+  color:#d6dde6; background:rgba(148,163,184,.12);
+}
+.agent-page .agent-edit-copy { display:flex; min-width:0; flex:1; flex-direction:column; gap:1px; }
+.agent-page .agent-edit-copy strong { color:#e4e8ed; font-size:11px; font-weight:600; }
+.agent-page .agent-edit-copy small { overflow:hidden; color:#7f8997; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.agent-page .agent-edit-cancel {
+  display:inline-flex; min-height:29px; flex:0 0 auto; align-items:center; gap:5px; padding:0 9px;
+  border:1px solid rgba(255,255,255,.09); border-radius:8px; color:#aeb7c3; background:rgba(255,255,255,.035);
+  font-size:10px; transition:background .15s ease,color .15s ease;
+}
+.agent-page .agent-edit-cancel:hover { color:#f1f4f7; background:rgba(255,255,255,.08); }
+.agent-page .agent-composer.is-editing .agent-input { border-color:rgba(148,163,184,.28); box-shadow:0 0 0 2px rgba(148,163,184,.045); }
+.agent-page .agent-composer.is-editing .agent-edit-submit { background:#d9dee5; color:#171a1f; }
+.agent-page .agent-message.user .agent-user-actions { opacity:.42; }
+.agent-page .agent-message.user:hover .agent-user-actions,
+.agent-page .agent-message.user:focus-within .agent-user-actions { opacity:1; }
+@media (max-width:760px) {
+  .agent-page .agent-edit-banner { gap:8px; padding:7px 9px; }
+  .agent-page .agent-edit-copy small { white-space:normal; line-height:1.35; }
+  .agent-page .agent-edit-cancel { min-height:32px; padding:0 8px; }
+  .agent-page .agent-message.user .agent-user-actions { opacity:.78; }
+}
 </style>

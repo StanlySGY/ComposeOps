@@ -112,6 +112,32 @@ test('search: Bing 通用网页搜索解析标题、摘要并还原官方文档�
   globalThis.fetch = originalFetch;
 });
 
+test('search: 优先解析 Bing RSS，并为中文查询传递地区语言参数', async () => {
+  setSetting('ai.search.provider', 'builtin');
+  const calls = stubFetch(async (url) => {
+    if (url.includes('format=rss')) return {
+      ok: true,
+      text: async () => '<?xml version="1.0"?><rss><channel><item><title>Docker Compose Watch | Docker Docs</title><link>https://docs.docker.com/compose/how-tos/file-watch/</link><description><![CDATA[Official Compose Watch documentation &amp; guide]]></description></item></channel></rss>',
+    };
+    return { ok: true, json: async () => ({}) };
+  });
+  const results = await searchWeb('Docker Compose Watch official documentation');
+  assert.equal(results[0].title, 'Docker Compose Watch | Docker Docs');
+  assert.equal(results[0].url, 'https://docs.docker.com/compose/how-tos/file-watch/');
+  assert.match(results[0].snippet, /Official Compose Watch documentation/);
+  assert.ok(calls.some((call) => call.url.includes('format=rss')));
+  globalThis.fetch = originalFetch;
+
+  const localeCalls = stubFetch(async () => {
+    return { ok: true, text: async () => '<rss><channel><item><title>腾讯新闻</title><link>https://news.qq.com/</link><description>腾讯新闻最新资讯</description></item></channel></rss>' };
+  });
+  const localized = await searchWeb('腾讯新闻 最新资讯');
+  assert.ok(localeCalls[0].url.includes('cc=CN'));
+  assert.ok(localeCalls[0].url.includes('setlang=zh-CN'));
+  assert.equal(localized[0].title, '腾讯新闻');
+  globalThis.fetch = originalFetch;
+});
+
 test('search: 过滤完全不相关的搜索结果并提供诊断', async () => {
   setSetting('ai.search.provider', 'builtin');
   const calls = stubFetch(async (url) => {
