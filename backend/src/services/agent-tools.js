@@ -75,6 +75,7 @@ export const RISK_LEVELS = {
   'event.diagnose': 'low',
   'project.list_managed': 'low',
   'web.search': 'low',
+  'web.open': 'low',
   'app.list': 'low',
   'app.deploy': 'critical',
   'memory.search': 'low',

@@ -2111,31 +2111,27 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 
 /* ===== 编辑已发送消息 ===== */
 .agent-edit-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 9px;
-  padding: 7px 11px;
-  color: var(--cyan-faint);
-  border: 1px solid rgba(8, 145, 178, 0.45);
-  border-radius: 8px;
-  background: rgba(8, 145, 178, 0.12);
-  font-size: 11px;
+  display:flex; align-items:center; gap:11px; width:min(100%,900px); margin:0 auto 10px; padding:11px 13px;
+  color:#e2e7ed; border:1px solid rgba(148,163,184,.16); border-radius:14px;
+  background:linear-gradient(110deg,rgba(148,163,184,.10),rgba(71,85,105,.045));
+  box-shadow:0 8px 24px rgba(0,0,0,.12); animation:agent-edit-in .18s ease-out;
 }
-.agent-edit-banner svg { flex-shrink: 0; }
-.agent-edit-banner span { min-width: 0; flex: 1; }
-.agent-edit-banner button {
-  flex-shrink: 0;
-  padding: 2px 9px;
-  color: var(--text-soft);
-  border: 1px solid var(--line-hover);
-  border-radius: 999px;
-  background: transparent;
-  font-size: 10px;
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-.agent-edit-banner button:hover { color: var(--danger-hot); border-color: var(--danger-dim); }
+.agent-edit-icon { display:grid; width:32px; height:32px; flex:0 0 32px; place-items:center; border:1px solid rgba(148,163,184,.16); border-radius:10px; color:#d3dae3; background:rgba(148,163,184,.09); }
+.agent-edit-copy { display:flex; min-width:0; flex:1; flex-direction:column; gap:3px; }
+.agent-edit-copy strong { color:#e8edf3; font-size:12px; font-weight:600; }
+.agent-edit-copy small { color:#8993a1; font-size:11px; line-height:1.45; }
+.agent-edit-cancel { display:inline-flex; min-height:32px; flex:0 0 auto; align-items:center; justify-content:center; gap:6px; padding:0 11px; border:1px solid rgba(255,255,255,.10); border-radius:999px; color:#aab3bf; background:rgba(255,255,255,.035); font-size:11px; transition:background .15s ease,color .15s ease,border-color .15s ease; }
+.agent-edit-cancel:hover { color:#f1f4f7; border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.075); }
+.agent-composer.is-editing .agent-input { border-color:rgba(148,163,184,.28); background:#1d222a; box-shadow:0 0 0 3px rgba(148,163,184,.045),0 12px 34px rgba(0,0,0,.2); }
+.agent-composer.is-editing .agent-composer-foot .agent-edit-submit { background:#dbe1e8; color:#171b21; }
+.agent-composer.is-editing .agent-composer-foot .agent-edit-submit:hover:not(:disabled) { background:#fff; }
+.agent-message.user .agent-user-actions { display:flex; justify-content:flex-end; }
+.agent-page .agent-user-edit-btn { display:inline-flex; width:auto; min-width:58px; height:27px; min-height:27px; align-items:center; justify-content:center; gap:6px; padding:0 9px; border:1px solid transparent; border-radius:999px; color:#8993a1; background:transparent; font-size:10px; }
+.agent-page .agent-user-edit-btn::after { content:'修改'; }
+.agent-page .agent-user-edit-btn:hover:not(:disabled),.agent-page .agent-user-edit-btn:focus-visible { border-color:rgba(255,255,255,.10); color:#e5eaf0; background:rgba(255,255,255,.065); }
+@keyframes agent-edit-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+@media(max-width:760px) { .agent-edit-banner { align-items:flex-start; gap:9px; padding:10px; border-radius:13px; } .agent-edit-icon { width:30px; height:30px; flex-basis:30px; } .agent-edit-cancel { min-height:34px; padding:0 9px; } .agent-page .agent-user-edit-btn { min-width:64px; min-height:36px; } }
+@media(prefers-reduced-motion:reduce) { .agent-edit-banner { animation:none; } }
 
 /* ===== 回复反馈(点赞 / 点踩) ===== */
 .agent-message-action-btn.is-up.active { color: var(--ok-soft); background: rgba(5, 150, 105, 0.16); }

@@ -8,7 +8,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-search-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 
 const { setSetting } = await import('../src/lib/db.js');
-const { searchWeb, getSearchConfig, setSearchConfig, SEARCH_PROVIDERS } = await import('../src/services/ai.js');
+const { searchWeb, openWebPage, getSearchConfig, setSearchConfig, SEARCH_PROVIDERS } = await import('../src/services/ai.js');
 
 const originalFetch = globalThis.fetch;
 
@@ -109,5 +109,47 @@ test('search: Bing 通用网页搜索解析标题、摘要并还原官方文档�
   assert.equal(results[0].url, target);
   assert.equal(results[0].snippet, 'Official Compose reference');
   assert.ok(calls.some((call) => call.url.includes('bing.com/search')));
+  globalThis.fetch = originalFetch;
+});
+
+test('web.open: 提取网页标题、正文和可继续访问的公开链接', async () => {
+  const html = '<html><head><title>Compose Guide</title><meta name="description" content="Official guide"></head><body><nav>menu</nav><main><h1>Getting started</h1><p>Run docker compose up to start services.</p><script>ignore this injected text</script><a href="/reference">API reference</a><a href="http://127.0.0.1/admin">unsafe link</a></main></body></html>';
+  const calls = stubFetch(async () => ({ ok: true, status: 200, url: 'https://docs.example.com/guide', headers: { get: (name) => name === 'content-type' ? 'text/html; charset=utf-8' : null }, text: async () => html }));
+  const page = await openWebPage('https://docs.example.com/guide');
+  assert.equal(page.title, 'Compose Guide');
+  assert.equal(page.description, 'Official guide');
+  assert.match(page.text, /Getting started/);
+  assert.match(page.text, /docker compose up/);
+  assert.doesNotMatch(page.text, /ignore this injected text|menu/);
+  assert.deepEqual(page.links, [{ title: 'API reference', url: 'https://docs.example.com/reference' }]);
+  assert.equal(calls.length, 1);
+  globalThis.fetch = originalFetch;
+});
+
+test('web.open: 支持 Markdown 正文与相对链接', async () => {
+  const markdown = '# Docker Compose\n\nOfficial guide for Compose.\n\n[CLI reference](./cli/)';
+  stubFetch(async () => ({ ok: true, status: 200, url: 'https://docs.docker.com/compose/', headers: { get: (name) => name === 'content-type' ? 'text/markdown; charset=utf-8' : null }, text: async () => markdown }));
+  const page = await openWebPage('https://docs.docker.com/compose/');
+  assert.equal(page.title, 'Docker Compose');
+  assert.match(page.text, /Official guide for Compose/);
+  assert.deepEqual(page.links, [{ title: 'CLI reference', url: 'https://docs.docker.com/compose/cli/' }]);
+  globalThis.fetch = originalFetch;
+});
+
+test('web.open: 拒绝内网地址和重定向到内网的跳转', async () => {
+  let calls = stubFetch(async () => ({ status: 302, ok: false, headers: { get: () => 'http://127.0.0.1/admin' } }));
+  await assert.rejects(() => openWebPage('https://public.example.com/redirect'), /内网地址/);
+  assert.equal(calls.length, 1);
+  await assert.rejects(() => openWebPage('http://192.168.1.10/'), /内网地址/);
+  assert.equal(calls.length, 1, '内网目标必须在发起请求前被拒绝');
+  globalThis.fetch = originalFetch;
+});
+
+test('web.open: 拒绝 IPv6、本地保留地址与尾点本地域名', async () => {
+  const calls = stubFetch(async () => { throw new Error('不应发出请求'); });
+  for (const url of ['http://[::1]/', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://localhost./']) {
+    await assert.rejects(() => openWebPage(url), /内网地址/);
+  }
+  assert.equal(calls.length, 0);
   globalThis.fetch = originalFetch;
 });

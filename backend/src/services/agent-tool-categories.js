@@ -15,10 +15,10 @@ import { getProjectDocker } from './docker-hosts.js';
 export const TOOL_CATEGORIES = {
   context: {
     label: '上下文与资料',
-    description: '发现已纳管项目和可选的联网资料检索',
+    description: '发现已纳管项目、搜索网页并阅读公开来源',
     icon: 'globe',
     risk: 'low',
-    tools: ['project.list_managed', 'web.search', 'app.list', 'skill.list', 'skill.use']
+    tools: ['project.list_managed', 'web.search', 'web.open', 'app.list', 'skill.list', 'skill.use']
   },
   memory: {
     label: '长期记忆',
