@@ -105,11 +105,11 @@ node backend/scripts/host-identity-migration-drill.js --backup=/外部目录/独
 - 新增容器部分失败审计、SSH 私钥脱敏诊断与设置页可访问性回归。
 - 后端全量 **743 通过、1 项跳过、0 失败**；前端全量 Vitest **934 项通过**；相关定向回归 13/13、设置页可访问性 12/12 通过。后端/前端 lint 无错误；前端 lint 仍报告 `ProjectActivityDrawer.resilience.spec.js` 的 3 条既有 `vue/one-component-per-file` warning。生产构建与 `git diff --check` 通过。
 - 本地 `composeops-local.service` 重启后为 active，`/health` 返回 `status: ok`；Docker 总状态仍为 degraded：local 节点正常，h1 仍离线。当前诊断能更准确提示私钥输入/格式问题，但没有擅自替换 h1 凭据。
-- 代码提交 `fbc7da8` 已推送 `origin/main`。本轮未完成正式 `opsdash` 镜像重建/替换，因此正式容器仍需单独发布验收；未删除或重建数据库卷。
+- 代码提交 `fbc7da8` 与本记录提交 `72c1cf3` 均已推送 `origin/main`。正式镜像使用 `docker-compose.yml` + `docker-compose.encrypted.yml` 和仓库外数据库密钥文件重建，仅 `opsdash` 服务执行 `up -d --no-deps --force-recreate`；容器状态 `healthy`，`/health` 返回 `status: ok, docker: ok`，Tailscale 地址 `http://100.86.191.116:28765/` 返回 HTTP 200。未执行 volume 删除或数据库卷重建。
 
 ### 后续待办
 
 1. 产品安全边界仍待确认：内网来源完全免密码，还是仅在 Tailscale 身份验证通过后免密码；本轮保持现有认证，不做绕过。
 2. 在 ComposeOps 设置页由用户本地修正 h1 的 SSH 私钥/口令后，再做只读连通性探测；不要把私钥粘贴到聊天或日志。
-3. 按既有加密 Compose 部署流程发布 `fbc7da8`，保留 `composeops_opsdash-data` 和外置数据库密钥文件，并做正式站点健康检查。
+3. 已完成加密 Compose 正式发布；下一步补做正式站点浏览器端到端操作 smoke test，确认页面交互与容器操作在部署环境一致。
 4. 下一轮继续按真实浏览器截图逐页审查桌面/手机布局与关键操作，不以单纯 lint/build 代替视觉验收。
