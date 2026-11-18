@@ -19,9 +19,9 @@
       </div>
     </div>
     <p v-if="projectsError" class="alert-error" role="alert">{{ projectsError }}<button class="text-link" :disabled="loading" @click="loadProjects">重试项目</button></p>
-    <div class="agent-layout">
+    <div class="agent-layout agent-layout-chat-first">
       <aside class="agent-sessions card"><AgentSessionList v-bind="sessionListProps" v-model:query="sessionQuery" v-model:rename-title="editingTitle" @refresh="loadSessions" @new="newSession" @select="selectSession" @toggle="toggleSession" @toggle-all="toggleAllSessions" @rename="beginRename" @save-rename="saveRename" @cancel-rename="cancelRename" @delete="deleteSession" @delete-selected="deleteSelectedSessions" /></aside>
-      <main class="agent-chat card"><div class="agent-chat-head">
+      <main class="agent-chat card agent-chat-surface"><div class="agent-chat-head">
           <button ref="mobileSessionsTrigger" class="agent-mobile-session-btn" title="打开会话" aria-label="打开会话列表" @click="mobileSessionsOpen = true"><MessageSquare class="h-4 w-4" /></button>
           <div class="agent-head-id"><Bot class="h-4 w-4 shrink-0 text-cyan-400" /><div class="agent-head-text"><strong>{{ activeTitle }}</strong><span class="agent-status">{{ webSearchEnabled ? '联网资料已开启' : '仅使用本地工具' }}</span></div></div>
           <div class="agent-head-menu" @focusout="onHeadMenuBlur">
@@ -43,7 +43,7 @@
         <div class="agent-composer"><AgentPendingQueue :items="pendingQueue" :paused="queuePaused" :busy="chatBusy || composerBlocked" @remove="removeQueued" @resume="resumeQueueSafely" /><div v-if="editingMessageId" class="agent-edit-banner"><Pencil class="h-3.5 w-3.5" /><span>正在编辑已发送的消息,发送后将替换这条消息及后续回复</span><button type="button" @click="cancelEdit">取消</button></div><div v-if="showLogPicker" class="agent-log-panel"><div class="agent-log-panel-head"><span>挂载容器日志</span><button class="text-xs text-surface-400 hover:text-cyan-300" @click="showLogPicker = false">收起</button></div><LogContextPicker :projects="projects" @attach="onAttach" /></div><div v-if="showQuickPrompts" class="agent-log-panel"><div class="agent-log-panel-head"><span>常用指令</span><button class="text-xs text-surface-400 hover:text-cyan-300" @click="showQuickPrompts = false">收起</button></div><div class="grid gap-1.5 sm:grid-cols-2"><button v-for="prompt in quickPrompts" :key="prompt" class="agent-quick-prompt" @click="applyQuickPrompt(prompt)"><Sparkles class="h-3.5 w-3.5 text-cyan-400" />{{ prompt }}</button></div></div><div class="agent-input-wrap"><textarea ref="inputEl" v-model="input" class="agent-input" aria-label="向 Agent 发送消息" rows="3" placeholder="告诉 Agent 你想查看或操作什么…（Enter 发送，Shift+Enter 换行）" :disabled="sessionBusy" @keydown="onComposerKeydown"></textarea><button class="agent-voice-btn" :class="{ recording: voiceRecording }" :title="voiceRecording ? '停止录音' : '语音输入'" :aria-label="voiceRecording ? '停止录音' : '语音输入'" :aria-pressed="voiceRecording" :disabled="composerBlocked" @click="toggleVoiceInput"><Mic class="h-4 w-4" /></button></div>
 <div class="agent-composer-foot"><span class="flex min-w-0 items-center gap-2"><button class="agent-log-btn" :class="{ active: attachedCount }" title="选择容器日志,作为排障证据随消息发送" @click="showLogPicker = !showLogPicker"><ScrollText class="h-3.5 w-3.5" />挂载日志<em v-if="attachedCount">{{ attachedCount }}</em></button><button class="agent-log-btn" title="常用指令" @click="showQuickPrompts = !showQuickPrompts"><Wand2 class="h-3.5 w-3.5" />常用指令</button><button class="agent-log-btn" :class="{ active: webSearchEnabled }" title="开启后 Agent 可以检索 Docker、Compose 和软件官方资料" @click="webSearchEnabled = !webSearchEnabled"><Globe2 class="h-3.5 w-3.5" />联网搜索</button><span class="truncate agent-composer-hint">{{ loadingHistory ? '正在恢复会话，请稍候' : historyError ? '恢复历史后即可继续发送' : running ? (pendingQueue.length ? '执行中,已排队 ' + pendingQueue.length + ' 条' : '执行中,可继续输入并自动排队') : '会话与上下文会自动保存' }}</span></span><button class="btn-primary" :disabled="!input.trim() || composerBlocked" :title="running ? '加入队列,当前执行结束后自动发送' : '发送消息'" @click="submit"><Send class="h-4 w-4" />{{ running || queuePaused && pendingQueue.length ? '排队发送' : '发送' }}</button></div></div>
       </main>
-      <aside class="agent-inspector"><section class="card agent-inspector-card"><div class="agent-inspector-title"><span>当前上下文</span><button v-if="projectId" class="text-xs text-surface-400 hover:text-cyan-300" @click="projectId = ''">清除</button></div><p v-if="selectedProject" class="text-sm text-cyan-300">{{ selectedProject.projectName }}</p><p v-else>未固定项目。发送时会按项目名称自动匹配；无法唯一判断时会先询问，不会猜测。</p></section><section class="card agent-inspector-card agent-activity-panel">
+      <aside class="agent-inspector agent-context-rail"><section class="card agent-inspector-card"><div class="agent-inspector-title"><span>当前上下文</span><button v-if="projectId" class="text-xs text-surface-400 hover:text-cyan-300" @click="projectId = ''">清除</button></div><p v-if="selectedProject" class="text-sm text-cyan-300">{{ selectedProject.projectName }}</p><p v-else>未固定项目。发送时会按项目名称自动匹配；无法唯一判断时会先询问，不会猜测。</p></section><section class="card agent-inspector-card agent-activity-panel">
             <div class="agent-inspector-title">
               <span><span v-if="running" class="agent-activity-live"></span>执行动态</span>
               <span class="agent-activity-tools">
@@ -1104,4 +1104,90 @@ usePullRefresh(() => {
   .agent-composer-foot > span { max-width: none; }
   .agent-chat-head { padding: 9px 10px; }
 }
+
+/* Chat-first visual refresh: modern consumer-AI hierarchy without changing behavior. */
+.agent-page.agent-page { background:#0f1115; }
+.agent-page > .page-header { min-height:54px; margin-bottom:10px; padding:0 4px 10px; border-bottom:0; align-items:center; }
+.agent-page .page-title { font-size:20px; letter-spacing:-.025em; }
+.agent-page .page-subtitle { margin-top:3px; color:#717783; font-size:11px; }
+.agent-header-actions,.agent-session-options { align-self:center; }
+.agent-session-options select,.agent-session-options button { border-radius:999px; }
+.agent-layout-chat-first { grid-template-columns:236px minmax(0,1fr) 224px; gap:0; overflow:hidden; border:1px solid rgba(255,255,255,.055); border-radius:18px; background:#12151b; box-shadow:0 18px 60px rgba(0,0,0,.24); }
+.agent-layout-chat-first .agent-sessions { border:0; border-right:1px solid rgba(255,255,255,.055); border-radius:0; background:#101319; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser) { background:#101319; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-head) { padding:16px 14px 10px; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-head h2) { color:#eef1f4; font-size:13px; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-head p) { color:#68717e; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-tools .icon-btn) { border:0; background:transparent; color:#737d8a; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-tools .icon-btn:hover) { background:rgba(255,255,255,.06); color:#eef1f4; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-search .search-field) { border-radius:999px; background:#191d24; border-color:rgba(255,255,255,.06); }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-row) { margin-bottom:3px; border:0; border-radius:10px; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-row.active) { background:#20252c; border:0; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-row.active::before) { left:-1px; width:2px; height:20px; background:#dfe4ea; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-title) { font-size:11.5px; }
+.agent-layout-chat-first .agent-sessions :deep(.session-browser-meta) { color:#68717e; }
+
+.agent-layout-chat-first .agent-chat { border:0; border-radius:0; background:#12151b; }
+.agent-layout-chat-first .agent-context-rail { gap:0; border-left:1px solid rgba(255,255,255,.055); background:#101319; }
+.agent-layout-chat-first .agent-inspector-card { border:0; border-radius:0; background:transparent; padding:16px 14px; }
+.agent-layout-chat-first .agent-activity-panel { border-top:1px solid rgba(255,255,255,.055); }
+.agent-chat-head { min-height:58px; padding:10px 18px; border-bottom:1px solid rgba(255,255,255,.055); background:rgba(18,21,27,.92); }
+.agent-head-id > svg { color:#8b93a3 !important; }
+.agent-head-text strong { color:#f1f3f5; font-size:13px; font-weight:650; }
+.agent-status { color:#6f7784; font-size:10px; }
+.agent-head-menu .icon-btn { width:32px; height:32px; border:0; background:transparent; }
+.agent-head-menu .icon-btn:hover { background:rgba(255,255,255,.06); color:#e7ebef; }
+.agent-messages { padding:30px clamp(20px,6vw,92px) 150px; scroll-behavior:smooth; }
+.agent-message { max-width:820px; margin:0 auto 30px; gap:0; }
+.agent-message.assistant .agent-avatar { width:24px; height:24px; margin:3px 12px 0 0; border:0; background:transparent; color:#8f98a8; }
+.agent-message.assistant .agent-message-body { max-width:min(760px,calc(100% - 36px)); }
+.agent-message.user .agent-message-body { max-width:min(680px,82%); }
+.agent-user-text { padding:10px 15px; border:1px solid rgba(255,255,255,.07); border-radius:18px 18px 5px 18px; background:#20242b; color:#f0f2f4; font-size:13px; line-height:1.65; box-shadow:none; }
+.agent-user-actions { min-height:24px; margin:4px 4px 0 0; opacity:0; transition:opacity .15s ease; }
+.agent-message.user:hover .agent-user-actions,.agent-message.user:focus-within .agent-user-actions,.agent-user-actions:has(button:focus-visible) { opacity:1; }
+.agent-user-edit-btn { min-width:auto; min-height:24px; padding:0 7px; border:0; border-radius:6px; background:transparent; box-shadow:none; color:#727b89; font-size:10px; }
+.agent-user-edit-btn:hover:not(:disabled),.agent-user-edit-btn:focus-visible { color:#dfe5ec; border:0; background:rgba(255,255,255,.06); }
+.agent-message-actions { display:flex; align-items:center; gap:2px; margin-top:7px; opacity:.65; }
+.agent-message-action-btn { width:27px; height:27px; border:0; border-radius:7px; color:#727b89; background:transparent; }
+.agent-message-action-btn:hover:not(:disabled),.agent-message-action-btn:focus-visible { color:#dfe5ec; background:rgba(255,255,255,.06); }
+.agent-markdown { color:#dce1e7; font-size:13px; line-height:1.82; }
+.agent-markdown :deep(p) { margin:0 0 12px; }
+.agent-markdown :deep(h1),.agent-markdown :deep(h2),.agent-markdown :deep(h3) { margin:20px 0 9px; }
+.agent-markdown :deep(pre) { margin:14px 0; padding:14px 16px; border:1px solid rgba(255,255,255,.07); border-radius:12px; background:#0d1015; }
+.agent-markdown :deep(code) { color:#d5dbe3; background:rgba(255,255,255,.055); }
+.agent-thinking-block { margin:0 0 10px; border:0; border-left:2px solid #3c4655; border-radius:0; background:transparent; }
+.agent-thinking-block.is-live { border-left-color:#8a93a1; }
+.agent-thinking-block > summary { padding:5px 0 5px 10px; color:#8992a0; font-size:11px; }
+.agent-thinking-block > summary em { color:#9aa3b1; background:rgba(255,255,255,.06); }
+.agent-thinking-live { color:#aab2be; }
+.agent-thinking-live i,.agent-thinking-dot { background:#aab2be; }
+.agent-thinking-body { max-height:220px; padding:2px 0 7px 10px; }
+.agent-thinking-round + .agent-thinking-round { margin-top:7px; padding-top:7px; }
+.agent-thinking-round p { color:#7d8795; font-size:11px; line-height:1.7; }
+.agent-tool-cards { margin:0 0 10px; }
+.agent-tool-card { border:0; border-bottom:1px solid rgba(255,255,255,.055); border-radius:0; background:transparent; }
+.agent-tool-card-header { min-height:34px; padding:5px 0; }
+.agent-tool-card-details { border:0; background:transparent; }
+.agent-composer { position:sticky; bottom:0; z-index:10; margin:0 auto; width:min(100%,850px); padding:10px 0 18px; border-top:0; background:linear-gradient(to bottom,rgba(18,21,27,0),#12151b 18px); }
+.agent-input-wrap { padding:0; }
+.agent-input { min-height:76px; max-height:180px; padding:14px 52px 14px 16px; border:1px solid rgba(255,255,255,.10); border-radius:18px; background:#1b1f26; box-shadow:0 8px 30px rgba(0,0,0,.18); font-size:13px; }
+.agent-input:focus { border-color:rgba(255,255,255,.18); box-shadow:0 10px 34px rgba(0,0,0,.22); }
+.agent-voice-btn { width:30px; height:30px; border:0; border-radius:999px; background:transparent; color:#7e8794; }
+.agent-voice-btn:hover { color:#e6e9ed; background:rgba(255,255,255,.06); }
+.agent-composer-foot { margin-top:7px; padding:0 4px; }
+.agent-composer-foot .btn-primary { min-width:72px; min-height:32px; border-radius:999px; background:#e8ebef; color:#171a1f; box-shadow:none; }
+.agent-composer-foot .btn-primary:hover:not(:disabled) { background:#fff; }
+.agent-log-btn { padding:4px 7px; border-radius:7px; }
+.agent-log-btn:hover { background:rgba(255,255,255,.05); color:#dce2e9; }
+.agent-log-panel { border:1px solid rgba(255,255,255,.09); border-radius:14px; background:#171b21; }
+.agent-inspector-title { color:#e1e5ea; font-size:11px; }
+.agent-inspector-card > p { color:#707987; }
+.agent-activity-group { border:0; border-radius:8px; background:rgba(255,255,255,.025); }
+.agent-activity-group.is-active { border:0; background:rgba(255,255,255,.04); }
+.agent-activity-group-head:hover,.agent-activity-turn-head:hover { background:rgba(255,255,255,.045); }
+.agent-memory { border-top-color:rgba(255,255,255,.055); }
+.agent-scroll-bottom { right:24px; bottom:132px; border:0; background:#242a32; color:#dbe2ea; box-shadow:0 6px 24px rgba(0,0,0,.28); }
+@media (max-width:1180px) { .agent-layout-chat-first { grid-template-columns:220px minmax(0,1fr); } .agent-context-rail { display:none; } }
+@media (max-width:760px) { .agent-page > .page-header { padding-bottom:7px; } .agent-layout-chat-first { border-radius:14px; border-left:0; border-right:0; } .agent-messages { padding:18px 14px 132px; } .agent-message { max-width:100%; margin-bottom:24px; } .agent-message.user .agent-message-body { max-width:86%; } .agent-composer { width:100%; padding:8px 10px 10px; } .agent-input { min-height:62px; border-radius:16px; } .agent-composer-foot { flex-wrap:wrap; } }
+
 </style>
