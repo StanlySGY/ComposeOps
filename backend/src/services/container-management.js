@@ -76,6 +76,7 @@ export async function runStandaloneContainerAction({ id, action, expectedHostId 
     const ok = after.State?.Status === expected;
     addOperation({ action: `container.${action}`, status: ok ? 'success' : 'failed', detail: `${data.Name?.replaceAll('/', '') || id}: ${after.State?.Status || 'unknown'}` });
     invalidateScanCache();
+    if (!ok) throw fail(`容器操作未达到预期状态（当前：${after.State?.Status || 'unknown'}）`, 502, 'postcondition_failed');
     return { ok: true, id, action, state: after.State.Status };
   });
 }

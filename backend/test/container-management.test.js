@@ -84,8 +84,25 @@ test('standalone lifecycle action verifies host and refuses Compose-owned contai
   } finally { await app.close(); }
 });
 
-test('Compose service action targets every replica with the exact service label', async (t) => {
+test('standalone lifecycle action reports a failed postcondition instead of false success', async (t) => {
   const docker = getActivityDocker();
+  t.mock.method(docker, 'getContainer', () => ({
+    async inspect() { return { Name: '/stuck-container', Config: { Labels: {} }, State: { Status: 'exited' } }; },
+    async start() {},
+  }));
+  const app = Fastify();
+  await app.register(projectRoutes, { prefix: '/projects' });
+  try {
+    const response = await app.inject({
+      method: 'POST', url: '/projects/standalone-containers/stuck-container-0001/actions',
+      payload: { action: 'start', expectedHostId: 'local' },
+    });
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.json().error, 'postcondition_failed');
+  } finally { await app.close(); }
+});
+
+test('Compose service action targets every replica with the exact service label', async (t) => {  const docker = getActivityDocker();
   const states = new Map([
     ['compose-web-container-0001', 'exited'],
     ['compose-web-container-0002', 'exited'],
