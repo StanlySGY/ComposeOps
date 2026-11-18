@@ -453,21 +453,33 @@ export async function streamSse(path, body, onFrame, signal) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  const dispatchFrame = (frame) => {
+    const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+    if (!data) return;
+    let event;
+    try { event = JSON.parse(data); } catch { return; }
+    onFrame(event);
+  };
+  const drainFrames = (final = false) => {
+    buf = buf.replace(/\r\n/g, '\n');
+    let boundary = buf.indexOf('\n\n');
+    while (boundary >= 0) {
+      dispatchFrame(buf.slice(0, boundary));
+      buf = buf.slice(boundary + 2);
+      boundary = buf.indexOf('\n\n');
+    }
+    if (final && buf.trim()) dispatchFrame(buf);
+    if (final) buf = '';
+  };
   while (true) {
     const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split('\n\n');
-    buf = parts.pop();
-    for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith('data:')) continue;
-      try {
-        onFrame(JSON.parse(line.slice(5).trim()));
-      } catch {
-        // 跳过无法解析的 AI 流帧,让连接继续接收后续事件。
-      }
+    if (done) {
+      buf += decoder.decode();
+      drainFrames(true);
+      break;
     }
+    buf += decoder.decode(value, { stream: true });
+    drainFrames();
   }
 }
 

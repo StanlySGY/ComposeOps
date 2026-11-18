@@ -115,6 +115,15 @@ node backend/scripts/host-identity-migration-drill.js --backup=/外部目录/独
 - 完整 preview Playwright 矩阵运行报告 **502 通过、6 跳过、4 失败**；4 个失败集中在 WebKit mobile 运行后段，预览服务进程连接被拒绝，非断言失败。后续需在稳定预览服务上复跑完整矩阵。
 - 代码提交 `fbc7da8`、记录提交 `72c1cf3` 和 Compose 服务视图提交 `953cd9b` 均已推送 `origin/main`。正式镜像使用 `docker-compose.yml` + `docker-compose.encrypted.yml` 和仓库外数据库密钥文件重建，仅 `opsdash` 服务执行 `up -d --no-deps --force-recreate`；最新容器状态 `healthy`，`/health` 返回 `status: ok, docker: ok`，本机与 Tailscale 地址 `http://100.86.191.116:28765/` 均返回 HTTP 200。未执行 volume 删除或数据库卷重建。
 
+## AI 助手流式体验与消息操作改造（2026-11-18）
+
+- 核对确认后端 Agent 引擎已通过 `callOpenAI({ stream: true })` 逐片发送 token/reasoning，SSE 路由与浏览器 `ReadableStream` 已存在；本轮没有用定时拆字模拟流式。
+- SSE 响应现在立即 flush headers 并发送注释心跳帧，设置 `no-transform` 与 `X-Accel-Buffering: no`，减少首个模型增量到达前被代理/压缩层缓冲的可能。
+- 前端 SSE 解析器支持 CRLF、多行 data、最后一个没有空行终止的帧，并把回调异常向上抛出，避免消费端错误被误吞。新增慢速分片回归，验证首帧在流结束前即可显示。
+- 模型内容 UI 刷新合并窗口从 120ms 缩短至 60ms（约 16fps），只做渲染节流，真实模型分片仍按到达顺序处理。
+- 用户消息编辑按钮移出消息气泡，放到气泡上方右侧的轻量工具栏；桌面悬停/键盘聚焦时显示，触屏设备常驻显示；保留编辑并重发逻辑与编辑失败恢复能力。
+- 回归：前端完整 Vitest 通过；SSE 与 AgentWorkflow 定向 **36/36** 通过；Agent SSE/会话 Playwright 桌面 **26/26** 通过；前后端 lint、生产构建、`git diff --check` 通过。后端全量 **743 通过、1 跳过、0 失败**。
+
 ### 后续待办
 
 1. 产品安全边界仍待确认：内网来源完全免密码，还是仅在 Tailscale 身份验证通过后免密码；本轮保持现有认证，不做绕过。

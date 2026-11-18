@@ -81,8 +81,8 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   function setSubscriberActive(active) { subscriber.active = active !== false; }
   // 滚动跟随:用户向上回看时暂停自动滚底,回到底部(或手动点"回到底部")后恢复。
   const atBottom = ref(true);
-  // token 节流:SSE 分片逐条追加会让 marked+DOMPurify 每个 chunk 全量重渲染,
-  // 长回复时一顿一顿;缓冲 120ms 合并刷新,流式更顺滑。
+  // token 节流:SSE 仍按真实模型分片接收；仅合并极短时间内的 DOM 更新，
+  // 60ms 约 16fps，避免 120ms 带来的明显块状跳字，同时控制 Markdown 重渲染成本。
   function flushTokens() {
     if (state.tokenTimer) { clearTimeout(state.tokenTimer); state.tokenTimer = null; }
     if (state.bufferingAssistant && state.tokenBuffer) {
@@ -97,7 +97,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     if (state.tokenTimer && state.bufferingAssistant && state.bufferingAssistant !== assistant) flushTokens();
     state.bufferingAssistant = assistant;
     state.tokenBuffer += chunk;
-    if (!state.tokenTimer) state.tokenTimer = setTimeout(flushTokens, 120);
+    if (!state.tokenTimer) state.tokenTimer = setTimeout(flushTokens, 60);
   }
 
   function isNearBottom() {

@@ -289,10 +289,13 @@ function aiRateLimit(limit, windowMs = 60000) {
     // 设置 SSE 响应头
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // 立即提交响应头和 SSE 注释帧，避免反向代理/中间层等到首个模型 token 才刷新缓冲。
+    reply.raw.flushHeaders?.();
+    reply.raw.write(': connected' + String.fromCharCode(10, 10));
 
     const abortController = new AbortController();
     const streamWriter = createBoundedSseWriter(reply.raw, {

@@ -111,6 +111,11 @@ it('编辑重发截断失败保留编辑态、草稿和挂载上下文',async()=
  api.truncateAiHistory.mockRejectedValueOnce(new Error('数据库忙'));await vm.submit();expect(vm.editingMessageId).toBeTruthy();expect(vm.input).toBe('修订后的排障目标');expect(api.agentExecuteStream).not.toHaveBeenCalled();
  api.truncateAiHistory.mockResolvedValueOnce({});await vm.submit();expect(vm.editingMessageId).toBeNull();expect(api.agentExecuteStream.mock.calls[0][0]).toMatchObject({message:'修订后的排障目标',attachedLogs:'日志证据',projectId:'p1'});
 });
+it('用户消息编辑入口位于气泡外的轻量工具栏，键盘焦点时可见且保持编辑重发行为',async()=>{
+ const vm=await start();const bubble=wrapper.find('.agent-user-text');const toolbar=wrapper.find('.agent-user-actions');
+ expect(bubble.exists()).toBe(true);expect(toolbar.exists()).toBe(true);expect(bubble.element.contains(toolbar.element)).toBe(false);
+ const edit=toolbar.get('button');expect(edit.text()).toContain('编辑');await edit.trigger('click');expect(vm.editingMessageId).toBeTruthy();expect(vm.input).toBe('问题 1');expect(wrapper.text()).toContain('正在编辑已发送的消息');
+});
 it('历史恢复中的工作台离页后，抽屉仍不能发送到尚未恢复的会话',async()=>{
  const vm=await start(),pending=deferred();api.getAiHistory.mockReturnValueOnce(pending.promise);const task=vm.openSession(2);wrapper.unmount();wrapper=null;
  const drawer=useAgentChat();expect(drawer.sendingBlocked.value).toBe(true);await expect(drawer.sendMessage('迟到消息')).rejects.toThrow('恢复');pending.resolve(history(2));await task;expect(api.agentExecuteStream).not.toHaveBeenCalled();
