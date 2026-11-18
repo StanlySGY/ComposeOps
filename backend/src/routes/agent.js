@@ -281,7 +281,7 @@ function aiRateLimit(limit, windowMs = 60000) {
       },
     },
   }, async (request, reply) => {
-    const { message, projectId, containerId, sessionId, role, webSearchEnabled = false, attachedLogs = '', history = [], pageContext = {} } = request.body || {};
+    const { message, projectId, containerId, sessionId, role, webSearchEnabled = true, attachedLogs = '', history = [], pageContext = {} } = request.body || {};
     if (!message || !String(message).trim()) {
       return reply.code(400).send({ error: 'missing_message', message: '缺少 message' });
     }

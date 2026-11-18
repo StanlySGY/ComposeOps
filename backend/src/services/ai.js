@@ -1,4 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
+
+// Node's built-in fetch does not automatically honor HTTP(S)_PROXY. ComposeOps
+// commonly runs inside WSL behind a local proxy, so configure undici's env-aware
+// dispatcher once; EnvHttpProxyAgent also respects NO_PROXY for local services.
+if (['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'].some((key) => process.env[key])) {
+  setGlobalDispatcher(new EnvHttpProxyAgent());
+}
 import db, { getSetting, setSetting, addAiMessage, getAiHistory, clearAiHistory } from '../lib/db.js';
 import { scanIcallProtocols, stripAgentInternalText } from '../lib/agent-protocol-core.js';
 import { aiChannelRevision, prepareAiChannels, publicAiChannels, readAiChannels, requestWithAiChannels, validateAiBaseUrl, writeAiChannels } from './ai-channels.js';
@@ -558,6 +566,7 @@ async function searchSearxng(q, { baseUrl }) {
 export async function searchWeb(query) {
   const q = String(query || '').trim();
   if (!q) return [];
+  const diagnostics = [];
   const search = getSearchConfig();
   if (search.provider !== 'builtin') {
     try {
@@ -567,84 +576,110 @@ export async function searchWeb(query) {
           ? await searchBrave(q, search)
           : await searchSearxng(q, search);
       if (custom.length) return custom;
+      diagnostics.push(`${search.provider}: 上游返回 0 条结果`);
     } catch (error) {
+      diagnostics.push(`${search.provider}: ${String(error?.message || error).slice(0, 180)}`);
       console.error(`[ai:search] ${search.provider} 检索失败,回退内置搜索:`, error.message);
     }
   }
-  return searchBuiltin(q);
+  const results = await searchBuiltin(q, diagnostics);
+  Object.defineProperty(results, 'diagnostics', { value: diagnostics, enumerable: false });
+  return results;
 }
-
-/** 内置检索管线:GitHub 仓库/README + DuckDuckGo 摘要(零 Key)。 */
-async function searchBuiltin(query) {
+/** 内置检索管线:按需查询 GitHub 仓库与 DuckDuckGo 摘要(零 Key)。 */
+async function searchBuiltin(query, diagnostics = []) {
   const q = String(query || '').trim();
   if (!q) return [];
   const results = [];
-  // GitHub Code/Search 对项目名和 Compose 文件比通用摘要搜索更精确。
+
+  // GitHub 只用于明确的仓库/源码发现,不把普通文档问题误当作仓库搜索。
+  if (/github|仓库|开源项目|项目源码|repo(?:sitory)?|source code/i.test(q)) {
+    try {
+      const resp = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&per_page=3`, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ComposeOps-AI/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        for (const repo of Array.isArray(data.items) ? data.items : []) {
+          if (!repo?.html_url) continue;
+          results.push({ title: repo.full_name || repo.name || 'GitHub repository', url: repo.html_url,
+            snippet: `${repo.description || '无项目描述'}; stars: ${repo.stargazers_count || 0}; 默认分支: ${repo.default_branch || 'main'}`,
+            sourceType: 'github_repository', trustedDomain: 'github.com' });
+          if (repo.full_name) results.push({ title: `${repo.full_name} README`, url: `https://github.com/${repo.full_name}#readme`,
+            snippet: '项目官方 README 入口,可进一步核对 Docker/Compose 使用说明和文件路径',
+            sourceType: 'github_readme', trustedDomain: 'github.com' });
+        }
+        if (!results.length) diagnostics.push('GitHub: 未找到匹配仓库');
+      } else diagnostics.push(`GitHub: HTTP ${resp.status}`);
+    } catch (error) {
+      diagnostics.push(`GitHub: ${String(error?.message || error).slice(0, 180)}`);
+    }
+  }
+
+  // Bing HTML 搜索作为通用网页搜索主源;不需要额外 API Key,并可通过 WSL HTTP(S)_PROXY 出网。
   try {
-    const timeout = AbortSignal.timeout(8000);
-    const resp = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&per_page=3`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ComposeOps-AI/1.0' },
-      signal: timeout,
+    const resp = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36' },
+      signal: AbortSignal.timeout(10000),
     });
     if (resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      for (const repo of Array.isArray(data.items) ? data.items : []) {
-        if (!repo?.html_url) continue;
-        results.push({
-          title: repo.full_name || repo.name || 'GitHub repository',
-          url: repo.html_url,
-          snippet: `${repo.description || '无项目描述'}; stars: ${repo.stargazers_count || 0}; 默认分支: ${repo.default_branch || 'main'}`,
-          sourceType: 'github_repository',
-          trustedDomain: 'github.com',
-        });
-        if (repo.full_name) {
-          results.push({
-            title: `${repo.full_name} README`,
-            url: `https://github.com/${repo.full_name}#readme`,
-            snippet: '项目官方 README 入口,可进一步核对 Docker/Compose 使用说明和文件路径',
-            sourceType: 'github_readme',
-            trustedDomain: 'github.com',
-          });
-        }
+      const html = await resp.text();
+      const blocks = [...html.matchAll(new RegExp('<li class="b_algo"[^>]*>(.*?)</li>', 'gs'))].slice(0, 6);
+      for (const blockMatch of blocks) {
+        const block = blockMatch[1];
+        const titleMatch = block.match(new RegExp('<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', 'is')); if (!titleMatch) continue;        let url = titleMatch[1].replace(/&amp;/g, '&');
+        try {
+          const redirect = new URL(url);
+          const encoded = redirect.searchParams.get('u');
+          if (redirect.hostname.endsWith('bing.com') && encoded?.startsWith('a1')) url = Buffer.from(encoded.slice(2), 'base64').toString('utf8');
+        } catch { /* 保留搜索源原始链接 */ }
+        if (!(url.startsWith('https://') || url.startsWith('http://'))) continue;
+        const clean = (value) => String(value || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();        const snippetMatch = block.match(new RegExp('<p[^>]*>(.*?)</p>', 'is'));
+        results.push({ title: clean(titleMatch[2]), url, snippet: clean(snippetMatch?.[1] || ''), sourceType: 'search_summary' });
       }
-    }
-  } catch { /* 第一个搜索源失败时尝试后备源。 */ }
+      if (!results.length) diagnostics.push('Bing: 页面未提取到结果');
+    } else diagnostics.push(`Bing: HTTP ${resp.status}`);
+  } catch (error) {
+    diagnostics.push(`Bing: ${String(error?.message || error).slice(0, 180)}`);
+  }
+
   try {
-    const timeout = AbortSignal.timeout(8000);
     const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`, {
-      headers: { Accept: 'application/json' },
-      signal: timeout,
+      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000),
     });
     if (resp.ok) {
       const data = await resp.json().catch(() => ({}));
       const abstract = String(data.AbstractText || '').trim();
-      if (abstract) {
-        results.push({ title: data.Heading || 'DuckDuckGo 摘要', url: data.AbstractURL || '', snippet: abstract, sourceType: 'search_summary' });
-      }
+      if (abstract) results.push({ title: data.Heading || 'DuckDuckGo 摘要', url: data.AbstractURL || '', snippet: abstract, sourceType: 'search_summary' });
       const topics = Array.isArray(data.RelatedTopics) ? data.RelatedTopics : [];
       for (const topic of topics.slice(0, 4)) {
         const title = topic.Text?.split(' - ')[0] || '';
         if (title) results.push({ title: title.slice(0, 120), url: topic.FirstURL || '', snippet: topic.Text || '', sourceType: 'search_summary' });
       }
-    }
-  } catch { /* 后备搜索源失败时返回已收集结果。 */ }
+    } else diagnostics.push(`DuckDuckGo API: HTTP ${resp.status}`);
+  } catch (error) {
+    diagnostics.push(`DuckDuckGo API: ${String(error?.message || error).slice(0, 180)}`);
+  }
+
   if (!results.length) {
-    // 回退:html.duckduckgo.com 摘要抽取
     try {
-      const timeout = AbortSignal.timeout(8000);
       const resp = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) ComposeOps-AI/1.0' },
-        signal: timeout,
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) ComposeOps-AI/1.0' }, signal: AbortSignal.timeout(8000),
       });
       if (resp.ok) {
         const html = await resp.text();
-        const snippets = [...html.matchAll(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)].slice(0, 5);
-        for (const m of snippets) {
-          const text = m[1].replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
-          if (text) results.push({ title: '', url: '', snippet: text.slice(0, 200), sourceType: 'search_summary' });
+        const snippets = [...html.matchAll(new RegExp('class="result__snippet"[^>]*>(.*?)</a>', 'gs'))].slice(0, 5);
+        for (const match of snippets) {
+          const snippet = match[1].replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+          if (snippet) results.push({ title: '', url: '', snippet: snippet.slice(0, 200), sourceType: 'search_summary' });
         }
-      }
-      } catch { /* 单条结果字段异常时跳过该结果。 */ }
+        if (!results.length) diagnostics.push('DuckDuckGo HTML: 页面未提取到结果');
+      } else diagnostics.push(`DuckDuckGo HTML: HTTP ${resp.status}`);
+    } catch (error) {
+      diagnostics.push(`DuckDuckGo HTML: ${String(error?.message || error).slice(0, 180)}`);
+    }
   }
+
   return results.filter((item, index, list) => item.url || list.findIndex((candidate) => candidate.snippet === item.snippet) === index).slice(0, 8);
 }

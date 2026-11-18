@@ -84,3 +84,30 @@ test('search: 配置的后端失败时回退 DuckDuckGo,最终绝不抛错', asy
   assert.ok(calls.some((c) => c.url.includes('duckduckgo.com')), '应回退到 DuckDuckGo');
   globalThis.fetch = originalFetch;
 });
+
+test('search: 内置搜索网络不可达时返回可诊断错误,普通文档查询不误搜 GitHub 仓库', async () => {
+  setSetting('ai.search.provider', 'builtin');
+  const calls = stubFetch(async () => { throw new Error('connect ETIMEDOUT'); });
+  const results = await searchWeb('Docker Compose official documentation');
+  assert.deepEqual(results, []);
+  assert.ok(calls.every((call) => !call.url.includes('api.github.com')), '普通文档问题不应被当作 GitHub 仓库发现');
+  assert.ok(results.diagnostics.some((item) => item.includes('DuckDuckGo API') && item.includes('ETIMEDOUT')));
+  assert.ok(results.diagnostics.some((item) => item.includes('DuckDuckGo HTML') && item.includes('ETIMEDOUT')));
+  globalThis.fetch = originalFetch;
+});
+
+test('search: Bing 通用网页搜索解析标题、摘要并还原官方文档链接', async () => {
+  setSetting('ai.search.provider', 'builtin');
+  const target = 'https://docs.docker.com/compose/';
+  const redirect = `https://www.bing.com/ck/a?u=a1${Buffer.from(target).toString('base64')}`;
+  const calls = stubFetch(async (url) => {
+    if (url.includes('bing.com/search')) return { ok: true, text: async () => `<ol><li class="b_algo"><h2><a href="${redirect}">Docker Compose docs</a></h2><p>Official Compose reference</p></li></ol>` };
+    return { ok: true, json: async () => ({}) };
+  });
+  const results = await searchWeb('Docker Compose official documentation');
+  assert.equal(results[0].title, 'Docker Compose docs');
+  assert.equal(results[0].url, target);
+  assert.equal(results[0].snippet, 'Official Compose reference');
+  assert.ok(calls.some((call) => call.url.includes('bing.com/search')));
+  globalThis.fetch = originalFetch;
+});
