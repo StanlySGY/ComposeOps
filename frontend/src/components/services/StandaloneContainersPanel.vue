@@ -46,7 +46,14 @@ async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const result = await api.getStandaloneContainers();
+    let result;
+    try { result = await api.getStandaloneContainers(); }
+    catch (cause) {
+      // 首次进入服务页时 Docker API 可能正处于短暂重连窗口,只对网络/超时故障做一次有界重试。
+      if (!/无法连接服务|fetch failed|networkerror|timeout|timed out/i.test(String(cause?.message || cause))) throw cause;
+      await new Promise(resolve => setTimeout(resolve, 500));
+      result = await api.getStandaloneContainers();
+    }
     hostId.value = result.hostId;
     hostName.value = result.hostName;
     containers.value = result.containers || [];
