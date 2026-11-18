@@ -760,7 +760,7 @@ async function searchBuiltin(query, diagnostics = []) {
     const trustedBonus = /(^|\.)docs\./.test(host) || /(^|\.)developer\./.test(host) || /(^|\.)github\.com$/.test(host) ? 0.2 : 0;
     return { item, index, score: terms.length ? matched / terms.length + trustedBonus : 1, matched };
   });
-  const relevant = ranked.filter((entry) => !terms.length || entry.matched > 0)
+  const relevant = ranked.filter((entry) => !terms.length || (entry.matched > 0 && entry.score >= 0.2))
     .sort((a, b) => b.score - a.score || a.index - b.index);
   if (results.length && !relevant.length) diagnostics.push('Bing: 返回结果与检索词无明显匹配,已过滤以避免误导');
   return relevant.map((entry) => entry.item)

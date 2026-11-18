@@ -115,7 +115,7 @@ test('search: Bing 通用网页搜索解析标题、摘要并还原官方文档�
 test('search: 过滤完全不相关的搜索结果并提供诊断', async () => {
   setSetting('ai.search.provider', 'builtin');
   const calls = stubFetch(async (url) => {
-    if (url.includes('bing.com/search')) return { ok: true, text: async () => '<ol><li class="b_algo"><h2><a href="https://social.msdn.microsoft.com/">MSDN Forums</a></h2><p>Microsoft community discussions</p></li></ol>' };
+    if (url.includes('bing.com/search')) return { ok: true, text: async () => '<ol><li class="b_algo"><h2><a href="https://social.msdn.microsoft.com/">MSDN Forums</a></h2><p>Microsoft community discussions</p></li><li class="b_algo"><h2><a href="https://www.docker.com/">Docker</a></h2><p>Docker platform overview</p></li></ol>' };
     return { ok: true, json: async () => ({}) };
   });
   const results = await searchWeb('latest linux.do posts');
