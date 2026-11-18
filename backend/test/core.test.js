@@ -31,6 +31,9 @@ test('passwords are hashed and sessions are authenticated by cookie', () => {
   // SameSite=None 仅在 EMBED_MODE=1 且 HTTPS 时使用(见 auth.js)。
   assert.match(cookie, /SameSite=Lax/);
   assert.equal(auth.isAuthenticated({ headers: { cookie: cookie.split(';')[0] } }), true);
+  // 恶意/损坏的 Cookie 编码应被视为无效会话，而不是让请求抛出 URIError。
+  assert.doesNotThrow(() => auth.isAuthenticated({ headers: { cookie: 'composeops_session=%E0%A4%A' } }));
+  assert.equal(auth.isAuthenticated({ headers: { cookie: 'composeops_session=%E0%A4%A' } }), false);
   auth.changePassword('correct-horse-battery', 'new-correct-horse-battery');
   assert.equal(auth.isAuthenticated({ headers: { cookie: cookie.split(';')[0] } }), false);
   assert.equal(auth.verifyPassword('new-correct-horse-battery'), true);

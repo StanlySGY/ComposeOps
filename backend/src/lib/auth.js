@@ -13,7 +13,11 @@ function parseCookies(header = '') {
   return Object.fromEntries(header.split(';').map((part) => {
     const index = part.indexOf('=');
     if (index < 0) return ['', ''];
-    return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];
+    const value = part.slice(index + 1).trim();
+    // Cookie 来自客户端；畸形百分号编码不应让整个 API 请求在认证钩子中抛出 500。
+    let decoded;
+    try { decoded = decodeURIComponent(value); } catch { decoded = ''; }
+    return [part.slice(0, index).trim(), decoded];
   }).filter(([key]) => key));
 }
 
