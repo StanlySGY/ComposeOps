@@ -126,7 +126,7 @@ it('多个纳管项目都未命中时不擅自选择项目',async()=>{
 it('用户消息编辑入口位于气泡外的轻量工具栏，键盘焦点时可见且保持编辑重发行为',async()=>{
  const vm=await start();const bubble=wrapper.find('.agent-user-text');const toolbar=wrapper.find('.agent-user-actions');
  expect(bubble.exists()).toBe(true);expect(toolbar.exists()).toBe(true);expect(bubble.element.contains(toolbar.element)).toBe(false);
- const edit=toolbar.get('button');expect(edit.text()).toBe('');expect(edit.attributes('aria-label')).toContain('编辑');expect(edit.attributes('title')).toContain('编辑');await edit.trigger('click');expect(vm.editingMessageId).toBeTruthy();expect(vm.input).toBe('问题 1');expect(wrapper.text()).toContain('正在修改这条消息');
+ const edit=toolbar.get('button');expect(edit.text()).toContain('编辑');expect(edit.attributes('aria-label')).toContain('编辑');expect(edit.attributes('title')).toContain('编辑');await edit.trigger('click');expect(vm.editingMessageId).toBeTruthy();expect(vm.input).toBe('问题 1');expect(wrapper.text()).toContain('正在修改这条消息');
   expect(wrapper.find('.agent-edit-banner[role="status"]').exists()).toBe(true);
   expect(wrapper.find('.agent-composer').classes()).toContain('is-editing');
   expect(wrapper.find('.agent-edit-submit').text()).toContain('重新发送');

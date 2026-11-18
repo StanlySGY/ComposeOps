@@ -3,6 +3,7 @@ import ipaddress
 import json
 import os
 import socket
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, urlencode
 from playwright.sync_api import sync_playwright
@@ -13,6 +14,7 @@ MAX_TEXT = 20000
 MAX_LINKS = 80
 CHROME = os.environ.get('CHROMIUM_PATH', '/ms-playwright/chromium-1124/chrome-linux/chrome')
 PROXY = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY') or ''
+REQUEST_SLOTS = threading.BoundedSemaphore(1)
 BLOCKED_HOSTS = {'localhost', 'metadata.google.internal', 'metadata.google', 'instance-data'}
 
 
@@ -62,12 +64,18 @@ def render(target):
                 context.route('**/*', guard)
                 page = context.new_page()
                 page.set_default_navigation_timeout(18000)
-                response = page.goto(target, wait_until='domcontentloaded', timeout=18000)
+                # Return as soon as the main response commits. Some JS-heavy portals keep
+                # navigation open indefinitely; DOM readiness is bounded separately.
+                response = page.goto(target, wait_until='commit', timeout=12000)
                 try:
-                    page.wait_for_load_state('networkidle', timeout=3500)
+                    page.wait_for_load_state('domcontentloaded', timeout=9000)
                 except Exception:
                     pass
-                page.wait_for_timeout(700)
+                try:
+                    page.wait_for_load_state('networkidle', timeout=1800)
+                except Exception:
+                    pass
+                page.wait_for_timeout(900)
                 data = page.evaluate('''({maxText,maxLinks}) => {
                   const ignored='script,style,noscript,svg,nav,footer,header,form,aside,[aria-hidden="true"]';
                   const root=document.querySelector('main,article,[role="main"]')||document.body;
@@ -112,8 +120,14 @@ def search(query):
                         route.abort('blockedbyclient')
                 context.route('**/*', guard)
                 page = context.new_page()
-                page.set_default_navigation_timeout(18000)
-                response = page.goto(target, wait_until='domcontentloaded', timeout=18000)
+                page.set_default_navigation_timeout(12000)
+                response = page.goto(target, wait_until='commit', timeout=12000)
+                if response and response.status >= 400:
+                    return {'results': [], 'status': response.status, 'pageTitle': page.title()[:160], 'blockedRequests': blocked[:20]}
+                try:
+                    page.wait_for_load_state('domcontentloaded', timeout=7000)
+                except Exception:
+                    pass
                 try:
                     page.wait_for_load_state('networkidle', timeout=3500)
                 except Exception:
@@ -155,7 +169,14 @@ class Handler(BaseHTTPRequestHandler):
             if length < 2 or length > MAX_BODY:
                 raise ValueError('请求体大小无效')
             body = json.loads(self.rfile.read(length))
-            self.send_json(200, search(body.get('query')) if self.path == '/search' else render(body.get('url')))
+            if not REQUEST_SLOTS.acquire(blocking=False):
+                self.send_json(429, {'error': '浏览器任务繁忙，请稍后重试'})
+                return
+            try:
+                result = search(body.get('query')) if self.path == '/search' else render(body.get('url'))
+                self.send_json(200, result)
+            finally:
+                REQUEST_SLOTS.release()
         except Exception as error:
             self.send_json(400, {'error': str(error)[:300]})
 
