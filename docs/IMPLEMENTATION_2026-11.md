@@ -113,7 +113,7 @@ node backend/scripts/host-identity-migration-drill.js --backup=/外部目录/独
 - 每个服务可独立折叠；多服务项目增加“全部展开/全部折叠”，减少长页面噪声。桌面采用信息分栏，平板/手机改为纵向堆叠，容器操作保留足够触控高度。
 - 组件回归覆盖多服务、多副本、服务/容器操作作用域和折叠交互；前端全量 **935/935** 通过，lint 与生产构建通过；项目工作区 Playwright 桌面/手机 **10/10** 通过。
 - 完整 preview Playwright 矩阵运行报告 **502 通过、6 跳过、4 失败**；4 个失败集中在 WebKit mobile 运行后段，预览服务进程连接被拒绝，非断言失败。后续需在稳定预览服务上复跑完整矩阵。
-- 代码提交 `fbc7da8` 与本记录提交 `72c1cf3` 均已推送 `origin/main`。正式镜像使用 `docker-compose.yml` + `docker-compose.encrypted.yml` 和仓库外数据库密钥文件重建，仅 `opsdash` 服务执行 `up -d --no-deps --force-recreate`；容器状态 `healthy`，`/health` 返回 `status: ok, docker: ok`，Tailscale 地址 `http://100.86.191.116:28765/` 返回 HTTP 200。未执行 volume 删除或数据库卷重建。
+- 代码提交 `fbc7da8`、记录提交 `72c1cf3` 和 Compose 服务视图提交 `953cd9b` 均已推送 `origin/main`。正式镜像使用 `docker-compose.yml` + `docker-compose.encrypted.yml` 和仓库外数据库密钥文件重建，仅 `opsdash` 服务执行 `up -d --no-deps --force-recreate`；最新容器状态 `healthy`，`/health` 返回 `status: ok, docker: ok`，本机与 Tailscale 地址 `http://100.86.191.116:28765/` 均返回 HTTP 200。未执行 volume 删除或数据库卷重建。
 
 ### 后续待办
 
