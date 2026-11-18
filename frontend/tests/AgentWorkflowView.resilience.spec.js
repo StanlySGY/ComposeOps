@@ -111,6 +111,18 @@ it('编辑重发截断失败保留编辑态、草稿和挂载上下文',async()=
  api.truncateAiHistory.mockRejectedValueOnce(new Error('数据库忙'));await vm.submit();expect(vm.editingMessageId).toBeTruthy();expect(vm.input).toBe('修订后的排障目标');expect(api.agentExecuteStream).not.toHaveBeenCalled();
  api.truncateAiHistory.mockResolvedValueOnce({});await vm.submit();expect(vm.editingMessageId).toBeNull();expect(api.agentExecuteStream.mock.calls[0][0]).toMatchObject({message:'修订后的排障目标',attachedLogs:'日志证据',projectId:'p1'});
 });
+it('发送内容唯一命中纳管项目名称时自动附加 projectId，无需手动固定服务',async()=>{
+ api.getProjects.mockResolvedValue({projects:[{id:'vaultwarden-id',projectName:'vaultwarden',managed:true},{id:'other-id',projectName:'other-service',managed:true}]});
+ const vm=await start();vm.input='帮我看看 vaultwarden 是干啥的';await vm.submit();await flushPromises();
+ expect(api.agentExecuteStream).toHaveBeenCalledTimes(1);
+ expect(api.agentExecuteStream.mock.calls[0][0]).toMatchObject({message:'帮我看看 vaultwarden 是干啥的',projectId:'vaultwarden-id'});
+ expect(wrapper.text()).toContain('vaultwarden');
+});
+it('多个纳管项目都未命中时不擅自选择项目',async()=>{
+ api.getProjects.mockResolvedValue({projects:[{id:'vaultwarden-id',projectName:'vaultwarden',managed:true},{id:'other-id',projectName:'other-service',managed:true}]});
+ const vm=await start();vm.input='帮我列出全部项目';await vm.submit();await flushPromises();
+ expect(api.agentExecuteStream.mock.calls[0][0].projectId).toBeUndefined();
+});
 it('用户消息编辑入口位于气泡外的轻量工具栏，键盘焦点时可见且保持编辑重发行为',async()=>{
  const vm=await start();const bubble=wrapper.find('.agent-user-text');const toolbar=wrapper.find('.agent-user-actions');
  expect(bubble.exists()).toBe(true);expect(toolbar.exists()).toBe(true);expect(bubble.element.contains(toolbar.element)).toBe(false);
