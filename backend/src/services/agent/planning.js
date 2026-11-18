@@ -8,7 +8,59 @@
  * 被 OperationsAgent(engine.js)与 agent.test.js 复用。
  */
 
-import { findProject, findProjectContainer } from '../scanner.js';
+import { findProject, findProjectContainer, scanProjects } from '../scanner.js';
+
+/**
+ * 从用户原话和当前页面事实中做确定性上下文匹配。
+ * 仅在唯一明确命中时自动绑定；多个项目/服务同名时保持空上下文，交给 Agent 询问。
+ */
+export async function resolveImplicitContext(userMessage = '', pageContext = {}, preferredProjectId = '') {
+  const allProjects = await scanProjects();
+  const projects = preferredProjectId ? allProjects.filter((project) => project.id === preferredProjectId) : allProjects;
+  if (!projects.length) return { project: null, projectId: null, container: null, confidence: 'none' };
+  const source = [userMessage, pageContext?.summary, pageContext?.state].filter(Boolean).join(' ').toLocaleLowerCase();
+  if (!source.trim()) return { project: null, projectId: null, container: null, confidence: 'none' };
+
+  const matches = [];
+  for (const project of projects) {
+    const projectName = String(project.projectName || project.name || '').trim().toLocaleLowerCase();
+    const id = String(project.id || '').trim().toLocaleLowerCase();
+    let score = 0;
+    if (projectName.length >= 3 && source.includes(projectName)) score = 100;
+    else if (id.length >= 6 && source.includes(id)) score = 95;
+    else {
+      const hits = [];
+      for (const container of project.containers || []) {
+        const name = String(container.name || '').trim().toLocaleLowerCase();
+        const service = String(container.service || '').trim().toLocaleLowerCase();
+        if (name.length >= 5 && source.includes(name)) hits.push({ score: 82, container });
+        else if (service.length >= 4 && source.includes(service)) hits.push({ score: 76, container });
+      }
+      if (hits.length) score = Math.max(...hits.map((hit) => hit.score));
+    }
+    if (score) matches.push({ project, score });
+  }
+  matches.sort((a, b) => b.score - a.score);
+  if (!matches.length) return { project: null, projectId: null, container: null, confidence: 'none' };
+  const best = matches[0];
+  const tied = matches.filter((item) => item.score === best.score);
+  if (tied.length !== 1) {
+    return {
+      project: null, projectId: null, container: null, confidence: 'ambiguous',
+      candidates: tied.map((item) => ({ id: item.project.id, name: item.project.projectName })),
+    };
+  }
+
+  const containerHits = [];
+  for (const container of best.project.containers || []) {
+    const name = String(container.name || '').trim().toLocaleLowerCase();
+    const service = String(container.service || '').trim().toLocaleLowerCase();
+    if (name.length >= 5 && source.includes(name)) containerHits.push(container);
+    else if (service.length >= 4 && source.includes(service)) containerHits.push(container);
+  }
+  const container = containerHits.length === 1 ? containerHits[0] : null;
+  return { project: best.project, projectId: best.project.id, container, confidence: container ? 'service' : 'project' };
+}
 
 /** 解析工具执行所需的项目/容器上下文。 */
 export async function resolveToolContext(params = {}) {

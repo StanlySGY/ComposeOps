@@ -22,7 +22,7 @@ import { RunawayGuard } from './runaway-guard.js';
 import { drainTaskNotifications } from './background-tasks.js';
 import { compactSessionHistory } from './compaction.js';
 import { getApprovalGate, persistentPolicyMaySkipConfirmation } from './approval-gate.js';
-import { resolveToolContext, assertPermission, validateParams } from './planning.js';
+import { resolveToolContext, resolveImplicitContext, assertPermission, validateParams } from './planning.js';
 import { withProjectOperationLock } from '../project-operation-lock.js';
 import { evaluateAgentPolicy, recordAgentAuditEvent, fingerprintAgentParams } from './policy-store.js';
 
@@ -388,6 +388,30 @@ export class OperationsAgent {
    */
   async executeWithLoop(userMessage, context = {}, onEvent, signal = null) {
     const trace = [];
+    // 不要求用户先手动选择项目：仅在用户原话/当前页面事实唯一命中时自动绑定。
+    // 显式 projectId/containerId 仍然优先；歧义时保持空上下文，让 Agent 使用项目工具确认。
+    if (!context.projectId || !context.containerId) {
+      try {
+        const implicit = await resolveImplicitContext(userMessage, context.pageContext || {}, context.projectId || '');
+        if (!context.projectId && implicit.projectId) context.projectId = implicit.projectId;
+        if (!context.containerId && implicit.container?.id) context.containerId = implicit.container.id;
+        if (implicit.projectId) {
+          onEvent({
+            type: 'context_resolved',
+            projectId: implicit.projectId,
+            projectName: implicit.project?.projectName || implicit.projectId,
+            containerId: implicit.container?.id || null,
+            containerName: implicit.container?.name || null,
+            serviceName: implicit.container?.service || null,
+            confidence: implicit.confidence,
+          });
+        } else if (implicit.confidence === 'ambiguous') {
+          onEvent({ type: 'context_ambiguous', candidates: implicit.candidates || [] });
+        }
+      } catch {
+        onEvent({ type: 'context_resolve_failed', content: '自动识别项目暂时不可用，将由 Agent 通过项目工具识别。' });
+      }
+    }
     const requestedRole = context.role || 'auto';
     const role = resolveAgentRole(requestedRole, userMessage);
     const roleMeta = AGENT_ROLES[role];

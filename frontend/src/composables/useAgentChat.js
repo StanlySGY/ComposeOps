@@ -97,7 +97,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     if (state.tokenTimer && state.bufferingAssistant && state.bufferingAssistant !== assistant) flushTokens();
     state.bufferingAssistant = assistant;
     state.tokenBuffer += chunk;
-    if (!state.tokenTimer) state.tokenTimer = setTimeout(flushTokens, 60);
+    if (!state.tokenTimer) state.tokenTimer = setTimeout(flushTokens, 28);
   }
 
   function isNearBottom() {
@@ -326,6 +326,21 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     } else if (event.type === 'confirmation_required') {
       flushTokens();
       assistant.confirmation = { ...event, busy: false, error: '' };
+    } else if (event.type === 'context_resolved') {
+      assistant.context = {
+        projectId: event.projectId,
+        projectName: event.projectName,
+        containerId: event.containerId || null,
+        containerName: event.containerName || null,
+        serviceName: event.serviceName || null,
+        confidence: event.confidence || 'project',
+      };
+      const target = event.serviceName || event.containerName;
+      assistant.taskNotices = [...(assistant.taskNotices || []), target
+        ? '已自动定位：' + event.projectName + ' · ' + target
+        : '已自动定位项目：' + event.projectName].slice(-40);
+    } else if (event.type === 'context_ambiguous') {
+      assistant.contextAmbiguous = event.candidates || [];
     } else if (event.type === 'context_data' && event.kind === 'projects') assistant.projects = event.projects;
     else if (event.type === 'context_data' && event.kind === 'search_sources') assistant.searchSources = event.sources;
     else if (event.type === 'action_completed') {
