@@ -34,6 +34,38 @@
 #   outbound calls through the proxy. Leave them unset for direct connectivity.
 
 services:
+  browser:
+    image: bettafish-local:latest
+    container_name: composeops-browser
+    restart: unless-stopped
+    init: true
+    entrypoint: ["python", "/opt/composeops-browser/server.py"]
+    volumes:
+      - ./browser/server.py:/opt/composeops-browser/server.py:ro
+    environment:
+      - PORT=3002
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - CHROMIUM_PATH=/ms-playwright/chromium-1124/chrome-linux/chrome
+      - HTTP_PROXY=${COMPOSEOPS_HTTP_PROXY:-}
+      - HTTPS_PROXY=${COMPOSEOPS_HTTPS_PROXY:-}
+    expose:
+      - "3002"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    shm_size: 1gb
+    mem_limit: 1536m
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:3002/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
   opsdash:
     build:
       context: .
@@ -81,9 +113,10 @@ services:
       - HTTPS_PROXY=${COMPOSEOPS_HTTPS_PROXY:-}
       - http_proxy=${COMPOSEOPS_HTTP_PROXY:-}
       - https_proxy=${COMPOSEOPS_HTTPS_PROXY:-}
-      - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
-      - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
+      - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},browser
+      - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},browser
       - NODE_USE_ENV_PROXY=${COMPOSEOPS_NODE_USE_ENV_PROXY:-0}
+      - COMPOSEOPS_BROWSER_URL=http://browser:3002
       # Durable Effect worker is constrained to read-only Docker inspect actions; set 0 to pause dispatch.
       - OPS_EFFECT_WORKER_ENABLED=${COMPOSEOPS_EFFECT_WORKER_ENABLED:-1}
       # 按需 Compose 工作容器复用时间与最多缓存项目数。

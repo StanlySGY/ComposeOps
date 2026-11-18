@@ -134,8 +134,50 @@ test('search: 优先解析 Bing RSS，并为中文查询传递地区语言参数
   const localized = await searchWeb('腾讯新闻 最新资讯');
   assert.ok(localeCalls[0].url.includes('cc=CN'));
   assert.ok(localeCalls[0].url.includes('setlang=zh-CN'));
-  assert.equal(localized[0].title, '腾讯新闻');
+  assert.equal(localized.length, 0, '新闻检索不能把门户首页当成具体新闻结果');
+  assert.ok(localized.diagnostics.some((item) => item.includes('门户首页')));
   globalThis.fetch = originalFetch;
+});
+
+test('search: 优先使用隔离 Chromium 的真实搜索结果并还原 Bing 目标链接', async () => {
+  setSetting('ai.search.provider', 'builtin');
+  const previous = process.env.COMPOSEOPS_BROWSER_URL;
+  Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', 'http://browser:3002');
+  const target = 'https://docs.docker.com/compose/how-tos/file-watch/';
+  const redirect = `https://www.bing.com/ck/a?u=a1${Buffer.from(target).toString('base64')}`;
+  const calls = stubFetch(async (url) => {
+    assert.match(url, /browser:3002\/search$/);
+    return { ok: true, json: async () => ({ results: [
+      { title: 'Use Compose Watch | Docker Docs', url: redirect, snippet: 'Compose Watch is designed to work with local source code.' },
+      { title: 'Docker Docs', url: 'https://www.bing.com/ck/a?u=a1' + Buffer.from('https://docs.docker.com/').toString('base64'), snippet: 'Docker Documentation' },
+    ] }) };
+  });
+  const results = await searchWeb('Docker Compose Watch official documentation');
+  assert.equal(calls.length, 1, '有真实浏览器搜索结果时不应再混入静态 RSS 噪声');
+  assert.equal(results[0].title, 'Use Compose Watch | Docker Docs');
+  assert.equal(results[0].url, target);
+  assert.equal(results[0].provider, 'bing_chromium');
+  globalThis.fetch = originalFetch;
+  if (previous === undefined) Reflect.deleteProperty(process.env, 'COMPOSEOPS_BROWSER_URL');
+  else Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', previous);
+});
+
+test('web.open: 优先使用 Chromium 动态渲染结果', async () => {
+  const previous = process.env.COMPOSEOPS_BROWSER_URL;
+  Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', 'http://browser:3002');
+  const calls = stubFetch(async (url) => {
+    assert.match(url, /browser:3002\/render$/);
+    return { ok: true, json: async () => ({ url: 'https://news.qq.com/', status: 200, contentType: 'text/html', title: '腾讯网-要闻', description: '新闻首页', text: '今日新闻正文'.repeat(80), links: [{ title: '热点新闻', url: 'https://news.qq.com/a/1' }], rendered: true }) };
+  });
+  const page = await openWebPage('https://news.qq.com/');
+  assert.equal(calls.length, 1);
+  assert.equal(page.rendered, true);
+  assert.equal(page.title, '腾讯网-要闻');
+  assert.match(page.text, /今日新闻正文/);
+  assert.equal(page.links[0].title, '热点新闻');
+  globalThis.fetch = originalFetch;
+  if (previous === undefined) Reflect.deleteProperty(process.env, 'COMPOSEOPS_BROWSER_URL');
+  else Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', previous);
 });
 
 test('search: 过滤完全不相关的搜索结果并提供诊断', async () => {
