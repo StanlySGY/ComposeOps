@@ -784,7 +784,7 @@ async function searchBuiltin(query, diagnostics = []) {
   const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'what', 'when', 'where', 'how', 'latest', 'official', 'documentation', 'docs', 'please', 'about', 'news', '最新', '官方', '文档', '一下', '怎么', '如何']);
   const terms = [...new Set([
     ...(q.toLowerCase().match(/[a-z0-9][a-z0-9._+-]{1,}/g) || []).filter((term) => !stopWords.has(term)),
-    ...(q.match(/[\u3400-\u9fff]{2,}/g) || []).filter((term) => !stopWords.has(term)),
+    ...(q.match(/[\u3400-\u9fff]{2,}/g) || []).filter((term) => !stopWords.has(term) && !/(最新|新闻|要闻|资讯|官方|文档|一下|怎么|如何)/.test(term)),
   ])];
   const ranked = results.map((item, index) => {
     const title = String(item.title || '').toLowerCase();
@@ -799,7 +799,8 @@ async function searchBuiltin(query, diagnostics = []) {
     const score = terms.length ? (matchedTitle * 2.4 + matchedUrl * 1.2 + matchedSnippet * 0.55) / (terms.length * 2.4) + trustedBonus : 1;
     return { item, index, score, matched };
   });
-  const relevant = ranked.filter((entry) => !terms.length || (entry.matched > 0 && entry.score >= 0.28))
+  const requiredMatches = Math.min(2, terms.length);
+  const relevant = ranked.filter((entry) => !terms.length || (entry.matched >= requiredMatches && entry.score >= 0.28))
     .sort((a, b) => b.score - a.score || b.matched - a.matched || a.index - b.index);
   if (results.length && !relevant.length) diagnostics.push('Bing: 返回结果与检索词无明显匹配,已过滤以避免误导');
   return relevant.map((entry) => entry.item)
