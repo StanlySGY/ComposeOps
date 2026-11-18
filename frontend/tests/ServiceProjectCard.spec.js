@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 const { api, streamProjectStats } = vi.hoisted(() => ({
-  api: Object.fromEntries(['getProjectUpdates', 'getProjectWebUi', 'getComposeFile', 'getProjectEnv', 'saveProjectPreference'].map(key => [key, vi.fn()])),
+  api: Object.fromEntries(['getProjectUpdates', 'getProjectWebUi', 'getComposeFile', 'getProjectEnv', 'saveProjectPreference', 'runComposeServiceAction'].map(key => [key, vi.fn()])),
   streamProjectStats: vi.fn(() => new Promise(() => {})),
 }));
 vi.mock('../src/api/client.js', () => ({ api, streamProjectStats }));
@@ -13,7 +13,7 @@ let wrapper;
 let project;
 async function start(overrides = {}, expanded = true) {
   project = { id: 'p', projectName: 'web', managed: true, editable: true, status: 'partial', note: '原备注', containers: [{ id: 'stopped', name: 'web', state: 'exited', health: 'healthy', image: 'nginx', ports: [] }, { id: 'running', name: 'worker', state: 'running', image: 'nginx', ports: [] }], ...overrides };
-  const router = createRouter({ history: createMemoryHistory(), routes: ['/services', '/logs', '/shell', '/compose', '/agent'].map(path => ({ path, component: {} })) });
+  const router = createRouter({ history: createMemoryHistory(), routes: ['/services', '/logs', '/shell', '/compose', '/agent', '/review'].map(path => ({ path, component: {} })) });
   await router.push('/services?q=web&sort=name');
   wrapper = mount(Card, { props: { project, expanded }, global: { plugins: [router, createPinia()], stubs: { ConfirmDialog: true, SparklineChart: true } } });
   await flushPromises();
@@ -38,6 +38,34 @@ describe('项目卡片操作契约', () => {
     expect(row.get('[aria-label="实时日志"]').attributes('href')).toContain('returnTo=');
     expect(row.text()).toContain('已退出');
     expect(row.text()).not.toContain('健康');
+  });
+  it('Compose 服务分组清楚区分服务级与容器级操作，并支持独立折叠', async () => {
+    await start({ containers: [
+      { id: 'api-1', name: 'web-api-1', service: 'api', state: 'running', health: 'healthy', image: 'nginx:latest', ports: [{ public: 8080, private: 80 }] },
+      { id: 'api-2', name: 'web-api-2', service: 'api', state: 'exited', health: '', image: 'nginx:latest', ports: [] },
+      { id: 'db-1', name: 'web-db-1', service: 'db', state: 'running', health: 'unhealthy', image: 'postgres:16', ports: [] },
+    ] });
+    const apiGroup = wrapper.findAll('.service-group').find(group => group.get('.service-group__identity').text().includes('api'));
+    expect(apiGroup.get('.service-group__health').text()).toContain('1/2 运行');
+    const dbGroup = wrapper.findAll('.service-group').find(group => group.get('.service-group__identity').text().includes('db'));
+    expect(dbGroup.classes()).toContain('service-group--attention');
+    expect(dbGroup.get('.service-group__health').classes()).toContain('is-warning');
+    expect(dbGroup.get('.service-group__health').text()).toContain('1 异常');
+    expect(apiGroup.get('[aria-label="api 服务级操作（作用于全部副本）"]').exists()).toBe(true);
+    expect(apiGroup.get('[data-container="api-1"] [aria-label="web-api-1 容器级操作"]').exists()).toBe(true);
+    const toggle = apiGroup.get('.service-group__summary');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+    expect(apiGroup.find('[data-container="api-1"]').exists()).toBe(false);
+    await toggle.trigger('click');
+    expect(apiGroup.find('[data-container="api-1"]').exists()).toBe(true);
+    expect(wrapper.findAll('.service-group')).toHaveLength(2);
+    await wrapper.get('.service-view-toggle').trigger('click');
+    expect(wrapper.findAll('.service-group__body')).toHaveLength(0);
+    expect(wrapper.get('.service-view-toggle').text()).toBe('全部展开');
+    await wrapper.get('.service-view-toggle').trigger('click');
+    expect(wrapper.findAll('.service-group__body')).toHaveLength(2);
   });
   it('未纳管项目所有控制和工具链接真正不可激活', async () => {
     await start({ managed: false, editable: false });

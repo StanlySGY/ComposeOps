@@ -105,6 +105,14 @@ node backend/scripts/host-identity-migration-drill.js --backup=/外部目录/独
 - 新增容器部分失败审计、SSH 私钥脱敏诊断与设置页可访问性回归。
 - 后端全量 **743 通过、1 项跳过、0 失败**；前端全量 Vitest **934 项通过**；相关定向回归 13/13、设置页可访问性 12/12 通过。后端/前端 lint 无错误；前端 lint 仍报告 `ProjectActivityDrawer.resilience.spec.js` 的 3 条既有 `vue/one-component-per-file` warning。生产构建与 `git diff --check` 通过。
 - 本地 `composeops-local.service` 重启后为 active，`/health` 返回 `status: ok`；Docker 总状态仍为 degraded：local 节点正常，h1 仍离线。当前诊断能更准确提示私钥输入/格式问题，但没有擅自替换 h1 凭据。
+
+## Compose 服务展开视图改造（2026-11-18）
+
+- 服务列表改为独立分组卡片，明确项目 → Compose service → 容器副本三级层次；服务头部集中展示副本数量和运行比例，异常副本组使用琥珀色提示。
+- 服务级启动/重启/停止固定在服务组操作区，并明确标注作用于全部副本；容器级日志、终端、AI 诊断放在各副本行内，避免操作对象混淆。停止/重启仍保留确认门。
+- 每个服务可独立折叠；多服务项目增加“全部展开/全部折叠”，减少长页面噪声。桌面采用信息分栏，平板/手机改为纵向堆叠，容器操作保留足够触控高度。
+- 组件回归覆盖多服务、多副本、服务/容器操作作用域和折叠交互；前端全量 **935/935** 通过，lint 与生产构建通过；项目工作区 Playwright 桌面/手机 **10/10** 通过。
+- 完整 preview Playwright 矩阵运行报告 **502 通过、6 跳过、4 失败**；4 个失败集中在 WebKit mobile 运行后段，预览服务进程连接被拒绝，非断言失败。后续需在稳定预览服务上复跑完整矩阵。
 - 代码提交 `fbc7da8` 与本记录提交 `72c1cf3` 均已推送 `origin/main`。正式镜像使用 `docker-compose.yml` + `docker-compose.encrypted.yml` 和仓库外数据库密钥文件重建，仅 `opsdash` 服务执行 `up -d --no-deps --force-recreate`；容器状态 `healthy`，`/health` 返回 `status: ok, docker: ok`，Tailscale 地址 `http://100.86.191.116:28765/` 返回 HTTP 200。未执行 volume 删除或数据库卷重建。
 
 ### 后续待办
@@ -112,4 +120,4 @@ node backend/scripts/host-identity-migration-drill.js --backup=/外部目录/独
 1. 产品安全边界仍待确认：内网来源完全免密码，还是仅在 Tailscale 身份验证通过后免密码；本轮保持现有认证，不做绕过。
 2. 在 ComposeOps 设置页由用户本地修正 h1 的 SSH 私钥/口令后，再做只读连通性探测；不要把私钥粘贴到聊天或日志。
 3. 已完成加密 Compose 正式发布；下一步补做正式站点浏览器端到端操作 smoke test，确认页面交互与容器操作在部署环境一致。
-4. 下一轮继续按真实浏览器截图逐页审查桌面/手机布局与关键操作，不以单纯 lint/build 代替视觉验收。
+4. 本轮 Compose 服务分组 UI 已改造并完成组件、窄屏工作区定向浏览器测试；仍需在正式部署环境补做真实数据下的服务级启停/副本状态验收。

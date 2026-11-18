@@ -45,28 +45,37 @@
       <div v-if="!project.managed" class="alert-warning flex flex-wrap items-center gap-2"><span class="flex-1">项目尚未纳管。纳管后可操作容器、查看日志与终端。</span><router-link class="btn-secondary" :to="`/settings?tab=mounts&projectId=${project.id}`"><FolderCog :size="16" />项目纳管</router-link></div>
       <div v-else-if="!project.editable" class="project-capability-note"><FolderCog :size="15" /><span>{{ project.mountState === 'remote_api_only' ? '此节点仅提供 Docker API。可管理容器，配置编辑需要 SSH 访问。' : '当前管理已有容器。挂载 Compose 目录后可编辑并应用配置。' }}</span><router-link v-if="project.mountState !== 'remote_api_only'" :to="`/settings?tab=mounts&projectId=${project.id}`">设置挂载</router-link></div>
 
-      <div class="project-container-table">
-        <div class="project-container-heading"><span>Compose 服务 / 容器副本</span><span>状态与资源</span><span>快捷操作</span></div>
-        <section v-for="group in serviceGroups" :key="group.name" class="service-group">
+      <div class="project-container-table" aria-label="Compose 服务列表">
+        <div class="service-list-heading"><div><span class="service-list-eyebrow">WORKLOADS</span><strong>服务与容器</strong><span>服务级操作作用于该服务的全部副本；容器级操作只作用于单个容器</span></div><div class="service-list-tools"><span class="service-total">{{ serviceGroups.length }} 个服务 · {{ project.containers.length }} 个容器</span><button v-if="serviceGroups.length > 1" class="service-view-toggle" @click="toggleAllServiceGroups">{{ allServicesCollapsed ? '全部展开' : '全部折叠' }}</button></div></div>
+        <section v-for="group in serviceGroups" :key="group.name" class="service-group" :class="{ 'service-group--attention': group.runningCount < group.containers.length || group.unhealthyCount > 0 }">
           <header class="service-group__header">
-            <div class="min-w-0"><strong>{{ group.name }}</strong><span>{{ group.containers.length }} 个副本 · {{ group.runningCount }} 个运行</span></div>
-            <div v-if="group.name !== '未标记服务'" class="service-group__actions" role="group" :aria-label="`${group.name} 服务操作`">
-              <button class="btn-ghost btn-sm" :disabled="locked || !project.managed" @click="runServiceAction(group.name, 'start')"><Play :size="13" />启动</button>
-              <button class="btn-ghost btn-sm" :disabled="locked || !project.managed" @click="runServiceAction(group.name, 'restart')"><RotateCw :size="13" />重启</button>
-              <button class="btn-ghost btn-sm text-status-error" :disabled="locked || !project.managed" @click="runServiceAction(group.name, 'stop')"><Square :size="13" />停止</button>
+            <button class="service-group__summary" :aria-expanded="!isServiceCollapsed(group.name)" :aria-controls="'service-containers-' + project.id + '-' + group.name" @click="toggleServiceGroup(group.name)">
+              <span class="service-group__glyph"><Boxes :size="17" /></span>
+              <span class="service-group__identity"><strong>{{ group.name }}</strong><small>{{ group.containers.length }} 个副本</small></span>
+              <span class="service-group__health" :class="group.runningCount === group.containers.length && group.unhealthyCount === 0 ? 'is-healthy' : 'is-warning'" :title="group.unhealthyCount ? `${group.unhealthyCount} 个容器健康检查异常` : ''"><i></i>{{ group.runningCount }}/{{ group.containers.length }} 运行<span v-if="group.unhealthyCount">· {{ group.unhealthyCount }} 异常</span></span>
+              <ChevronDown :size="16" class="service-group__chevron" :class="{ 'is-collapsed': isServiceCollapsed(group.name) }" />
+            </button>
+            <div v-if="group.name !== '未标记服务'" class="service-group__actions" role="group" :aria-label="group.name + ' 服务级操作（作用于全部副本）'">
+              <span class="service-action-scope">服务级</span>
+              <button class="service-action" :disabled="locked || !project.managed" title="启动此服务的全部容器副本" @click="runServiceAction(group.name, 'start')"><Play :size="13" /><span>启动</span></button>
+              <button class="service-action" :disabled="locked || !project.managed" title="重启此服务的全部容器副本" @click="runServiceAction(group.name, 'restart')"><RotateCw :size="13" /><span>重启</span></button>
+              <button class="service-action service-action--danger" :disabled="locked || !project.managed" title="停止此服务的全部容器副本" @click="runServiceAction(group.name, 'stop')"><Square :size="12" /><span>停止</span></button>
             </div>
           </header>
-          <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id">
-          <div class="project-container-identity"><Box :size="17" class="text-surface-400 shrink-0" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">{{ portText(container) }}</small></div></div>
-          <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="text-xs text-muted font-mono">{{ numberValue(metrics[container.id].cpu).toFixed(1) }}% · {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="text-xs text-muted">{{ containerStateHint(container) }}</span></div>
-          <div class="project-container-actions">
-            <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="toolLocation('logs', container.id)" class="container-action" aria-label="实时日志"><ScrollText :size="15" /><span>日志</span></CapabilityLink>
-            <CapabilityLink :disabled="!project.managed || container.state !== 'running'" :reason="!project.managed ? '项目尚未纳管' : '容器运行后才能打开终端'" :to="toolLocation('shell', container.id)" class="container-action" aria-label="容器终端"><TerminalSquare :size="15" /><span>终端</span></CapabilityLink>
-            <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="{ ...toolLocation('agent', container.id), query: { ...toolLocation('agent', container.id).query, diagnose: '1' } }" class="container-action" aria-label="AI 诊断"><Bot :size="15" /><span>诊断</span></CapabilityLink>
-          </div>
+          <div v-if="!isServiceCollapsed(group.name)" :id="'service-containers-' + project.id + '-' + group.name" class="service-group__body">
+            <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id">
+              <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">端口 · {{ portText(container) }}</small></div></div>
+              <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
+              <div class="project-container-actions" role="group" :aria-label="container.name + ' 容器级操作'">
+                <span class="container-action-scope">容器级</span>
+                <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="toolLocation('logs', container.id)" class="container-action" aria-label="实时日志"><ScrollText :size="15" /><span>日志</span></CapabilityLink>
+                <CapabilityLink :disabled="!project.managed || container.state !== 'running'" :reason="!project.managed ? '项目尚未纳管' : '容器运行后才能打开终端'" :to="toolLocation('shell', container.id)" class="container-action" aria-label="容器终端"><TerminalSquare :size="15" /><span>终端</span></CapabilityLink>
+                <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="{ ...toolLocation('agent', container.id), query: { ...toolLocation('agent', container.id).query, diagnose: '1' } }" class="container-action" aria-label="AI 诊断"><Bot :size="15" /><span>诊断</span></CapabilityLink>
+              </div>
+            </div>
           </div>
         </section>
-        <p v-if="!project.containers.length" class="p-4 text-xs text-muted">还没有容器。可通过「更多操作 → 应用配置 / 启动」创建服务。</p>
+        <p v-if="!project.containers.length" class="service-empty-state"><Boxes :size="20" /><strong>还没有运行中的容器</strong><span>应用 Compose 配置后，服务和容器副本会显示在这里。</span></p>
       </div>
       <footer class="project-detail-footer">
         <span class="truncate" :title="project.workingDir"><FolderOpen :size="13" />{{ project.workingDir || '未提供工作目录' }}</span>
@@ -117,6 +126,7 @@ const route = useRoute();
 const pendingAction = ref('');
 const pendingServiceAction = ref(null);
 const serviceActionRunning = ref(false);
+const collapsedServiceGroups = ref(new Set());
 const noteOpen = ref(false);
 const noteDraft = ref('');
 const noteError = ref('');
@@ -130,9 +140,24 @@ const serviceGroups = computed(() => {
     groups.get(name).push(container);
   }
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, containers]) => ({
-    name, containers, runningCount: containers.filter(item => item.state === 'running').length,
+    name,
+    containers,
+    runningCount: containers.filter(item => item.state === 'running').length,
+    unhealthyCount: containers.filter(item => item.health === 'unhealthy').length,
   }));
 });
+function isServiceCollapsed(name) { return collapsedServiceGroups.value.has(name); }
+const allServicesCollapsed = computed(() => serviceGroups.value.length > 0 && serviceGroups.value.every(group => isServiceCollapsed(group.name)));
+function toggleAllServiceGroups() {
+  collapsedServiceGroups.value = allServicesCollapsed.value
+    ? new Set()
+    : new Set(serviceGroups.value.map(group => group.name));
+}
+function toggleServiceGroup(name) {
+  const next = new Set(collapsedServiceGroups.value);
+  if (next.has(name)) next.delete(name); else next.add(name);
+  collapsedServiceGroups.value = next;
+}
 const serviceConfirmationMessage = computed(() => {
   const item = pendingServiceAction.value;
   if (!item) return '';
@@ -364,27 +389,71 @@ function containerStateHint(container) {
 .project-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 16px 0; }
 .project-capability-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--color-surface-400); padding-bottom: 12px; }
 .project-capability-note a { color: var(--link-color); }
-.project-container-table { border-top: 1px solid var(--line-subtle); }
-.service-group { border-top: 1px solid var(--line-subtle); }
-.service-group__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 2px; }
-.service-group__header strong { display: block; font-size: 12px; font-weight: 600; }
-.service-group__header span { display: block; margin-top: 3px; color: var(--color-surface-500); font-size: 10px; }
-.service-group__actions { display: flex; flex-wrap: wrap; gap: 4px; }
-.service-group__actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
-.project-container-heading, .project-container-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .6fr) auto; gap: 20px; align-items: center; }
-.project-container-heading { padding: 10px 0; font-size: 10px; color: var(--color-surface-500); }
-.project-container-heading > :last-child { width: 180px; text-align: right; }
-.project-container-row { padding: 15px 0; border-top: 1px solid var(--line-subtle); }
+.project-container-table { padding: 2px 0 14px; border-top: 1px solid var(--line-subtle); }
+.service-list-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 2px 12px; }
+.service-list-heading > div { display: grid; gap: 3px; }
+.service-list-heading strong { font-size: 13px; font-weight: 650; color: var(--color-surface-100); }
+.service-list-heading > div > span:last-child { font-size: 11px; color: var(--color-surface-500); }
+.service-list-eyebrow { font-size: 9px; font-weight: 700; letter-spacing: .13em; color: var(--color-surface-500); }
+.service-list-tools { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.service-view-toggle { min-height: 30px; padding: 0 9px; border: 1px solid var(--line-subtle); border-radius: 7px; color: var(--color-surface-300); font-size: 10px; transition: background 120ms, border-color 120ms; }
+.service-view-toggle:hover { background: var(--panel-raised); border-color: color-mix(in srgb, var(--color-link) 28%, var(--line-subtle)); }
+.service-total { flex-shrink: 0; padding: 5px 9px; border: 1px solid var(--line-subtle); border-radius: 999px; color: var(--color-surface-400); font-size: 10px; font-variant-numeric: tabular-nums; }
+.service-group { overflow: hidden; margin-top: 10px; border: 1px solid var(--line-subtle); border-radius: 11px; background: color-mix(in srgb, var(--panel-raised) 42%, transparent); transition: border-color 150ms, background 150ms; }
+.service-group:hover { border-color: color-mix(in srgb, var(--color-link) 25%, var(--line-subtle)); }
+.service-group--attention { border-left: 3px solid color-mix(in srgb, #e6a84f 72%, transparent); }
+.service-group__header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 66px; padding: 10px 12px; background: linear-gradient(100deg, color-mix(in srgb, var(--color-link) 7%, var(--panel-raised)), var(--panel-raised) 68%); }
+.service-group__summary { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; text-align: left; background: transparent !important; }
+.service-group__glyph { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; border-radius: 9px; color: var(--color-link); background: color-mix(in srgb, var(--color-link) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-link) 18%, transparent); }
+.service-group__identity { display: grid; gap: 3px; min-width: 0; }
+.service-group__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-surface-100); font-size: 12px; font-weight: 650; }
+.service-group__identity small { color: var(--color-surface-500); font-size: 10px; }
+.service-group__health { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 4px 8px; border-radius: 999px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.service-group__health i, .container-resource i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.service-group__health.is-healthy { color: #63d5a0; background: rgba(54,190,128,.09); }
+.service-group__health.is-warning { color: #e9b35d; background: rgba(225,165,69,.1); }
+.service-group__chevron { flex-shrink: 0; color: var(--color-surface-500); transition: transform 150ms; }
+.service-group__chevron.is-collapsed { transform: rotate(-90deg); }
+.service-group__actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; padding-left: 12px; border-left: 1px solid var(--line-subtle); }
+.service-action-scope, .container-action-scope { color: var(--color-surface-500); font-size: 9px; white-space: nowrap; }
+.service-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; color: var(--color-surface-300); font-size: 10px; transition: background 120ms, border-color 120ms, color 120ms; }
+.service-action:hover:not(:disabled) { background: var(--panel); border-color: var(--line-subtle); color: var(--color-surface-50); }
+.service-action--danger { color: #e58a8a; }
+.service-action--danger:hover:not(:disabled) { color: #ffaaaa; background: rgba(220,75,75,.1); border-color: rgba(220,75,75,.2); }
+.service-action:disabled { opacity: .4; cursor: not-allowed; }
+.service-group__body { padding: 0 12px 5px; }
+.project-container-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(150px, .8fr) minmax(190px, auto); gap: 18px; align-items: center; padding: 13px 3px; border-top: 1px solid color-mix(in srgb, var(--line-subtle) 72%, transparent); }
 .project-container-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.project-container-identity strong { display: block; font-family: var(--font-mono); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-container-identity span, .project-container-identity small { display: block; color: var(--color-surface-400); font-size: 11px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-container-state { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; }
-.project-container-actions { display: flex; justify-content: flex-end; gap: 3px; }
-.container-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 7px; border-radius: 6px; font-size: 11px; color: var(--color-surface-300); }
-a.container-action:hover { background: var(--panel-raised); color: var(--color-surface-50); }
+.container-glyph { flex-shrink: 0; color: var(--color-surface-500); }
+.project-container-identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-surface-200); font-family: var(--font-mono); font-size: 11px; font-weight: 550; }
+.project-container-identity span, .project-container-identity small { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-surface-500); font-size: 10px; }
+.project-container-state { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; min-width: 0; }
+.container-resource { display: inline-flex; align-items: center; gap: 6px; color: var(--color-surface-400); font-family: var(--font-mono); font-size: 10px; }
+.container-resource i { width: 3px; height: 3px; color: var(--color-surface-500); }
+.container-state-hint { color: var(--color-surface-500); font-size: 9px; }
+.project-container-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.container-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 6px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--color-surface-400); font-size: 10px; transition: background 120ms, color 120ms, border-color 120ms; }
+a.container-action:hover { border-color: var(--line-subtle); background: var(--panel-raised); color: var(--color-surface-50); }
+.service-empty-state { display: grid; justify-items: center; gap: 7px; padding: 28px 12px; border: 1px dashed var(--line-subtle); border-radius: 10px; color: var(--color-surface-500); text-align: center; }
+.service-empty-state strong { color: var(--color-surface-300); font-size: 12px; }
+.service-empty-state span { font-size: 10px; }
 .project-detail-footer { display: flex; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line-subtle); font-size: 10px; color: var(--color-surface-500); }
 .project-detail-footer span { display: inline-flex; align-items: center; gap: 6px; }
-@media (max-width: 1100px) { .project-path { display: none; } .project-container-count { display: none; } .project-container-row, .project-container-heading { gap: 12px; } }
+@media (max-width: 1100px) {
+  .project-path { display: none; }
+  .project-container-row { grid-template-columns: minmax(180px, 1fr) minmax(130px, .8fr) auto; gap: 10px; }
+  .container-action-scope { display: none; }
+}
+@media (max-width: 760px) {
+  .service-group__header { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .service-group__summary { width: 100%; }
+  .service-group__actions { width: 100%; padding: 8px 0 0; border-left: 0; border-top: 1px solid var(--line-subtle); }
+  .service-action-scope { margin-right: auto; }
+  .project-container-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .project-container-state { align-items: flex-end; }
+  .project-container-actions { grid-column: 1 / -1; justify-content: flex-start; padding-top: 8px; border-top: 1px dashed var(--line-subtle); }
+  .container-action-scope { display: inline; margin-right: auto; }
+}
 @media (max-width: 639px) {
   .service-project-card__header { min-height: 76px; padding-inline: 8px; gap: 2px; }
   .service-project-card__toggle { gap: 8px; }
@@ -393,12 +462,18 @@ a.container-action:hover { background: var(--panel-raised); color: var(--color-s
   .project-health-summary { flex-direction: column; align-items: flex-end; }
   .project-mode { display: none; }
   .project-detail { padding: 0 12px; }
-  .project-actions { gap: 6px; } .project-actions > .btn-ghost { font-size: 11px; padding-inline: 6px; }
-  .project-container-heading { display: none; }
-  .project-container-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 14px 0; }
-  .project-container-state { align-items: flex-end; }
-  .project-container-actions { grid-column: 1 / -1; justify-content: stretch; gap: 8px; }
-  .container-action { flex: 1; min-height: 40px; background: var(--panel-raised); }
+  .project-actions { gap: 6px; }
+  .project-actions > .btn-ghost { font-size: 11px; padding-inline: 6px; }
+  .service-list-heading { align-items: flex-start; flex-direction: column; }
+  .service-list-tools { width: 100%; justify-content: space-between; }
+  .service-total { font-size: 9px; }
+  .service-group__header { padding: 10px; }
+  .service-group__body { padding-inline: 9px; }
+  .project-container-row { padding: 12px 0; }
+  .project-container-identity strong { max-width: 48vw; }
+  .project-container-actions { gap: 5px; }
+  .container-action { flex: 1; min-height: 40px; padding-inline: 5px; background: var(--panel-raised); }
+  .container-action-scope { font-size: 8px; }
   .project-detail-footer { flex-direction: column; gap: 8px; }
 }
 </style>
