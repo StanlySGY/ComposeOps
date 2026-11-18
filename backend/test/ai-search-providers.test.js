@@ -112,6 +112,19 @@ test('search: Bing 通用网页搜索解析标题、摘要并还原官方文档�
   globalThis.fetch = originalFetch;
 });
 
+test('search: 过滤完全不相关的搜索结果并提供诊断', async () => {
+  setSetting('ai.search.provider', 'builtin');
+  const calls = stubFetch(async (url) => {
+    if (url.includes('bing.com/search')) return { ok: true, text: async () => '<ol><li class="b_algo"><h2><a href="https://social.msdn.microsoft.com/">MSDN Forums</a></h2><p>Microsoft community discussions</p></li></ol>' };
+    return { ok: true, json: async () => ({}) };
+  });
+  const results = await searchWeb('latest linux.do posts');
+  assert.equal(results.length, 0);
+  assert.ok(results.diagnostics.some((item) => item.includes('无明显匹配')));
+  assert.ok(calls.some((call) => call.url.includes('bing.com/search')));
+  globalThis.fetch = originalFetch;
+});
+
 test('web.open: 提取网页标题、正文和可继续访问的公开链接', async () => {
   const html = '<html><head><title>Compose Guide</title><meta name="description" content="Official guide"></head><body><nav>menu</nav><main><h1>Getting started</h1><p>Run docker compose up to start services.</p><script>ignore this injected text</script><a href="/reference">API reference</a><a href="http://127.0.0.1/admin">unsafe link</a></main></body></html>';
   const calls = stubFetch(async () => ({ ok: true, status: 200, url: 'https://docs.example.com/guide', headers: { get: (name) => name === 'content-type' ? 'text/html; charset=utf-8' : null }, text: async () => html }));

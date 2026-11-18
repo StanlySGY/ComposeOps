@@ -747,5 +747,23 @@ async function searchBuiltin(query, diagnostics = []) {
     }
   }
 
-  return results.filter((item, index, list) => item.url || list.findIndex((candidate) => candidate.snippet === item.snippet) === index).slice(0, 8);
+  // 搜索引擎偶尔会返回完全不相关的地区/缓存结果。宁可明确返回无匹配，
+  // 也不要把无关页面伪装成有效证据交给 Agent。
+  const terms = [...new Set([
+    ...(q.toLowerCase().match(/[a-z0-9][a-z0-9._+-]{1,}/g) || []),
+    ...(q.match(/[\u3400-\u9fff]{2,}/g) || []),
+  ])];
+  const ranked = results.map((item, index) => {
+    const haystack = `${item.title || ''} ${item.url || ''} ${item.snippet || ''}`.toLowerCase();
+    const matched = terms.filter((term) => haystack.includes(term)).length;
+    const host = (() => { try { return new URL(item.url).hostname.toLowerCase(); } catch { return ''; } })();
+    const trustedBonus = /(^|\.)docs\./.test(host) || /(^|\.)developer\./.test(host) || /(^|\.)github\.com$/.test(host) ? 0.2 : 0;
+    return { item, index, score: terms.length ? matched / terms.length + trustedBonus : 1, matched };
+  });
+  const relevant = ranked.filter((entry) => !terms.length || entry.matched > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  if (results.length && !relevant.length) diagnostics.push('Bing: 返回结果与检索词无明显匹配,已过滤以避免误导');
+  return relevant.map((entry) => entry.item)
+    .filter((item, index, list) => item.url || list.findIndex((candidate) => candidate.snippet === item.snippet) === index)
+    .slice(0, 8);
 }
