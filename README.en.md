@@ -30,7 +30,7 @@ Auto-discover Compose projects, manage services, edit configs, stream logs, diag
 
 [Interactive preview](https://stanlysgy.github.io/ComposeOps/) · [Backup and restore](docs/public/BACKUP_RESTORE.md)
 
-The offline preview runs the actual application UI with fictional data and never connects to Docker or AI. See [preview scope](docs/public/PREVIEW.md). The installation manifest pins version 1.6.0; AI is optional.
+The offline preview runs the actual application UI with fictional data and never connects to Docker or AI. See [preview scope](docs/public/PREVIEW.md). The installation manifest pins version 1.6.1; AI is optional.
 
 ## 🚀 Why ComposeOps
 
@@ -237,7 +237,7 @@ These modules target power users who want to codify their ops experience. The co
 
 ```bash
 mkdir composeops && cd composeops
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.6.0/deploy/compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.6.1/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 

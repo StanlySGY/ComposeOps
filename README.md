@@ -28,7 +28,7 @@
 
 [在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [升级与回退](docs/public/UPGRADE.md) · [备份与恢复](docs/public/BACKUP_RESTORE.md) · [SQLite 静态加密与密钥轮换](docs/public/DATABASE_ENCRYPTION.md)
 
-预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.6.0；AI 为可选功能。
+预览直接使用真实应用的页面与导航，数据为虚构示例，无需登录，不访问 Docker 或 AI。[预览范围说明](docs/public/PREVIEW.md)。正式部署默认固定版本 1.6.1；AI 为可选功能。
 
 ## 🚀 为什么选择 ComposeOps
 
@@ -253,7 +253,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 ```bash
 mkdir composeops && cd composeops
 # 下载固定版本、无需源码构建的安装清单
-curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.6.0/deploy/compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/StanlySGY/ComposeOps/v1.6.1/deploy/compose.yml -o docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 

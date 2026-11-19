@@ -92,10 +92,13 @@ try {
     await page.reload(); await expect(card).toContainText(noteText);
     if (await card.locator('.service-project-card__toggle').getAttribute('aria-expanded') !== 'true') await card.locator('.service-project-card__toggle').click();
     await card.getByRole('link', { name: '实时日志', exact: true }).click();
-    await expect(page.getByText('UX_WORKSPACE_READY', { exact: false })).toBeVisible();
+    const target = docker([...composeArgs, 'ps', '-q', 'app']);
+    // Emit a fresh marker after the log subscription is established. The
+    // container's startup line may predate a later viewport's subscription.
+    docker(['exec', target, 'sh', '-c', 'printf "UX_WORKSPACE_READY\\n" > /proc/1/fd/1']);
+    await expect(page.getByText('UX_WORKSPACE_READY', { exact: false }).first()).toBeVisible();
     if (viewport.width === 1440) {
       await expect.poll(() => heartbeatFrames.length, { timeout: 20000 }).toBeGreaterThan(0);
-      const target = docker([...composeArgs, 'ps', '-q', 'app']);
       for (const mode of ['aggregate', 'single']) {
         const aggregate = page.getByTitle('当前为聚合模式,点击切换为单容器', { exact: true });
         if ((await aggregate.count() > 0) !== (mode === 'aggregate')) {

@@ -30,7 +30,7 @@ describe('设计系统契约', () => {
       }
       expect(text, file).not.toMatch(/(?:toast|useToastStore\(\))\.(?:error|success|warning|info)\([^\n]*[\u4e00-\u9fff]:/);
     }
-  });
+  }, 15000);
   it('组件有实际运行引用，尺寸与色板不退回旧覆写', () => {
     const preview = walk(resolve(root, '../preview')).filter(file => /\.(js|vue)$/.test(file)).map(file => readFileSync(file, 'utf8')).join('\n');
     for (const [file, text] of source) {

@@ -80,6 +80,9 @@ const config = parseArgs(process.argv.slice(2));
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-agent-soak-'));
 process.env.DB_PATH = path.join(tempDir, 'soak.db');
 process.env.ENABLE_SHELL = '0';
+// The isolated harness binds only to loopback and injects reserved TEST-NET
+// client addresses so each synthetic caller exercises its own production rate-limit bucket.
+process.env.TRUST_PROXY = '1';
 // Never use the operator database or any production encryption key in this disposable harness.
 delete process.env.DB_ENCRYPTION_KEY;
 delete process.env.DB_ENCRYPTION_KEY_FILE;

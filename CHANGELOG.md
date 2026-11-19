@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-19
+
+### Fixed
+- SRE worker heartbeat writes now treat SQLite `BUSY` / `LOCKED` as transient: skip the current sample and retry on the next tick instead of terminating the API process during concurrent database writes.
+- Browser regression tests emit a fresh log marker after subscription is established, avoiding false failures when startup logs predate a viewport's subscription.
+- Agent soak harness explicitly enables trusted proxy parsing only inside its isolated loopback test environment, allowing synthetic caller buckets to exercise the real rate limiter.
+- Design-contract source scan has a bounded timeout suitable for the complete Vue source tree on slower CI runners.
+
 ## [1.6.0] - 2026-11-09
 
 本版汇总 v1.5.1 之后的运维可靠性、Agent 和界面改进，面向单用户个人服务器与自托管部署。
