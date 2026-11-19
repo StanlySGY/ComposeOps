@@ -38,7 +38,7 @@
         </div>
       </div>
       <div class="relative flex min-h-0 flex-1 flex-col">
-        <Skeleton v-if="!termReady" class="skeleton-workspace" rows="10" label="终端加载中" />
+        <Skeleton v-if="!termReady" class="skeleton-workspace" :rows="10" label="终端加载中" />
         <div ref="termEl" class="shell-terminal min-h-0 w-full flex-1" :class="{ invisible: !termReady }" aria-label="容器终端输出"></div>
         <div v-if="termReady && !hasTranscript && !connected" class="terminal-empty absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 px-6">
           <div class="shell-empty-icon"><LoaderCircle v-if="connecting || loading" class="h-7 w-7 animate-spin" /><SquareTerminal v-else class="h-7 w-7" /></div>

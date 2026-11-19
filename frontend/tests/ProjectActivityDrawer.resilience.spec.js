@@ -156,9 +156,13 @@ describe('项目活动恢复与连续操作', () => {
 
   it('父页面缓存失活关闭抽屉，迟到恢复不再次发送完成回调', async () => {
     const active = ref(true); const closed = vi.fn(); const restored = vi.fn();
+    // This test intentionally composes multiple tiny host components to exercise KeepAlive lifecycle.
+    // eslint-disable-next-line vue/one-component-per-file
     const Pane = defineComponent({ components: { ProjectActivityDrawer }, setup: () => ({ projectA, closed, restored }), template: '<ProjectActivityDrawer :project="projectA" @close="closed" @restored="restored"/>' });
+    // eslint-disable-next-line vue/one-component-per-file
     const Other = defineComponent({ template: '<p>other page</p>' });
     const request = deferred(); api.restoreBackup.mockReturnValueOnce(request.promise);
+    // eslint-disable-next-line vue/one-component-per-file
     wrapper = mount(defineComponent({ components: { KeepAlive }, setup: () => ({ active, Pane, Other }), template: '<KeepAlive><component :is="active ? Pane : Other"/></KeepAlive>' }), { global: { provide: { [routeLocationKey]: { fullPath: '/services' } }, stubs: { ConfirmDialog: true, BaseModal: true, RouterLink: true } } });
     await flushPromises(); await chooseRestore(); confirm().vm.$emit('confirm'); await flushPromises();
     active.value = false; await flushPromises();

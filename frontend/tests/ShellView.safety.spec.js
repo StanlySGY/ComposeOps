@@ -30,7 +30,7 @@ const projects = [{ id: 'p', managed: true, projectName: '测试项目', contain
 let wrapper; let router;
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
 async function start() {
-  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/shell', name: 'shell', component: ShellView }, { path: '/services', name: 'services', component: {} }] });
+  router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/shell', name: 'shell', component: ShellView }, { path: '/services', name: 'services', component: {} }, { path: '/logs', name: 'logs', component: {} } ] });
   await router.push('/shell?projectId=p&containerId=c1');
   wrapper = mount(ShellView, { global: { plugins: [router] } });
   await flushPromises();
