@@ -88,7 +88,7 @@ test('早期回复的重新生成准确截断对应问题之后的历史', async
   expect(await page.evaluate(() => window.agentStreamFixture.streams[0].payload.message)).toBe('检查备份完整性'); await expect(page.locator('.agent-message')).toHaveCount(2); await done(page);
 });
 test('编辑重发失败保留编辑横条，重试不会变成追加消息', async ({ page }) => {
-  await install(page, true); await page.getByRole('button', { name: '编辑并重发', exact: true }).first().click(); await composer(page).fill('修订的备份核对目标'); await page.evaluate(() => { window.agentStreamFixture.failTruncate = true; }); await composer(page).press('Enter');
+  await install(page, true); await page.getByRole('button', { name: '编辑并重发这条消息', exact: true }).first().click(); await composer(page).fill('修订的备份核对目标'); await page.evaluate(() => { window.agentStreamFixture.failTruncate = true; }); await composer(page).press('Enter');
   await expect(page.locator('.agent-edit-banner')).toBeVisible(); await expect(composer(page)).toHaveValue('修订的备份核对目标'); await count(page, 0);
   await page.evaluate(() => { window.agentStreamFixture.failTruncate = false; }); await composer(page).press('Enter'); await count(page, 1); await done(page); await expect(page.locator('.agent-edit-banner')).toHaveCount(0);
 });

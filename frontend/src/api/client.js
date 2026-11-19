@@ -442,6 +442,14 @@ export async function streamComposeControl(projectId, action, onFrame, path = nu
 /**
  * AI 对话 / 诊断 SSE 流式
  */
+const NATIVE_AGENT_EVENT_TYPES = new Set([
+  'token', 'session_meta', 'done', 'error', 'interrupted', 'confirmation_required', 'approval_mode',
+  'tool_requested', 'tool_executing', 'tool_result', 'tool_error', 'tool_rejected',
+  'context_resolved', 'context_ambiguous', 'context_data', 'action_completed',
+  'channel_selected', 'channel_failed', 'channel_unavailable', 'task_notice', 'compaction',
+  'max_loops_reached', 'ui_present', 'thinking', 'reasoning', 'trace',
+]);
+
 export function normalizeAgUiEvent(event) {
   if (!event || typeof event !== 'object') return null;
   if (event.type === 'TEXT_MESSAGE_CONTENT') return { type: 'token', content: String(event.delta || '') };
@@ -451,6 +459,10 @@ export function normalizeAgUiEvent(event) {
     if (String(event.name || '').startsWith('composeops.') && event.value && typeof event.value === 'object') return event.value;
   }
   if (event.type === 'ACTIVITY_DELTA') return { type: 'trace', phase: String(event.activityType || 'agent'), content: String(event.delta || '') };
+  // Compatibility with servers and offline transports that still emit the
+  // original ComposeOps SSE event envelope while the request prefers AG-UI.
+  // Only allow the public event vocabulary; arbitrary extension payloads stay ignored.
+  if (NATIVE_AGENT_EVENT_TYPES.has(event.type)) return event;
   return null;
 }
 

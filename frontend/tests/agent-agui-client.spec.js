@@ -15,6 +15,14 @@ describe('AG-UI frontend event normalization', () => {
     expect(normalizeAgUiEvent({ type: 'CUSTOM', name: 'untrusted.extension', value: { script: 'alert(1)' } })).toBeNull();
   });
 
+  it('accepts the allowlisted native ComposeOps SSE envelope as a compatibility fallback', () => {
+    const token = { type: 'token', content: 'legacy stream' };
+    const approval = { type: 'confirmation_required', tool: 'compose.up', params: { projectId: 'p1' } };
+    expect(normalizeAgUiEvent(token)).toEqual(token);
+    expect(normalizeAgUiEvent(approval)).toEqual(approval);
+    expect(normalizeAgUiEvent({ type: 'untrusted.extension', script: 'alert(1)' })).toBeNull();
+  });
+
   it('does not treat partial tool argument events as executable frontend actions', () => {
     expect(normalizeAgUiEvent({ type: 'TOOL_CALL_START', toolCallId: 'c1', toolCallName: 'compose.up' })).toBeNull();
     expect(normalizeAgUiEvent({ type: 'TOOL_CALL_ARGS', toolCallId: 'c1', delta: '{"projectId":"p"}' })).toBeNull();

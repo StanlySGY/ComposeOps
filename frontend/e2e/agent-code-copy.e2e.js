@@ -38,6 +38,20 @@ test('复制权限失败有反馈并可重试，不出现未捕获异常', async
 test('代码块在手机窄屏不遮挡正文且不撑宽页面', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 740 }); await install(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-  const button = await page.getByRole('button', { name: '复制代码', exact: true }).boundingBox();
-  const code = await page.locator('.agent-markdown pre code').boundingBox(); expect(button.y + button.height).toBeLessThanOrEqual(code.y + 2);
+  const pre = page.locator('.agent-markdown pre').first();
+  const layout = await pre.evaluate(el => {
+    const button = el.querySelector('.code-copy-btn');
+    const preRect = el.getBoundingClientRect(), buttonRect = button.getBoundingClientRect();
+    return {
+      paddingTop: Number.parseFloat(getComputedStyle(el).paddingTop),
+      buttonHeight: buttonRect.height,
+      buttonBottom: buttonRect.bottom - preRect.top,
+      buttonRight: buttonRect.right - preRect.left,
+      preWidth: preRect.width,
+    };
+  });
+  // Fractional device-scale rounding can add <0.1px to the touch target.
+  expect(layout.paddingTop).toBeGreaterThanOrEqual(layout.buttonHeight + 7.5);
+  expect(layout.buttonBottom).toBeLessThanOrEqual(layout.paddingTop - 2);
+  expect(layout.buttonRight).toBeLessThanOrEqual(layout.preWidth - 4);
 });
