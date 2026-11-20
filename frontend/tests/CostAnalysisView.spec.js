@@ -15,6 +15,20 @@ beforeEach(() => {
 afterEach(() => wrapper?.unmount());
 async function start() { wrapper = mount(CostAnalysisView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } }); await flushPromises(); }
 describe('成本快照反馈', () => {
+  it('切换节点立即重载，旧请求迟到不能覆盖新报告', async () => {
+    let resolveOld;
+    api.getCostAnalysisReport.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
+    await start();
+    api.getCostAnalysisReport.mockResolvedValue({ summary: {}, projects: [{ projectId: 'b', projectName: 'new-node-project' }], images: [], storage: {} });
+    window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises();
+    expect(wrapper.text()).toContain('new-node-project');
+    resolveOld({ summary: {}, projects: [{ projectId: 'a', projectName: 'old-node-project' }], images: [], storage: {} });
+    await flushPromises(); expect(wrapper.text()).not.toContain('old-node-project'); expect(wrapper.text()).toContain('new-node-project');
+  });
+  it('部分指标不可用时明确说明合计范围', async () => {
+    api.getCostAnalysisReport.mockResolvedValue({ summary: { incomplete: true }, projects: [], images: [], trends: [], storage: {} });
+    await start(); expect(wrapper.find('[role=status]').text()).toContain('仅包含已采集的数据');
+  });
   it('快照成功后采用新的趋势，即使报告仍被服务端缓存', async () => {
     api.recordCostSnapshot.mockResolvedValue({ timestamp: 1793501000000 }); await start();
     api.getCostTrends.mockResolvedValue([{ timestamp: 1793500000000, totalCPUPercent: 4, totalMemoryMB: 600 }, { timestamp: 1793501000000, totalCPUPercent: 9, totalMemoryMB: 700 }]);

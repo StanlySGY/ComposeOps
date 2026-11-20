@@ -182,11 +182,10 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     const started = Date.now();
     const hosts = await Promise.all(listHosts().map(async host => {
       const started = Date.now();
-      let timer;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
       try {
-        await Promise.race([getDockerForHost(host.id).ping(), new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error('节点连接超时')), 3000);
-        })]);
+        await getDockerForHost(host.id).ping({ abortSignal: controller.signal });
         return { id: host.id, ok: true, latencyMs: Date.now() - started };
       } catch { return { id: host.id, ok: false, latencyMs: Date.now() - started }; }
       finally { clearTimeout(timer); }

@@ -10,7 +10,7 @@ function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
 }
 
-export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 15000 } = {}) {
+export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 30000 } = {}) {
   hostId = hostId || getActiveHostId();
   // Resolve before collecting: an unknown explicit node is a 404, not an empty total.
   const selected = (hostId === 'all' ? listHosts().map(host => host.id) : [hostId])

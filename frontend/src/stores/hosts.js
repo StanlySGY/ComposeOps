@@ -39,9 +39,10 @@ export const useHostsStore = defineStore('hosts', () => {
   function ping(id) {
     if (probes.has(id)) return probes.get(id);
     pinging.value = id;
+    const requestedHost = hosts.value.find(item => item.id === id);
     const task = api.pingHost(id).then(result => {
       const host = hosts.value.find(item => item.id === id);
-      if (host && result.host) {
+      if (host && host === requestedHost && result.host) {
         mutationVersion += 1;
         // A probe may finish after a switch/group edit; it only owns observation fields.
         for (const key of ['status', 'latencyMs', 'version', 'containerCount', 'runningCount', 'lastPingAt', 'error']) {

@@ -82,7 +82,7 @@ export function normalizeCostReport(value) {
   const storage = normalizeStorageDf(data.storage);
   return {
     ...data,
-    summary: Object.fromEntries(Object.keys(EMPTY_COST_SUMMARY).map((key) => [key, numberOrZero(summary[key])])),
+    summary: { ...Object.fromEntries(Object.keys(EMPTY_COST_SUMMARY).map((key) => [key, numberOrZero(summary[key])])), incomplete: summary.incomplete === true },
     storage: {
       ...storage,
       images: { ...storage.images, active: numberOrZero(data.storage?.images?.active), sizeMB: numberOrZero(data.storage?.images?.sizeMB), reclaimableMB: numberOrZero(data.storage?.images?.reclaimableMB) },

@@ -45,6 +45,7 @@ export default async function costAnalysisRoutes(api, _opts) {
             summary: {
               type: 'object',
               properties: {
+                incomplete: { type: 'boolean' },
                 totalProjects: { type: 'number' },
                 totalContainers: { type: 'number' },
                 runningContainers: { type: 'number' },
@@ -80,6 +81,7 @@ export default async function costAnalysisRoutes(api, _opts) {
           items: {
             type: 'object',
             properties: {
+              statsAvailable: { type: 'boolean' },
               containerId: { type: 'string' },
               containerName: { type: 'string' },
               projectName: { type: 'string' },

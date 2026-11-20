@@ -4,7 +4,7 @@
     <div class="tabs-segment">
       <button v-for="item in tabs" :key="item.id" :class="{ active: tab === item.id }" :aria-pressed="tab === item.id" @click="setTab(item.id)"><component :is="item.icon" class="w-4 h-4" />{{ item.label }}</button>
     </div>
-    <p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p><p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p><p v-if="error" class="alert-error" role="alert" aria-live="assertive" aria-atomic="true">{{ error }}</p>
 
     <section v-if="tab === 'ai'" class="settings-section">
       <SettingsLoadState :state="loads.ai" name="ai" label="AI 设置" @retry="loadAi" />
@@ -447,7 +447,7 @@ async function saveHost() {
 async function pingHost(host) {
   try {
     const result = await hostsStore.ping(host.id);
-    if (!result?.ok) { fail(result?.message || `节点 ${host.name} 暂不可达`); return; }
+    if (!result?.ok) { fail(new Error(result?.message || `节点 ${host.name} 暂不可达`)); return; }
     ok(`节点 ${host.name} 连接正常`);
   } catch (e) { fail(e); }
 }

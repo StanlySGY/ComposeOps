@@ -101,3 +101,28 @@ test('MCP 即时设置保存失败后恢复已确认值', async ({ page }) => {
     { enabled: false, mode: 'all' }, { enabled: true, mode: 'readonly' },
   ]);
 });
+
+test('Docker 节点连接失败明确显示原因，重试成功清除错误', async ({ page }) => {
+  await installSettingsFixture(page);
+  await page.evaluate(() => {
+    const original = window.fetch;
+    window.probeOffline = true;
+    window.fetch = async (input, init = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+      if (path.match(/\/hosts\/[^/]+\/ping$/)) {
+        return new Response(JSON.stringify(window.probeOffline
+          ? { ok: false, message: '节点连接检测超时，请检查地址与网络' }
+          : { ok: true }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      return original(input, init);
+    };
+  });
+  await page.goto('./#/settings?tab=hosts');
+  const probe = page.getByRole('button', { name: '测试连接', exact: true }).first();
+  await probe.click();
+  await expect(page.getByRole('alert')).toContainText('节点连接检测超时');
+  await page.evaluate(() => { window.probeOffline = false; });
+  await probe.click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText(/节点 .* 连接正常/)).toBeVisible();
+});

@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 const chromiumLaunch = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {};
+const previewPort = Number(process.env.PREVIEW_PORT || 4174);
+if (!Number.isInteger(previewPort) || previewPort < 1 || previewPort > 65535) throw new Error('Invalid PREVIEW_PORT');
+const previewUrl = `http://127.0.0.1:${previewPort}/ComposeOps/`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -13,7 +16,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: 'list',
   use: {
-    baseURL: process.env.PREVIEW_BASE_URL || 'http://127.0.0.1:4174/ComposeOps/',
+    baseURL: process.env.PREVIEW_BASE_URL || previewUrl,
     trace: 'retain-on-failure',
   },
   projects: [
@@ -22,5 +25,10 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } } },
     { name: 'webkit-mobile', use: { ...devices['iPhone 13'] } },
   ],
-  webServer: process.env.PREVIEW_BASE_URL ? undefined : { command: 'npm run preview:serve', url: 'http://127.0.0.1:4174/ComposeOps/', reuseExistingServer: !process.env.CI },
+  // A different worktree may already serve this port. Never silently test its
+  // stale assets; an explicitly supplied PREVIEW_BASE_URL remains opt-in.
+  webServer: process.env.PREVIEW_BASE_URL ? undefined : {
+    command: 'npm run preview:serve', url: previewUrl,
+    env: { PREVIEW_PORT: String(previewPort) }, reuseExistingServer: false,
+  },
 });

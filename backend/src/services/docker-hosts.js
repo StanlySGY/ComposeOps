@@ -27,6 +27,9 @@ const MASK = '••••••••••••';
 const clientCache = new Map(); // hostId -> { docker, created }
 const activeHostListeners = new Set();
 const hostsListeners = new Set();
+const pendingProbes = new Map();
+const observationFields = ['status', 'latencyMs', 'version', 'containerCount', 'runningCount', 'lastPingAt', 'error'];
+const connectionIdentity = host => JSON.stringify([host.type, host.host, host.port, host.username, host.hostFingerprint, host.password, host.privateKey, host.tls]);
 export function onHostsChange(listener) { hostsListeners.add(listener); return () => hostsListeners.delete(listener); }
 function notifyHostsChange(id) { for (const listener of hostsListeners) listener(id); }
 
@@ -132,7 +135,12 @@ export function upsertHost(input = {}) {
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  if (existing) Object.assign(existing, entry);
+  if (existing) {
+    if (connectionIdentity(existing) !== connectionIdentity(entry)) {
+      for (const key of observationFields) delete existing[key];
+    }
+    Object.assign(existing, entry);
+  }
   else hosts.push(entry);
   writeHosts(hosts);
   invalidateClient(entry.id);
@@ -293,15 +301,24 @@ export function probeHost(input = {}) {
 }
 
 /** 连通性检测:ping + 版本 + 容器数 + 延迟。probe 传入时探测未保存的临时节点。 */
-export async function pingHost(id, probe = null) {
-  const host = probe ? probeHost(probe) : getHost(id);
-  if (!host) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
+export async function pingHost(id, probe = null, { timeoutMs = 15000 } = {}) {
+  const savedHost = probe ? probeHost(probe) : getHost(id);
+  if (!savedHost) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
+  const host = { ...savedHost };
+  const identity = connectionIdentity(host);
+  const token = Symbol();
+  if (!probe) pendingProbes.set(id, token);
   const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const docker = createDockerClient(host);
-    await docker.ping();
-    const version = await docker.version().catch(() => null);
-    const containers = await docker.listContainers({ all: true }).catch(() => null);
+    await docker.ping({ abortSignal: controller.signal });
+    const [version, containers] = await Promise.all([
+      docker.version({ abortSignal: controller.signal }).catch(() => null),
+      docker.listContainers({ all: true, abortSignal: controller.signal }).catch(() => null),
+    ]);
+    if (controller.signal.aborted) throw new Error('节点连接检测超时，请检查地址与网络');
     const latencyMs = Date.now() - started;
     host.status = 'online';
     host.latencyMs = latencyMs;
@@ -309,7 +326,7 @@ export async function pingHost(id, probe = null) {
     host.containerCount = Array.isArray(containers) ? containers.length : null;
     host.runningCount = Array.isArray(containers) ? containers.filter((item) => item.State === 'running').length : null;
     host.lastPingAt = new Date().toISOString();
-    if (host.id !== 'local') writeHosts(readHosts());
+    host.error = '';
     return {
       ok: true,
       status: 'online',
@@ -321,17 +338,37 @@ export async function pingHost(id, probe = null) {
     };
   } catch (error) {
     host.status = 'offline';
-    host.error = error.message;
+    host.error = controller.signal.aborted ? '节点连接检测超时，请检查地址与网络' : error.message;
     host.latencyMs = Date.now() - started;
+    host.containerCount = null;
+    host.runningCount = null;
+    host.lastPingAt = new Date().toISOString();
     return {
       ok: false,
       status: 'offline',
       latencyMs: host.latencyMs,
-      containerCount: 0,
-      runningCount: 0,
-      message: error.message,
+      containerCount: null,
+      runningCount: null,
+      message: host.error,
       host: sanitizeHost(host),
     };
+  } finally {
+    clearTimeout(timer);
+    if (!probe && pendingProbes.get(id) === token) {
+      pendingProbes.delete(id);
+      if (id === 'local') {
+        for (const key of observationFields) DEFAULT_HOSTS[0][key] = host[key];
+      } else {
+        // Update only observations on the latest config; edits/deletes and newer
+        // probes must never be overwritten by a late network response.
+        const hosts = readHosts();
+        const current = hosts.find(item => item.id === id);
+        if (current && connectionIdentity(current) === identity) {
+          for (const key of observationFields) current[key] = host[key];
+          writeHosts(hosts);
+        }
+      }
+    }
   }
 }
 

@@ -10,6 +10,7 @@
     <div v-if="error" class="alert-error flex items-center justify-between gap-3" role="alert"><span>{{ error }}</span><button class="btn-secondary btn-sm" :disabled="loading" @click="loadReport">重试</button></div>
     <Skeleton v-if="loading && !report" variant="cards" :rows="6" label="成本数据加载中" />
     <template v-if="report">
+      <p v-if="report.summary.incomplete" class="alert-warning" role="status">部分容器指标暂不可用，CPU 与内存合计仅包含已采集的数据。</p>
       <section class="grid grid-cols-2 gap-3 xl:grid-cols-3" aria-label="资源概况">
         <MetricTile title="项目" :value="report.summary.totalProjects" :icon="Boxes" sub="当前节点已发现" to="/services?from=cost" />
         <MetricTile title="容器" :value="report.summary.totalContainers" :sub="`运行中 ${report.summary.runningContainers}`" :icon="Container" to="/services?from=cost" />
@@ -64,7 +65,7 @@
   </div>
 </template>
 <script setup>
-import { computed, onActivated, onMounted, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import { ArrowUpRight, Boxes, Camera, Container, Cpu, HardDrive, Layers, MemoryStick, RefreshCw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { deepLink } from '../lib/deep-links.js';
@@ -76,6 +77,7 @@ import Skeleton from '../components/common/Skeleton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import RiskBadge from '../components/common/RiskBadge.vue';
 const toast = useToastStore();
+let active = true; let requestId = 0; let contextId = 0;
 const loading = ref(false); const error = ref(''); const report = ref(null); const suggestions = ref([]);
 const storageItems = [{ key: 'images', label: '镜像' }, { key: 'containers', label: '容器' }, { key: 'volumes', label: '卷' }, { key: 'buildCache', label: '构建缓存' }];
 function numberValue(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; }
@@ -89,23 +91,32 @@ function trendDate(item) { const date = new Date(item?.timestamp || item?.create
 const trendStart = computed(() => trendDate(report.value?.trends?.[0]));
 const trendEnd = computed(() => trendDate(report.value?.trends?.at(-1)));
 async function loadReport() {
-  if (loading.value) return false;
+  if (!active || loading.value) return false;
+  const current = ++requestId;
   loading.value = true; error.value = '';
-  try { const [data, advice, trends] = await Promise.all([api.getCostAnalysisReport(), api.getCostSuggestions(), api.getCostTrends()]); report.value = { ...data, trends }; suggestions.value = Array.isArray(advice) ? advice : advice?.suggestions || []; return true; }
-  catch (err) { error.value = err.message; return false; }
-  finally { loading.value = false; }
+  try {
+    const [data, advice, trends] = await Promise.all([api.getCostAnalysisReport(), api.getCostSuggestions(), api.getCostTrends()]);
+    if (!active || current !== requestId) return false;
+    report.value = { ...data, trends }; suggestions.value = Array.isArray(advice) ? advice : advice?.suggestions || []; return true;
+  } catch (err) { if (active && current === requestId) error.value = err.message; return false; }
+  finally { if (current === requestId) loading.value = false; }
 }
 async function refreshData() { if (await loadReport()) toast.success('数据已刷新'); }
 async function recordSnapshot() {
-  if (loading.value) return;
+  if (!active || loading.value) return;
+  const context = contextId;
   loading.value = true;
-  try { await api.recordCostSnapshot(); toast.success('成本快照已记录'); }
-  catch (err) { toast.error(err); }
-  finally { loading.value = false; }
-  await loadReport();
+  try { await api.recordCostSnapshot(); if (active && context === contextId) toast.success('成本快照已记录'); }
+  catch (err) { if (active && context === contextId) toast.error(err); }
+  finally { if (context === contextId) loading.value = false; }
+  if (active && context === contextId) await loadReport();
 }
+function invalidateContext() { requestId += 1; contextId += 1; loading.value = false; }
+function onHostChanged() { invalidateContext(); report.value = null; suggestions.value = []; error.value = ''; if (active) void loadReport(); }
 usePullRefresh(loadReport, { keepAlive: true });
-onMounted(loadReport);
+onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void loadReport(); });
 let activatedOnce = false;
-onActivated(() => { if (!activatedOnce) { activatedOnce = true; return; } void loadReport(); });
+onActivated(() => { active = true; if (!activatedOnce) { activatedOnce = true; return; } void loadReport(); });
+onDeactivated(() => { active = false; invalidateContext(); });
+onBeforeUnmount(() => { active = false; invalidateContext(); window.removeEventListener('composeops:host-changed', onHostChanged); });
 </script>

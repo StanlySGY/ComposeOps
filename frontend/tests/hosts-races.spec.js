@@ -36,3 +36,14 @@ it('新列表先完成时旧响应不能回退列表', async () => {
   old.resolve({ hosts: [{ id: 'old', active: true }] }); await first;
   expect(store.activeHostId).toBe('new');
 });
+it('重新读取连接配置后，旧探测不能标记新地址为在线', async () => {
+  const store = useHostsStore();
+  store.hosts = [{ id: 'remote', host: 'old-address', status: 'offline' }];
+  const pending = deferred(); api.pingHost.mockReturnValue(pending.promise);
+  const probe = store.ping('remote');
+  api.getHosts.mockResolvedValue({ hosts: [{ id: 'remote', host: 'new-address' }] });
+  await store.load(true);
+  pending.resolve({ ok: true, host: { id: 'remote', status: 'online' } }); await probe;
+  expect(store.hosts[0].host).toBe('new-address');
+  expect(store.hosts[0].status).toBeUndefined();
+});

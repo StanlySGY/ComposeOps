@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const previewBase = process.env.PREVIEW_BASE_URL || 'http://127.0.0.1:4174/ComposeOps/';
+const previewBase = process.env.PREVIEW_BASE_URL || `http://127.0.0.1:${process.env.PREVIEW_PORT || 4174}/ComposeOps/`;
 function observe(page) {
   const errors = [], network = [];
   page.on('pageerror', error => errors.push(error.message));
