@@ -1,3 +1,4 @@
+import { createTerminalInput } from '../lib/terminal-input.js';
 import { WebSocket } from 'ws';
 import { findProjectContainer } from '../services/scanner.js';
 import { getBackgroundJob } from '../lib/db.js';
@@ -183,9 +184,14 @@ export default async function wsRoutes(fastify) {
     let pendingInput = [];
     let pendingBytes = 0;
     let pendingResize = null;
+    const input = createTerminalInput(bytes => { if (stream?.writable) stream.write(bytes); }, () => {
+      safeSend(socket, { type: 'error', data: '终端输入过多，请重新连接后分段粘贴' });
+      teardown(); socket.close();
+    });
     function teardown() {
       teardownExecSession(socket);
       socket.removeListener('message', onMessage);
+      input.close();
       pendingInput = [];
       pendingBytes = 0;
       pendingResize = null;
@@ -244,7 +250,7 @@ export default async function wsRoutes(fastify) {
         }
         pendingInput.push(bytes);
         pendingBytes += bytes.length;
-      } else if (stream.writable) stream.write(bytes);
+      } else input.send(bytes);
     }
     socket.once('close', teardown);
     socket.on('message', onMessage);
@@ -289,7 +295,7 @@ export default async function wsRoutes(fastify) {
       safeSend(socket, { type: 'ready' });
       if (pendingResize) void exec.resize(pendingResize).catch(() => {});
       pendingResize = null;
-      for (const bytes of pendingInput) if (stream.writable) stream.write(bytes);
+      for (const bytes of pendingInput) input.send(bytes);
       pendingInput = [];
       pendingBytes = 0;
     } catch (error) {

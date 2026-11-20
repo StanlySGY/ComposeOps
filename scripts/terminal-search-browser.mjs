@@ -55,11 +55,10 @@ try {
     await page.goto(`${base}/#/shell?projectId=${encodeURIComponent(project.id)}&containerId=${project.containers[0].id}`);
     await expect(page.locator('.terminal-session-bar strong')).toHaveText('已连接', { timeout: 15000 });
     const terminal = page.locator('.xterm-helper-textarea');
-    // BusyBox ash requests the cursor position before finishing its initial prompt.
-    // A resize can redraw before the DSR handshake completes. Only accept a
-    // redraw received after xterm has actually sent its cursor-position reply.
+    // Wait for the actual cursor reply. A redraw is not guaranteed (it depends
+    // on a resize), and cannot prove the shell finished parsing the reply.
+    // Type immediately afterward to exercise the server's control/input boundary.
     await expect.poll(() => cursorReportOutputIndex, { timeout: 15000 }).not.toBeNull();
-    await expect.poll(() => outputFrames.slice(cursorReportOutputIndex).join(''), { timeout: 15000 }).toContain('\x1b[J');
     await terminal.pressSequentially("printf '\\n%s%s first\\n%s%s second\\n%s%s third\\n' TERM FIND term find TERM FIND; i=0; while [ $i -lt 120 ]; do echo line-$i; i=$((i+1)); done");
     await terminal.press('Enter');
     // Input delivery and Docker output are asynchronous on hosted CI runners.
