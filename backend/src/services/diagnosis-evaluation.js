@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import db from '../lib/db.js';
 import { getAiConfig } from './ai.js';
 import { DIAGNOSIS_FIXTURES, DIAGNOSIS_SUITE_VERSION } from './diagnosis-fixtures.js';
-import { diagnoseEvidence, DIAGNOSIS_PROTOCOL_VERSION } from './diagnosis-protocol.js';
+import { diagnoseEvidence, DIAGNOSIS_PROTOCOL_VERSION, DIAGNOSIS_EXECUTION_VERSION, DIAGNOSIS_GUIDANCE_VERSION } from './diagnosis-protocol.js';
 import { safeIncidentData, incidentError } from './incident-store.js';
 import { recordAgentAuditEvent } from './agent/policy-store.js';
 const suiteHash = createHash('sha256').update(JSON.stringify(DIAGNOSIS_FIXTURES)).digest('hex');
@@ -11,7 +11,7 @@ const map = row => row && ({ id: row.id, suiteVersion: row.suite_version, suiteH
   config: JSON.parse(row.config_json), result: JSON.parse(row.result_json), error: row.error });
 export const getDiagnosisEvaluation = id => map(db.prepare('SELECT * FROM sre_diagnosis_evaluations WHERE id=?').get(id));
 export const listDiagnosisEvaluations = () => db.prepare('SELECT * FROM sre_diagnosis_evaluations ORDER BY created_at DESC LIMIT 20').all().map(map);
-export const diagnosisSuiteInfo = () => ({ version: DIAGNOSIS_SUITE_VERSION, hash: suiteHash, protocolVersion: DIAGNOSIS_PROTOCOL_VERSION,
+export const diagnosisSuiteInfo = () => ({ version: DIAGNOSIS_SUITE_VERSION, hash: suiteHash, protocolVersion: DIAGNOSIS_PROTOCOL_VERSION, executionVersion: DIAGNOSIS_EXECUTION_VERSION, guidanceVersion: DIAGNOSIS_GUIDANCE_VERSION,
   cases: DIAGNOSIS_FIXTURES.map(f => ({ id: f.id, synthetic: true })), passThreshold: 85,
   limitations: '固定小规模合成故障集，用于回归比较；不能替代真实环境成功率。引用合法性不等于因果正确；成本缺元数据时保留未知。' });
 function selectChannel(config, id) {
@@ -25,7 +25,7 @@ export function queueDiagnosisEvaluation(input = {}, actor = 'admin', config = g
   db.transaction(() => {
     if (db.prepare("SELECT id FROM sre_diagnosis_evaluations WHERE status IN ('queued','running')").get()) throw incidentError('已有诊断评测正在执行，请等待', 409);
     db.prepare("INSERT INTO sre_diagnosis_evaluations(id,suite_version,protocol_version,suite_hash,status,requested_by,created_at,config_json) VALUES(?,?,?,?,'queued',?,?,?)")
-      .run(id, DIAGNOSIS_SUITE_VERSION, DIAGNOSIS_PROTOCOL_VERSION, suiteHash, actor, now, JSON.stringify({ channelId: channel.id, channelName: channel.name, model: channel.model }));
+      .run(id, DIAGNOSIS_SUITE_VERSION, DIAGNOSIS_PROTOCOL_VERSION, suiteHash, actor, now, JSON.stringify({ channelId: channel.id, channelName: channel.name, model: channel.model, executionVersion: DIAGNOSIS_EXECUTION_VERSION, guidanceVersion: DIAGNOSIS_GUIDANCE_VERSION }));
     recordAgentAuditEvent({ executionId: id, eventType: 'diagnosis_evaluation_queued', actor, toolName: 'sre.diagnosis.evaluate', decision: 'synthetic_evidence_only', details: { suiteHash, channelId: channel.id, model: channel.model } });
   })();
   return getDiagnosisEvaluation(id);
@@ -52,6 +52,8 @@ export function summarizeDiagnosisEvaluation(cases) {
   return { cases: count, completed, failed: count - completed, averageScore: count ? cases.reduce((sum, row) => sum + row.score.score, 0) / count : 0,
     rootCauseCorrect: countScore('rootCauseCorrect'), citationValid: countScore('citationValid'), dangerousAdvice: countScore('dangerousAdvice'),
     falsePositives: countScore('falsePositive'), falseNegatives: countScore('falseNegative'), correctUncertainty: countScore('correctUncertainty'),
+    recoveredSyntaxCases: cases.filter(row => !row.error && row.metadata?.attempts?.some(attempt => attempt.status === 'rejected')).length,
+    requests: cases.reduce((sum, row) => sum + (row.metadata?.attempts?.length || 1), 0),
     totalLatencyMs: cases.reduce((sum, row) => sum + (row.metadata?.latencyMs || 0), 0),
     reportedUsage: cases.filter(row => row.metadata?.usage?.total != null).reduce((sum, row) => sum + row.metadata.usage.total, 0),
     usageReportingCases: cases.filter(row => row.metadata?.usage?.total != null).length, cost: null, costAvailability: '未提供可核验费用元数据' };

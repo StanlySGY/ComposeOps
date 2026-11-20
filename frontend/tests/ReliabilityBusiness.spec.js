@@ -20,3 +20,9 @@ it('缓存页失活后停止轮询并中止请求，激活只恢复一次', asyn
   wrapper = mount(Host, options); await flushPromises(); const count = api.getSreResource.mock.calls.length, signal = api.getSreResource.mock.calls.at(-1)[1]; visible.value = false; await nextTick(); expect(signal.aborted).toBe(true);
   await vi.advanceTimersByTimeAsync(20000); expect(api.getSreResource).toHaveBeenCalledTimes(count); visible.value = true; await nextTick(); await flushPromises(); expect(api.getSreResource).toHaveBeenCalledTimes(count + 1);
 });
+it('缺少密钥时暂停新备份，历史明文备份仍能选择演练', async () => {
+  wrapper = mount(Business, options); await flushPromises();
+  expect(wrapper.text()).toContain('请配置独立的外置备份密钥'); expect(wrapper.text()).toContain('历史明文备份');
+  expect(wrapper.findAll('button').find(row => row.text() === '创建业务备份').attributes('disabled')).toBeDefined();
+  expect(wrapper.findAll('button').find(row => row.text() === '选择备份并演练').attributes('disabled')).toBeUndefined();
+});

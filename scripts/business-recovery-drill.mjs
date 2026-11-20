@@ -11,6 +11,9 @@ if (!process.argv.includes('--run-isolated-fixtures')) throw new Error('需显�
 const outputDir = path.resolve(process.env.SRE_EVIDENCE_DIR || '/tmp/composeops-business-evidence');
 await mkdir(outputDir, { recursive: true, mode: 0o700 });
 const work = await mkdtemp(path.join(os.tmpdir(), 'composeops-business-drill-'));
+const keyDir = await mkdtemp(path.join(os.tmpdir(), 'composeops-business-keys-'));
+process.env.BUSINESS_BACKUP_KEYS_FILE = path.join(keyDir, 'keys.json');
+await writeFile(process.env.BUSINESS_BACKUP_KEYS_FILE, JSON.stringify({ active: 'fixture', keys: { fixture: randomBytes(32).toString('hex') } }), { mode: 0o600 });
 process.env.DB_PATH = path.join(work, 'verification.db'); process.env.DISABLE_BACKGROUND_JOBS = '1'; process.env.SERVE_FRONTEND = '0';
 const { default: db, setProjectPreference } = await import('../backend/src/lib/db.js');
 const { getHost } = await import('../backend/src/services/docker-hosts.js');
@@ -63,7 +66,7 @@ async function run(engine) {
     const dependencies = { scan: async () => [project], dockerForHost: () => docker, host: getHost, capture: captureDeploymentInputs };
     const plan = await saveBusinessPlan({ projectId: name, config, noConcurrentDdl: true }, 'isolated-acceptance', dependencies);
     const queued = queueBusinessBackup(plan.id, 'isolated-acceptance'), backup = await executeBusinessBackup(queued.id, dependencies);
-    assert.equal(backup.status, 'verified', backup.error);
+    assert.equal(backup.status, 'verified', backup.error); assert.equal(backup.result.protection?.algorithm, 'aes-256-gcm');
     const queuedRun = queueBusinessRun(plan.id, backup.id, 'isolated-acceptance'), recovery = await executeBusinessRun(queuedRun.id, dependencies);
     await writeFile(path.join(outputDir, engine + '-recovery.json'), JSON.stringify({ plan, backup, recovery }, null, 2), { mode: 0o600 });
     assert.equal(recovery.status, 'passed', recovery.error); assert.equal(recovery.result.cleanupComplete, true);
@@ -109,6 +112,6 @@ finally {
   await writeFile(path.join(outputDir, 'business-recovery-summary.json'), JSON.stringify(report, null, 2), { mode: 0o600 });
   await import('../backend/src/services/workflow-engine.js'); await new Promise(resolve => setImmediate(resolve)); db.close();
   // Keep failed run DB/evidence for reconciliation; successful fixture credentials are erased.
-  if (!report.error) await rm(work, { recursive: true, force: true });
+  if (!report.error) { await rm(work, { recursive: true, force: true }); await rm(keyDir, { recursive: true, force: true }); }
   else { await rm(path.join(work, 'unused'), { force: true }); console.error('验收失败，隔离状态保留于：' + work); }
 }

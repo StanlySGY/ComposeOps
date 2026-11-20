@@ -26,3 +26,13 @@ test('截断、非零退出码和主动中断均不发布或遗留半成品', as
   await assert.rejects(persistDumpStream(source, join(root, 'abort.gz'), async () => ({ ExitCode: 0 }), { signal: controller.signal }));
   assert.deepEqual(await readdir(root), ['large.gz']);
 });
+test('加密导出失败和中断不发布归档或留下密文半成品', async () => {
+  const encryption = { key: randomBytes(32), keyId: 'test', context: 'fixed-backup' };
+  try {
+    await assert.rejects(persistDumpStream(Readable.from([frame(Buffer.from('private rows'))]), join(root, 'encrypted-failed'), async () => ({ ExitCode: 1 }), { encryption }), /未成功/);
+    const controller = new AbortController();
+    const source = Readable.from((async function* () { yield frame(randomBytes(65536)); controller.abort(); yield frame(Buffer.from('more')); })());
+    await assert.rejects(persistDumpStream(source, join(root, 'encrypted-aborted'), async () => ({ ExitCode: 0 }), { encryption, signal: controller.signal }));
+    assert.deepEqual(await readdir(root), ['large.gz']);
+  } finally { encryption.key.fill(0); }
+});

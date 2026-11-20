@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { gunzipSync } from 'node:zlib';
 import { Readable } from 'node:stream';
+const keysDir = mkdtempSync(path.join(os.tmpdir(), 'business-keys-'));
+process.env.BUSINESS_BACKUP_KEYS_FILE = path.join(keysDir, 'keys.json');
+writeFileSync(process.env.BUSINESS_BACKUP_KEYS_FILE, JSON.stringify({ active: 'v1', keys: { v1: 'ab'.repeat(32) } }), { mode: 0o600 });
 const dir = mkdtempSync(path.join(os.tmpdir(), 'business-recovery-'));
 process.env.DB_PATH = path.join(dir, 'db.sqlite'); process.env.DISABLE_BACKGROUND_JOBS = '1';
 const { default: db, setProjectPreference } = await import('../src/lib/db.js');
@@ -16,7 +19,7 @@ const { saveBusinessPlan, queueBusinessBackup, executeBusinessBackup, queueBusin
 const { businessDump, recoveryContainerConfig } = await import('../src/services/business-recovery-docker.js');
 const { persistDumpStream } = await import('../src/services/db-dumper.js');
 const { createAgentPolicyGroup, createAgentPolicyRule, deleteAgentPolicyGroup } = await import('../src/services/agent/policy-store.js');
-test.after(async () => { await import('../src/services/workflow-engine.js'); await new Promise(resolve => setImmediate(resolve)); db.close(); rmSync(dir, { recursive: true, force: true }); });
+test.after(async () => { await import('../src/services/workflow-engine.js'); await new Promise(resolve => setImmediate(resolve)); db.close(); rmSync(dir, { recursive: true, force: true }); rmSync(keysDir, { recursive: true, force: true }); });
 const image = char => 'sha256:' + char.repeat(64);
 const config = () => ({ engine: 'postgres', dbService: 'db', appService: 'app', database: 'business', user: 'reader', credentialEnv: 'POSTGRES_PASSWORD', appEnvironment: { DATABASE_URL: '$DB_URL' },
   assertions: [{ table: 'public.items', column: 'name', equals: 'known-value', expectedRows: 1 }], http: { port: 8080, path: '/items', bodyContains: 'known-value', expectedStatus: 200 }, rpoMinutes: 60, rtoMinutes: 1, scheduleHours: 0 });
@@ -35,8 +38,8 @@ async function fixture() {
     createVolume: async cfg => { created.push(cfg); items.set(cfg.Name, cfg); return entity('volume', cfg.Name); },
     createContainer: async cfg => { created.push(cfg); items.set(cfg.name, { Config: cfg }); return entity('container', cfg.name); } };
   const opts = { scan: async () => [project], host: getHost, dockerForHost: () => docker, capture: async () => ({ fingerprint, effective: { services: { db: {}, app: {} } } }),
-    dump: async (_container, _config, password, file) => { assert.equal(password, 'private-source-password'); await writeFile(file, gzipSync('known-data')); return { rawBytes: 10 }; },
-    restore: async (_container, _config, password, file) => { assert.notEqual(password, 'private-source-password'); assert.equal(gunzipSync(await readFile(file)).toString(), 'known-data'); },
+    dump: async (_container, _config, password, file, options) => { assert.equal(password, 'private-source-password'); const body = Buffer.from('known-data'), header = Buffer.alloc(8); header[0] = 1; header.writeUInt32BE(body.length, 4); return persistDumpStream(Readable.from([Buffer.concat([header, body])]), file, async () => ({ ExitCode: 0, Running: false }), options); },
+    restore: async (_container, _config, password, _file, _timeout, { prepared }) => { assert.notEqual(password, 'private-source-password'); const chunks = []; for await (const chunk of prepared.stream()) chunks.push(chunk); assert.equal(gunzipSync(Buffer.concat(chunks)).toString(), 'known-data'); },
     assertData: async () => [{ table: 'public.items', actualRows: 1, expectedRows: 1, passed: true }], ready: async () => {}, exec: async () => JSON.stringify({ statusCode: 200, bodyMatched: true }), sleep: async () => {} };
   const plan = await saveBusinessPlan({ projectId: project.id, config: config() }, 'tester', opts);
   const backup = async () => { const queued = queueBusinessBackup(plan.id); return executeBusinessBackup(queued.id, opts); };
@@ -50,7 +53,7 @@ test('校验业务表断言与隔离变量；拒绝任意 SQL、空检查和明�
   const escaped = config(); escaped.assertions[0].equals = "it's known"; assert.match(businessAssertionSql(validateBusinessConfig(escaped), escaped.assertions[0]), /it''s known/);
 });
 test('固定备份、独立网络与新卷、SQL 和三次 HTTP 断言，清理后才通过', async () => {
-  const f = await fixture(), backup = await f.backup(); assert.equal(backup.status, 'verified');
+  const f = await fixture(), backup = await f.backup(); assert.equal(backup.status, 'verified'); assert.equal(backup.result.protection.algorithm, 'aes-256-gcm'); assert.equal((await readFile(businessBackupFile(backup.id))).subarray(0, 8).toString(), 'COBKP001');
   const run = queueBusinessRun(f.plan.id, backup.id); const finished = await executeBusinessRun(run.id, f.opts);
   assert.equal(finished.status, 'passed'); assert.equal(finished.result.businessRecoveryVerified, true); assert.equal(finished.result.httpChecks.length, 3);
   assert.equal(f.items.size, 0); assert.equal(f.removed.length, 5); assert.equal(f.created[0].Internal, true);
@@ -121,4 +124,13 @@ test('MySQL/MariaDB 先拒绝非 InnoDB 表，不启动不一致导出', async (
   const data = Buffer.from('1\n'), frame = Buffer.alloc(8); frame[0] = 1; frame.writeUInt32BE(data.length, 4);
   const container = { exec: async () => { calls++; return { start: async () => Readable.from([Buffer.concat([frame, data])]), inspect: async () => ({ ExitCode: 0, Running: false }) }; }, modem: { demuxStream: (source, stdout, _stderr) => source.on('data', bytes => stdout.write(bytes.subarray(8))) } };
   await assert.rejects(businessDump(container, { ...config(), engine: 'mysql' }, 'pass', path.join(dir, 'unused.gz')), /非事务表/); assert.equal(calls, 1);
+});
+
+test('密钥遗失或替换在创建任何恢复资源之前失败', async () => {
+  for (const keys of [{ v2: 'cd'.repeat(32) }, { v1: 'cd'.repeat(32) }]) {
+    const f = await fixture(), backup = await f.backup(), run = queueBusinessRun(f.plan.id, backup.id);
+    writeFileSync(process.env.BUSINESS_BACKUP_KEYS_FILE, JSON.stringify({ active: Object.keys(keys)[0], keys }));
+    try { const result = await executeBusinessRun(run.id, f.opts); assert.equal(result.status, 'failed'); assert.equal(f.created.length, 0); }
+    finally { writeFileSync(process.env.BUSINESS_BACKUP_KEYS_FILE, JSON.stringify({ active: 'v1', keys: { v1: 'ab'.repeat(32) } })); }
+  }
 });

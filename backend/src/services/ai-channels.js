@@ -126,9 +126,9 @@ export async function requestWithAiChannels(options, invoke) {
   if (!channels.length) throw new Error(tools?.length ? '没有已启用且支持工具调用的 AI 渠道' : '请先配置并启用 AI 渠道');
   const total = AbortSignal.timeout(options.totalTimeoutMs ?? 120000);
   const combined = signal ? AbortSignal.any([signal, total]) : total;
-  const attempts = [];
+  const attempts = [], channelAttempts = [];
   for (const channel of channels) {
-    combined.throwIfAborted();
+    if (combined.aborted) throw Object.assign(new Error('等待模型响应超时'), { code: 'timeout', channelAttempts });
     const state = options.diagnostic ? { failures: 0, cooldownUntil: 0 } : stateFor(channel);
     if (!options.probe && (state.cooldownUntil > Date.now() || state.probing)) {
       onChannelEvent?.({ type: 'channel_skipped', channelId: channel.id, channelName: channel.name, model: channel.model,
@@ -140,6 +140,7 @@ export async function requestWithAiChannels(options, invoke) {
     if (halfOpen) state.probing = true;
     const controller = new AbortController();
     const attemptSignal = AbortSignal.any([combined, controller.signal]);
+    const attemptStarted = Date.now();
     let timer;
     let emitted = false;
     const arm = (ms) => {
@@ -147,7 +148,8 @@ export async function requestWithAiChannels(options, invoke) {
       timer = setTimeout(() => controller.abort(new DOMException('等待模型响应超时', 'TimeoutError')), ms);
       timer.unref?.();
     };
-    arm(channel.firstTokenTimeoutMs ?? DEFAULT_FIRST_TOKEN_MS);
+    const streaming = options.stream === true;
+    arm(!streaming && options.responseTimeoutMs != null ? options.responseTimeoutMs : channel.firstTokenTimeoutMs ?? DEFAULT_FIRST_TOKEN_MS);
     const notify = (callback) => (value) => {
       if (value && callback) emitted = true;
       callback?.(value);
@@ -156,14 +158,16 @@ export async function requestWithAiChannels(options, invoke) {
       content: `使用「${channel.name}」· ${channel.model}` });
     try {
       const result = await invoke({ ...options, ...channel, signal: attemptSignal,
-        onActivity: () => arm(45000), onToken: notify(options.onToken), onReasoning: notify(options.onReasoning) });
+        onActivity: () => { if (streaming) arm(45000); }, onToken: notify(options.onToken), onReasoning: notify(options.onReasoning) });
       combined.throwIfAborted();
       Object.assign(state, { failures: 0, cooldownUntil: 0, lastError: '', lastSuccessAt: new Date().toISOString() });
-      return { ...result, channelId: channel.id, channelName: channel.name, model: channel.model };
+      channelAttempts.push({ channelId: channel.id, model: channel.model, status: 'completed', latencyMs: Date.now() - attemptStarted });
+      return { ...result, channelAttempts, channelId: channel.id, channelName: channel.name, model: channel.model };
     } catch (caught) {
-      if (signal?.aborted) throw signal.reason;
+      if (signal?.aborted) throw Object.assign(signal.reason, { channelAttempts: [...channelAttempts, { channelId: channel.id, model: channel.model, status: 'cancelled', latencyMs: Date.now() - attemptStarted }] });
       const error = attemptSignal.aborted ? attemptSignal.reason : caught;
       const reason = errorDescription(error);
+      channelAttempts.push({ channelId: channel.id, model: channel.model, status: 'failed', latencyMs: Date.now() - attemptStarted, error: reason, code: error.code || (error.name === 'TimeoutError' ? 'timeout' : 'transport_error') });
       state.lastError = reason;
       if (canRetry(error)) {
         state.failures++;
@@ -174,7 +178,7 @@ export async function requestWithAiChannels(options, invoke) {
       }
       attempts.push(`「${channel.name}」${reason}`);
       if (options.probe || emitted || !canRetry(error) || combined.aborted) {
-        throw Object.assign(new Error(`${attempts.join('；')}${emitted ? '。回复已开始，为避免内容混合，本次未自动切换；已完成的工具操作不会重跑。' : ''}`), { code: error.code, status: error.status, partial: emitted });
+        throw Object.assign(new Error(`${attempts.join('；')}${emitted ? '。回复已开始，为避免内容混合，本次未自动切换；已完成的工具操作不会重跑。' : ''}`), { code: error.code, status: error.status, partial: emitted, channelAttempts });
       }
       onChannelEvent?.({ type: 'channel_failed', channelId: channel.id, channelName: channel.name, model: channel.model,
         content: `「${channel.name}」${reason}${options.failoverEnabled === false || options.probe ? '' : '，尝试后续可用渠道'}` });
@@ -184,5 +188,5 @@ export async function requestWithAiChannels(options, invoke) {
       controller.abort();
     }
   }
-  throw new Error(attempts.length ? `AI 渠道均未成功：${attempts.join('；')}` : 'AI 渠道暂时都在故障冷却中，请稍后重试或在设置中测试连接');
+  throw Object.assign(new Error(attempts.length ? `AI 渠道均未成功：${attempts.join('；')}` : 'AI 渠道暂时都在故障冷却中，请稍后重试或在设置中测试连接'), { channelAttempts });
 }

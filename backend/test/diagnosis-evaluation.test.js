@@ -48,7 +48,7 @@ test('真实调用协议携带取消信号、记录模型/usage；费用与版�
   await assert.rejects(diagnoseEvidence(fixture.evidence, {}, { config, timeoutMs: 20, call: options => new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('cancelled')))) }), /超时|cancelled/);
 });
 test('评测逐案例记录失败和危险建议，不把执行完成当作质量通过', async () => {
-  const run = queueDiagnosisEvaluation({}, 'test', config);
+  const run = queueDiagnosisEvaluation({}, 'test', config); assert.equal(run.config.guidanceVersion, 2);
   assert.throws(() => queueDiagnosisEvaluation({}, 'test', config), /已有/);
   let count = 0;
   const result = await executeDiagnosisEvaluation(run.id, { config, diagnose: async () => {
@@ -61,4 +61,29 @@ test('评测逐案例记录失败和危险建议，不把执行完成当作质�
   const before = count; await executeDiagnosisEvaluation(run.id, { config, diagnose: () => { count++; } }); assert.equal(count, before);
   const next = queueDiagnosisEvaluation({}, 'test', config); db.prepare("UPDATE sre_diagnosis_evaluations SET status='running' WHERE id=?").run(next.id);
   recoverDiagnosisEvaluations(); assert.equal(getDiagnosisEvaluation(next.id).status, 'failed'); assert.match(getDiagnosisEvaluation(next.id).error, /不会自动重发/);
+});
+
+test('只补发一次 JSON 语法错误，保留失败文本与全部 usage，不改变评分标准', async () => {
+  const fixture = DIAGNOSIS_FIXTURES[0]; let calls = 0;
+  const result = await diagnoseEvidence(fixture.evidence, {}, { config, call: async options => {
+    calls++; assert.ok(options.responseTimeoutMs <= 90000); assert.equal(JSON.stringify(options.messages).includes('essentialEvidenceIds'), false);
+    return { content: calls === 1 ? '{"broken":' : JSON.stringify(answer(fixture)), usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
+  } });
+  assert.equal(calls, 2); assert.equal(result.metadata.usage.total, 30); assert.equal(result.metadata.attempts[0].status, 'rejected');
+  assert.equal(result.metadata.attempts[0].rejectedOutput, '{"broken":'); assert.equal(result.metadata.attempts[1].reason, 'json_syntax_repair');
+  assert.equal(scoreDiagnosis(fixture, result.diagnosis).score, 100);
+});
+test('引用与风险错误不重试；重复语法错误、超时和取消保留失败证据', async () => {
+  const fixture = DIAGNOSIS_FIXTURES[0];
+  for (const content of ['{', JSON.stringify(answer(fixture, { facts: [{ claim: '伪造', evidenceIds: ['fake'] }] }))]) {
+    let calls = 0;
+    await assert.rejects(diagnoseEvidence(fixture.evidence, {}, { config, call: async () => { calls++; return { content }; } }), error => {
+      assert.equal(error.metadata.attempts.length, content === '{' ? 2 : 1); assert.ok(error.metadata.attempts.every(a => a.rejectedOutput)); return true;
+    }); assert.equal(calls, content === '{' ? 2 : 1);
+  }
+  await assert.rejects(diagnoseEvidence(fixture.evidence, {}, { config, timeoutMs: 10, call: () => new Promise(() => {}) }), error => {
+    assert.equal(error.code, 'timeout'); assert.equal(error.metadata.attempts[0].status, 'failed'); return true;
+  });
+  const controller = new AbortController(); controller.abort(new Error('user cancelled'));
+  await assert.rejects(diagnoseEvidence(fixture.evidence, {}, { config, signal: controller.signal, call: () => { throw new Error('must not call'); } }), /user cancelled/);
 });

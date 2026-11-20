@@ -45,11 +45,11 @@ export async function businessDump(container, config, password, file, options = 
   const stream = await withReadTimeout(instance.start({}));
   return persistDumpStream(stream, file, () => instance.inspect(), { maxRawBytes: 2 * 1024 ** 3, timeoutMs: 930000, ...options });
 }
-export async function restoreBusinessDump(container, config, password, file, timeoutMs) {
+export async function restoreBusinessDump(container, config, password, file, timeoutMs, { prepared } = {}) {
   const cli = client(config, password, config.engine !== 'postgres');
   const cmd = config.engine === 'postgres'
     ? ['pg_restore', '-h', '127.0.0.1', '-U', config.user, '-d', config.database, '--no-owner', '--no-acl', '--single-transaction', '--exit-on-error'] : cli.cmd;
-  const source = createReadStream(file), input = createGunzip();
+  const source = prepared ? prepared.stream() : createReadStream(file), input = createGunzip();
   source.on('error', error => input.destroy(error)); source.pipe(input);
   const env = config.engine === 'postgres' ? ['PGPASSWORD=' + password] : cli.env;
   try { await businessExec(container, cmd, env, { input, timeoutMs }); }

@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createHmac } from 'node:crypto';
+import { checkerWebhook } from '../../scripts/platform-checker.mjs';
+const dir = await mkdtemp(path.join(tmpdir(), 'checker-webhook-')), file = path.join(dir, 'webhook');
+test.after(() => rm(dir, { recursive: true, force: true }));
+test('独立 webhook 鉴权与签名读取外置文件，拒绝凭据明文传输和宽松权限', async () => {
+  const settings = { url: 'https://receiver.example/hook', bearerToken: 'synthetic-bearer', hmacSecret: 'synthetic-signing-secret-long-enough' };
+  await writeFile(file, JSON.stringify(settings), { mode: 0o600 });
+  const result = await checkerWebhook({ webhookFile: file }, '{"test":true}', 'event-1', 1234);
+  assert.equal(result.headers.Authorization, 'Bearer synthetic-bearer');
+  assert.equal(result.headers['Idempotency-Key'], 'event-1');
+  assert.equal(result.headers['X-ComposeOps-Signature'], 'sha256=' + createHmac('sha256', settings.hmacSecret).update('1234.{"test":true}').digest('hex'));
+  await writeFile(file, JSON.stringify({ ...settings, url: 'http://receiver.example/hook' }));
+  await assert.rejects(checkerWebhook({ webhookFile: file }, '{}', 'event-1', 1));
+  await chmod(file, 0o644); await assert.rejects(checkerWebhook({ webhookFile: file }, '{}', 'event-1', 1));
+  assert.equal(await checkerWebhook({}, '{}', 'event', 1), null);
+});

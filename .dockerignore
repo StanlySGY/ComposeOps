@@ -24,3 +24,7 @@ README.md
 **/playwright-report
 **/test-results
 backend/data/snapshots
+
+# Runtime backups and index must never enter the image.
+backend/data
+.codegraph

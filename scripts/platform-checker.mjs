@@ -1,9 +1,41 @@
 #!/usr/bin/env node
 // Independent process, no database access or Docker socket. Can run on another host.
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
+import { constants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHmac } from 'node:crypto';
+
+async function privateFile(file) {
+  if (!path.isAbsolute(file)) throw new Error('private_file_required');
+  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > 16384 || (info.mode & 0o077)) throw new Error('private_file_required');
+    return await handle.readFile('utf8');
+  } finally { await handle.close(); }
+}
+function endpoint(value) {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw new Error('invalid_webhook');
+  return url;
+}
+export async function checkerWebhook(config, body, id, at) {
+  const settings = config.webhookFile ? JSON.parse(await privateFile(config.webhookFile)) : { url: config.webhookUrl };
+  if (!settings.url) return null;
+  const url = endpoint(settings.url), headers = { 'Content-Type': 'application/json', 'Idempotency-Key': id };
+  if ((settings.bearerToken || settings.hmacSecret) && url.protocol !== 'https:') throw new Error('webhook_tls_required');
+  if (settings.bearerToken) {
+    if (typeof settings.bearerToken !== 'string' || /[\r\n]/.test(settings.bearerToken)) throw new Error('invalid_webhook');
+    headers.Authorization = 'Bearer ' + settings.bearerToken;
+  }
+  if (settings.hmacSecret) {
+    if (typeof settings.hmacSecret !== 'string' || settings.hmacSecret.length < 32) throw new Error('invalid_webhook');
+    headers['X-ComposeOps-Timestamp'] = String(at);
+    headers['X-ComposeOps-Signature'] = 'sha256=' + createHmac('sha256', settings.hmacSecret).update(String(at) + '.' + body).digest('hex');
+  }
+  return { url, headers };
+}
 
 export function advanceCheckerState(previous, observation, { failures = 3, recoveries = 3 } = {}) {
   const state = { version: 1, status: 'unknown', bad: 0, good: 0, episode: 0, transitions: [], ...previous };
@@ -33,7 +65,7 @@ export async function checkPlatform(config, { fetcher = fetch, now = Date.now } 
   try {
     const url = new URL(config.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('invalid_url');
-    const token = (await readFile(config.tokenFile, 'utf8')).trim();
+    const token = (await privateFile(config.tokenFile)).trim();
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('invalid_credential');
     const response = await fetcher(url, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ location: config.location || 'same-host' }), signal: AbortSignal.timeout(config.timeoutMs || 10000) });
@@ -57,13 +89,15 @@ export async function runCheckerOnce(config, { fetcher = fetch, now = Date.now }
   const state = advanceCheckerState(previous, await checkPlatform(config, { fetcher, now }));
   await saveState(config.stateFile, state);
   for (const item of state.transitions.filter(row => ['pending', 'retry'].includes(row.notification) && (!row.nextAt || row.nextAt <= now()))) {
-    if (!config.webhookUrl) { item.notification = 'unconfigured'; continue; }
+    if (!config.webhookUrl && !config.webhookFile) { item.notification = 'unconfigured'; continue; }
     if (item.episode !== state.episode || (item.transition === 'firing' && state.status !== 'firing')) { item.notification = 'superseded'; continue; }
     item.notification = 'sending'; item.attempts++;
     await saveState(config.stateFile, state);
     try {
-      const response = await fetcher(config.webhookUrl, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': item.id },
-        body: JSON.stringify({ id: item.id, source: 'composeops-independent-checker', location: config.location || 'same-host', ...item }), signal: AbortSignal.timeout(10000) });
+      const body = JSON.stringify({ id: item.id, source: 'composeops-independent-checker', location: config.location || 'same-host', ...item });
+      const webhook = await checkerWebhook(config, body, item.id, now());
+      if (!webhook) throw new Error('invalid_webhook');
+      const response = await fetcher(webhook.url, { method: 'POST', redirect: 'error', headers: webhook.headers, body, signal: AbortSignal.timeout(10000) });
       await response.body?.cancel();
       if (!response.ok) throw new Error('delivery_failed');
       item.notification = 'sent';

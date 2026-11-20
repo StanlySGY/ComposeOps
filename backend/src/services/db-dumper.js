@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { createGzip, createGunzip } from 'node:zlib';
 import { fileURLToPath } from 'url';
+import { encryptBusinessBackup, decryptBusinessBackup } from '../lib/business-backup-crypto.js';
 import { getProjectDocker } from './docker-hosts.js';
 import { readProjectEnv } from './project-env.js';
 import { addOperation, addAlertEvent } from '../lib/db.js';
@@ -180,7 +181,7 @@ async function* dumpStdout(source, state) {
 }
 
 /** 后台只写文件；完成、退出码和解压校验全部通过后原子发布。 */
-export async function persistDumpStream(source, filePath, inspect, { signal, timeoutMs = 900000, maxRawBytes = Infinity } = {}) {
+export async function persistDumpStream(source, filePath, inspect, { signal, timeoutMs = 900000, maxRawBytes = Infinity, encryption } = {}) {
   const partial = `${filePath}.${randomUUID()}.partial`;
   const controller = new AbortController();
   const abortSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -190,7 +191,7 @@ export async function persistDumpStream(source, filePath, inspect, { signal, tim
   const state = { rawBytes: 0, stderr: '', maxRawBytes };
   try {
     abortSignal.throwIfAborted();
-    await pipeline(dumpStdout(source, state), createGzip(), createWriteStream(partial, { flags: 'wx', mode: 0o600 }), { signal: abortSignal });
+    await pipeline(dumpStdout(source, state), createGzip(), ...(encryption ? [input => encryptBusinessBackup(input, encryption)] : []), createWriteStream(partial, { flags: 'wx', mode: 0o600, flush: true }), { signal: abortSignal });
     const info = await new Promise((resolve, reject) => {
       const cancelled = () => reject(abortSignal.reason);
       if (abortSignal.aborted) return cancelled();
@@ -200,7 +201,7 @@ export async function persistDumpStream(source, filePath, inspect, { signal, tim
     if (info.Running || info.ExitCode !== 0) throw new Error('数据库导出命令未成功结束，请检查数据库配置');
     if (!state.rawBytes) throw new Error('数据库导出为空，未生成备份');
     let verifiedBytes = 0;
-    await pipeline(createReadStream(partial), createGunzip(), new Writable({ write(chunk, _, done) { verifiedBytes += chunk.length; done(); } }), { signal: abortSignal });
+    await pipeline(encryption ? decryptBusinessBackup(partial, { ...encryption, signal: abortSignal }) : createReadStream(partial), createGunzip(), new Writable({ write(chunk, _, done) { verifiedBytes += chunk.length; done(); } }), { signal: abortSignal });
     if (verifiedBytes !== state.rawBytes) throw new Error('数据库备份完整性校验失败');
     const { size: bytes } = await fs.stat(partial);
     abortSignal.throwIfAborted();

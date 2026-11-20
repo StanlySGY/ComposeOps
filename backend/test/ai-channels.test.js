@@ -443,3 +443,17 @@ test('兼容模式也拒绝残缺工具参数，验证前不外发正文', async
   await assert.rejects(callOpenAI({ channels: [channel('strict-buffer', { streamToolCalls: false })], stream: true, probe: true, messages: [], tools: [{ type: 'function', function: { name: 'probe' } }], onToken: token => tokens.push(token) }), /完整 JSON/);
   assert.equal(tokens.length, 0);
 });
+
+test('非流式响应可使用完整响应预算，流式首段超时不受该选项影响', async () => {
+  const channel = { id: 'response-budget-test', name: 'budget', apiKey: 'test', baseUrl: 'http://localhost', model: 'test', firstTokenTimeoutMs: 10 };
+  const invoke = options => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve({ content: 'complete' }), 40);
+    options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, { once: true });
+  });
+  const result = await requestWithAiChannels({ channels: [channel], stream: false, responseTimeoutMs: 100, totalTimeoutMs: 150, diagnostic: true }, invoke);
+  assert.equal(result.content, 'complete'); assert.equal(result.channelAttempts[0].status, 'completed');
+  await assert.rejects(requestWithAiChannels({ channels: [channel], stream: true, responseTimeoutMs: 100, totalTimeoutMs: 150, diagnostic: true }, invoke), error => {
+    assert.equal(error.channelAttempts[0].status, 'failed'); return true;
+  });
+  assert.equal(channel.firstTokenTimeoutMs, 10);
+});

@@ -1,0 +1,8 @@
+# Add alongside docker-compose.yml AND docker-compose.encrypted.yml.
+# This independent key ring protects business dump archives, not the platform DB.
+services:
+  opsdash:
+    environment:
+      BUSINESS_BACKUP_KEYS_FILE: /run/secrets/composeops-business-keys
+    volumes:
+      - ${COMPOSEOPS_BUSINESS_BACKUP_KEYS_FILE:?Set COMPOSEOPS_BUSINESS_BACKUP_KEYS_FILE to an external key ring}:/run/secrets/composeops-business-keys:ro

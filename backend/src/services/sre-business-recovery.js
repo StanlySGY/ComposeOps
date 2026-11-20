@@ -12,6 +12,7 @@ import { incidentError, safeIncidentData } from './incident-store.js';
 import { harvestSecretValues } from '../lib/secret-redactor.js';
 import { recordAgentAuditEvent, evaluateAgentPolicy } from './agent/policy-store.js';
 import { recordEvent } from './event-center.js';
+import { readBusinessBackupKey, businessBackupProtectionStatus, prepareBusinessBackup } from '../lib/business-backup-crypto.js';
 import { validateBusinessConfig } from './business-recovery-config.js';
 import { businessDump, businessExec, restoreBusinessDump, verifyBusinessData, waitBusinessDatabase, recoveryContainerConfig, databaseEnvironment, isolatedEnvironment, businessHttpProbeScript } from './business-recovery-docker.js';
 
@@ -28,7 +29,7 @@ const jobRow = row => row && ({ id: row.id, planId: row.plan_id, version: row.ve
 export function getBusinessPlan(id) { const row = planRow(db.prepare('SELECT * FROM sre_business_plans WHERE id=?').get(id)); if (!row) throw incidentError('业务恢复计划不存在', 404); return row; }
 export function getBusinessBackup(id) { const row = jobRow(db.prepare('SELECT * FROM sre_business_backups WHERE id=?').get(id)); if (!row) throw incidentError('业务备份不存在', 404); return row; }
 export function getBusinessRun(id) { const row = jobRow(db.prepare('SELECT * FROM sre_business_runs WHERE id=?').get(id)); if (!row) throw incidentError('业务演练不存在', 404); return row; }
-export function listBusinessRecovery() { return { plans: db.prepare('SELECT * FROM sre_business_plans ORDER BY updated_at DESC LIMIT 100').all().map(planRow),
+export function listBusinessRecovery() { return { protection: businessBackupProtectionStatus(), plans: db.prepare('SELECT * FROM sre_business_plans ORDER BY updated_at DESC LIMIT 100').all().map(planRow),
   backups: db.prepare('SELECT * FROM sre_business_backups ORDER BY created_at DESC LIMIT 100').all().map(jobRow), runs: db.prepare('SELECT * FROM sre_business_runs ORDER BY created_at DESC LIMIT 100').all().map(jobRow) }; }
 function policy(plan, action) {
   const decision = evaluateAgentPolicy({ toolName: 'sre.business.' + action, projectId: plan.projectId, params: { hostId: plan.hostId, projectId: plan.projectId, dbService: plan.config.dbService } });
@@ -123,6 +124,7 @@ function noActive(plan) {
 export function queueBusinessBackup(id, actor = 'admin', drillAfter = false) {
   return db.transaction(() => {
     const plan = getBusinessPlan(id); requireCurrent(plan, 'backup'); noActive(plan);
+    const protection = businessBackupProtectionStatus(); if (!protection.ready) throw incidentError(protection.message);
     if (drillAfter) policy(plan, 'drill');
     const jobId = 'sbb_' + randomUUID(), now = Date.now();
     // Config contains only validated placeholders. Redacting its keys would destroy the recovery template.
@@ -177,7 +179,11 @@ export async function executeBusinessBackup(id, options = {}) {
       await mkdir(ROOT, { recursive: true, mode: 0o700 }); const capacity = await statfs(ROOT);
       if (capacity.bavail * capacity.bsize < 2.25 * 1024 ** 3) throw incidentError('备份存储可用空间不足 2.25 GiB');
       const file = businessBackupFile(id), snapshotAt = Date.now();
-      const dumped = await deps.dump(target.docker.getContainer(target.source.Id), plan.config, password, file);
+      const material = readBusinessBackupKey(), context = id + ':' + hash(plan);
+      let dumped;
+      try { dumped = await deps.dump(target.docker.getContainer(target.source.Id), plan.config, password, file, { encryption: { ...material, context } }); }
+      finally { material.key.fill(0); }
+      result.protection = { algorithm: 'aes-256-gcm', keyId: material.keyId, context };
       requireCurrent(plan, 'backup'); await checkTarget(plan, deps);
       const sha256 = await fileHash(file), size = (await stat(file)).size;
       Object.assign(result, { sha256, bytes: size, rawBytes: dumped.rawBytes, snapshotAt, durationMs: Date.now() - job.startedAt, engine: plan.config.engine, source: plan.identity.database,
@@ -199,7 +205,8 @@ export async function executeBusinessRun(id, options = {}) {
   const persist = () => db.prepare('UPDATE sre_business_runs SET result_json=? WHERE id=?').run(json(result), id);
   const deadline = Date.now() + plan.config.rtoMinutes * 60000;
   const remaining = () => { const ms = deadline - Date.now(); if (ms <= 0) throw incidentError('业务恢复超过 RTO 期限', 504); return ms; };
-  let docker, uncertain = false, failure = '';
+  let docker, prepared, uncertain = false, failure = '';
+  const archiveSignal = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   const labels = { 'composeops.business-recovery': id, 'composeops.project': plan.projectId };
   const register = (kind, name) => { const resource = { kind, id: name, state: 'creating' }; result.resources.push(resource); persist(); return resource; };
   const verifyNode = async () => {
@@ -221,7 +228,7 @@ export async function executeBusinessRun(id, options = {}) {
       const backup = getBusinessBackup(job.snapshot.backup.id), expected = job.snapshot.backup.result;
       if (backup.status !== 'verified' || backup.version !== plan.version || backup.planId !== plan.id || hash(backup.result) !== hash(expected)) throw incidentError('固定备份记录已变化或已过期');
       const file = businessBackupFile(backup.id);
-      if ((await stat(file)).size !== expected.bytes || await fileHash(file) !== expected.sha256) throw incidentError('备份校验值不匹配，禁止恢复');
+      prepared = await prepareBusinessBackup(file, { ...expected, context: backup.id + ':' + hash(backup.snapshot.plan), signal: archiveSignal });
       Object.assign(result, { backupId: backup.id, sha256: expected.sha256, backupAgeMs: Date.now() - expected.snapshotAt });
       result.rpoMet = result.backupAgeMs >= 0 && result.backupAgeMs <= plan.config.rpoMinutes * 60000; persist();
       if (!result.rpoMet) throw incidentError('备份恢复点年龄超过 RPO 目标');
@@ -237,7 +244,7 @@ export async function executeBusinessRun(id, options = {}) {
       harvestSecretValues('RECOVERY_PASSWORD=' + password);
       const database = await createContainer(prefix + '-db', recoveryContainerConfig(plan.identity.database.image, networkName, labels, 'recovery-db', { env: databaseEnvironment(plan.config, password), database: true, mounts }));
       await deps.ready(database, plan.config, password, { sleep: deps.sleep, deadline: Math.min(deadline, Date.now() + 120000) });
-      await deps.restore(database, plan.config, password, file, remaining());
+      await deps.restore(database, plan.config, password, file, remaining(), { prepared });
       const assertions = await deps.assertData(database, plan.config, password); Object.assign(result, { assertions }); persist();
       if (!assertions.length || assertions.some(item => !item.passed)) throw incidentError('SQL 业务数据断言未通过');
       await createContainer(prefix + '-app', recoveryContainerConfig(plan.identity.application.image, networkName, labels, 'recovery-app', {
@@ -257,6 +264,7 @@ export async function executeBusinessRun(id, options = {}) {
       Object.assign(result, { businessRecoveryVerified: true, recoveryDurationMs: Date.now() - job.startedAt }); result.rtoMet = result.recoveryDurationMs <= plan.config.rtoMinutes * 60000; persist();
     });
   } catch (error) { failure = error.message; }
+  finally { try { await prepared?.close(); } catch { failure ||= '备份验证句柄关闭失败'; uncertain = true; } }
   if (docker) {
     for (const resource of [...result.resources].reverse()) {
       try {
