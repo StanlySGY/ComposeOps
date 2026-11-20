@@ -49,7 +49,9 @@ test('遥测凭据绑定服务范围并只显示一次，关联页面保留假�
 });
 test('业务恢复创建固定断言，HTTP 未通过不展示成功', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto('./#/reliability?tab=business'); await page.getByRole('button', { name: '添加业务恢复计划', exact: true }).click();
+  await page.goto('./#/reliability?tab=business');
+  await expect(page.getByText('新业务备份已启用 AES-256-GCM 加密 · 密钥版本 离线演示密钥', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '添加业务恢复计划', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '添加业务恢复计划' }); await dialog.getByRole('combobox', { name: '纳管应用', exact: true }).selectOption('local:knowledge-base');
   await dialog.getByRole('combobox', { name: '数据库服务', exact: true }).selectOption('postgres'); await dialog.getByRole('combobox', { name: '无状态应用服务', exact: true }).selectOption('wiki-api');
   await dialog.getByRole('textbox', { name: '业务数据库名' }).fill('wiki'); await dialog.getByRole('textbox', { name: '表名（可含 schema）' }).fill('public.items'); await dialog.getByRole('textbox', { name: '响应必须包含' }).fill('known');

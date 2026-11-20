@@ -40,6 +40,7 @@ try {
     const [cookieName, cookieValue] = cookie.split('=');
     await context.addCookies([{ name: cookieName, value: cookieValue, url: base }]);
     const page = await context.newPage(), errors = [], inputFrames = [], outputFrames = [];
+    let cursorReportOutputIndex = null;
     currentSession = { viewport, errors, inputFrames, outputFrames };
     page.on('pageerror', error => errors.push(error.message));
     page.on('websocket', socket => {
@@ -47,6 +48,7 @@ try {
       if (socket.url().includes('/ws/exec?')) socket.on('framesent', ({ payload }) => {
         // Cursor-position reports answer the shell's DSR requests; they are not user input.
         const text = String(payload), cursorReport = text.startsWith('\x1b[') && /^\d+;\d+R$/.test(text.slice(2));
+        if (cursorReport) cursorReportOutputIndex = outputFrames.length;
         if (!text.startsWith('{') && !cursorReport) inputFrames.push(text);
       });
     });
@@ -54,8 +56,10 @@ try {
     await expect(page.locator('.terminal-session-bar strong')).toHaveText('已连接', { timeout: 15000 });
     const terminal = page.locator('.xterm-helper-textarea');
     // BusyBox ash requests the cursor position before finishing its initial prompt.
-    // Wait for its redraw acknowledgement before injecting an entire command at once.
-    await expect.poll(() => outputFrames.join('')).toContain('\x1b[J');
+    // A resize can redraw before the DSR handshake completes. Only accept a
+    // redraw received after xterm has actually sent its cursor-position reply.
+    await expect.poll(() => cursorReportOutputIndex, { timeout: 15000 }).not.toBeNull();
+    await expect.poll(() => outputFrames.slice(cursorReportOutputIndex).join(''), { timeout: 15000 }).toContain('\x1b[J');
     await terminal.pressSequentially("printf '\\n%s%s first\\n%s%s second\\n%s%s third\\n' TERM FIND term find TERM FIND; i=0; while [ $i -lt 120 ]; do echo line-$i; i=$((i+1)); done");
     await terminal.press('Enter');
     // Input delivery and Docker output are asynchronous on hosted CI runners.

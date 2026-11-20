@@ -1139,7 +1139,9 @@ usePullRefresh(() => {
 .agent-status { color:#6f7784; font-size:10px; }
 .agent-head-menu .icon-btn { width:32px; height:32px; border:0; background:transparent; }
 .agent-head-menu .icon-btn:hover { background:rgba(255,255,255,.06); color:#e7ebef; }
-.agent-messages { padding:30px clamp(20px,6vw,92px) 150px; scroll-behavior:smooth; }
+/* Streaming follows each committed render immediately. Smooth intermediate scroll
+   events look like reading older output and can incorrectly disable following. */
+.agent-messages { padding:30px clamp(20px,6vw,92px) 150px; scroll-behavior:auto; }
 .agent-message { max-width:820px; margin:0 auto 30px; gap:0; }
 .agent-message.assistant .agent-avatar { width:24px; height:24px; margin:3px 12px 0 0; border:0; background:transparent; color:#8f98a8; }
 .agent-message.assistant .agent-message-body { max-width:min(760px,calc(100% - 36px)); }
