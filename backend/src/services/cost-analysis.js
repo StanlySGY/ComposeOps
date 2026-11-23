@@ -5,6 +5,7 @@
 import { getDockerForHost, getActiveHostId, onHostsChange } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 import { getSetting, setSetting } from '../lib/db.js';
+import { readDockerDiskUsage } from './docker-disk-usage.js';
 
 // 成本扫描要逐容器拉 stats、跑 docker df,较慢;结果做 2 分钟 TTL 内存缓存(按活跃宿主分键),
 // 成本页重复进入与后台预热不再反复全量扫描
@@ -120,8 +121,8 @@ export function getStorageStats(hostId = getActiveHostId()) {
   return withCostCache('storage', fetchStorageStats, hostId);
 }
 async function fetchStorageStats(hostId) {
-  return dockerRead(hostId, async (docker, abortSignal) => {
-    const dfOutput = await docker.df({ abortSignal });
+  try {
+    const dfOutput = await readDockerDiskUsage(hostId);
     // LayersSize is total storage, not reclaimable storage. Match the Engine
     // disk-usage estimate by subtracting unique layers of referenced images.
     const layersSize = Math.max(0, Number(dfOutput.LayersSize) || 0);
@@ -149,7 +150,7 @@ async function fetchStorageStats(hostId) {
         reclaimableMB: Math.round((dfOutput.BuildCache?.filter(b => b.InUse === false).reduce((sum, b) => sum + (b.Size || 0), 0) || 0) / 1024 / 1024 * 100) / 100
       }
     };
-  }, 30000);
+  } catch (cause) { throw Object.assign(new Error('节点成本数据暂不可用，请检查连接后重试', { cause }), { statusCode: 503 }); }
 }
 
 /**

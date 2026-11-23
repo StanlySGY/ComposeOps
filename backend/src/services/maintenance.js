@@ -1,4 +1,5 @@
-import { getActivityDocker, getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
+import { getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
+import { readDockerDiskUsage, invalidateDiskUsage } from './docker-disk-usage.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
 import db, { pruneAiData, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
@@ -10,20 +11,18 @@ function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
 }
 
-export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 30000 } = {}) {
+export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 60000 } = {}) {
   hostId = hostId || getActiveHostId();
   // Resolve before collecting: an unknown explicit node is a 404, not an empty total.
   const selected = (hostId === 'all' ? listHosts().map(host => host.id) : [hostId])
     .map(id => ({ id, docker: getDockerForHost(id) }));
-  const snapshots = await Promise.all(selected.map(async ({ id, docker }) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const snapshots = await Promise.all(selected.map(async ({ id }) => {
     try {
-      const data = await docker.df({ abortSignal: controller.signal });
+      const data = await readDockerDiskUsage(id, { timeoutMs });
       return { id, data };
     } catch (error) {
       return { id, data: null, error };
-    } finally { clearTimeout(timer); }
+    }
   }));
   const unavailable = snapshots.filter(item => !item.data).map(item => item.id);
   const data = snapshots.filter(item => item.data).map(item => item.data);
@@ -79,13 +78,16 @@ export async function checkImageUpdates(onProgress = () => {}) {
 }
 
 export async function pruneDocker({ images = true, buildCache = true, containers = false, volumes = false }) {
-  const docker = await getActivityDocker();
+  const hostId = getActiveHostId();
+  const docker = getDockerForHost(hostId);
   const result = {};
-  if (images) result.images = await docker.pruneImages({ filters: { dangling: ['false'] } });
-  if (buildCache) result.buildCache = await docker.pruneBuilds();
-  if (containers) result.containers = await docker.pruneContainers();
-  if (volumes) result.volumes = await docker.pruneVolumes();
-  return result;
+  try {
+    if (images) result.images = await docker.pruneImages({ filters: { dangling: ['false'] } });
+    if (buildCache) result.buildCache = await docker.pruneBuilds();
+    if (containers) result.containers = await docker.pruneContainers();
+    if (volumes) result.volumes = await docker.pruneVolumes();
+    return result;
+  } finally { invalidateDiskUsage(hostId); }
 }
 
 /* ---------------------------------------------------------------------------
