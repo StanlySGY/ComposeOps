@@ -166,7 +166,8 @@ test('Playwright MCP tracks temporary tab selection and closes the active tab by
   let active = 0;
   const fake = createFakeClient(({ name, arguments: args }) => {
     if (name === 'browser_tabs' && args.action === 'list') {
-      return textResult(Array.from({ length: count }, (_, index) => String(index) + ': https://tab' + index + '.example/').join('\n'));
+      const tabs = Array.from({ length: count }, (_, index) => '- ' + index + ': ' + (index === active ? '(current) ' : '') + '[Example](https://tab' + index + '.example/)').join('\n');
+      return textResult('### Result\n' + tabs + '\n### Open tabs\n' + tabs + '\n### Ran Playwright code\n// tabs');
     }
     if (name === 'browser_tabs' && args.action === 'new') {
       count += 1;

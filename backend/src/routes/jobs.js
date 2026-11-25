@@ -76,7 +76,7 @@ export default async function jobRoutes(fastify) {
       reply.raw.write(`data: ${JSON.stringify({ type: 'update', event: payload.event, job: updatedJob })}\n\n`);
     });
 
-    request.raw.on('close', () => {
+    reply.raw.on('close', () => {
       unsubscribe();
       reply.raw.end();
     });

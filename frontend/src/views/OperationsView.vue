@@ -77,7 +77,7 @@
               <td><StatusBadge :status="job.status === 'running' ? 'task' : job.status" /></td>
               <td><button class="icon-btn" title="查看任务详情" aria-label="查看任务详情" @click="openJob(job.id)"><Eye class="h-4 w-4" /></button></td>
             </tr>
-            <tr v-if="!filteredJobs.length"><td colspan="6"><EmptyState compact :icon="jobs.length ? 'Search' : 'ListChecks'" :title="jobs.length ? '没有匹配的后台任务' : '暂无后台任务'" :description="jobs.length ? '调整筛选条件后重试' : '批量操作会以后台任务形式出现在这里'" /></td></tr>
+            <tr v-if="!filteredJobs.length"><td colspan="6"><EmptyState compact :icon="jobs.length ? 'Search' : 'ListChecks'" :title="jobs.length ? '没有匹配的后台任务' : '暂无后台任务'" :description="jobs.length ? '调整筛选条件后重试' : '批量操作、创建项目和源码部署会出现在这里'" /></td></tr>
           </tbody>
         </table>
       </div>
@@ -97,6 +97,8 @@
       <template v-if="selectedJob">
         <div class="shrink-0 border-b border-surface-800 p-4">
           <div class="mb-2 flex items-center justify-between text-muted"><span>{{ formatTime(selectedJob.createdAt) }} 创建</span><span>{{ selectedJob.completed }} / {{ selectedJob.total }} 已完成</span></div>
+          <p v-if="selectedJob.context?.hostName" class="my-2 text-xs text-muted">目标节点：{{ selectedJob.context.hostName }} · {{ selectedJob.context.workingDir }}</p>
+          <p v-if="selectedJob.result?.message" class="my-2 text-xs" :class="selectedJob.result?.outcomeUnknown ? 'text-status-warn' : 'text-muted'">{{ selectedJob.result.message }}</p>
           <div class="progress"><span :style="{ width: `${jobProgress(selectedJob)}%` }"></span></div>
         </div>
         <div class="grid min-h-0 flex-1 md:grid-cols-[17rem_minmax(0,1fr)]">
@@ -150,7 +152,7 @@ const savedFilters = loadFilters();
 const query = ref(''); const jobQuery = ref('');
 const statusFilter = ref(savedFilters.statusFilter || (!props.embedded && route.query.status === 'failed' ? 'failed' : 'all'));
 const jobStatusFilter = ref(savedFilters.jobStatusFilter || 'all');
-const activeTab = ref(props.embedded ? 'operations' : (route.query.tab === 'jobs' || route.query.job ? 'jobs' : 'operations'));
+const activeTab = ref(props.embedded ? (route.query.job ? 'jobs' : 'operations') : (route.query.tab === 'jobs' || route.query.job ? 'jobs' : 'operations'));
 const jobLoading = ref(false);
 const jobError = ref('');
 const requestedJobId = ref(null);
@@ -261,7 +263,7 @@ function closeJob(updateRoute = true) {
 function jobProgress(job) { return job.total ? Math.round(job.completed / job.total * 100) : 0; }
 function statusLabel(status) { return ({ pending: '等待执行', queued: '排队中', running: '执行中', success: '执行成功', failed: '执行失败', interrupted: '意外中断' })[status] || status; }
 function actionLabel(action) {
-  const labels = { 'compose.save': '保存配置', 'compose.restore': '恢复配置', 'projects.management': '更新纳管范围', 'projects.mounts': '更新目录范围', 'docker.prune': '清理 Docker 空间', 'images.check': '检查镜像更新', 'settings.import': '导入设置', up: '启动项目', restart: '重启项目', stop: '停止项目', pull: '拉取镜像', ps: '检查状态' };
+  const labels = { 'compose.create': '创建 Compose 项目', 'source.deploy': '拉取源码并重建', 'compose.save': '保存配置', 'compose.restore': '恢复配置', 'projects.management': '更新纳管范围', 'projects.mounts': '更新目录范围', 'docker.prune': '清理 Docker 空间', 'images.check': '检查镜像更新', 'settings.import': '导入设置', up: '启动项目', restart: '重启项目', stop: '停止项目', pull: '拉取镜像', ps: '检查状态' };
   return labels[action] || labels[String(action).split('.').pop()] || action;
 }
 
@@ -269,11 +271,10 @@ watch([statusFilter, jobStatusFilter], () => {
   saveFilters({ statusFilter: statusFilter.value, jobStatusFilter: jobStatusFilter.value });
 });
 watch(() => route.query.job, (id) => {
-  if (props.embedded) return;
   if (id && requestedJobId.value !== String(id)) void openJob(String(id), false);
   if (!id && requestedJobId.value) closeJob(false);
 });
 usePullRefresh(load);
-onMounted(async () => { await load(); if (!disposed && !props.embedded && route.query.job) await openJob(String(route.query.job), false); });
+onMounted(async () => { await load(); if (!disposed && route.query.job) await openJob(String(route.query.job), false); });
 onUnmounted(() => { disposed = true; stopJobUpdates(); });
 </script>

@@ -4,8 +4,8 @@ import { getActivityDocker } from './docker-hosts.js';
  * 读取指定容器的单次资源快照。
  * 返回 { cpuPercent, memUsageMB, memLimitMB, memPercent, netIO, blockIO }。
  */
-export async function readContainerStat(containerId, docker = getActivityDocker()) {
-  const stat = await docker.getContainer(containerId).stats({ stream: false });
+export async function readContainerStat(containerId, docker = getActivityDocker(), signal) {
+  const stat = await docker.getContainer(containerId).stats({ stream: false, ...(signal ? { abortSignal: signal } : {}) });
   return parseContainerStat(stat);
 }
 

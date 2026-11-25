@@ -930,6 +930,15 @@ const MIGRATIONS = [
   { version: 26, name: '结构化诊断评测与范围隔离的遥测证据', up: installSreAnalysisSchema },
   { version: 27, name: '业务数据库备份和隔离应用恢复', up: installSreBusinessSchema },
   { version: 28, name: '可恢复幂等的应用接入向导', up: installSreOnboardingSchema },
+  { version: 29, name: 'Compose 创建与源码部署后台结果', up(database) {
+    database.exec(`CREATE TABLE IF NOT EXISTS background_jobs (
+      id TEXT PRIMARY KEY, type TEXT NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL,
+      total INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT
+    )`);
+    addColumn(database, 'background_jobs', 'context_json', "TEXT NOT NULL DEFAULT '{}'");
+    addColumn(database, 'background_jobs', 'result_json', "TEXT NOT NULL DEFAULT '{}'");
+  } },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1780,13 +1789,20 @@ export function updateBackgroundJobItem(id, { status, output = '', exitCode = nu
     .run(status, String(output || '').slice(-20000), exitCode, id);
 }
 
+export function updateDeploymentJob(id, { context, result } = {}) {
+  if (context) db.prepare('UPDATE background_jobs SET context_json = ? WHERE id = ?').run(JSON.stringify(context), id);
+  if (result) db.prepare('UPDATE background_jobs SET result_json = ? WHERE id = ?').run(JSON.stringify(result), id);
+}
+
 export function getBackgroundJob(id) {
   const job = db.prepare(`
     SELECT id, type, action, status, total, completed, created_at AS createdAt,
-           started_at AS startedAt, finished_at AS finishedAt
+           started_at AS startedAt, finished_at AS finishedAt, context_json, result_json
     FROM background_jobs WHERE id = ?
   `).get(id);
   if (!job) return null;
+  job.context = safeParse(job.context_json, {}); job.result = safeParse(job.result_json, {});
+  delete job.context_json; delete job.result_json;
   job.items = db.prepare(`
     SELECT id, project_id AS projectId, project_name AS projectName, status, output,
            exit_code AS exitCode, started_at AS startedAt, finished_at AS finishedAt
@@ -1807,6 +1823,7 @@ export function listBackgroundJobs(limit = 20) {
 export function interruptRunningBackgroundJobs() {
   const jobs = db.prepare("SELECT id FROM background_jobs WHERE status IN ('queued', 'running')").all();
   const interrupt = db.transaction(() => {
+    db.prepare("UPDATE background_jobs SET result_json = json_set(result_json, '$.ok', json('false'), '$.outcomeUnknown', json('true'), '$.message', '服务进程中断，执行结果需核对；不会自动重试') WHERE type = 'project.deploy' AND status IN ('queued', 'running')").run();
     db.prepare("UPDATE background_job_items SET status = 'interrupted', finished_at = datetime('now') WHERE status IN ('pending', 'running')").run();
     db.prepare("UPDATE background_jobs SET status = 'interrupted', finished_at = datetime('now') WHERE status IN ('queued', 'running')").run();
   });

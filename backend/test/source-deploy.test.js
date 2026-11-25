@@ -35,6 +35,7 @@ test('source deploy: clean tracked branch pulls fast-forward, validates config, 
   const { calls, runCommand } = commandHarness();
   const output = [];
   const result = await executeSourceDeployment(project, { runCommand, onOutput: (stream, chunk) => output.push([stream, chunk]) });
+  assert.ok(calls.filter(call => call.args[0] === 'git').every(call => call.args[1] === '-c' && call.args[2] === 'safe.directory=/srv/demo-stack'));
   const commandLines = calls.map(call => call.args.join(' '));
   const pullIndex = commandLines.findIndex(command => command.includes('pull --ff-only'));
   const configIndex = commandLines.findIndex(command => command.includes('config --quiet'));

@@ -185,7 +185,10 @@ function tabCountOf(result) {
   const data = jsonOf(result);
   if (Array.isArray(data?.tabs)) return data.tabs.length;
   if (Array.isArray(data)) return data.length;
-  return Math.max(1, textOf(result).match(/^\s*\d+\s*[:.)]/gm)?.length || 1);
+  const text = textOf(result);
+  const section = text.match(/### Result\s*\n([\s\S]*?)(?=\n### |$)/)?.[1] || text;
+  const indices = [...section.matchAll(/^\s*(?:-\s+)?(\d+)\s*[:.)]/gm)].map(match => Number(match[1]));
+  return Math.max(1, new Set(indices).size);
 }
 
 async function tabsCount(client) {

@@ -154,13 +154,21 @@ test('纯 build 服务跳过 pull，直接执行 compose up --build', async () =
   ]);
 });
 
-test('不允许使用管理员白名单之外的宿主机目录', async () => {
+test('任意普通父目录可创建，内核目录和相对路径拒绝', async () => {
   const { deps, state } = dependencies();
-  await assert.rejects(
-    () => createCustomComposeProject(input({ rootDir: '/srv/other' }), { dependencies: deps }),
-    (error) => error.statusCode === 403,
-  );
-  assert.equal(state.workspaceCalls, 0);
+  const result = await createCustomComposeProject(input({ rootDir: '/srv/other' }), { dependencies: deps });
+  assert.equal(result.workingDir, '/srv/other/my-web');
+  assert.equal(state.workspaceCalls, 1);
+  for (const rootDir of ['relative', '/proc/1', '/dev/shm', '/sys', '/tmp/../proc']) {
+    await assert.rejects(createCustomComposeProject(input({ rootDir }), { dependencies: deps }));
+  }
+  assert.equal(state.workspaceCalls, 1);
+});
+
+test('文件上限按 UTF-8 字节校验，组合合法内容可超过 1 MiB', () => {
+  assert.doesNotThrow(() => validateComposeInput(compose + '#' + 'x'.repeat(700000), '#' + 'x'.repeat(400000)));
+  assert.throws(() => validateComposeInput(compose + '#' + '中'.repeat(350000)), /1 MiB/);
+  assert.throws(() => validateComposeInput(compose, '中'.repeat(175000)), /512 KiB/);
 });
 
 test('TCP Docker API 节点不能创建宿主机 Compose 文件', async () => {

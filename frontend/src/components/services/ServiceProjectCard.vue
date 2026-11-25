@@ -66,7 +66,7 @@
           <div v-if="!isServiceCollapsed(group.name)" :id="'service-containers-' + project.id + '-' + group.name" class="service-group__body">
             <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id" :data-container-id="container.id">
               <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">端口 · {{ portText(container) }}</small></div></div>
-              <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
+              <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><span v-else-if="project.managed && container.state === 'running'" class="container-resource text-muted">{{ statsError || '等待指标采样…' }}</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
               <div class="project-container-actions" role="group" :aria-label="container.name + ' 容器级操作'">
                 <span class="container-action-scope">容器级</span>
                 <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="toolLocation('logs', container.id)" class="container-action" aria-label="实时日志"><ScrollText :size="15" /><span>日志</span></CapabilityLink>
@@ -212,6 +212,7 @@ const quickActions = computed(() => [
 ]);
 
 const metrics = ref({});
+const statsError = ref('');
 const updateInfo = ref(null);
 const webuiLinks = ref([]);
 const dependencyMap = ref(new Map());
@@ -273,17 +274,17 @@ async function openStats() {
   statsAbort = new AbortController();
   try {
     await streamProjectStats(props.project.id, (frame) => {
-      if (frame.type === 'stats') applyStats(frame.data || []);
-      else if (frame.type === 'error') { /* 指标流按节点能力静默降级 */ }
+      if (frame.type === 'stats') { statsError.value = ''; applyStats(frame.data || []); }
+      else if (frame.type === 'error') { statsError.value = '指标暂不可用，正在重连'; metrics.value = {}; }
     }, statsAbort.signal, 2500);
   } catch {
     // fetch abort 或网络错误:静默降级,不打断卡片交互
   }
 }
 function applyStats(rows) {
-  const next = { ...metrics.value };
+  const next = {};
   for (const row of rows) {
-    const prev = next[row.containerId] || { history: [] };
+    const prev = metrics.value[row.containerId] || { history: [] };
     const history = [...prev.history, { cpuPercent: numberValue(row.cpuPercent), memPercent: numberValue(row.memPercent) }];
     if (history.length > 26) history.shift();
     next[row.containerId] = { cpu: numberValue(row.cpuPercent), mem: numberValue(row.memPercent), memUsageMB: numberValue(row.memUsageMB), history };
@@ -300,6 +301,7 @@ function closeStats() {
   }
   if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
   metrics.value = {};
+  statsError.value = '';
 }
 
 const locked = computed(() => props.busy || !!props.actionRunning || serviceActionRunning.value);

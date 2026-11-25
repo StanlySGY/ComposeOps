@@ -1,12 +1,17 @@
-import { getActiveHost } from '../services/docker-hosts.js';
+import { getActiveHost, getActiveHostId, getDockerForHost } from '../services/docker-hosts.js';
 import { assertReviewedDeployment, createDeploymentReview } from '../services/reviewed-deployment.js';
 import { findProject, scanProjects, invalidateScanCache } from '../services/scanner.js';
 import { buildMountPlan } from '../services/mount-plan.js';
 import { readCompose, saveCompose } from '../services/compose-runner.js';
-import { pruneWorkspaceRunners, readWorkspaceCompose, saveWorkspaceCompose } from '../services/compose-workspace.js';
+import { browseHostDirectories, pruneWorkspaceRunners, readWorkspaceCompose, saveWorkspaceCompose } from '../services/compose-workspace.js';
 import { prepareProjectAction } from '../services/project-action-runner.js';
 import { runSourceDeployment } from '../services/source-deploy.js';
-import { composeProjectCreateOptions, createCustomComposeProject } from '../services/custom-compose-project.js';
+import path from 'node:path';
+import { composeProjectId } from '../services/project-id.js';
+import { normalizeHostDirectory } from '../services/host-directory-paths.js';
+import { createDeploymentJob, streamDeploymentJob } from '../services/deployment-jobs.js';
+import { harvestSecretValues, redactSecrets } from '../lib/secret-redactor.js';
+import { composeProjectCreateOptions, createCustomComposeProject, validateProjectName, validateComposeInput } from '../services/custom-compose-project.js';
 import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles, normalizeEnvFileName } from '../services/project-env.js';
 import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
@@ -18,6 +23,7 @@ import { scanProjectWebPorts, buildWebUiLinks } from '../services/project-ports.
 import { listStandaloneContainers, runStandaloneContainerAction, runComposeServiceAction } from '../services/container-management.js';
 import {
   addOperation,
+  getSetting,
   getComposeBackup,
   listComposeBackups,
   listProjectOperations,
@@ -98,13 +104,24 @@ const fileIndexField = { type: 'number' };
 export default async function projectRoutes(fastify) {
   fastify.get('/', async () => ({ projects: await scanProjects() }));
 
-  // 创建自定义 Compose 项目只开放管理员配置的宿主机根目录，不接受任意路径。
+  // 默认目录作为快捷入口，位置可在目标宿主机自由选择。
   fastify.get('/create-options', async (_request, reply) => {
     try { return composeProjectCreateOptions(getActiveHost()); }
     catch (error) { return reply.code(error.statusCode || 500).send({ error: 'compose_create_options_failed', message: error.message }); }
   });
 
+  fastify.get('/directories', {
+    schema: { querystring: { type: 'object', required: ['expectedHostId'], properties: {
+      directory: { type: 'string', maxLength: 4096 }, expectedHostId: { type: 'string', minLength: 1, maxLength: 128 }, after: { type: 'string', maxLength: 255 },
+    } } },
+  }, async (request, reply) => {
+    try { return await browseHostDirectories(request.query); }
+    catch (error) { return reply.code(error.statusCode || 409).send({ error: error.code || 'directory_read_failed', message: error.message }); }
+  });
+
   fastify.post('/create', {
+    // JSON 转义最多放大 6 倍；文件本身仍按 UTF-8 字节限额校验。
+    bodyLimit: 6 * (1048576 + 524288) + 65536,
     schema: {
       body: {
         type: 'object', additionalProperties: false,
@@ -120,68 +137,22 @@ export default async function projectRoutes(fastify) {
       },
     },
   }, async (request, reply) => {
-    const controller = new AbortController();
-    let clientClosed = false;
-    let finished = false;
-    let currentExec = null;
-    let output = '';
-    const heartbeat = setInterval(() => send('stdout', ''), 15000);
-    const send = (type, data) => {
-      if (reply.raw.destroyed || reply.raw.writableEnded) return;
-      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
-    };
-    const finish = async (code, result = null) => {
-      if (finished) return;
-      finished = true;
-      clearInterval(heartbeat);
-      if (result) send('result', result);
-      send('exit', { code });
-      reply.raw.end();
-    };
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    reply.raw.on('close', () => {
-      if (finished) return;
-      clientClosed = true;
-      controller.abort();
-      currentExec?.kill?.('SIGTERM');
-      clearInterval(heartbeat);
-    });
     try {
-      const result = await createCustomComposeProject(request.body, {
-        signal: controller.signal,
-        onOutput: (type, text) => {
-          output = (output + String(text || '')).slice(-20000);
-          send(type, text);
-        },
-        onPhase: (phase) => send('phase', phase),
-        onExec: (handle) => {
-          currentExec = handle;
-          if (clientClosed) handle.kill?.('SIGTERM');
-        },
+      const input = request.body;
+      const host = getActiveHost();
+      if (input.expectedHostId !== host.id) throw Object.assign(new Error('Docker 节点已变化，请重新选择目标节点'), { statusCode: 409 });
+      if (host.type === 'tcp') throw Object.assign(new Error('TCP 节点不支持创建项目，请使用本地或 SSH 节点'), { statusCode: 409 });
+      const projectName = validateProjectName(input.projectName);
+      const { config } = validateComposeInput(input.composeContent, input.envContent);
+      const workingDir = path.posix.join(normalizeHostDirectory(input.rootDir), projectName);
+      harvestSecretValues(input.envContent); harvestSecretValues(JSON.stringify(config));
+      const project = { projectName, workingDir, id: composeProjectId(workingDir, projectName, host.id, getSetting('projects.legacy_host_id', 'local')) };
+      const job = createDeploymentJob({ action: 'compose.create', project, hostId: host.id, hostName: host.name,
+        execute: options => createCustomComposeProject(input, options),
       });
-      invalidateScanCache();
-      await finish(result.ok ? 0 : 1, result);
+      streamDeploymentJob(reply, job.id);
     } catch (error) {
-      invalidateScanCache();
-      const result = {
-        ok: false,
-        code: 1,
-        message: error.message,
-        projectId: error.projectId || '',
-        projectName: error.projectName || request.body.projectName,
-        workingDir: error.workingDir || '',
-        directoryCreated: !!error.directoryCreated,
-        filesCreated: !!error.filesCreated,
-      };
-      const detail = `${error.message}\n`;
-      output = (output + detail).slice(-20000);
-      send('stderr', detail);
-      await finish(1, result);
+      return reply.code(error.statusCode || 400).send({ error: error.code || 'compose_create_failed', message: redactSecrets(error.message) });
     }
   });
 
@@ -628,6 +599,61 @@ export default async function projectRoutes(fastify) {
     });
   });
 
+  // 多项目复用单个连接，固定节点与容器身份，避免浏览器连接池饥饿。
+  fastify.post('/stats/stream', {
+    schema: { body: { type: 'object', required: ['projectIds'], additionalProperties: false, properties: {
+      projectIds: { type: 'array', minItems: 1, maxItems: 1000, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 128 } },
+      interval: { type: 'number' },
+    } } },
+  }, async (request, reply) => {
+    const hostId = getActiveHostId();
+    const docker = getDockerForHost(hostId);
+    const interval = Math.max(1000, Math.min(Number(request.body.interval) || 2500, 10000));
+    const wanted = new Set(request.body.projectIds);
+    reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    let closed = false, timer;
+    const samples = new Set();
+    const send = frame => {
+      if (!closed && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`);
+    };
+    const close = () => { closed = true; clearTimeout(timer); for (const sample of samples) sample.abort(); reply.raw.end(); };
+    reply.raw.on('close', close);
+    async function tick() {
+      if (closed) return;
+      if (getActiveHostId() !== hostId) return close();
+      try {
+        const projects = await scanProjects();
+        if (closed || getActiveHostId() !== hostId) return close();
+        const queue = [...wanted];
+        // 限制 Docker 并发，队列在每轮内完整消耗，每个项目都得到帧。
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+          while (queue.length && !closed) {
+            const projectId = queue.shift();
+            const project = projects.find(item => item.id === projectId && item.managed);
+            if (!project) { send({ projectId, type: 'error', data: '项目不存在或尚未纳管' }); continue; }
+            const rows = [];
+            for (const container of project.containers.filter(item => item.state === 'running')) {
+              if (closed || getActiveHostId() !== hostId) return close();
+              let timeout;
+              const sample = new AbortController(); samples.add(sample);
+              try {
+                const stat = await Promise.race([readContainerStat(container.id, docker, sample.signal), new Promise((_, reject) => {
+                  timeout = setTimeout(() => { sample.abort(); reject(new Error('指标读取超时')); }, 5000);
+                })]);
+                rows.push({ containerId: container.id, name: container.name, ...stat });
+              } catch { /* 一个容器失败不阻塞其余项目 */ }
+              finally { clearTimeout(timeout); samples.delete(sample); }
+            }
+            if (getActiveHostId() !== hostId) return close();
+            send({ projectId, type: 'stats', data: rows, ts: Date.now() });
+          }
+        }));
+      } catch (error) { for (const projectId of wanted) send({ projectId, type: 'error', data: error.message }); }
+      if (!closed) { timer = setTimeout(() => void tick(), interval); timer.unref?.(); }
+    }
+    void tick();
+  });
+
   // ---- 项目容器实时资源指标流(SSE,2.5s 周期,客户端断开自动销毁) ----
   fastify.get('/:id/stats/stream', {
     schema: {
@@ -785,61 +811,21 @@ export default async function projectRoutes(fastify) {
       return reply.code(409).send({ error: 'host_changed', message: 'Docker 节点已变化，请在目标节点重新发起源码部署' });
     }
     const project = { ...found, host };
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    const send = (type, data) => {
-      if (reply.raw.destroyed || reply.raw.writableEnded) return;
-      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
-    };
-    let output = '';
-    let finished = false;
-    let clientClosed = false;
-    let currentExec = null;
-    const heartbeat = setInterval(() => send('stdout', ''), 15_000);
-    const finish = (code) => {
-      if (finished) return;
-      finished = true;
-      clearInterval(heartbeat);
-      invalidateScanCache();
-      addOperation({
-        projectId: project.id,
-        projectName: project.projectName,
-        action: 'source.deploy',
-        status: code === 0 ? 'success' : 'failed',
-        detail: output.slice(-20000),
-      });
-      send('exit', { code });
-      reply.raw.end();
-    };
-    reply.raw.on('close', () => {
-      if (!finished) {
-        clientClosed = true;
-        currentExec?.kill?.();
-        clearInterval(heartbeat);
-      }
-    });
-    runSourceDeployment(project, {
-      onOutput: (type, chunk) => {
-        output = (output + chunk).slice(-20000);
-        send(type, chunk);
+    const job = createDeploymentJob({ action: 'source.deploy', project, hostId: host.id, hostName: host.name,
+      execute: async options => {
+        let output = '', ok = false;
+        try {
+          const result = await runSourceDeployment(project, { onOutput: (type, text) => { output = (output + text).slice(-20000); options.onOutput(type, text); } });
+          ok = true;
+          return { ...result, ok: true, projectId: project.id, workingDir: project.workingDir, message: '源码更新与 Compose 构建启动命令已完成，请检查容器健康状态。' };
+        } catch (error) { output += '\n' + redactSecrets(error.message); throw error; }
+        finally {
+          invalidateScanCache();
+          addOperation({ projectId: project.id, projectName: project.projectName, action: 'source.deploy', status: ok ? 'success' : 'failed', detail: output });
+        }
       },
-      onExec: (handle) => {
-        currentExec = handle;
-        if (clientClosed) handle.kill?.();
-      },
-    }).then(() => finish(0)).catch((error) => {
-      const detail = error.code === 'STREAM_CLOSED'
-        ? error.message + '；远端命令可能仍在执行，请先核对容器状态，不要盲目重试'
-        : error.message;
-      const text = '\n[源码部署失败] ' + detail + '\n';
-      output = (output + text).slice(-20000);
-      send('stderr', text);
-      finish(1);
     });
+    streamDeploymentJob(reply, job.id);
   });
   // ---- 镜像更新雷达 ----
   // force 收 string:处理函数按 `=== '1'` 比较,见文件头第 4 条。

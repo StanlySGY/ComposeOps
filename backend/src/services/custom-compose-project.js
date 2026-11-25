@@ -1,3 +1,4 @@
+import { normalizeHostDirectory } from './host-directory-paths.js';
 import path from 'node:path';
 import YAML from 'yaml';
 import { getActiveHost, getActiveHostId, getDockerForHost, getHost, assertProjectHostUnchanged } from './docker-hosts.js';
@@ -32,10 +33,11 @@ export function validateProjectName(value) {
 }
 
 export function validateComposeInput(composeContent, envContent) {
-  if (typeof composeContent !== 'string' || !composeContent.trim() || composeContent.length > COMPOSE_MAX) {
+  if (typeof composeContent !== 'string' || !composeContent.trim() || Buffer.byteLength(composeContent, 'utf8') > COMPOSE_MAX) {
     throw Object.assign(new Error('Compose YAML 不能为空，且不能超过 1 MiB'), { statusCode: 400 });
   }
-  validateYaml(composeContent);
+  try { validateYaml(composeContent); }
+  catch (error) { throw Object.assign(new Error('Compose YAML 格式无效：' + error.message), { statusCode: 422, code: error.code }); }
   const document = YAML.parseDocument(composeContent, { maxAliasCount: 50 });
   if (document.errors.length) throw Object.assign(new Error('Compose YAML 格式无效：' + document.errors[0].message), { statusCode: 422 });
   const config = document.toJS();
@@ -50,7 +52,7 @@ export function validateComposeInput(composeContent, envContent) {
     }
   }
   const env = envContent === undefined || envContent === null ? '' : envContent;
-  if (typeof env !== 'string' || env.length > ENV_MAX || env.includes('\0')) {
+  if (typeof env !== 'string' || Buffer.byteLength(env, 'utf8') > ENV_MAX || env.includes('\0')) {
     throw Object.assign(new Error('.env 内容无效或超过 512 KiB'), { statusCode: 400 });
   }
   return { config, envContent: env };
@@ -86,7 +88,6 @@ export async function createCustomComposeProject(input = {}, options = {}) {
   const registerProject = dependencies.registerCustomComposeProject || registerCustomComposeProject;
   const saveProjectPreference = dependencies.setProjectPreference || setProjectPreference;
   const recordOperation = dependencies.addOperation || addOperation;
-  const allowedRoots = dependencies.configuredComposeProjectRoots || configuredComposeProjectRoots;
   const hostId = readActiveHostId();
   const host = readHost(hostId);
   if (!host) throw Object.assign(new Error('目标 Docker 节点不存在'), { statusCode: 404 });
@@ -99,12 +100,10 @@ export async function createCustomComposeProject(input = {}, options = {}) {
   }
 
   const projectName = validateProjectName(input.projectName);
-  const rootDir = safeProjectMountPath(String(input.rootDir || ''));
-  if (!rootDir || !allowedRoots().includes(rootDir)) {
-    throw Object.assign(new Error('项目根目录不在管理员允许列表中，请在部署配置中设置 COMPOSEOPS_PROJECT_ROOTS'), { statusCode: 403 });
-  }
+  const rootDir = normalizeHostDirectory(input.rootDir);
   const { config, envContent } = validateComposeInput(input.composeContent, input.envContent);
   const workingDir = path.posix.join(rootDir, projectName);
+  if (!safeProjectMountPath(workingDir)) throw Object.assign(new Error('项目目录范围过宽，请进入具体文件夹后创建'), { statusCode: 400 });
   const composeFile = path.posix.join(workingDir, COMPOSE_FILE);
   const projectId = makeProjectId(workingDir, projectName, hostId, readSetting('projects.legacy_host_id', 'local'));
   const identity = { hostId, activeHostAtScan: hostId };

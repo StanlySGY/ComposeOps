@@ -113,3 +113,15 @@ describe('项目卡片操作契约', () => {
     expect(signal.aborted).toBe(true);
   });
 });
+
+it('指标首帧前展示等待，收到数据后展示指标，断线不保留陈旧值', async () => {
+  await start();
+  const row = () => wrapper.get('[data-container="running"]');
+  expect(row().text()).toContain('等待指标采样');
+  const onFrame = streamProjectStats.mock.calls.at(-1)[1];
+  onFrame({ type: 'stats', data: [{ containerId: 'running', cpuPercent: 12, memUsageMB: 64 }] });
+  await flushPromises();
+  expect(row().text()).toContain('CPU 12.0%');
+  onFrame({ type: 'error', data: 'disconnected' }); await flushPromises();
+  expect(row().text()).toContain('正在重连'); expect(row().text()).not.toContain('CPU 12.0%');
+});

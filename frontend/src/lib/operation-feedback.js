@@ -2,6 +2,7 @@
 // exit/result frame may confirm completion, and failed verification wins.
 export function applyOperationFrame(output, frame) {
   if (frame.type === 'stdout' || frame.type === 'stderr') output.text += frame.data || '';
+  else if (frame.type === 'output') output.text = String(frame.data || '');
   else if (frame.type === 'error') {
     output.failureReason = String(frame.data || '操作执行失败');
     output.text += `\n[错误] ${output.failureReason}`;

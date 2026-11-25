@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import CustomComposeProjectModal from '../src/components/services/CustomComposeProjectModal.vue';
-import { streamProjectStats } from '../src/api/client.js';
 
 const mocks = vi.hoisted(() => ({
   api: {
     getComposeProjectCreateOptions: vi.fn(),
+    getHostDirectories: vi.fn(),
+    followDeploymentJob: vi.fn(),
     streamCustomComposeProjectDeploy: vi.fn(),
   },
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
@@ -216,51 +217,38 @@ describe('自定义 Compose 项目创建', () => {
     await button('取消').trigger('click');
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
-});
-
-describe('项目指标 SSE 并发限制', () => {
-  let fetchMock;
-
-  beforeEach(() => {
-    fetchMock = vi.fn((_url, { signal } = {}) => new Promise((_, reject) => {
-      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+  it('校验失败可修改重试，关闭重开仍保留草稿', async () => {
+    mocks.api.streamCustomComposeProjectDeploy.mockRejectedValue(Object.assign(new Error('YAML 格式无效'), { status: 422 }));
+    await mountModal();
+    await field('项目名称').setValue('draft');
+    await field('Compose YAML').setValue('services: [');
+    await button('创建并部署').trigger('click'); await flushPromises();
+    await field('Compose YAML').setValue(compose);
+    expect(button('创建并部署').element.disabled).toBe(false);
+    await wrapper.setProps({ show: false }); await wrapper.setProps({ show: true }); await flushPromises();
+    expect(field('项目名称').element.value).toBe('draft');
+    expect(field('Compose YAML').element.value).toBe(compose);
   });
 
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('同时最多发起三条指标长连接,释放槽位后启动排队请求', async () => {
-    const controllers = Array.from({ length: 4 }, () => new AbortController());
-    const streams = controllers.map((controller, index) =>
-      streamProjectStats(`project-${index}`, vi.fn(), controller.signal));
-    const resultsPromise = Promise.allSettled(streams);
-
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    controllers[0].abort();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    controllers.slice(1).forEach(controller => controller.abort());
-
-    const results = await resultsPromise;
-    expect(results.every(result => result.status === 'rejected' && result.reason.name === 'AbortError')).toBe(true);
+  it('未知结果不能重新创建；持久化失败提供配置入口', async () => {
+    mocks.api.streamCustomComposeProjectDeploy.mockRejectedValue(new Error('network failed'));
+    await mountModal(); await field('项目名称').setValue('draft'); await field('Compose YAML').setValue(compose);
+    await button('创建并部署').trigger('click'); await flushPromises();
+    expect(button('创建并部署').element.disabled).toBe(true);
+    expect(wrapper.text()).toContain('避免重复部署');
   });
 
-  it('等待队列中的卡片收起时取消订阅,不占用连接槽位', async () => {
-    const controllers = Array.from({ length: 4 }, () => new AbortController());
-    const streams = controllers.map((controller, index) =>
-      streamProjectStats(`project-${index}`, vi.fn(), controller.signal));
-    const allResultsPromise = Promise.allSettled(streams);
-    const queuedResultPromise = Promise.allSettled([streams[3]]);
-
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    controllers[3].abort();
-    const queuedResult = await queuedResultPromise;
-
-    expect(queuedResult[0].status).toBe('rejected');
-    expect(queuedResult[0].reason.name).toBe('AbortError');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-
-    controllers.slice(0, 3).forEach(controller => controller.abort());
-    await allResultsPromise;
+  it('浏览进入任意父目录，使用解析后的真实路径创建', async () => {
+    mocks.api.getHostDirectories.mockResolvedValueOnce({ path: '/srv', parent: '/', entries: [{ name: 'apps', path: '/srv/apps' }] })
+      .mockResolvedValueOnce({ path: '/mnt/storage/apps', parent: '/mnt/storage', entries: [] });
+    await mountModal(); await field('项目根目录').setValue('/srv'); await button('浏览目录').trigger('click'); await flushPromises();
+    await button('apps').trigger('click'); await flushPromises();
+    expect(field('项目根目录').element.value).toBe('/mnt/storage/apps');
+    await field('项目名称').setValue('web'); expect(wrapper.text()).toContain('/mnt/storage/apps/web');
+    expect(wrapper.text()).toContain('目标节点：本地节点');
+    await field('Compose YAML').setValue(compose + '#' + '中'.repeat(350000));
+    expect(button('创建并部署').element.disabled).toBe(true);
+    expect(wrapper.text()).toContain('UTF-8 字节');
   });
+
 });

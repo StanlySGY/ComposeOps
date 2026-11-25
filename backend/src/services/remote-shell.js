@@ -1,4 +1,6 @@
 import ssh2 from 'ssh2';
+import path from 'node:path';
+import { normalizeHostDirectory } from './host-directory-paths.js';
 import { createSshHostVerifier } from '../lib/ssh-fingerprint.js';
 import { assertSshPrivateKey } from '../lib/ssh-private-key.js';
 
@@ -168,5 +170,28 @@ export function sshWriteFile(host, filePath, content, header = {}) {
     await new Promise((resolve, reject) => {
       sftp.writeFile(filePath, Buffer.from(content), { mode: header.mode || 0o644 }, (error) => (error ? reject(error) : resolve()));
     });
+  });
+}
+
+/** SFTP 目录浏览使用 SSH 用户权限，不要求远端安装 Node。 */
+export function sshListDirectory(host, directory, { resolveOnly = false, after = '' } = {}) {
+  return withSsh(host, async conn => {
+    const sftp = await openSftp(conn);
+    const call = (method, ...args) => new Promise((resolve, reject) => sftp[method](...args, (error, value) => error ? reject(error) : resolve(value)));
+    let timer;
+    try {
+      return await Promise.race([(async () => {
+        const actual = normalizeHostDirectory(await call('realpath', normalizeHostDirectory(directory)));
+        const stats = await call('stat', actual);
+        if (!stats.isDirectory()) throw Object.assign(new Error('目标不是目录'), { statusCode: 400 });
+        const entries = resolveOnly ? [] : (await call('readdir', actual))
+          .filter(entry => (entry.attrs.isDirectory() || entry.attrs.isSymbolicLink()) && !['.', '..'].includes(entry.filename) && !/[\0\r\n]/.test(entry.filename))
+          .filter(entry => { try { normalizeHostDirectory(path.posix.join(actual, entry.filename)); return true; } catch { return false; } })
+          .sort((a, b) => a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0)
+          .filter(entry => entry.filename > after);
+        const page = entries.slice(0, 500);
+        return { path: actual, exists: true, entries: page.map(entry => ({ name: entry.filename, path: path.posix.join(actual, entry.filename), symlink: entry.attrs.isSymbolicLink() })), next: entries.length > 500 ? page.at(-1).filename : '' };
+      })(), new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('读取远端目录超时'), { statusCode: 504 })), 15000); })]);
+    } finally { clearTimeout(timer); sftp.end(); }
   });
 }

@@ -156,6 +156,8 @@ export const api = {
   logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getProjects: (force = false) => request('/projects', { force }),
+  getHostDirectories: (params, signal) => request('/projects/directories?' + new URLSearchParams(params), { signal }),
+  followDeploymentJob: (jobId, onFrame, signal) => followDeploymentJob(jobId, onFrame, signal),
   getComposeProjectCreateOptions: (signal) => request('/projects/create-options', { signal }),
   streamCustomComposeProjectDeploy: (payload, onFrame, signal) =>
     streamComposeControl(null, null, onFrame, '/projects/create', payload, signal),
@@ -398,6 +400,27 @@ export const api = {
   pruneStateHistory: (days = 90) => request('/state/prune', { method: 'POST', body: JSON.stringify({ days }) }),
 };
 
+/** 断线后只查询既有任务，绝不重新 POST 部署请求。 */
+export async function followDeploymentJob(jobId, onFrame, signal) {
+  while (!signal?.aborted) {
+    const job = normalizeBackgroundJob(await request('/jobs/' + encodeURIComponent(jobId), { signal }));
+    onFrame({ type: 'output', data: job.items[0]?.output || '' });
+    if (job.result?.phase) onFrame({ type: 'phase', data: job.result });
+    if (!['queued', 'running'].includes(job.status)) {
+      onFrame({ type: 'result', data: job.result });
+      onFrame({ type: 'exit', data: { code: job.status === 'success' ? 0 : 1 } });
+      return job;
+    }
+    await new Promise((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
+      const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, 1200);
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    });
+  }
+  throw new DOMException('Aborted', 'AbortError');
+}
+
 /**
  * 调用 compose 控制端点(SSE 流式)。逐行解析 data: {...} 帧。
  * @param {object} body
@@ -516,86 +539,7 @@ export async function streamSse(path, body, onFrame, signal, protocol = 'native'
   }
 }
 
-// HTTP/1.1 浏览器对同一 origin 的并发连接数有限。项目卡片展开时会各自建立长连接
-// SSE；不设上限会占满连接槽位,让普通 API 请求(如新建 Compose 配置读取)一直排队。
-const MAX_CONCURRENT_PROJECT_STATS_STREAMS = 3;
-let activeProjectStatsStreams = 0;
-const queuedProjectStatsStreams = [];
-
-function drainProjectStatsQueue() {
-  while (activeProjectStatsStreams < MAX_CONCURRENT_PROJECT_STATS_STREAMS && queuedProjectStatsStreams.length) {
-    const entry = queuedProjectStatsStreams.shift();
-    if (entry.signal?.aborted) {
-      entry.cleanup();
-      entry.reject(new DOMException('The operation was aborted.', 'AbortError'));
-      continue;
-    }
-    entry.started = true;
-    entry.cleanup();
-    activeProjectStatsStreams += 1;
-    let released = false;
-    entry.resolve(() => {
-      if (released) return;
-      released = true;
-      activeProjectStatsStreams = Math.max(0, activeProjectStatsStreams - 1);
-      drainProjectStatsQueue();
-    });
-  }
-}
-
-function acquireProjectStatsSlot(signal) {
-  if (signal?.aborted) return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
-  return new Promise((resolve, reject) => {
-    const entry = {
-      signal,
-      resolve,
-      reject,
-      started: false,
-      cleanup: () => signal?.removeEventListener('abort', onAbort),
-    };
-    const onAbort = () => {
-      if (entry.started) return; // 启动后的请求由 fetch(signal) 负责中止,finally 释放并发槽位。
-      const index = queuedProjectStatsStreams.indexOf(entry);
-      if (index >= 0) queuedProjectStatsStreams.splice(index, 1);
-      entry.cleanup();
-      reject(new DOMException('The operation was aborted.', 'AbortError'));
-      drainProjectStatsQueue();
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-    queuedProjectStatsStreams.push(entry);
-    drainProjectStatsQueue();
-  });
-}
-
-/** 项目容器实时资源指标 SSE 流(GET),全局限流并为普通 API 保留连接槽位。 */
-export async function streamProjectStats(projectId, onFrame, signal, interval = 2500) {
-  const release = await acquireProjectStatsSlot(signal);
-  try {
-    const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectId)}/stats/stream?interval=${interval}`, { signal });
-    if (!res.ok || !res.body) throw await streamError(res, '指标流请求失败');
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split('\n\n');
-      buf = parts.pop();
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith('data:')) continue;
-        try {
-          onFrame(JSON.parse(line.slice(5).trim()));
-        } catch {
-          // 跳过无法解析的指标流帧,避免单帧污染终止整条流。
-        }
-      }
-    }
-  } finally {
-    release();
-  }
-}
+export { streamProjectStats } from './project-stats-stream.js';
 
 /** 构造 WebSocket 绝对地址 */
 export function wsUrl(path) {

@@ -9,8 +9,10 @@ import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
 import { configuredComposeProjectRoots, safeProjectMountPath } from './mount-plan.js';
-import { getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
-import { sshExec, sshReadFile, sshWriteFile } from './remote-shell.js';
+import { getActiveHost, getDockerForHost, getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
+import { sshExec, sshReadFile, sshWriteFile, sshListDirectory } from './remote-shell.js';
+
+import { normalizeHostDirectory, hostDirectoryInspector } from './host-directory-paths.js';
 
 let runnerImagePromise;
 const workspaceRunners = new Map();
@@ -226,53 +228,88 @@ async function withRunner(project, callback) {
   }
 }
 
-/**
- * 首次部署专用：原子创建全新目录，不复用或覆盖任何已有目录。
- * 普通 withRunner 仍要求 Compose 文件已经存在。这里只给短生命周期
- * helper 挂 /projects（无 Docker socket、无网络），创建完成立即释放。
- */
+/** 目录来自 Docker 宿主机而非面板容器；本地 helper 只读、无网络、无 socket。 */
+export async function inspectHostDirectory(host, directory, options = {}) {
+  const requested = normalizeHostDirectory(directory);
+  if (host.type === 'tcp') throw Object.assign(new Error('TCP 节点不支持宿主机目录浏览，请切换到本地或 SSH 节点'), { statusCode: 409 });
+  if (host.type === 'ssh') return sshListDirectory(host, requested, options);
+  let helper;
+  try {
+    helper = await getDockerForHost(host.id).createContainer({
+      Image: await runnerImage(), Cmd: ['sleep', '60'],
+      Labels: { 'composeops.helper': 'directory-browser' },
+      HostConfig: { AutoRemove: true, ReadonlyRootfs: true, NetworkMode: 'none',
+        Mounts: [{ Type: 'bind', Source: '/', Target: '/host', ReadOnly: true }],
+        SecurityOpt: ['no-new-privileges:true'], CapDrop: ['ALL'], CapAdd: ['DAC_OVERRIDE'],
+      },
+    });
+    await helper.start();
+    const response = await execInRunner(helper, ['node', '-e', '(' + hostDirectoryInspector.toString() + ')()', requested,
+      options.resolveOnly ? '1' : '0', options.allowMissing ? '1' : '0', options.after || ''], { timeoutMs: 15000 });
+    const result = JSON.parse(response.stdout || '{}');
+    if (response.code !== 0 || !result.path) throw Object.assign(new Error('无法读取宿主机目录，请检查目录是否存在及访问权限'), { statusCode: 409, code: result.error });
+    normalizeHostDirectory(result.path);
+    return result;
+  } finally { if (helper) await helper.remove({ force: true }).catch(() => {}); }
+}
+
+export async function browseHostDirectories({ directory = '/', expectedHostId, after = '' } = {}) {
+  const host = getActiveHost();
+  const identity = { hostId: expectedHostId, activeHostAtScan: expectedHostId };
+  if (!expectedHostId || host.id !== expectedHostId) throw Object.assign(new Error('Docker 节点已变化，请重新选择目录'), { statusCode: 409, code: 'HOST_CHANGED' });
+  assertProjectHostUnchanged(identity);
+  const result = await inspectHostDirectory(host, directory, { after });
+  assertProjectHostUnchanged(identity);
+  return { ...result, hostId: host.id, hostName: host.name, parent: result.path === '/' ? null : path.posix.dirname(result.path) };
+}
+
+/** 首次部署原子创建独立子目录；helper 仅写所选父目录，已有目录不覆盖。 */
 export async function withNewWorkspace(project, callback) {
   const { root, files } = projectPaths(project);
-  const creationRoot = safeProjectMountPath(project.creationRoot || '/projects');
-  if (!creationRoot || !configuredComposeProjectRoots().includes(creationRoot) ||
+  const creationRoot = normalizeHostDirectory(project.creationRoot || '/projects');
+  if (
       path.posix.dirname(root) !== creationRoot || files.some(file => path.posix.dirname(file) !== root)) {
-    throw Object.assign(new Error('首次部署目录必须是管理员配置的项目根目录下的独立子目录'), { statusCode: 403 });
+    throw Object.assign(new Error('项目目录必须是所选父目录下的独立子目录'), { statusCode: 403 });
   }
   assertProjectHostUnchanged(project);
   const host = getProjectHost(project);
   if (host.type === 'tcp') throw Object.assign(new Error('TCP 节点不支持创建应用工作区'), { statusCode: 409 });
   let container;
+  let writeRoot = root;
   try {
     if (host.type === 'ssh') {
-      const parent = await sshExec(host, ['mkdir', '-p', '--', creationRoot], { timeoutMs: 15000 });
-      if (parent.code !== 0) throw Object.assign(new Error('无法创建远端项目根目录 ' + creationRoot + '，请检查写入权限'), { statusCode: 409 });
+      if (configuredComposeProjectRoots().includes(creationRoot)) {
+        const parent = await sshExec(host, ['mkdir', '-p', '--', creationRoot], { timeoutMs: 15000 });
+        if (parent.code !== 0) throw Object.assign(new Error('无法创建远端项目根目录，请检查写入权限'), { statusCode: 409 });
+      }
       const verifiedRoot = await sshExec(host, ['realpath', '-e', '--', creationRoot], { timeoutMs: 15000 });
       if (verifiedRoot.code !== 0 || verifiedRoot.stdout.trim() !== creationRoot) {
         throw Object.assign(new Error('项目根目录无法通过真实路径校验，拒绝创建'), { statusCode: 403 });
       }
       container = { __ssh: true, host };
     } else {
-      container = await docker.createContainer({
+      const parent = await inspectHostDirectory(host, creationRoot, { resolveOnly: true, allowMissing: configuredComposeProjectRoots().includes(creationRoot) });
+      if (parent.path !== creationRoot) throw Object.assign(new Error('目录包含符号链接，请浏览并选择解析后的真实目录：' + parent.path), { statusCode: 409 });
+      if (!parent.exists && creationRoot.includes(':')) throw Object.assign(new Error('请先在宿主机创建该目录，再浏览选择'), { statusCode: 400 });
+      assertProjectHostUnchanged(project);
+      writeRoot = path.posix.join('/workspace', path.posix.basename(root));
+      container = await getDockerForHost(host.id).createContainer({
         Image: await runnerImage(), Cmd: ['sleep', '300'],
         Labels: { 'composeops.helper': 'blueprint-init', 'composeops.project': project.id },
         HostConfig: {
           AutoRemove: true, ReadonlyRootfs: true, NetworkMode: 'none',
-          // Binds 明确创建尚不存在的 /projects；Mounts 要求 source 已存在。
-          Binds: [creationRoot + ':' + creationRoot + ':rw'], SecurityOpt: ['no-new-privileges:true'],
+          ...(parent.exists ? { Mounts: [{ Type: 'bind', Source: creationRoot, Target: '/workspace', ReadOnly: false }] }
+            : { Binds: [creationRoot + ':/workspace:rw'] }),
+          SecurityOpt: ['no-new-privileges:true'],
         },
       });
       await container.start();
+      container.__creationDirectory = { source: root, target: writeRoot };
     }
     assertProjectHostUnchanged(project);
-    if (!container.__ssh) {
-      const verifiedRoot = await execInRunner(container, ['realpath', '-e', '--', creationRoot], { timeoutMs: 15000 });
-      if (verifiedRoot.code !== 0 || verifiedRoot.stdout.trim() !== creationRoot) {
-        throw Object.assign(new Error('项目根目录无法通过真实路径校验，拒绝创建'), { statusCode: 403 });
-      }
-    }
     const created = await execInRunner(container, [
       'sh', '-c', 'if [ -e "$1" ] || [ -L "$1" ]; then exit 17; fi; umask 077; mkdir -- "$1"',
-      'composeops-init', root,
+      'composeops-init', writeRoot,
     ], { timeoutMs: 15000 });
     if (created.code !== 0) {
       throw Object.assign(new Error(created.code === 17
@@ -437,6 +474,10 @@ async function putArchiveFile(container, directory, name, content, header) {
       throw Object.assign(new Error('远端文件名不合法'), { statusCode: 400 });
     }
     return sshWriteFile(container.host, path.posix.join(directory, name), content, header);
+  }
+  if (container?.__creationDirectory) {
+    if (directory !== container.__creationDirectory.source) throw new Error('创建文件必须位于新项目目录');
+    directory = container.__creationDirectory.target;
   }
   const pack = tar.pack();
   pack.entry({

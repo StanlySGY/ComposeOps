@@ -37,7 +37,8 @@ export async function executeSourceDeployment(project, { runCommand, onOutput = 
     throw Object.assign(new Error('项目没有可用的 Compose 文件'), { statusCode: 409 });
   }
 
-  const git = (...args) => ['git', '-C', root, ...args];
+  // withRunner 已校验项目真实路径；仅信任本次命令的这一个仓库。
+  const git = (...args) => ['git', '-c', `safe.directory=${root}`, '-C', root, ...args];
   const rootResult = await runChecked(runCommand, onOutput, '检查 Git 仓库根目录', git('rev-parse', '--show-prefix'), GIT_TIMEOUT_MS);
   const repoPrefix = String(rootResult.stdout || '').trim();
   if (repoPrefix) {

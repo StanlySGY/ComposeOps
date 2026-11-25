@@ -5,7 +5,7 @@ ComposeOps 可以直接使用你自己的 Docker Compose YAML 创建新项目，
 ## 使用方式
 
 1. 打开 **服务总览 → 新建 Compose**。
-2. 选择项目名称与项目根目录。
+2. 确认目标节点，输入项目名称。点击 **浏览目录** 逐级进入文件夹、返回上级，或直接输入宿主机绝对路径。最终路径为 `所选父目录/项目名称`。
 3. 粘贴 docker-compose.yml 内容；需要环境变量时可展开 .env 输入区。
 4. 点击 **创建并部署**。
 5. 页面会实时展示目录准备、Compose 校验、镜像拉取和启动输出。
@@ -14,31 +14,31 @@ ComposeOps 可以直接使用你自己的 Docker Compose YAML 创建新项目，
 
 如果 Compose 校验、镜像拉取或启动失败，Compose 文件和项目登记会保留，用户可以进入项目配置修复后再操作。命令返回成功只代表 Compose 启动命令完成，不等于应用健康；仍需检查服务健康状态和日志。
 
-## 项目根目录白名单
+## 选择宿主机目录
 
-默认仅允许在 Docker 宿主机的 /projects 下创建：
+可以在本地或 SSH 节点的任意普通文件夹下新建项目，不再需要把目录加入白名单。浏览器显示的是目标宿主机目录，面板运行在容器中也不例外。通过符号链接进入时会显示解析后的真实路径；手工输入链接路径时，请按提示改选真实目录。
 
-~~~dotenv
-COMPOSEOPS_PROJECT_ROOTS=/projects
-~~~
-
-管理员可以在部署环境的 .env 中追加经过确认的绝对路径，使用逗号分隔：
+`COMPOSEOPS_PROJECT_ROOTS` 仍可配置常用目录快捷入口，默认 `/projects`，多个入口用逗号分隔：
 
 ~~~dotenv
 COMPOSEOPS_PROJECT_ROOTS=/projects,/opt/compose-projects
 ~~~
 
-修改 .env 后重新创建或更新 ComposeOps 容器，使环境变量生效。额外根目录必须是你明确允许 ComposeOps 创建项目的宿主机目录；不要将 /、/home、/root、/var 等宽泛目录加入白名单。
+这些入口不是访问范围限制。快捷目录可在首次使用时创建；其他手输位置必须已经存在。创建需要目标节点的写入权限，不支持 `/proc`、`/sys`、`/dev` 等内核目录。每次创建独立子目录，已有目录或符号链接不会被覆盖。
 
-界面只会列出白名单中的目录，API 也会在服务端再次校验。创建前会校验根目录真实路径；项目子目录必须不存在，已有目录或符号链接均不会被覆盖。
+## 草稿、重试与后台任务
+
+关闭再打开弹窗会保留当前草稿；草稿仅在页面内存中保留，YAML 和环境变量不会写入浏览器本地存储。YAML 解析等创建前错误可以原地修正重试。文件已经创建的失败会显示 **打开配置**、**查看项目**，避免重复创建。
+
+新建项目与 **拉取源码并重建** 都登记到后台任务。关闭弹窗或刷新浏览器不会取消执行，可在 **事件中心 → 操作与任务 → 后台任务** 查看输出和结果。任务数据库保存节点、项目位置、阶段和脱敏输出，不复制 YAML/.env 正文。服务进程重启、执行超时或输出连接异常时显示结果需核对，不自动重试；请先检查宿主机文件、Git 版本及容器状态。
 
 ## 节点与文件安全
 
 - 支持本地 Docker 节点和通过 SSH 管理的 Docker 主机。
 - 仅有 Docker API 的 TCP 节点不支持创建宿主机目录；请切换为 SSH 节点。
-- 创建流程使用短生命周期隔离 helper，只挂载选定的项目根目录；helper 不挂载 Docker Socket、不接入网络，根文件系统只读。
+- 本地目录浏览 helper 只读访问宿主机目录；创建 helper 只对所选父目录开放写入。两者均不挂载 Docker Socket、不接入网络，根文件系统只读。后续 Compose 操作复用现有项目工作区。
 - 项目名仅允许小写字母、数字、下划线和连字符，且必须以字母或数字开头。
-- Compose YAML 必须包含至少一个服务，最大 1 MiB；.env 最大 512 KiB。
+- Compose YAML 必须包含至少一个服务，最大 1 MiB；.env 最大 512 KiB，均按 UTF-8 字节数计算。
 - Compose 与 .env 文件创建权限为 0600；项目目录创建过程不覆盖任何已有目录。
 - 创建请求绑定当前 Docker 节点 ID，切换节点后旧请求不能写入新节点。
 
@@ -47,3 +47,9 @@ COMPOSEOPS_PROJECT_ROOTS=/projects,/opt/compose-projects
 服务端先执行 docker compose config --quiet 验证配置。存在远端 image: 且不是 build: 的服务时，先执行 docker compose pull --ignore-buildable；随后统一执行 docker compose up -d --build。纯本地构建服务跳过独立 pull 阶段。
 
 .env 和 Compose 文件都位于项目目录中，Compose 相对路径按项目目录解析。自定义项目使用输入的项目名作为 Compose project name，避免目录或 YAML 中的 name: 造成栈名称漂移。
+
+## 源码部署身份
+
+源码部署仍要求干净的仓库根目录、当前分支已有 upstream，使用 `git pull --ff-only`，随后校验并构建 Compose。容器 runner 仅在本次 Git 命令中信任已校验的这个项目目录，因此普通宿主用户拥有的仓库也能运行；不会设置全局 `safe.directory=*`。
+
+私有远端的凭据必须在实际执行环境可用。本地 runner 不会自动继承宿主用户的 SSH agent、`~/.ssh` 或 Git credential helper；通过 SSH 节点执行时使用该远端用户已有的 Git 认证配置。认证失败会停止，不会继续构建。

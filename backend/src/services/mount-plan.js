@@ -20,8 +20,8 @@ export function safeProjectMountPath(value) {
 }
 
 /**
- * 管理员允许 ComposeOps 首次创建项目目录的宿主机根目录。
- * 默认仅开放 /projects；额外目录必须由部署管理员显式配置，页面不能提交任意宿主机路径。
+ * 创建项目时的目录快捷入口；不再限制可选择的宿主机父目录。
+ * 配置的快捷目录可在首次使用时创建，其他位置须先浏览或输入已有目录。
  */
 export function configuredComposeProjectRoots(raw = process.env.COMPOSEOPS_PROJECT_ROOTS) {
   const entries = String(raw || '/projects').split(',').map((item) => item.trim()).filter(Boolean);
