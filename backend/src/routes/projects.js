@@ -6,6 +6,7 @@ import { readCompose, saveCompose } from '../services/compose-runner.js';
 import { pruneWorkspaceRunners, readWorkspaceCompose, saveWorkspaceCompose } from '../services/compose-workspace.js';
 import { prepareProjectAction } from '../services/project-action-runner.js';
 import { runSourceDeployment } from '../services/source-deploy.js';
+import { composeProjectCreateOptions, createCustomComposeProject } from '../services/custom-compose-project.js';
 import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles, normalizeEnvFileName } from '../services/project-env.js';
 import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
@@ -96,6 +97,93 @@ const fileIndexField = { type: 'number' };
 
 export default async function projectRoutes(fastify) {
   fastify.get('/', async () => ({ projects: await scanProjects() }));
+
+  // 创建自定义 Compose 项目只开放管理员配置的宿主机根目录，不接受任意路径。
+  fastify.get('/create-options', async (_request, reply) => {
+    try { return composeProjectCreateOptions(getActiveHost()); }
+    catch (error) { return reply.code(error.statusCode || 500).send({ error: 'compose_create_options_failed', message: error.message }); }
+  });
+
+  fastify.post('/create', {
+    schema: {
+      body: {
+        type: 'object', additionalProperties: false,
+        required: ['projectName', 'rootDir', 'composeContent', 'expectedHostId'],
+        properties: {
+          projectName: { type: 'string', minLength: 1, maxLength: 40 },
+          rootDir: { type: 'string', minLength: 1, maxLength: 4096 },
+          composeContent: { type: 'string', minLength: 1, maxLength: 1048576 },
+          envContent: { type: 'string', maxLength: 524288 },
+          expectedHostId: { type: 'string', minLength: 1, maxLength: 128 },
+          owner: { type: 'string', maxLength: 80 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const controller = new AbortController();
+    let clientClosed = false;
+    let finished = false;
+    let currentExec = null;
+    let output = '';
+    const heartbeat = setInterval(() => send('stdout', ''), 15000);
+    const send = (type, data) => {
+      if (reply.raw.destroyed || reply.raw.writableEnded) return;
+      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
+    };
+    const finish = async (code, result = null) => {
+      if (finished) return;
+      finished = true;
+      clearInterval(heartbeat);
+      if (result) send('result', result);
+      send('exit', { code });
+      reply.raw.end();
+    };
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    reply.raw.on('close', () => {
+      if (finished) return;
+      clientClosed = true;
+      controller.abort();
+      currentExec?.kill?.('SIGTERM');
+      clearInterval(heartbeat);
+    });
+    try {
+      const result = await createCustomComposeProject(request.body, {
+        signal: controller.signal,
+        onOutput: (type, text) => {
+          output = (output + String(text || '')).slice(-20000);
+          send(type, text);
+        },
+        onPhase: (phase) => send('phase', phase),
+        onExec: (handle) => {
+          currentExec = handle;
+          if (clientClosed) handle.kill?.('SIGTERM');
+        },
+      });
+      invalidateScanCache();
+      await finish(result.ok ? 0 : 1, result);
+    } catch (error) {
+      invalidateScanCache();
+      const result = {
+        ok: false,
+        code: 1,
+        message: error.message,
+        projectId: error.projectId || '',
+        projectName: error.projectName || request.body.projectName,
+        workingDir: error.workingDir || '',
+        directoryCreated: !!error.directoryCreated,
+        filesCreated: !!error.filesCreated,
+      };
+      const detail = `${error.message}\n`;
+      output = (output + detail).slice(-20000);
+      send('stderr', detail);
+      await finish(1, result);
+    }
+  });
 
   // 独立容器与 Compose 项目分开呈现；只接受当前活动节点扫描得到的容器 ID。
   fastify.get('/standalone-containers', async (request, reply) => {

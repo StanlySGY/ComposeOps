@@ -8,7 +8,7 @@ import { withProjectOperationLock } from './project-operation-lock.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
-import { safeProjectMountPath } from './mount-plan.js';
+import { configuredComposeProjectRoots, safeProjectMountPath } from './mount-plan.js';
 import { getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
 import { sshExec, sshReadFile, sshWriteFile } from './remote-shell.js';
 
@@ -233,8 +233,10 @@ async function withRunner(project, callback) {
  */
 export async function withNewWorkspace(project, callback) {
   const { root, files } = projectPaths(project);
-  if (path.posix.dirname(root) !== '/projects' || files.some(file => path.posix.dirname(file) !== root)) {
-    throw Object.assign(new Error('应用首次部署只能在 /projects 的独立子目录创建配置'), { statusCode: 403 });
+  const creationRoot = safeProjectMountPath(project.creationRoot || '/projects');
+  if (!creationRoot || !configuredComposeProjectRoots().includes(creationRoot) ||
+      path.posix.dirname(root) !== creationRoot || files.some(file => path.posix.dirname(file) !== root)) {
+    throw Object.assign(new Error('首次部署目录必须是管理员配置的项目根目录下的独立子目录'), { statusCode: 403 });
   }
   assertProjectHostUnchanged(project);
   const host = getProjectHost(project);
@@ -242,8 +244,12 @@ export async function withNewWorkspace(project, callback) {
   let container;
   try {
     if (host.type === 'ssh') {
-      const parent = await sshExec(host, ['mkdir', '-p', '--', '/projects'], { timeoutMs: 15000 });
-      if (parent.code !== 0) throw Object.assign(new Error('无法创建远端应用父目录，请检查 /projects 写入权限'), { statusCode: 409 });
+      const parent = await sshExec(host, ['mkdir', '-p', '--', creationRoot], { timeoutMs: 15000 });
+      if (parent.code !== 0) throw Object.assign(new Error('无法创建远端项目根目录 ' + creationRoot + '，请检查写入权限'), { statusCode: 409 });
+      const verifiedRoot = await sshExec(host, ['realpath', '-e', '--', creationRoot], { timeoutMs: 15000 });
+      if (verifiedRoot.code !== 0 || verifiedRoot.stdout.trim() !== creationRoot) {
+        throw Object.assign(new Error('项目根目录无法通过真实路径校验，拒绝创建'), { statusCode: 403 });
+      }
       container = { __ssh: true, host };
     } else {
       container = await docker.createContainer({
@@ -252,12 +258,18 @@ export async function withNewWorkspace(project, callback) {
         HostConfig: {
           AutoRemove: true, ReadonlyRootfs: true, NetworkMode: 'none',
           // Binds 明确创建尚不存在的 /projects；Mounts 要求 source 已存在。
-          Binds: ['/projects:/projects:rw'], SecurityOpt: ['no-new-privileges:true'],
+          Binds: [creationRoot + ':' + creationRoot + ':rw'], SecurityOpt: ['no-new-privileges:true'],
         },
       });
       await container.start();
     }
     assertProjectHostUnchanged(project);
+    if (!container.__ssh) {
+      const verifiedRoot = await execInRunner(container, ['realpath', '-e', '--', creationRoot], { timeoutMs: 15000 });
+      if (verifiedRoot.code !== 0 || verifiedRoot.stdout.trim() !== creationRoot) {
+        throw Object.assign(new Error('项目根目录无法通过真实路径校验，拒绝创建'), { statusCode: 403 });
+      }
+    }
     const created = await execInRunner(container, [
       'sh', '-c', 'if [ -e "$1" ] || [ -L "$1" ]; then exit 17; fi; umask 077; mkdir -- "$1"',
       'composeops-init', root,

@@ -101,6 +101,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 
 - [AI SRE 平台：应用目标、有界自治、可靠发布、业务恢复与证据复盘](docs/public/AI_SRE.md)
 - [应用接入向导](docs/public/APPLICATION_ONBOARDING.md) · [多服务发布](docs/public/APPLICATION_RELEASES.md) · [数据库与业务恢复](docs/public/BUSINESS_RECOVERY.md)
+- [从零创建自定义 Compose 项目](docs/public/CUSTOM_COMPOSE_PROJECTS.md)
 - [平台健康与多窗口告警](docs/public/PLATFORM_MONITORING.md) · [故障关联与遥测接入](docs/public/INCIDENT_CORRELATION.md) · [AI 诊断评测](docs/public/DIAGNOSIS_EVALUATION.md)
 - WHY_COMPOSEOPS：`docs/public/WHY_COMPOSEOPS.md`
 - FAQ：`docs/public/FAQ.md`
@@ -125,6 +126,7 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 
 **项目管理**
 - 🔍 自动发现 Compose 项目（基于容器标签）
+- 🆕 从零创建自定义 Compose 项目：选择管理员白名单目录、粘贴 YAML / .env，一键校验、拉取镜像和启动
 - 🌐 多宿主管理：Local / TCP / SSH 节点切换
 - 📁 按 `myops.owner` 分组，支持收藏和备注
 - 🎯 显式纳管：默认只读，手动授权后开放控制

@@ -8,7 +8,8 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-scanner-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 const { getActivityDocker, setActiveHost, upsertHost } = await import('../src/services/docker-hosts.js');
 const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
-const { setProjectPreference } = await import('../src/lib/db.js');
+const { setProjectPreference, registerCustomComposeProject, deleteCustomComposeProject } = await import('../src/lib/db.js');
+const { composeProjectId } = await import('../src/services/project-id.js');
 const { prepareProjectAction } = await import('../src/services/project-action-runner.js');
 const local = getActivityDocker();
 const remoteHost = upsertHost({ name: '扫描测试', type: 'tcp', host: '127.0.0.1', port: 1 });
@@ -78,6 +79,81 @@ test('纳管、目录权限及备注变更立即生效,不等待 Docker 扫描�
   assert.equal(current.managed, false);
   assert.equal(current.editable, false);
   assert.equal(list.mock.callCount(), 1);
+});
+
+test('已登记的自定义 Compose 项目在首个容器创建前也会被扫描并可继续编辑', async (t) => {
+  const workingDir = path.join(tempDir, 'custom-compose');
+  fs.mkdirSync(workingDir);
+  const composeFile = path.join(workingDir, 'docker-compose.yml');
+  fs.writeFileSync(composeFile, 'services:\n  web:\n    image: nginx:latest\n');
+  const projectId = composeProjectId(workingDir, 'custom-compose', 'local', 'local');
+  registerCustomComposeProject({
+    projectId,
+    hostId: 'local',
+    projectName: 'custom-compose',
+    workingDir,
+    composeFile,
+    owner: 'Personal',
+  });
+  setProjectPreference(projectId, { managed: true, mountEnabled: true });
+  t.mock.method(local, 'listContainers', async () => []);
+  invalidateScanCache();
+
+  const project = (await scanProjects()).find((item) => item.id === projectId);
+  assert.ok(project);
+  assert.equal(project.status, 'stopped');
+  assert.equal(project.containers.length, 0);
+  assert.equal(project.managed, true);
+  assert.equal(project.mountEnabled, true);
+  assert.equal(project.editable, true);
+  assert.equal(project.composeFile, composeFile);
+  deleteCustomComposeProject(projectId);
+  invalidateScanCache();
+});
+
+test('已登记的自定义 Compose 项目启动首个容器后仍与 Docker 标签合并成同一项目', async (t) => {
+  const workingDir = path.join(tempDir, 'custom-compose-running');
+  fs.mkdirSync(workingDir);
+  const composeFile = path.join(workingDir, 'docker-compose.yml');
+  fs.writeFileSync(composeFile, ['services:', '  web:', '    image: nginx:latest', ''].join('\n'));
+  const projectId = composeProjectId(workingDir, 'custom-compose-running', 'local', 'local');
+  registerCustomComposeProject({
+    projectId,
+    hostId: 'local',
+    projectName: 'custom-compose-running',
+    workingDir,
+    composeFile,
+    owner: 'Personal',
+  });
+  setProjectPreference(projectId, { managed: true, mountEnabled: true });
+  const container = {
+    Id: 'custom-container',
+    Names: ['/custom-compose-running-web-1'],
+    State: 'running',
+    Status: 'Up 10 seconds (healthy)',
+    Image: 'nginx:latest',
+    ImageID: 'sha256:custom',
+    Created: Math.floor(Date.now() / 1000),
+    Labels: {
+      'com.docker.compose.project': 'custom-compose-running',
+      'com.docker.compose.project.working_dir': workingDir,
+      'com.docker.compose.project.config_files': composeFile,
+      'com.docker.compose.service': 'web',
+    },
+    Ports: [],
+    Mounts: [],
+  };
+  t.mock.method(local, 'listContainers', async () => [container]);
+  invalidateScanCache();
+
+  const projects = await scanProjects();
+  const matched = projects.filter((item) => item.id === projectId);
+  assert.equal(matched.length, 1);
+  assert.equal(matched[0].containers.length, 1);
+  assert.equal(matched[0].containers[0].id, 'custom-container');
+  assert.equal(matched[0].status, 'running');
+  deleteCustomComposeProject(projectId);
+  invalidateScanCache();
 });
 
 test('项目操作完成后立即读取真实容器状态', async t => {

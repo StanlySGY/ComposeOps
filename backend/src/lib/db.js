@@ -69,6 +69,17 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS custom_compose_projects (
+    project_id TEXT PRIMARY KEY,
+    host_id TEXT NOT NULL,
+    project_name TEXT NOT NULL,
+    working_dir TEXT NOT NULL,
+    compose_file TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT 'Personal',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_custom_compose_projects_host ON custom_compose_projects(host_id);
+
   CREATE TABLE IF NOT EXISTS compose_backups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL,
@@ -1591,6 +1602,33 @@ export function setProjectPreference(projectId, { managed, mountEnabled, favorit
       updated_at = excluded.updated_at
   `).run(projectId, nextManaged, nextMountEnabled, nextFavorite, nextNote);
   return { managed: !!nextManaged, favorite: !!nextFavorite, note: nextNote };
+}
+
+/** Register new projects before their first container exists so failed deployments remain editable. */
+export function registerCustomComposeProject({ projectId, hostId, projectName, workingDir, composeFile, owner = 'Personal' }) {
+  db.prepare(`
+    INSERT INTO custom_compose_projects(project_id, host_id, project_name, working_dir, compose_file, owner)
+    VALUES(?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id) DO UPDATE SET
+      host_id = excluded.host_id,
+      project_name = excluded.project_name,
+      working_dir = excluded.working_dir,
+      compose_file = excluded.compose_file,
+      owner = excluded.owner
+  `).run(projectId, hostId, projectName, workingDir, composeFile, owner);
+}
+
+export function listCustomComposeProjects(hostId) {
+  return db.prepare(`
+    SELECT project_id AS projectId, host_id AS hostId, project_name AS projectName,
+           working_dir AS workingDir, compose_file AS composeFile, owner,
+           created_at AS createdAt
+    FROM custom_compose_projects WHERE host_id = ? ORDER BY created_at, project_name
+  `).all(hostId);
+}
+
+export function deleteCustomComposeProject(projectId) {
+  return db.prepare('DELETE FROM custom_compose_projects WHERE project_id = ?').run(projectId).changes > 0;
 }
 
 export function setProjectManagement(discoveredProjectIds, managedProjectIds, mountProjectIds = null) {

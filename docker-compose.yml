@@ -146,6 +146,8 @@ services:
       - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},playwright
       - NODE_USE_ENV_PROXY=${COMPOSEOPS_NODE_USE_ENV_PROXY:-0}
       - COMPOSEOPS_PLAYWRIGHT_MCP_URL=http://playwright:8931/mcp
+      # 允许从零创建 Compose 项目的宿主机目录白名单（逗号分隔）；默认仅 /projects。
+      - COMPOSEOPS_PROJECT_ROOTS=${COMPOSEOPS_PROJECT_ROOTS:-/projects}
       # Optional OpenTelemetry GenAI trace export. Disabled when endpoint is empty.
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-composeops}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}

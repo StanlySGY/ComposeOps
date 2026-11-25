@@ -1,7 +1,7 @@
 import { access } from 'fs/promises';
 import path from 'node:path';
 import { getActiveHostId, getHost, getDockerForHost, listHosts } from './docker-hosts.js';
-import { getProjectMountEnabled, getProjectPreference, getSetting } from '../lib/db.js';
+import { getProjectMountEnabled, getProjectPreference, getSetting, listCustomComposeProjects } from '../lib/db.js';
 import { safeProjectMountPath } from './mount-plan.js';
 import { composeProjectId } from './project-id.js';
 
@@ -116,15 +116,36 @@ export async function scanAllProjects() {
 async function scanProjectsUncached(activeDocker, host) {
   const nodeType = host.type;
   let containers;
+  const projects = new Map();
+  // Newly-created Compose projects must remain visible even before Compose has
+  // managed to create a container (for example, when an image registry is down).
+  for (const registered of listCustomComposeProjects(host.id)) {
+    const workingDir = safeProjectMountPath(registered.workingDir);
+    const projectName = String(registered.projectName || '');
+    const composeFile = path.posix.normalize(String(registered.composeFile || ''));
+    if (!workingDir || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(projectName) ||
+        path.posix.dirname(composeFile) !== workingDir || !path.posix.isAbsolute(composeFile)) continue;
+    const key = `${workingDir}\0${projectName}`;
+    projects.set(key, {
+      id: registered.projectId,
+      hostId: host.id,
+      hostName: host.name,
+      projectName,
+      owner: registered.owner || 'Personal',
+      workingDir,
+      composeFiles: [composeFile],
+      composeFile,
+      containers: [],
+      registered: true,
+    });
+  }
   try {
     containers = await activeDocker.listContainers({ all: true });
   } catch {
-    return [];
+    containers = [];
   }
 
   // 按 compose project 分组（以 workingDir 为 key）
-  const projects = new Map();
-
   for (const c of containers) {
     const labels = c.Labels || {};
     const projectName = labels[COMPOSE_PROJECT_LABEL];
@@ -180,7 +201,9 @@ async function scanProjectsUncached(activeDocker, host) {
   // 计算每个 project 的状态：running | stopped | partial + 可达性检查
   for (const project of projects.values()) {
     const runningCount = project.containers.filter(c => c.state === 'running').length;
-    if (runningCount === project.containers.length) {
+    if (project.containers.length === 0) {
+      project.status = 'stopped';
+    } else if (runningCount === project.containers.length) {
       project.status = 'running';
     } else if (runningCount === 0) {
       project.status = 'stopped';
@@ -211,6 +234,7 @@ async function scanProjectsUncached(activeDocker, host) {
     if (project.mounted) project.mountState = 'ready';
     else if (!project.workingDir) project.mountState = 'metadata_missing';
     else if (nodeType === 'tcp') project.mountState = 'remote_api_only';
+    else if (project.registered && project.workspaceAvailable) project.mountState = 'workspace_available';
     else if (sshHost && project.workspaceAvailable) project.mountState = 'remote_ssh';
     else if (!project.workingDirReachable) project.mountState = 'directory_unreachable';
     else project.mountState = 'compose_files_unreachable';

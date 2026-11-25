@@ -23,8 +23,21 @@ function fixture(t, { code = 0, afterCreate = () => {}, startFails = false } = {
       async start() { if (startFails) throw new Error('start failed'); },
       async remove() { calls.removed++; },
       async exec({ Cmd }) {
-        calls.commands.push(Cmd);
-        return { async start() { afterCreate(); return Readable.from([]); }, async inspect() { return { ExitCode: code }; } };
+        const isRootRealpath = Cmd[0] === 'realpath';
+        if (!isRootRealpath) calls.commands.push(Cmd);
+        return {
+          async start() {
+            if (!isRootRealpath) afterCreate();
+            if (!isRootRealpath) return Readable.from([]);
+            const payload = Buffer.from(Cmd.at(-1) + '\n');
+            const frame = Buffer.alloc(8 + payload.length);
+            frame[0] = 1;
+            frame.writeUInt32BE(payload.length, 4);
+            payload.copy(frame, 8);
+            return Readable.from([frame]);
+          },
+          async inspect() { return { ExitCode: isRootRealpath ? 0 : code }; },
+        };
       },
     };
   });
@@ -39,6 +52,32 @@ test('new workspace: 初始化无须既有 Compose 文件，helper 无 socket/�
   assert.equal(calls.config.HostConfig.NetworkMode, 'none'); assert.equal(calls.config.HostConfig.ReadonlyRootfs, true);
   assert.equal(calls.commands[0].at(-1), project.workingDir);
   assert.match(calls.commands[0][2], /mkdir --/); assert.doesNotMatch(calls.commands[0][2], /mkdir -p/);
+});
+
+test('new workspace: 只允许管理员额外配置的项目根目录，并将该根目录限定挂载给 helper', async t => {
+  const previous = process.env.COMPOSEOPS_PROJECT_ROOTS;
+  Reflect.set(process.env, 'COMPOSEOPS_PROJECT_ROOTS', '/projects,/srv/composeops');
+  try {
+    const customProject = {
+      ...project,
+      id: 'test-custom-root',
+      creationRoot: '/srv/composeops',
+      workingDir: '/srv/composeops/test-custom',
+      composeFiles: ['/srv/composeops/test-custom/docker-compose.yml'],
+    };
+    const calls = fixture(t);
+    let wrote = false;
+    await withNewWorkspace(customProject, async () => { wrote = true; });
+    assert.equal(wrote, true);
+    assert.deepEqual(calls.config.HostConfig.Binds, ['/srv/composeops:/srv/composeops:rw']);
+    await assert.rejects(
+      withNewWorkspace({ ...customProject, creationRoot: '/srv/not-allowed', workingDir: '/srv/not-allowed/test', composeFiles: ['/srv/not-allowed/test/docker-compose.yml'] }, async () => {}),
+      error => error.statusCode === 403,
+    );
+  } finally {
+    if (previous === undefined) Reflect.deleteProperty(process.env, 'COMPOSEOPS_PROJECT_ROOTS');
+    else Reflect.set(process.env, 'COMPOSEOPS_PROJECT_ROOTS', previous);
+  }
 });
 
 test('new workspace: 已存在目录或符号链接时拒绝覆盖', async t => {

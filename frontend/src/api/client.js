@@ -156,6 +156,9 @@ export const api = {
   logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getProjects: (force = false) => request('/projects', { force }),
+  getComposeProjectCreateOptions: () => request('/projects/create-options'),
+  streamCustomComposeProjectDeploy: (payload, onFrame, signal) =>
+    streamComposeControl(null, null, onFrame, '/projects/create', payload, signal),
   getStandaloneContainers: () => request('/projects/standalone-containers'),
   runStandaloneContainerAction: (id, action, expectedHostId) => request(`/projects/standalone-containers/${encodeURIComponent(id)}/actions`, { method: 'POST', body: JSON.stringify({ action, expectedHostId }) }),
   runComposeServiceAction: (projectId, service, action) => request(`/projects/${encodeURIComponent(projectId)}/services/${encodeURIComponent(service)}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),

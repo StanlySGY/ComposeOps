@@ -4,6 +4,7 @@
       <div><h1 class="page-title">服务总览</h1><p class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
       <div class="page-actions service-page-actions">
         <span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">更新于 {{ lastUpdated }}</span>
+        <button class="btn-primary" :disabled="busy" @click="createComposeOpen = true"><Plus class="h-4 w-4" />新建 Compose</button>
         <label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label>
         <button class="btn-secondary" :disabled="manualRefreshing || store.loading" :aria-busy="manualRefreshing" @click="manualRefresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': manualRefreshing || store.loading }" />{{ manualRefreshing ? '刷新中' : '刷新' }}</button>
         <button class="icon-btn hidden md:inline-grid" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
@@ -88,6 +89,7 @@
     <ProjectActivityDrawer v-if="activityProject" :project="activityProject" @close="activityProject = null" @restored="handleRestored" />
     <ProjectUpgradeModal v-if="upgradeProject" :project="upgradeProject" :open="!!upgradeProject" @close="upgradeProject = null" @upgrade="handleUpgrade" />
     <DbDumpModal v-if="dbDumpProject" :project="dbDumpProject" @close="dbDumpProject = null" />
+    <CustomComposeProjectModal :show="createComposeOpen" @close="createComposeOpen = false" @created="handleCustomComposeCreated" />
   </div>
 </template>
 
@@ -95,7 +97,7 @@
 import MetricTile from '../components/common/MetricTile.vue';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ShieldCheck, AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, RefreshCw, Search, Star, X } from 'lucide-vue-next';
+import { ShieldCheck, AlertTriangle, Bot, Boxes, ChevronDown, CircleCheckBig, Container, Gauge, Keyboard, Plus, RefreshCw, Search, Star, X } from 'lucide-vue-next';
 import { useServicesStore } from '../stores/services.js';
 import { useToastStore } from '../stores/toast.js';
 import { useKeyboardNavigation } from '../composables/useKeyboardNavigation.js';
@@ -112,6 +114,7 @@ import ProjectUpgradeModal from '../components/services/ProjectUpgradeModal.vue'
 import DbDumpModal from '../components/services/DbDumpModal.vue';
 import BatchOperationsBar from '../components/services/BatchOperationsBar.vue';
 import OperationOutputDrawer from '../components/services/OperationOutputDrawer.vue';
+import CustomComposeProjectModal from '../components/services/CustomComposeProjectModal.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import Skeleton from '../components/common/Skeleton.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
@@ -127,6 +130,7 @@ const route = useRoute();
 const router = useRouter();
 const { openAgent, updateAgentContext } = useAgentConsole();
 const autoRefresh = ref(true); const busy = ref(false); const expandedIds = ref(new Set());
+const createComposeOpen = ref(false);
 const { searchQuery, filter, sort, resetFilters } = useServiceFilters();
 const filterLabels = { attention: '需要关注', running: '健康运行', stopped: '已停止', managed: '已纳管', unmanaged: '未纳管', favorites: '仅收藏' };
 const selectedIds = ref([]); const updateSettings = ref({ lastResults: [] }); const focusedProject = ref('');
@@ -257,6 +261,12 @@ const completedBatchTasks = computed(() => batchTasks.value.filter((task) => ['s
 const batchProgress = computed(() => batchTasks.value.length ? Math.round(completedBatchTasks.value / batchTasks.value.length * 100) : 0);
 
 function refresh(force = false) { return store.refresh(force === true).finally(() => { if (!store.error) lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false }); }); }
+async function handleCustomComposeCreated(result) {
+  await refresh(true);
+  if (result?.projectId) {
+    expandedIds.value = new Set([...expandedIds.value, result.projectId]);
+  }
+}
 function hasAttention(project) { return project.status !== 'running' || project.containers.some((container) => container.health === 'unhealthy'); }
 function searchIndex(project) { return [project.projectName, project.owner, project.workingDir, project.note, ...project.containers.flatMap((container) => [container.name, container.image])].join(' ').toLowerCase(); }
 const statusMatchers = { attention: (p) => hasAttention(p), running: (p) => !hasAttention(p), managed: (p) => p.managed, unmanaged: (p) => !p.managed, favorites: (p) => p.favorite, stopped: (p) => p.containers.some((c) => c.state !== 'running') };
