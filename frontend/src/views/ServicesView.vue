@@ -273,9 +273,9 @@ watch(() => store.projects, (projects) => {
   expandedIds.value = next;
 }, { immediate: true });
 function toggleExpanded(projectId) { const next = new Set(expandedIds.value); if (next.has(projectId)) next.delete(projectId); else next.add(projectId); expandedIds.value = next; }
-function actionLabel(action) { return ({ up: '启动', restart: '重启', stop: '停止', pull: '拉取', ps: '状态', 'env.apply': '应用环境变量', 'env.save': '保存环境变量' })[action] || action; }
+function actionLabel(action) { return ({ up: '启动', restart: '重启', stop: '停止', pull: '拉取', ps: '状态', 'source-deploy': '拉取源码并重建', 'env.apply': '应用环境变量', 'env.save': '保存环境变量' })[action] || action; }
 async function run(project, action) {
-  if (busy.value || !project.managed || (action === 'pull' && !project.editable)) return;
+  if (busy.value || !project.managed || (['pull', 'source-deploy'].includes(action) && !project.editable)) return;
   clearTimeout(jobPollTimer);
   activeJobId = '';
   runningAction.value = { id: project.id, action };
@@ -283,9 +283,12 @@ async function run(project, action) {
   controlController = new AbortController();
   busy.value = true; batchTasks.value = []; output.open = true; output.text = ''; output.action = action; output.name = project.projectName; output.projectId = project.id; output.exitCode = null; output.failureReason = ''; output.resultConfirmed = false; output.running = true;
   try {
-    await streamComposeControl(project.id, action, (frame) => {
+    const sourceDeploy = action === 'source-deploy';
+    await streamComposeControl(project.id, sourceDeploy ? null : action, (frame) => {
       applyOperationFrame(output, frame);
-    }, null, null, controlController.signal);
+    }, sourceDeploy ? `/projects/${encodeURIComponent(project.id)}/source-deploy` : null,
+    sourceDeploy ? { confirmed: true, expectedHostId: hosts.activeHostId } : null,
+    controlController.signal);
     await refresh(true);
   } catch (error) { if (error.name !== 'AbortError') { output.text += `\n[请求失败] ${error.message}`; output.exitCode = 1; }
   } finally { controlController = null; busy.value = false; runningAction.value = { id: '', action: '' }; output.running = false; }

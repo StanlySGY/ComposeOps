@@ -23,7 +23,7 @@
 </div>
 
 > **这是什么**：给自己服务器用的单用户运维面板。Docker Socket 等价 root，界面为中文（英文界面在规划中）。
-> **这不是什么**：不支持多租户与团队协作（多人请用 Portainer）；不是 PaaS，不接管构建发布流程（那请看 Coolify / Komodo）。
+> **这不是什么**：不支持多租户与团队协作（多人请用 Portainer）；不是 CI/CD 平台，不提供流水线和无人值守发布。纳管项目可手动拉取源码并在目标节点执行 Compose 构建，详见 [GitOps 与源码部署说明](docs/public/USE_CASE_GITOPS.md)。
 > **定位**：在这类工具里，ComposeOps 的差异点是 **AI 运维 Agent**——不止能看，还能在你确认后替你动手排障。
 
 [在线交互预览](https://stanlysgy.github.io/ComposeOps/) · [升级与回退](docs/public/UPGRADE.md) · [备份与恢复](docs/public/BACKUP_RESTORE.md) · [SQLite 静态加密与密钥轮换](docs/public/DATABASE_ENCRYPTION.md)

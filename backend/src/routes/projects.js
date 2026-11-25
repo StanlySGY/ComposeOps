@@ -5,6 +5,7 @@ import { buildMountPlan } from '../services/mount-plan.js';
 import { readCompose, saveCompose } from '../services/compose-runner.js';
 import { pruneWorkspaceRunners, readWorkspaceCompose, saveWorkspaceCompose } from '../services/compose-workspace.js';
 import { prepareProjectAction } from '../services/project-action-runner.js';
+import { runSourceDeployment } from '../services/source-deploy.js';
 import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles, normalizeEnvFileName } from '../services/project-env.js';
 import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
@@ -669,6 +670,87 @@ export default async function projectRoutes(fastify) {
       .catch((error) => { const text = `${error.message}\n`; output += text; send('stderr', text); finish(1); });
     reply.raw.on('close', () => {
       if (!finished && child && child.exitCode === null && !child.killed) child.kill('SIGTERM');
+    });
+  });
+  // 手动源码部署与 GitOps 同步、镜像发布分离；只有用户明确确认后才拉代码并现场构建。
+  fastify.post('/:id/source-deploy', {
+    schema: {
+      params: idParams,
+      body: {
+        type: 'object', additionalProperties: false,
+        required: ['confirmed', 'expectedHostId'],
+        properties: {
+          confirmed: { type: 'boolean', const: true },
+          expectedHostId: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const found = await projectOr404(request.params.id, reply);
+    if (!found) return;
+    const host = getActiveHost();
+    if (host.type === 'tcp') {
+      return reply.code(409).send({ error: 'source_deploy_unsupported', message: 'TCP 节点只有 Docker API，不能在远端运行 Git 与 Compose 构建命令；请改用 SSH 节点' });
+    }
+    if (!requireEditable(found, reply)) return;
+    if (request.body.expectedHostId !== host.id) {
+      return reply.code(409).send({ error: 'host_changed', message: 'Docker 节点已变化，请在目标节点重新发起源码部署' });
+    }
+    const project = { ...found, host };
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const send = (type, data) => {
+      if (reply.raw.destroyed || reply.raw.writableEnded) return;
+      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
+    };
+    let output = '';
+    let finished = false;
+    let clientClosed = false;
+    let currentExec = null;
+    const heartbeat = setInterval(() => send('stdout', ''), 15_000);
+    const finish = (code) => {
+      if (finished) return;
+      finished = true;
+      clearInterval(heartbeat);
+      invalidateScanCache();
+      addOperation({
+        projectId: project.id,
+        projectName: project.projectName,
+        action: 'source.deploy',
+        status: code === 0 ? 'success' : 'failed',
+        detail: output.slice(-20000),
+      });
+      send('exit', { code });
+      reply.raw.end();
+    };
+    reply.raw.on('close', () => {
+      if (!finished) {
+        clientClosed = true;
+        currentExec?.kill?.();
+        clearInterval(heartbeat);
+      }
+    });
+    runSourceDeployment(project, {
+      onOutput: (type, chunk) => {
+        output = (output + chunk).slice(-20000);
+        send(type, chunk);
+      },
+      onExec: (handle) => {
+        currentExec = handle;
+        if (clientClosed) handle.kill?.();
+      },
+    }).then(() => finish(0)).catch((error) => {
+      const detail = error.code === 'STREAM_CLOSED'
+        ? error.message + '；远端命令可能仍在执行，请先核对容器状态，不要盲目重试'
+        : error.message;
+      const text = '\n[源码部署失败] ' + detail + '\n';
+      output = (output + text).slice(-20000);
+      send('stderr', text);
+      finish(1);
     });
   });
   // ---- 镜像更新雷达 ----

@@ -75,7 +75,7 @@ describe('项目卡片操作契约', () => {
   });
   it('应用配置/重启/停止必须确认，取消不发出动作', async () => {
     await start();
-    for (const [label, action] of [['应用配置 / 启动', 'up'], ['重启项目', 'restart'], ['停止项目', 'stop']]) {
+    for (const [label, action] of [['应用配置 / 启动', 'up'], ['重启项目', 'restart'], ['停止项目', 'stop'], ['拉取源码并重建', 'source-deploy']]) {
       await button('更多操作').trigger('click'); await button(label).trigger('click');
       const dialog = wrapper.getComponent(ConfirmDialog);
       expect(dialog.props('show')).toBe(true);

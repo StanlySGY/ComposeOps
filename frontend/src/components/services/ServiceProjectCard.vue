@@ -34,6 +34,7 @@
           <button :disabled="!project.managed || locked" @click="trigger('up')"><Play :size="15" />{{ project.editable ? '应用配置 / 启动' : '启动容器' }}</button>
           <button :disabled="!project.managed || locked" @click="trigger('restart')"><RotateCw :size="15" />重启项目</button>
           <button :disabled="!project.editable || locked" @click="trigger('pull')"><Download :size="15" />拉取镜像</button>
+          <button :disabled="!project.editable || locked" @click="trigger('source-deploy')"><GitBranch :size="15" />拉取源码并重建</button>
           <button v-if="updateInfo?.hasUpdate" :disabled="!project.editable || locked" @click="$emit('upgrade')"><Sparkles :size="15" />平滑升级</button>
           <button :disabled="!project.managed || locked" @click="trigger('ps')"><ListTree :size="15" />查看详细状态</button>
           <button v-if="dbContainers.length" :disabled="!project.managed || locked" @click="$emit('db-dump')"><Database :size="15" />备份数据库</button>
@@ -194,11 +195,12 @@ async function executeServiceAction(service, action) {
 const attentionSummary = computed(() => projectAttention(props.project));
 const attentionContainer = computed(() => props.project.containers.find(c => c.state !== 'running') || props.project.containers.find(c => c.health === 'unhealthy'));
 function toolLocation(name, containerId = '') { return projectToolLocation(name, props.project, containerId, { from: 'services', returnTo: route.fullPath }); }
-const confirmationTitle = computed(() => ({ up: '应用配置', restart: '重启项目', stop: '停止项目' })[pendingAction.value] || '确认操作');
+const confirmationTitle = computed(() => ({ up: '应用配置', restart: '重启项目', stop: '停止项目', 'source-deploy': '拉取源码并重建' })[pendingAction.value] || '确认操作');
 const confirmationMessage = computed(() => {
   const name = props.project.projectName;
   if (pendingAction.value === 'up') return `将对 ${name} 执行 Docker Compose up。新增服务会被创建，配置变化的容器可能重建。执行后请确认容器状态。`;
   if (pendingAction.value === 'restart') return `确认重启 ${name}？服务会短暂中断。重启不会应用 Compose 文件中的配置变更。`;
+  if (pendingAction.value === 'source-deploy') return `将先检查 ${name} 的 Git 工作区与远端跟踪分支，再执行 git pull --ff-only、docker compose config --quiet 和 docker compose up -d --build。存在任何未提交/未跟踪文件、分支分叉或配置错误都会停止。构建可能中断服务；此操作不自动回滚数据库、数据卷或应用数据。`;
   return `确认停止 ${name} 中的容器？服务将不可访问，容器和数据会保留。`;
 });
 const favoriteSaving = ref(false);
@@ -318,11 +320,11 @@ const imageState = computed(() => {
 
 function trigger(action) {
   if (!props.project.managed || locked.value) return;
-  if (action === 'pull' && !props.project.editable) return;
-  if (['stop', 'restart'].includes(action) || (action === 'up' && props.project.editable)) { pendingAction.value = action; return; }
+  if (['pull', 'source-deploy'].includes(action) && !props.project.editable) return;
+  if (['stop', 'restart', 'source-deploy'].includes(action) || (action === 'up' && props.project.editable)) { pendingAction.value = action; return; }
   emit('action', action);
 }
-function confirmAction() { const action = pendingAction.value; pendingAction.value = ''; if (!locked.value && props.project.managed && action) emit('action', action); }
+function confirmAction() { const action = pendingAction.value; pendingAction.value = ''; if (!locked.value && props.project.managed && (!['pull', 'source-deploy'].includes(action) || props.project.editable) && action) emit('action', action); }
 async function toggleFavorite(project) {
   if (favoriteSaving.value) return;
   favoriteSaving.value = true;
