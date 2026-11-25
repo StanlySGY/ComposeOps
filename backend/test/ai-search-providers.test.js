@@ -159,7 +159,6 @@ test('search: 中文腾讯新闻只接受具体新闻文章，不把门户或视
   setSetting('ai.search.provider', 'builtin');
   const article = 'https://news.qq.com/rain/a/20261118A01234';
   const calls = stubFetch(async (url) => {
-    if (url.includes('browser:3002/search')) return { ok: true, json: async () => ({ results: [] }) };
     if (url.includes('format=rss')) return { ok: true, text: async () => `<rss><channel>
       <item><title>Tencent 腾讯</title><link>https://www.tencent.com/zh-cn/</link><description>腾讯公司介绍</description></item>
       <item><title>腾讯新闻：今日重要消息</title><link>${article}</link><description>腾讯新闻报道最新事件</description></item>
@@ -167,58 +166,11 @@ test('search: 中文腾讯新闻只接受具体新闻文章，不把门户或视
     </channel></rss>` };
     return { ok: true, text: async () => '' };
   });
-  Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', 'http://browser:3002');
   const results = await searchWeb('腾讯新闻 最新资讯');
   assert.ok(calls.some((call) => /2026年11月/.test(decodeURIComponent(call.url))));
   assert.equal(results.length, 1);
   assert.equal(results[0].url, article);
   globalThis.fetch = originalFetch;
-  Reflect.deleteProperty(process.env, 'COMPOSEOPS_BROWSER_URL');
-});
-
-test('search: 优先使用隔离 Chromium 的真实搜索结果并还原 Bing 目标链接', async () => {
-  setSetting('ai.search.provider', 'builtin');
-  const previous = process.env.COMPOSEOPS_BROWSER_URL;
-  const previousSearchEnabled = process.env.COMPOSEOPS_BROWSER_SEARCH_ENABLED;
-  Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', 'http://browser:3002');
-  Reflect.set(process.env, 'COMPOSEOPS_BROWSER_SEARCH_ENABLED', '1');
-  const target = 'https://docs.docker.com/compose/how-tos/file-watch/';
-  const redirect = `https://www.bing.com/ck/a?u=a1${Buffer.from(target).toString('base64')}`;
-  const calls = stubFetch(async (url) => {
-    assert.match(url, /browser:3002\/search$/);
-    return { ok: true, json: async () => ({ results: [
-      { title: 'Use Compose Watch | Docker Docs', url: redirect, snippet: 'Compose Watch is designed to work with local source code.' },
-      { title: 'Docker Docs', url: 'https://www.bing.com/ck/a?u=a1' + Buffer.from('https://docs.docker.com/').toString('base64'), snippet: 'Docker Documentation' },
-    ] }) };
-  });
-  const results = await searchWeb('Docker Compose Watch official documentation');
-  assert.equal(calls.length, 1, '有真实浏览器搜索结果时不应再混入静态 RSS 噪声');
-  assert.equal(results[0].title, 'Use Compose Watch | Docker Docs');
-  assert.equal(results[0].url, target);
-  assert.equal(results[0].provider, 'bing_chromium');
-  globalThis.fetch = originalFetch;
-  if (previous === undefined) Reflect.deleteProperty(process.env, 'COMPOSEOPS_BROWSER_URL');
-  else Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', previous);
-  if (previousSearchEnabled === undefined) Reflect.deleteProperty(process.env, 'COMPOSEOPS_BROWSER_SEARCH_ENABLED');
-  else Reflect.set(process.env, 'COMPOSEOPS_BROWSER_SEARCH_ENABLED', previousSearchEnabled);
-});
-
-test('web.open: 优先使用 Chromium 动态渲染结果', async () => {
-  const previous = process.env.COMPOSEOPS_BROWSER_URL;
-  Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', 'http://browser:3002');
-  const calls = stubFetch(async (url) => {
-    assert.match(url, /browser:3002\/render$/);
-    return { ok: true, json: async () => ({ url: 'https://news.qq.com/', status: 200, contentType: 'text/html', title: '腾讯网-要闻', description: '新闻首页', text: '今日新闻正文'.repeat(80), links: [{ title: '热点新闻', url: 'https://news.qq.com/a/1' }], rendered: true }) };
-  });
-  const page = await openWebPage('https://news.qq.com/');
-  assert.equal(calls.length, 1);
-  assert.equal(page.rendered, true);
-  assert.equal(page.title, '腾讯网-要闻');
-  assert.match(page.text, /今日新闻正文/);
-  assert.equal(page.links[0].title, '热点新闻');
-  globalThis.fetch = originalFetch;
-  if (previous === undefined) Reflect.deleteProperty(process.env, 'COMPOSEOPS_BROWSER_URL');
-  else Reflect.set(process.env, 'COMPOSEOPS_BROWSER_URL', previous);
 });
 
 test('search: 过滤完全不相关的搜索结果并提供诊断', async () => {

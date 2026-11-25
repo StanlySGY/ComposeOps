@@ -34,22 +34,43 @@
 #   outbound calls through the proxy. Leave them unset for direct connectivity.
 
 services:
-  browser:
-    image: bettafish-local:latest
-    container_name: composeops-browser
+  playwright:
+    # Official Microsoft Playwright MCP image, pinned to the verified multi-arch manifest digest.
+    image: mcr.microsoft.com/playwright/mcp@sha256:2dfc17e08e8db54678ec965ce9ffb4100be0aa68135774d761bac9035ceb6668
+    container_name: composeops-playwright
     restart: unless-stopped
     init: true
-    entrypoint: ["python", "/opt/composeops-browser/server.py"]
-    volumes:
-      - ./browser/server.py:/opt/composeops-browser/server.py:ro
+    entrypoint: ["node"]
+    command:
+      - /app/cli.js
+      - --headless
+      - --browser
+      - chromium
+      - --no-sandbox
+      - --isolated
+      - --block-service-workers
+      - --no-webmcp
+      - --output-dir
+      - /tmp
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8931"
+      - --allowed-hosts
+      - playwright,playwright:8931,localhost,127.0.0.1
+      - --blocked-origins
+      - "http://localhost:*;https://localhost:*;http://127.0.0.1:*;https://127.0.0.1:*;http://10.*:*;https://10.*:*;http://172.16.*:*;https://172.16.*:*;http://172.17.*:*;https://172.17.*:*;http://172.18.*:*;https://172.18.*:*;http://172.19.*:*;https://172.19.*:*;http://172.2[0-9].*:*;https://172.2[0-9].*:*;http://172.3[01].*:*;https://172.3[01].*:*;http://169.254.*:*;https://169.254.*:*;http://192.168.*:*;https://192.168.*:*;http://metadata.google.internal:*;https://metadata.google.internal:*"
     environment:
-      - PORT=3002
-      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-      - CHROMIUM_PATH=/ms-playwright/chromium-1124/chrome-linux/chrome
       - HTTP_PROXY=${COMPOSEOPS_HTTP_PROXY:-}
       - HTTPS_PROXY=${COMPOSEOPS_HTTPS_PROXY:-}
+      - http_proxy=${COMPOSEOPS_HTTP_PROXY:-}
+      - https_proxy=${COMPOSEOPS_HTTPS_PROXY:-}
+      - XDG_CONFIG_HOME=/tmp/.chromium/config
+      - XDG_CACHE_HOME=/tmp/.chromium/cache
+      - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
+      - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1}
     expose:
-      - "3002"
+      - "8931"
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -60,12 +81,17 @@ services:
     shm_size: 1gb
     mem_limit: 1536m
     cpus: 1.5
+    pids_limit: 256
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:3002/health', timeout=3)"]
+      test:
+        - CMD
+        - node
+        - -e
+        - "const net=require('node:net');const s=net.connect(8931,'127.0.0.1');s.setTimeout(2000,()=>process.exit(1));s.once('connect',()=>{s.end();process.exit(0)});s.once('error',()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 30s
   opsdash:
     build:
       context: .
@@ -82,6 +108,9 @@ services:
     container_name: opsdash
     restart: unless-stopped
     init: true
+    depends_on:
+      playwright:
+        condition: service_healthy
     ports:
       # Published on all interfaces (change to "127.0.0.1:28765:3001" for
       # localhost-only). For remote access prefer Tailscale or a TLS reverse
@@ -113,10 +142,10 @@ services:
       - HTTPS_PROXY=${COMPOSEOPS_HTTPS_PROXY:-}
       - http_proxy=${COMPOSEOPS_HTTP_PROXY:-}
       - https_proxy=${COMPOSEOPS_HTTPS_PROXY:-}
-      - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},browser
-      - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},browser
+      - NO_PROXY=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},playwright
+      - no_proxy=${COMPOSEOPS_NO_PROXY:-localhost,127.0.0.1,::1},playwright
       - NODE_USE_ENV_PROXY=${COMPOSEOPS_NODE_USE_ENV_PROXY:-0}
-      - COMPOSEOPS_BROWSER_URL=http://browser:3002
+      - COMPOSEOPS_PLAYWRIGHT_MCP_URL=http://playwright:8931/mcp
       # Optional OpenTelemetry GenAI trace export. Disabled when endpoint is empty.
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-composeops}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}

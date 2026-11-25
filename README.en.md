@@ -157,6 +157,7 @@ Single chat entry (the standalone AI diagnosis page has been merged in), powered
 - 🛡 **Command guard**: LLM-generated commands are statically screened before entering containers (rm -rf /, mkfs, fork bombs, curl|sh …)
 - 📎 **Log mounting**: pick container log lines as evidence attached to your message (untrusted-fence guarded)
 - 🌐 **Web search**: optional toggle with cited sources; Tavily / Brave / self-hosted SearXNG backends with built-in fallback
+- 🌍 **Browser agent**: Microsoft Playwright MCP runs in a dedicated sidecar; dynamic page reading and bounded interactions use fresh isolated sessions, without persisted cookies or login state, while ComposeOps keeps its own approval and audit gates
 - 🧠 **Long-term memory**: remembers your ops preferences on request
 - 🗜 **Session compaction**: long sessions auto-collapse into a handoff summary to keep the model context lean
 - 🖼️ **Rich rendering**: markdown tables / embedded HTML / SVG diagrams, with in-page zoom
