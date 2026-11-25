@@ -156,7 +156,7 @@ export const api = {
   logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getProjects: (force = false) => request('/projects', { force }),
-  getComposeProjectCreateOptions: () => request('/projects/create-options'),
+  getComposeProjectCreateOptions: (signal) => request('/projects/create-options', { signal }),
   streamCustomComposeProjectDeploy: (payload, onFrame, signal) =>
     streamComposeControl(null, null, onFrame, '/projects/create', payload, signal),
   getStandaloneContainers: () => request('/projects/standalone-containers'),
@@ -516,9 +516,62 @@ export async function streamSse(path, body, onFrame, signal, protocol = 'native'
   }
 }
 
-/** 项目容器实时资源指标 SSE 流(GET)。 */
-export function streamProjectStats(projectId, onFrame, signal, interval = 2500) {
-  return fetch(`${BASE}/projects/${projectId}/stats/stream?interval=${interval}`, { signal }).then(async (res) => {
+// HTTP/1.1 浏览器对同一 origin 的并发连接数有限。项目卡片展开时会各自建立长连接
+// SSE；不设上限会占满连接槽位,让普通 API 请求(如新建 Compose 配置读取)一直排队。
+const MAX_CONCURRENT_PROJECT_STATS_STREAMS = 3;
+let activeProjectStatsStreams = 0;
+const queuedProjectStatsStreams = [];
+
+function drainProjectStatsQueue() {
+  while (activeProjectStatsStreams < MAX_CONCURRENT_PROJECT_STATS_STREAMS && queuedProjectStatsStreams.length) {
+    const entry = queuedProjectStatsStreams.shift();
+    if (entry.signal?.aborted) {
+      entry.cleanup();
+      entry.reject(new DOMException('The operation was aborted.', 'AbortError'));
+      continue;
+    }
+    entry.started = true;
+    entry.cleanup();
+    activeProjectStatsStreams += 1;
+    let released = false;
+    entry.resolve(() => {
+      if (released) return;
+      released = true;
+      activeProjectStatsStreams = Math.max(0, activeProjectStatsStreams - 1);
+      drainProjectStatsQueue();
+    });
+  }
+}
+
+function acquireProjectStatsSlot(signal) {
+  if (signal?.aborted) return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const entry = {
+      signal,
+      resolve,
+      reject,
+      started: false,
+      cleanup: () => signal?.removeEventListener('abort', onAbort),
+    };
+    const onAbort = () => {
+      if (entry.started) return; // 启动后的请求由 fetch(signal) 负责中止,finally 释放并发槽位。
+      const index = queuedProjectStatsStreams.indexOf(entry);
+      if (index >= 0) queuedProjectStatsStreams.splice(index, 1);
+      entry.cleanup();
+      reject(new DOMException('The operation was aborted.', 'AbortError'));
+      drainProjectStatsQueue();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    queuedProjectStatsStreams.push(entry);
+    drainProjectStatsQueue();
+  });
+}
+
+/** 项目容器实时资源指标 SSE 流(GET),全局限流并为普通 API 保留连接槽位。 */
+export async function streamProjectStats(projectId, onFrame, signal, interval = 2500) {
+  const release = await acquireProjectStatsSlot(signal);
+  try {
+    const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectId)}/stats/stream?interval=${interval}`, { signal });
     if (!res.ok || !res.body) throw await streamError(res, '指标流请求失败');
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -539,7 +592,9 @@ export function streamProjectStats(projectId, onFrame, signal, interval = 2500) 
         }
       }
     }
-  });
+  } finally {
+    release();
+  }
 }
 
 /** 构造 WebSocket 绝对地址 */

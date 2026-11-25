@@ -12,7 +12,10 @@
       已存在的目录不会被覆盖。创建后的项目沿用现有服务管理、镜像更新和回滚能力。
     </div>
 
-    <div v-if="optionsError" class="alert-error" role="alert">{{ optionsError }}</div>
+    <div v-if="optionsError" class="alert-error flex items-center justify-between gap-3" role="alert">
+      <span>{{ optionsError }}</span>
+      <button class="btn-secondary shrink-0" type="button" @click="loadOptions">重试</button>
+    </div>
     <div v-else-if="!options" class="flex items-center gap-2 py-3 text-sm text-muted" role="status">
       <LoaderCircle class="h-4 w-4 animate-spin" />正在读取目标节点与允许目录…
     </div>
@@ -111,6 +114,7 @@ import { useToastStore } from '../../stores/toast.js';
 const props = defineProps({ show: { type: Boolean, default: false } });
 const emit = defineEmits(['close', 'created']);
 const toast = useToastStore();
+const OPTIONS_TIMEOUT_MS = 15000;
 const options = ref(null);
 const optionsError = ref('');
 const projectName = ref('');
@@ -123,6 +127,8 @@ const phase = ref('');
 const output = ref('');
 const result = ref(null);
 let controller = null;
+let optionsController = null;
+let optionsRequestId = 0;
 
 const phaseLabels = {
   checking: '检查项目与目标节点',
@@ -149,18 +155,38 @@ function reset() {
 }
 
 async function loadOptions() {
+  optionsController?.abort();
+  const requestId = ++optionsRequestId;
+  const requestController = new AbortController();
+  optionsController = requestController;
   options.value = null;
   optionsError.value = '';
+  const timeoutId = window.setTimeout(() => requestController.abort(), OPTIONS_TIMEOUT_MS);
   try {
-    options.value = await api.getComposeProjectCreateOptions();
-    rootDir.value = options.value.roots?.[0] || '';
+    const loadedOptions = await api.getComposeProjectCreateOptions(requestController.signal);
+    if (requestId !== optionsRequestId || !props.show) return;
+    options.value = loadedOptions;
+    rootDir.value = loadedOptions.roots?.[0] || '';
   } catch (error) {
-    optionsError.value = '读取创建配置失败：' + error.message;
+    if (requestId !== optionsRequestId || !props.show) return;
+    if (requestController.signal.aborted) {
+      optionsError.value = '读取创建配置超时（15 秒未收到服务器响应）。请重试，或检查服务器后端与当前 Docker 节点。';
+    } else {
+      optionsError.value = '读取创建配置失败：' + error.message;
+    }
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (optionsController === requestController) optionsController = null;
   }
 }
 
 watch(() => props.show, (visible) => {
-  if (!visible) return;
+  if (!visible) {
+    optionsRequestId += 1;
+    optionsController?.abort();
+    optionsController = null;
+    return;
+  }
   reset();
   void loadOptions();
 });

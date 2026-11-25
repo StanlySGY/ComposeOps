@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import CustomComposeProjectModal from '../src/components/services/CustomComposeProjectModal.vue';
+import { streamProjectStats } from '../src/api/client.js';
 
 const mocks = vi.hoisted(() => ({
   api: {
@@ -10,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('../src/api/client.js', () => ({ api: mocks.api }));
+vi.mock('../src/api/client.js', async (importOriginal) => ({ ...(await importOriginal()), api: mocks.api }));
 vi.mock('../src/stores/toast.js', () => ({ useToastStore: () => mocks.toast }));
 
 const options = {
@@ -81,6 +82,44 @@ describe('自定义 Compose 项目创建', () => {
     await mountModal();
     expect(wrapper.get('[role="alert"]').text()).toContain('权限不足');
     expect(button('创建并部署').element.disabled).toBe(true);
+    expect(button('重试')).toBeTruthy();
+    expect(mocks.api.getComposeProjectCreateOptions).toHaveBeenCalledWith(expect.any(AbortSignal));
+  });
+
+  it('配置读取超时后停止加载并允许重试', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      mocks.api.getComposeProjectCreateOptions
+        .mockImplementationOnce((signal) => new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        }))
+        .mockResolvedValueOnce(options);
+
+      wrapper = mount(CustomComposeProjectModal, {
+        props: { show: false },
+        global: {
+          stubs: {
+            BaseModal: {
+              props: ['show', 'closeDisabled'],
+              emits: ['close'],
+              template: '<section v-if="show" role="dialog"><header><slot /></header><footer><slot name="footer" /></footer></section>',
+            },
+          },
+        },
+      });
+      await wrapper.setProps({ show: true });
+      await vi.advanceTimersByTimeAsync(15000);
+      await flushPromises();
+
+      expect(wrapper.get('[role="alert"]').text()).toContain('15 秒');
+      expect(button('重试')).toBeTruthy();
+      await button('重试').trigger('click');
+      await flushPromises();
+      expect(field('项目根目录').element.value).toBe('/projects');
+      expect(mocks.api.getComposeProjectCreateOptions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('提交 Compose 和 .env，实时展示阶段/输出，创建结果刷新项目列表', async () => {
@@ -176,5 +215,52 @@ describe('自定义 Compose 项目创建', () => {
     await mountModal();
     await button('取消').trigger('click');
     expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+});
+
+describe('项目指标 SSE 并发限制', () => {
+  let fetchMock;
+
+  beforeEach(() => {
+    fetchMock = vi.fn((_url, { signal } = {}) => new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('同时最多发起三条指标长连接,释放槽位后启动排队请求', async () => {
+    const controllers = Array.from({ length: 4 }, () => new AbortController());
+    const streams = controllers.map((controller, index) =>
+      streamProjectStats(`project-${index}`, vi.fn(), controller.signal));
+    const resultsPromise = Promise.allSettled(streams);
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    controllers[0].abort();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    controllers.slice(1).forEach(controller => controller.abort());
+
+    const results = await resultsPromise;
+    expect(results.every(result => result.status === 'rejected' && result.reason.name === 'AbortError')).toBe(true);
+  });
+
+  it('等待队列中的卡片收起时取消订阅,不占用连接槽位', async () => {
+    const controllers = Array.from({ length: 4 }, () => new AbortController());
+    const streams = controllers.map((controller, index) =>
+      streamProjectStats(`project-${index}`, vi.fn(), controller.signal));
+    const allResultsPromise = Promise.allSettled(streams);
+    const queuedResultPromise = Promise.allSettled([streams[3]]);
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    controllers[3].abort();
+    const queuedResult = await queuedResultPromise;
+
+    expect(queuedResult[0].status).toBe('rejected');
+    expect(queuedResult[0].reason.name).toBe('AbortError');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    controllers.slice(0, 3).forEach(controller => controller.abort());
+    await allResultsPromise;
   });
 });
