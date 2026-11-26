@@ -169,16 +169,16 @@ function luminance([r, g, b]) {
 }
 
 /** 浅色 → 主题面板色;纯黑形状 → 面板色 + 描边(与既有 CSS 兜底一致)。 */
-const DARK_PANEL_FILL = '#1f2530';
-const DARK_SHAPE_FILL = '#262c37';
-const DARK_SHAPE_STROKE = '#4b5563';
+const THEME_PANEL_FILL = 'var(--fill-shape)';
+const THEME_SHAPE_FILL = 'var(--fill-shape-2)';
+const THEME_SHAPE_STROKE = 'var(--line-hover)';
 
 function themeColorFor(value, { isText = false } = {}) {
   const rgb = parseColor(value);
   if (!rgb) return null;
   const lum = luminance(rgb);
-  if (lum >= 0.6) return isText ? '#d4d4d8' : DARK_PANEL_FILL;
-  if (lum <= 0.12) return isText ? '#d4d4d8' : DARK_SHAPE_FILL;
+  if (lum >= 0.6) return isText ? 'var(--text-body)' : THEME_PANEL_FILL;
+  if (lum <= 0.12) return isText ? 'var(--text-body)' : THEME_SHAPE_FILL;
   return null;
 }
 
@@ -224,9 +224,9 @@ function rethemeSvg(svg) {
       node.removeAttribute('stroke-width');
       // 不能直接 continue:下面的 style 颜色清理同样要执行,
       // 否则 style="fill:#fff" 的底板会漏过去,暗色主题里留一块白。
-    } else if (shape && node.getAttribute('fill') === DARK_SHAPE_FILL && !node.hasAttribute('stroke')) {
+    } else if (shape && node.getAttribute('fill') === THEME_SHAPE_FILL && !node.hasAttribute('stroke')) {
       // 纯黑形状在暗底上等于隐形:除了换填充色,再补一道描边保证轮廓可辨。
-      node.setAttribute('stroke', DARK_SHAPE_STROKE);
+      node.setAttribute('stroke', THEME_SHAPE_STROKE);
     }
     // 文字颜色一律交给主题 CSS:模型常写 fill=black,暗底上直接看不见。
     if (isText) {

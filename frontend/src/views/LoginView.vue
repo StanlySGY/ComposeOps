@@ -124,7 +124,7 @@ async function submit() {
   background:
     radial-gradient(ellipse at 16% 18%, rgba(37, 99, 235, 0.11), transparent 38%),
     radial-gradient(ellipse at 88% 82%, rgba(16, 185, 129, 0.07), transparent 34%),
-    #10141a;
+    var(--panel-deep);
 }
 
 .login-page::before {

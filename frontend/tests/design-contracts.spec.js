@@ -22,6 +22,12 @@ describe('设计系统契约', () => {
     }
     for (const bg of ['accent', 'accent-hover', 'status-danger']) expect(contrast([1, 1, 1], colors[bg]), bg).toBeGreaterThanOrEqual(4.5);
   });
+  it('浅色模式的说明文字与状态色在白色和浅灰面板保持 AA 对比度', () => {
+    const theme = source.get(resolve(root, 'theme.css'));
+    const light = Object.fromEntries([...theme.matchAll(/--color-([\w-]+):\s*#([\da-f]{6})/gi)].map(([, key, hex]) => [key, hex.match(/../g).map(v => parseInt(v, 16) / 255)]));
+    for (const fg of ['surface-100', 'surface-200', 'surface-300', 'surface-400', 'text-secondary', 'status-ok', 'status-warn', 'status-error', 'status-info'])
+      for (const bg of ['surface-800', 'surface-900', 'surface-950']) expect(contrast(light[fg], light[bg]), `${fg}/${bg}`).toBeGreaterThanOrEqual(4.5);
+  });
   it('所有 Vue 模板可解析，页头有中文，toast 使用中文冒号', () => {
     for (const [file, text] of source) {
       if (file.endsWith('.vue')) {

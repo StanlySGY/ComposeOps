@@ -59,19 +59,19 @@ describe('renderAgentMarkdown — SVG 主题化与尺寸', () => {
   it('白色填充被重映射到暗色面板色', () => {
     const html = renderAgentMarkdown('<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="white" /></svg>');
     expect(html).not.toMatch(/fill="white"/i);
-    expect(html).toMatch(/fill="#1f2530"/i);
+    expect(html).toMatch(/fill="var\(--fill-shape\)"/i);
   });
 
   it('lightgray 底色也被重映射', () => {
     const html = renderAgentMarkdown('<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="lightgray" /></svg>');
     expect(html).not.toMatch(/lightgray/i);
-    expect(html).toMatch(/fill="#1f2530"/i);
+    expect(html).toMatch(/fill="var\(--fill-shape\)"/i);
   });
 
   it('黑色形状重映射为面板色 + 描边(暗底上不可见的老问题)', () => {
     const html = renderAgentMarkdown('<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#000000" /></svg>');
-    expect(html).toMatch(/fill="#262c37"/i);
-    expect(html).toMatch(/stroke="#4b5563"/i);
+    expect(html).toMatch(/fill="var\(--fill-shape-2\)"/i);
+    expect(html).toMatch(/stroke="var\(--line-hover\)"/i);
   });
 
   it('文字颜色一律交给 CSS(模型常写 fill=black)', () => {

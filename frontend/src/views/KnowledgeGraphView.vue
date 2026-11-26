@@ -353,8 +353,8 @@ onMounted(async () => {
   display: inline-flex;
   padding: 3px;
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--ui-panel-rgb), 0.7);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.1);
 }
 .ios-segment-btn {
   display: flex;
@@ -363,16 +363,16 @@ onMounted(async () => {
   padding: 5px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #94A3B8;
+  color: var(--text-soft);
   border-radius: 9px;
   transition: all 0.18s ease;
 }
 .ios-segment-btn:hover {
-  color: #F8FAFC;
+  color: var(--text-bright);
 }
 .ios-segment-btn.active {
-  color: #FFFFFF;
-  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-bright);
+  background: rgba(var(--ui-ink-rgb), 0.12);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 .ios-mini-tag {
@@ -382,7 +382,7 @@ onMounted(async () => {
   border-radius: 6px;
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, monospace;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--ui-ink-rgb), 0.04);
   border: 1px solid;
 }
 </style>

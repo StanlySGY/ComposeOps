@@ -55,6 +55,7 @@
     </section>
 
     <section v-if="tab === 'personal'" class="settings-section">
+      <div class="ios-group"><div class="ios-row"><div class="flex-1"><strong>界面主题</strong><p class="text-sm text-surface-400">默认深色，也可跟随系统外观</p></div><ThemeSelect /></div></div>
       <h2 class="section-title">界面偏好</h2>
       <p v-if="preferencesLoading" class="text-muted" role="status">正在读取界面偏好…</p>
       <div v-if="preferencesError" class="alert-error flex items-center justify-between gap-3" role="alert"><span>{{ preferencesError }}</span><button class="btn-secondary" @click="loadPreferences">重试</button></div>
@@ -304,6 +305,7 @@
 </template>
 
 <script setup>
+import ThemeSelect from '../components/common/ThemeSelect.vue';
 import ImageUpdatePanel from '../components/services/ImageUpdatePanel.vue';
 import DataMaintenancePanel from '../components/settings/DataMaintenancePanel.vue';
 import { computed, markRaw, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';

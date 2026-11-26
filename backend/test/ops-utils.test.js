@@ -88,20 +88,21 @@ test('image-updater: 比较同一仓库的 RepoDigest；不把本地 Image ID �
 test('image-updater: Docker Hub official image 的匿名 token 使用 library 仓库 scope，并请求 OCI manifest', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
-  const digest = `sha256:${'c'.repeat(64)}`;
+  const payload = JSON.stringify({ schemaVersion: 2 });
+  const { createHash } = await import('node:crypto');
+  const digest = 'sha256:' + createHash('sha256').update(payload).digest('hex');
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
-    if (String(url).startsWith('https://auth.docker.io/token?')) {
-      return { ok: true, json: async () => ({ token: 'test-token' }) };
-    }
-    return { ok: true, headers: { get: (name) => (name.toLowerCase() === 'docker-content-digest' ? digest : null) } };
+    if (String(url).startsWith('https://auth.docker.io/token?')) return Response.json({ token: 'test-token' });
+    if (!options.headers.Authorization) return new Response('', { status: 401, headers: { 'www-authenticate': 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"' } });
+    return new Response(payload, { headers: { 'docker-content-digest': digest } });
   };
   try {
     assert.equal(await fetchRemoteDigest(parseImageRef('nginx:alpine')), digest);
-    assert.match(calls[0].url, /scope=repository%3Alibrary%2Fnginx%3Apull|scope=repository:library\/nginx:pull/);
-    assert.match(calls[1].url, /\/v2\/library\/nginx\/manifests\/alpine$/);
-    assert.match(calls[1].options.headers.Authorization, /^Bearer test-token$/);
-    assert.match(calls[1].options.headers.Accept, /application\/vnd\.oci\.image\.index\.v1\+json/);
+    assert.match(calls[1].url, /scope=repository%3Alibrary%2Fnginx%3Apull/);
+    assert.match(calls[2].url, /\/v2\/library\/nginx\/manifests\/alpine$/);
+    assert.equal(calls[2].options.headers.Authorization, 'Bearer test-token');
+    assert.match(calls[2].options.headers.Accept, /application\/vnd\.oci\.image\.index\.v1\+json/);
   } finally {
     // eslint-disable-next-line require-atomic-updates -- this test restores its temporary global fetch stub.
     globalThis.fetch = originalFetch;

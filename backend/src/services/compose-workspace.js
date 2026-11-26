@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import docker from './docker.js';
 import { ACTIONS, assertComposeVersion, composeProjectOptions, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
-import { withProjectOperationLock } from './project-operation-lock.js';
+import { assertProjectOperationAllowed, withProjectOperationLock } from './project-operation-lock.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
@@ -185,6 +185,7 @@ async function acquireRunner(project) {
 }
 
 async function withRunner(project, callback) {
+  assertProjectOperationAllowed(project.id);
   assertProjectHostUnchanged(project);
   const host = getProjectHost(project);
   const hostType = host.type;
@@ -343,6 +344,22 @@ export async function closeAllWorkspaceRunners() {
   const entries = [...workspaceRunners.values()];
   for (const entry of entries) retireRunner(entry);
   await Promise.all(entries.map((entry) => destroyRunner(entry)));
+}
+
+/** 完整备份前只回收所选项目的空闲工作容器，不能强杀正在执行的命令。 */
+export async function closeIdleProjectRunners(projectIds, { waitMs = 0 } = {}) {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const entries = [...workspaceRunners.values()].filter((entry) => projectIds.includes(entry.projectId));
+    if (!entries.some((entry) => entry.active > 0)) {
+      for (const entry of entries) retireRunner(entry);
+      await Promise.all(entries.map((entry) => destroyRunner(entry)));
+      return;
+    }
+    if (Date.now() >= deadline)
+      throw Object.assign(new Error('所选应用有正在执行的工作区命令，请等待完成'), { statusCode: 409 });
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+  }
 }
 
 export function workspaceRunnerStats() {

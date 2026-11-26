@@ -29,8 +29,8 @@
         <defs>
           <!-- Area gradient (单指标) -->
           <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" :stop-color="color" stop-opacity="0.3" />
-            <stop offset="100%" :stop-color="color" stop-opacity="0.05" />
+            <stop offset="0%" :stop-color="plotColor" stop-opacity="0.3" />
+            <stop offset="100%" :stop-color="plotColor" stop-opacity="0.05" />
           </linearGradient>
           
           <!-- Phase 2: 多指标渐变 -->
@@ -131,7 +131,7 @@
           <path v-if="(chartType === 'line' || chartType === 'area') && linePath"
                 :d="linePath"
                 fill="none"
-                :stroke="color"
+                :stroke="plotColor"
                 stroke-width="2"
                 stroke-linejoin="round"
                 stroke-linecap="round"
@@ -144,7 +144,7 @@
                   :y="getY(point.value)"
                   :width="barWidth"
                   :height="Math.max(0, height - padding.bottom - getY(point.value))"
-                  :fill="color"
+                  :fill="plotColor"
                   opacity="0.8"
                   class="chart-bar" />
           </g>
@@ -157,7 +157,7 @@
                   :x2="getX(hoverIndex)" :y2="height - padding.bottom"
                   class="crosshair-line" />
             <circle :cx="getX(hoverIndex)" :cy="getY(visiblePoints[hoverIndex].value)"
-                    r="4" :fill="color" class="crosshair-dot" />
+                    r="4" :fill="plotColor" class="crosshair-dot" />
             <!-- Keyboard focus indicator -->
             <circle v-if="keyboardEnabled && focusedPointIndex === hoverIndex"
                     :cx="getX(hoverIndex)" :cy="getY(visiblePoints[hoverIndex].value)"
@@ -260,17 +260,21 @@ const keyboardEnabled = ref(false);
 
 const plotWidth = computed(() => props.width - padding.left - padding.right);
 const plotHeight = computed(() => props.height - padding.top - padding.bottom);
+// 内置指标颜色使用主题变量；调用方提供的自定义颜色保持原值。
+const chartColors = { '#38bdf8': 'var(--cyan-strong)', '#6ee7b7': 'var(--ok-soft)', '#34d399': 'var(--ok)', '#f87171': 'var(--danger)', '#fcd34d': 'var(--warn)' };
+const chartColor = color => chartColors[String(color).toLowerCase()] || color;
+const plotColor = computed(() => chartColor(props.color));
 
 // Phase 2: 多指标模式下的数据集
 const activeDatasets = computed(() => {
   if (props.compareMode && props.datasets.length > 0) {
-    return props.datasets;
+    return props.datasets.map(dataset => ({ ...dataset, color: chartColor(dataset.color) }));
   }
   // 单指标模式：包装为数据集格式
   return [{
     label: '指标',
     data: props.data,
-    color: props.color,
+    color: plotColor.value,
     unit: props.unit,
   }];
 });
@@ -731,7 +735,7 @@ watch(sourcePoints, () => {
 }
 
 .grid-line {
-  stroke: #27272a;
+  stroke: var(--line-strong);
   stroke-width: 1;
 }
 

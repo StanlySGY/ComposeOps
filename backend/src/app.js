@@ -3,6 +3,8 @@ import websocket from '@fastify/websocket';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import serviceRoutes from './routes/services.js';
+import maintenanceRoutes from './routes/maintenance.js';
+import fullBackupRoutes from './routes/full-backup.js';
 import projectRoutes from './routes/projects.js';
 import aiRoutes from './routes/ai.js';
 import agentRoutes from './routes/agent.js';
@@ -152,6 +154,8 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
       await api.register(jobRoutes, { prefix: '/jobs' });
       await api.register(hostRoutes, { prefix: '/hosts' });
       await api.register(opsRoutes, { prefix: '/ops' });
+      await api.register(fullBackupRoutes, { prefix: '/ops' });
+      await api.register(maintenanceRoutes, { prefix: '/maintenance' });
       await api.register(inspectionRoutes, { prefix: '/ops' });
       await api.register(cronRoutes, { prefix: '/cron' });
       await api.register(metricsRoutes, { prefix: '/metrics' });

@@ -71,7 +71,7 @@ export function useChartExport() {
     sources.forEach((source, index) => {
       const style = getComputedStyle(source);
       for (const property of presentation) {
-        if (source.hasAttribute(property)) continue;
+        if (source.hasAttribute(property) && !source.getAttribute(property).includes('var(')) continue;
         const value = style.getPropertyValue(property);
         if (value && !value.includes('url(')) copies[index].setAttribute(property, value);
       }
@@ -90,7 +90,7 @@ export function useChartExport() {
       img.onerror = () => { cleanup(); reject(new Error('图片生成失败，请重试或导出 CSV')); };
       img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgData)}`;
     });
-    ctx.fillStyle = '#0F131C';
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--panel-deep').trim() || '#0F131C';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise((resolve, reject) => {

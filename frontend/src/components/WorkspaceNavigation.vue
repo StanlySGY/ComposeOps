@@ -64,20 +64,20 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.workspace-navigation { position: relative; display: flex; min-height: 46px; flex-shrink: 0; align-items: center; gap: 14px; padding: 4px clamp(16px, 1.35vw, 28px); border-bottom: 1px solid rgba(148,163,184,.1); background: #141920; font-size: 12px; color: #8f9bab; }
+.workspace-navigation { position: relative; display: flex; min-height: 46px; flex-shrink: 0; align-items: center; gap: 14px; padding: 4px clamp(16px, 1.35vw, 28px); border-bottom: 1px solid rgba(148,163,184,.1); background: var(--panel-surface); font-size: 12px; color: var(--text-soft); }
 .navigation-controls { display: flex; flex-shrink: 0; align-items: center; gap: 2px; }
 .navigation-back, .navigation-forward { display: flex; min-height: 34px; align-items: center; justify-content: center; gap: 7px; padding: 5px 8px; border-radius: 7px; transition: background-color 140ms, color 140ms; }
-.navigation-back:not(:disabled):hover, .navigation-forward:not(:disabled):hover { background: #242d39; color: #f1f5f9; }
+.navigation-back:not(:disabled):hover, .navigation-forward:not(:disabled):hover { background: var(--panel-raised); color: var(--text-bright); }
 .navigation-back:not(:disabled):hover svg { transform: translateX(-2px); }
 .navigation-back svg { transition: transform 140ms; }
 button:disabled { opacity: .35; cursor: default; }
-.navigation-back-name { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bec8d5; }
-.navigation-divider { height: 18px; width: 1px; flex-shrink: 0; background: #303845; }
+.navigation-back-name { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-body); }
+.navigation-divider { height: 18px; width: 1px; flex-shrink: 0; background: var(--line-strong); }
 .navigation-breadcrumbs { display: flex; min-width: 0; align-items: center; gap: 9px; }
 .navigation-breadcrumbs li { display: flex; min-width: 0; align-items: center; gap: 9px; }
 .navigation-breadcrumbs a { border-radius: 4px; white-space: nowrap; transition: color 140ms; }
-.navigation-breadcrumbs a:hover { color: #93c5fd; }
-.navigation-current { display: block !important; color: #d9e2ed; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.navigation-breadcrumbs a:hover { color: var(--ui-link); }
+.navigation-current { display: block !important; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .navigation-progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 35%; background: #60a5fa; animation: navigation-loading 1.4s ease-in-out infinite; }
 @keyframes navigation-loading { from { left: 0; width: 10%; } to { left: 65%; width: 35%; } }
 @media (max-width: 767px) { .workspace-navigation { gap: 10px; padding-inline: 12px; min-height: 46px; } .navigation-back-name, .navigation-parent, .navigation-home { display: none !important; } .navigation-back, .navigation-forward { min-height: 38px; } .navigation-controls { gap: 0; } }

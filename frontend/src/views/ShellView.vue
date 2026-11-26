@@ -64,6 +64,7 @@
   </div>
 </template>
 <script setup>
+import { useTerminalTheme } from '../lib/theme.js';
 import ProjectContextNav from '../components/services/ProjectContextNav.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
@@ -78,6 +79,8 @@ import { api, wsUrl } from '../api/client.js';
 import { useWebSocket } from '../composables/useWebSocket.js';
 import { copyText } from '../lib/clipboard.js';
 
+const terminalTheme = useTerminalTheme();
+watch(terminalTheme, value => { if (term) term.options.theme = value; });
 const route = useRoute(), router = useRouter();
 const projects = ref([]), projectId = ref(route.query.projectId || ''), containerId = ref(route.query.containerId || '');
 const normalizeShell = value => value === 'bash' ? 'bash' : 'sh';
@@ -164,7 +167,7 @@ const canConnect = computed(() => termReady.value && !loading.value && !loadErro
 usePullRefresh(() => loadData());
 onMounted(async () => {
   window.addEventListener('composeops:host-changed', onHostChanged);
-  term = new Terminal({ allowProposedApi: true, disableStdin: true, screenReaderMode: true, fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, monospace', fontSize: 13, cursorBlink: true, theme: { background: '#0b0d10', foreground: '#e5e7eb', cursor: '#34d399', selectionBackground: '#24554a' } });
+  term = new Terminal({ allowProposedApi: true, disableStdin: true, screenReaderMode: true, fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, monospace', fontSize: 13, cursorBlink: true, theme: terminalTheme.value });
   fit = new FitAddon(); term.loadAddon(fit); term.open(termEl.value);
   resetSearchAddon();
   term.onData(data => { if (connected.value) socket.send(data); });

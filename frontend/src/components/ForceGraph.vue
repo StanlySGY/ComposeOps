@@ -52,23 +52,23 @@
       <defs>
         <!-- iOS 暗黑极简点阵背景 -->
         <pattern id="ios-dot-grid" width="28" height="28" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="2" r="1.2" fill="rgba(255, 255, 255, 0.07)" />
+          <circle cx="2" cy="2" r="1.2" fill="rgba(var(--ui-ink-rgb), 0.07)" />
         </pattern>
 
         <!-- 卡片背景与高光渐变 -->
         <linearGradient id="ios-card-glass" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#1A2230" stop-opacity="0.94" />
-          <stop offset="100%" stop-color="#0F172A" stop-opacity="0.96" />
+          <stop offset="0%" stop-color="var(--graph-top)" stop-opacity="0.94" />
+          <stop offset="100%" stop-color="var(--graph-bottom)" stop-opacity="0.96" />
         </linearGradient>
 
         <linearGradient id="ios-card-glass-hover" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#243044" stop-opacity="0.98" />
-          <stop offset="100%" stop-color="#131D31" stop-opacity="0.98" />
+          <stop offset="0%" stop-color="var(--graph-hover)" stop-opacity="0.98" />
+          <stop offset="100%" stop-color="var(--graph-bottom)" stop-opacity="0.98" />
         </linearGradient>
 
         <linearGradient id="ios-card-selected" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#1E2E3E" stop-opacity="0.98" />
-          <stop offset="100%" stop-color="#0D212A" stop-opacity="0.98" />
+          <stop offset="0%" stop-color="var(--graph-selected)" stop-opacity="0.98" />
+          <stop offset="100%" stop-color="var(--graph-selected)" stop-opacity="0.98" />
         </linearGradient>
 
         <!-- 卡片阴影 Filter -->
@@ -78,7 +78,7 @@
         </filter>
 
         <filter id="ios-selected-glow" x="-25%" y="-25%" width="150%" height="150%">
-          <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#10B981" flood-opacity="0.38" />
+          <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="var(--ok)" flood-opacity="0.38" />
           <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#000000" flood-opacity="0.45" />
         </filter>
 
@@ -87,7 +87,7 @@
           <polygon points="0 0.5, 8 3.5, 0 6.5" fill="#64748B" />
         </marker>
         <marker id="ios-arrow-active" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
-          <polygon points="0 0.5, 8 3.5, 0 6.5" fill="#34D399" />
+          <polygon points="0 0.5, 8 3.5, 0 6.5" fill="var(--ok)" />
         </marker>
       </defs>
 
@@ -109,8 +109,8 @@
               :width="CARD_W + 32"
               :height="col.maxY - col.minY + 96"
               rx="20"
-              fill="rgba(255, 255, 255, 0.015)"
-              stroke="rgba(255, 255, 255, 0.05)"
+              fill="rgba(var(--ui-ink-rgb), 0.015)"
+              stroke="rgba(var(--ui-ink-rgb), 0.05)"
               stroke-dasharray="4 6"
             />
             <g :transform="`translate(${col.x} ${col.minY - 26})`">
@@ -120,8 +120,8 @@
                 :width="col.titleWidth"
                 height="24"
                 rx="12"
-                fill="rgba(30, 41, 59, 0.85)"
-                stroke="rgba(255, 255, 255, 0.1)"
+                fill="rgba(var(--ui-panel-rgb), 0.85)"
+                stroke="rgba(var(--ui-ink-rgb), 0.1)"
               />
               <text
                 text-anchor="middle"
@@ -197,7 +197,7 @@
               :y1="-CARD_H / 2 + 0.5"
               :x2="CARD_W / 2 - 16"
               :y2="-CARD_H / 2 + 0.5"
-              stroke="rgba(255, 255, 255, 0.16)"
+              stroke="rgba(var(--ui-ink-rgb), 0.16)"
               stroke-width="1"
             />
 
@@ -262,8 +262,8 @@
                 width="24"
                 height="16"
                 rx="8"
-                fill="rgba(255, 255, 255, 0.06)"
-                stroke="rgba(255, 255, 255, 0.08)"
+                fill="rgba(var(--ui-ink-rgb), 0.06)"
+                stroke="rgba(var(--ui-ink-rgb), 0.08)"
               />
               <text
                 x="-6"
@@ -335,15 +335,15 @@ function setLayoutMode(mode) {
 
 // 统一 iOS 色彩系统 (HIG System Colors)
 const PALETTES = {
-  running: { main: '#10B981', soft: '#6EE7B7', bg: 'rgba(16, 185, 129, 0.14)', border: 'rgba(16, 185, 129, 0.3)' },
-  stopped: { main: '#F43F5E', soft: '#FDA4AF', bg: 'rgba(244, 63, 94, 0.14)', border: 'rgba(244, 63, 94, 0.3)' },
-  unhealthy: { main: '#F59E0B', soft: '#FCD34D', bg: 'rgba(245, 158, 11, 0.14)', border: 'rgba(245, 158, 11, 0.3)' },
-  none: { main: '#94A3B8', soft: '#CBD5E1', bg: 'rgba(148, 163, 184, 0.12)', border: 'rgba(148, 163, 184, 0.25)' },
-  neutral: { main: '#38BDF8', soft: '#7DD3FC', bg: 'rgba(56, 189, 248, 0.14)', border: 'rgba(56, 189, 248, 0.3)' },
-  host: { main: '#38BDF8', soft: '#7DD3FC', bg: 'rgba(56, 189, 248, 0.14)', border: 'rgba(56, 189, 248, 0.3)' },
-  project: { main: '#34D399', soft: '#6EE7B7', bg: 'rgba(52, 211, 153, 0.14)', border: 'rgba(52, 211, 153, 0.3)' },
-  volume: { main: '#A78BFA', soft: '#C4B5FD', bg: 'rgba(167, 139, 250, 0.14)', border: 'rgba(167, 139, 250, 0.3)' },
-  alert: { main: '#F43F5E', soft: '#FDA4AF', bg: 'rgba(244, 63, 94, 0.14)', border: 'rgba(244, 63, 94, 0.3)' },
+  running: { main: 'var(--ok)', soft: 'var(--ok-soft)', bg: 'rgba(16, 185, 129, 0.14)', border: 'rgba(16, 185, 129, 0.3)' },
+  stopped: { main: 'var(--danger)', soft: 'var(--danger-soft)', bg: 'rgba(244, 63, 94, 0.14)', border: 'rgba(244, 63, 94, 0.3)' },
+  unhealthy: { main: 'var(--warn)', soft: 'var(--warn-soft)', bg: 'rgba(245, 158, 11, 0.14)', border: 'rgba(245, 158, 11, 0.3)' },
+  none: { main: 'var(--text-soft)', soft: 'var(--text-body)', bg: 'rgba(148, 163, 184, 0.12)', border: 'rgba(148, 163, 184, 0.25)' },
+  neutral: { main: 'var(--cyan-strong)', soft: 'var(--cyan-faint)', bg: 'rgba(56, 189, 248, 0.14)', border: 'rgba(56, 189, 248, 0.3)' },
+  host: { main: 'var(--cyan-strong)', soft: 'var(--cyan-faint)', bg: 'rgba(56, 189, 248, 0.14)', border: 'rgba(56, 189, 248, 0.3)' },
+  project: { main: 'var(--ok)', soft: 'var(--ok-soft)', bg: 'rgba(52, 211, 153, 0.14)', border: 'rgba(52, 211, 153, 0.3)' },
+  volume: { main: 'var(--ui-purple)', soft: 'var(--ui-purple)', bg: 'rgba(167, 139, 250, 0.14)', border: 'rgba(167, 139, 250, 0.3)' },
+  alert: { main: 'var(--danger)', soft: 'var(--danger-soft)', bg: 'rgba(244, 63, 94, 0.14)', border: 'rgba(244, 63, 94, 0.3)' },
 };
 function paletteOf(node) {
   return PALETTES[node.pal] || PALETTES.neutral;
@@ -447,9 +447,9 @@ function nodeGlyph(node) {
 }
 
 function cardBorderColor(node) {
-  if (props.selectedKey === node.key) return '#10B981';
-  if (hoverKey.value === node.key) return 'rgba(255, 255, 255, 0.28)';
-  return 'rgba(255, 255, 255, 0.1)';
+  if (props.selectedKey === node.key) return 'var(--ok)';
+  if (hoverKey.value === node.key) return 'rgba(var(--ui-ink-rgb), 0.28)';
+  return 'rgba(var(--ui-ink-rgb), 0.1)';
 }
 
 // ---- 分层 DAG 计算逻辑 (Sugiyama 架构流) ----
@@ -578,12 +578,12 @@ function isEdgeHighlighted(edge) {
 }
 
 function edgeColor(edge) {
-  if (isEdgeHighlighted(edge)) return '#34D399';
+  if (isEdgeHighlighted(edge)) return 'var(--ok)';
   if (isDimmedEdge(edge)) return 'rgba(100, 116, 139, 0.12)';
   return 'rgba(100, 116, 139, 0.32)';
 }
 function edgeFlowColor(edge) {
-  if (isEdgeHighlighted(edge)) return '#34D399';
+  if (isEdgeHighlighted(edge)) return 'var(--ok)';
   return 'rgba(148, 163, 184, 0.45)';
 }
 
@@ -809,11 +809,11 @@ defineExpose({ reseed, fitView, setLayoutMode });
   position: relative;
   overflow: hidden;
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.08);
   background:
     radial-gradient(1200px 500px at 50% -10%, rgba(16, 185, 129, 0.06), transparent 60%),
-    linear-gradient(180deg, #0B0F17 0%, #080B10 100%);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+    linear-gradient(180deg, var(--panel-deep) 0%, var(--ui-canvas) 100%);
+  box-shadow: inset 0 1px 0 0 rgba(var(--ui-ink-rgb), 0.08);
   touch-action: none;
 }
 
@@ -845,10 +845,10 @@ defineExpose({ reseed, fitView, setLayoutMode });
   display: inline-flex;
   padding: 3px;
   border-radius: 14px;
-  background: rgba(15, 23, 42, 0.78);
+  background: rgba(var(--ui-panel-rgb), 0.78);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.1);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 .ios-segment-btn {
@@ -858,16 +858,16 @@ defineExpose({ reseed, fitView, setLayoutMode });
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
-  color: #94A3B8;
+  color: var(--text-soft);
   border-radius: 10px;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .ios-segment-btn:hover {
-  color: #F8FAFC;
+  color: var(--text-bright);
 }
 .ios-segment-btn.active {
-  color: #FFFFFF;
-  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-bright);
+  background: rgba(var(--ui-ink-rgb), 0.12);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 .ios-stat-chip {
@@ -877,9 +877,9 @@ defineExpose({ reseed, fitView, setLayoutMode });
   gap: 6px;
   padding: 4px 10px;
   border-radius: 20px;
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(var(--ui-panel-rgb), 0.6);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.08);
 }
 
 /* 悬浮控制胶囊 */
@@ -892,10 +892,10 @@ defineExpose({ reseed, fitView, setLayoutMode });
   gap: 4px;
   padding: 4px 8px;
   border-radius: 24px;
-  background: rgba(15, 23, 42, 0.82);
+  background: rgba(var(--ui-panel-rgb), 0.82);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 10;
 }
@@ -905,17 +905,17 @@ defineExpose({ reseed, fitView, setLayoutMode });
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  color: #94A3B8;
+  color: var(--text-soft);
   transition: all 0.18s ease;
 }
 .ios-tool-btn:hover {
-  color: #FFFFFF;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-bright);
+  background: rgba(var(--ui-ink-rgb), 0.1);
 }
 .ios-pill-divider {
   width: 1px;
   height: 18px;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(var(--ui-ink-rgb), 0.12);
   margin: 0 2px;
 }
 
@@ -923,7 +923,7 @@ defineExpose({ reseed, fitView, setLayoutMode });
 .ios-tier-label {
   font-size: 11px;
   font-weight: 600;
-  fill: #94A3B8;
+  fill: var(--text-soft);
   letter-spacing: 0.02em;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -944,7 +944,7 @@ defineExpose({ reseed, fitView, setLayoutMode });
   transition: fill 0.2s ease, stroke 0.2s ease, stroke-width 0.2s ease;
 }
 .ios-card-node:hover .ios-card-body {
-  stroke: rgba(255, 255, 255, 0.28);
+  stroke: rgba(var(--ui-ink-rgb), 0.28);
 }
 .ios-card-glyph {
   font-size: 16px;
@@ -954,7 +954,7 @@ defineExpose({ reseed, fitView, setLayoutMode });
 .ios-card-title {
   font-size: 13px;
   font-weight: 600;
-  fill: #F8FAFC;
+  fill: var(--text-bright);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   user-select: none;
 }
@@ -967,7 +967,7 @@ defineExpose({ reseed, fitView, setLayoutMode });
 .ios-badge-text {
   font-size: 9.5px;
   font-weight: 600;
-  fill: #94A3B8;
+  fill: var(--text-soft);
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 

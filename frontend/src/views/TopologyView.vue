@@ -365,7 +365,7 @@ onMounted(async () => {
 <style scoped>
 .topo-row-selected {
   background: rgba(16, 185, 129, 0.08);
-  box-shadow: inset 2px 0 0 var(--color-emerald-400, #34D399);
+  box-shadow: inset 2px 0 0 var(--color-emerald-400, var(--ok));
 }
 
 /* iOS 浮动抽屉/检测器卡片 */
@@ -377,10 +377,10 @@ onMounted(async () => {
   max-width: calc(100% - 32px);
   padding: 16px;
   border-radius: 18px;
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(var(--ui-panel-rgb), 0.88);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.12);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   z-index: 20;
 }
@@ -393,14 +393,14 @@ onMounted(async () => {
   border-radius: 10px;
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 11px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  color: #E2E8F0;
+  background: rgba(var(--ui-ink-rgb), 0.06);
+  border: 1px solid rgba(var(--ui-ink-rgb), 0.09);
+  color: var(--text-strong);
   transition: all 0.18s ease;
 }
 .ios-tag-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #FFFFFF;
+  background: rgba(var(--ui-ink-rgb), 0.14);
+  color: var(--text-bright);
 }
 
 /* 动效 */

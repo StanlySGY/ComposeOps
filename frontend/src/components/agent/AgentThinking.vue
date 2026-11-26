@@ -58,20 +58,20 @@ watch(() => groups.value.map((group) => group.content).join('|'), () => { void n
 </script>
 
 <style scoped>
-.agent-thinking-block { margin-bottom: 9px; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 10px; background: rgba(17, 21, 27, 0.6); }
+.agent-thinking-block { margin-bottom: 9px; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 10px; background: rgba(var(--ui-panel-rgb), 0.6); }
 .agent-thinking-block.is-live { border-color: rgba(8, 145, 178, 0.42); }
-.agent-thinking-block > summary { display: flex; align-items: center; gap: 6px; padding: 8px 11px; color: #67e8f9; font-size: 11px; font-weight: 600; cursor: pointer; list-style: none; }
+.agent-thinking-block > summary { display: flex; align-items: center; gap: 6px; padding: 8px 11px; color: var(--cyan-strong); font-size: 11px; font-weight: 600; cursor: pointer; list-style: none; }
 .agent-thinking-block > summary::-webkit-details-marker { display: none; }
-.agent-thinking-block > summary em { padding: 1px 6px; color: #a5f3fc; border-radius: 999px; background: rgba(8, 145, 178, 0.22); font-size: 9.5px; font-style: normal; }
-.agent-thinking-block > summary::after { content: ''; margin-left: auto; color: #52525b; font-size: 11px; transition: transform 0.15s ease; }
+.agent-thinking-block > summary em { padding: 1px 6px; color: var(--cyan-faint); border-radius: 999px; background: rgba(8, 145, 178, 0.22); font-size: 9.5px; font-style: normal; }
+.agent-thinking-block > summary::after { content: ''; margin-left: auto; color: var(--text-dim); font-size: 11px; transition: transform 0.15s ease; }
 .agent-thinking-block[open] > summary::after { transform: rotate(180deg); }
-.agent-thinking-live { display: inline-flex; align-items: center; gap: 4px; color: #a5f3fc; font-size: 9.5px; font-weight: 500; }
-.agent-thinking-live i { width: 5px; height: 5px; border-radius: 999px; background: #22d3ee; animation: thinking-pulse 1.1s ease-in-out infinite; }
+.agent-thinking-live { display: inline-flex; align-items: center; gap: 4px; color: var(--cyan-faint); font-size: 9.5px; font-weight: 500; }
+.agent-thinking-live i { width: 5px; height: 5px; border-radius: 999px; background: var(--cyan-main); animation: thinking-pulse 1.1s ease-in-out infinite; }
 @keyframes thinking-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
 .agent-thinking-body { max-height: 280px; overflow-y: auto; padding: 2px 11px 10px; overscroll-behavior: contain; }
 .agent-thinking-round + .agent-thinking-round { margin-top: 9px; padding-top: 9px; border-top: 1px dashed rgba(148, 163, 184, 0.14); }
-.agent-thinking-round header { display: flex; align-items: center; gap: 6px; color: #71717a; font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em; }
-.agent-thinking-dot { width: 5px; height: 5px; border-radius: 999px; background: #22d3ee; animation: thinking-pulse 1.1s ease-in-out infinite; }
-.agent-thinking-round p { margin: 5px 0 0; color: #9ca3af; font-size: 11.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
-.agent-thinking-round p.agent-thinking-pending { color: #52525b; font-style: italic; }
+.agent-thinking-round header { display: flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em; }
+.agent-thinking-dot { width: 5px; height: 5px; border-radius: 999px; background: var(--cyan-main); animation: thinking-pulse 1.1s ease-in-out infinite; }
+.agent-thinking-round p { margin: 5px 0 0; color: var(--text-soft); font-size: 11.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.agent-thinking-round p.agent-thinking-pending { color: var(--text-dim); font-style: italic; }
 </style>

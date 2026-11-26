@@ -340,17 +340,17 @@ function downloadYaml() {
 
 .input-label,
 .output-label {
-  color: #F3F4F6;
+  color: var(--text-bright);
   font-size: 14px;
   font-weight: 500;
 }
 
 .input-textarea {
   padding: 14px;
-  background: #0F131C;
-  border: 1px solid #1E2636;
+  background: var(--panel-deep);
+  border: 1px solid var(--fill-shape-2);
   border-radius: 8px;
-  color: #E5E7EB;
+  color: var(--text-strong);
   font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
   font-size: 13px;
   line-height: 1.6;
@@ -360,15 +360,15 @@ function downloadYaml() {
 
 .input-textarea:focus {
   outline: none;
-  border-color: #38BDF8;
+  border-color: var(--cyan-strong);
 }
 
 .input-textarea::placeholder {
-  color: #4B5563;
+  color: var(--text-dim);
 }
 
 .input-hint {
-  color: #6B7280;
+  color: var(--text-faint);
   font-size: 12px;
 }
 
@@ -392,12 +392,12 @@ function downloadYaml() {
 }
 
 .btn-convert {
-  background: #38BDF8;
-  color: #0A0D12;
+  background: var(--cyan-strong);
+  color: var(--panel-deep);
 }
 
 .btn-convert:hover:not(:disabled) {
-  background: #0EA5E9;
+  background: var(--cyan-deep);
 }
 
 .btn-convert:disabled {
@@ -406,13 +406,13 @@ function downloadYaml() {
 }
 
 .btn-clear {
-  background: #1E2636;
-  color: #9CA3AF;
+  background: var(--fill-shape-2);
+  color: var(--text-soft);
 }
 
 .btn-clear:hover {
-  background: #2A3447;
-  color: #E5E7EB;
+  background: var(--fill-shape-2);
+  color: var(--text-strong);
 }
 
 .icon {
@@ -425,7 +425,7 @@ function downloadYaml() {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: 8px;
-  color: #EF4444;
+  color: var(--danger);
   font-size: 13px;
   display: flex;
   align-items: center;
@@ -451,10 +451,10 @@ function downloadYaml() {
 
 .btn-icon {
   padding: 6px;
-  background: #1E2636;
+  background: var(--fill-shape-2);
   border: none;
   border-radius: 6px;
-  color: #9CA3AF;
+  color: var(--text-soft);
   cursor: pointer;
   transition: all 0.15s;
   display: flex;
@@ -462,21 +462,21 @@ function downloadYaml() {
 }
 
 .btn-icon:hover {
-  background: #2A3447;
-  color: #E5E7EB;
+  background: var(--fill-shape-2);
+  color: var(--text-strong);
 }
 
 .output-code {
   margin: 0;
   padding: 16px;
-  background: #0F131C;
-  border: 1px solid #1E2636;
+  background: var(--panel-deep);
+  border: 1px solid var(--fill-shape-2);
   border-radius: 8px;
   overflow-x: auto;
 }
 
 .output-code code {
-  color: #E5E7EB;
+  color: var(--text-strong);
   font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
   font-size: 13px;
   line-height: 1.6;
@@ -487,8 +487,8 @@ function downloadYaml() {
   bottom: 24px;
   right: 24px;
   padding: 12px 20px;
-  background: #6EE7B7;
-  color: #0A0D12;
+  background: var(--ok-soft);
+  color: var(--panel-deep);
   border-radius: 8px;
   font-size: 14px;
   font-weight: 500;

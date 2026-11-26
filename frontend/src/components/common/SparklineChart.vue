@@ -6,14 +6,14 @@
         <stop offset="100%" stop-color="#6366f1" stop-opacity="0.05" />
       </linearGradient>
       <linearGradient :id="memGradientId" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#34d399" stop-opacity="0.9" />
-        <stop offset="100%" stop-color="#34d399" stop-opacity="0.05" />
+        <stop offset="0%" stop-color="var(--ok)" stop-opacity="0.9" />
+        <stop offset="100%" stop-color="var(--ok)" stop-opacity="0.05" />
       </linearGradient>
     </defs>
     <path v-if="cpuPath" :d="areaPath(cpuPath)" :fill="`url(#${cpuGradientId})`" class="spark-area" />
-    <path v-if="cpuPath" :d="linePath(cpuPath)" fill="none" :stroke="alertCpu ? '#fb7185' : '#818cf8'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+    <path v-if="cpuPath" :d="linePath(cpuPath)" fill="none" :stroke="alertCpu ? 'var(--danger)' : 'var(--color-indigo-400)'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
     <path v-if="memPath" :d="areaPath(memPath)" :fill="`url(#${memGradientId})`" class="spark-area" />
-    <path v-if="memPath" :d="linePath(memPath)" fill="none" :stroke="alertMem ? '#fb7185' : '#34d399'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+    <path v-if="memPath" :d="linePath(memPath)" fill="none" :stroke="alertMem ? 'var(--danger)' : 'var(--ok)'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
   </svg>
 </template>
 

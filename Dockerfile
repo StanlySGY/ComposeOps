@@ -80,7 +80,8 @@ RUN if [ -n "$APT_MIRROR" ]; then \
  && docker --version \
  && docker compose version \
  && git --version \
- && ssh -V
+ && ssh -V \
+ && tar --version
 
 WORKDIR /app/backend
 

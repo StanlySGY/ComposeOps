@@ -939,6 +939,27 @@ const MIGRATIONS = [
     addColumn(database, 'background_jobs', 'context_json', "TEXT NOT NULL DEFAULT '{}'");
     addColumn(database, 'background_jobs', 'result_json', "TEXT NOT NULL DEFAULT '{}'");
   } },
+  {
+    version: 30,
+    name: '应用访问入口路径',
+    up(database) {
+      database.exec(`CREATE TABLE IF NOT EXISTS project_webui_settings (
+        host_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0, entries_json TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY (host_id, project_id)
+      )`);
+    },
+  },
+  {
+    version: 31,
+    name: '完整备份的持久项目互斥',
+    up(database) {
+      database.exec(`CREATE TABLE IF NOT EXISTS maintenance_project_locks (
+        project_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, host_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    },
+  },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

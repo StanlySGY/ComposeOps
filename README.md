@@ -99,6 +99,10 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 
 ### 📚 公开文档
 
+- [应用完整备份、隔离恢复与 WebDAV / 115 同步](docs/public/FULL_BACKUP_OPERATIONS.md)
+- [应用访问地址与路径设置](docs/public/APPLICATION_ACCESS.md)
+- [深色、浅色与系统主题](docs/public/THEMES.md)
+
 - [AI SRE 平台：应用目标、有界自治、可靠发布、业务恢复与证据复盘](docs/public/AI_SRE.md)
 - [应用接入向导](docs/public/APPLICATION_ONBOARDING.md) · [多服务发布](docs/public/APPLICATION_RELEASES.md) · [数据库与业务恢复](docs/public/BUSINESS_RECOVERY.md)
 - [从零创建自定义 Compose 项目](docs/public/CUSTOM_COMPOSE_PROJECTS.md)

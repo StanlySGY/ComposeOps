@@ -103,6 +103,7 @@ const navGroups = [
       { to: '/cmdb', icon: Database, label: '资产中心' },
       { to: '/node-groups', icon: ServerCog, label: '节点组' },
       { to: '/marketplace', icon: Store, label: '应用市场' },
+      { to: '/maintenance', icon: HardDrive, label: '完整备份' },
       { to: '/resources', icon: HardDrive, label: '存储清理' },
       { to: '/cost', icon: DollarSign, label: '成本分析' },
     ],

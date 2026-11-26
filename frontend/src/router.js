@@ -7,6 +7,7 @@ const routes = [
   { path: '/dashboard', name: 'dashboard', component: () => import('./views/DashboardView.vue') },
   { path: '/oncall', name: 'oncall', component: () => import('./views/OnCallView.vue') },
   { path: '/reliability', name: 'reliability', component: () => import('./views/ReliabilityView.vue') },
+  { path: '/maintenance', name: 'maintenance', component: () => import('./views/MaintenanceView.vue') },
   { path: '/services', name: 'services', component: () => import('./views/ServicesView.vue') },
   { path: '/compose', name: 'compose', component: () => import('./views/ComposeView.vue') },
   { path: '/logs', name: 'logs', component: () => import('./views/LogsView.vue') },

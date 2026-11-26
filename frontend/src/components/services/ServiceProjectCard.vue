@@ -11,7 +11,7 @@
         <span class="project-path" :title="project.workingDir">{{ project.workingDir }}</span>
         <ChevronDown class="w-4 h-4 text-surface-400 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
       </button>
-      <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden lg:inline-flex" />
+      <WebUiLauncher v-if="webuiLinks.length" :links="webuiLinks" class="hidden lg:inline-flex" @configure="webuiService = $event; webuiOpen = true" />
       <ImageUpdatePanel :project="project" compact @result="updateInfo = $event" @open="$emit('upgrade')" />
       <button class="icon-btn hidden sm:inline-flex" title="编辑备注" aria-label="编辑备注" @click="editNote"><Pencil class="w-4 h-4" /></button>
     </header>
@@ -20,6 +20,7 @@
       <span class="ml-auto text-xs text-muted">{{ project.containers.length }} 个容器</span>
     </nav>
 
+    <div v-if="webuiLinks.length" class="px-3 pb-2 lg:hidden"><WebUiLauncher :links="webuiLinks" @configure="webuiService = $event; webuiOpen = true" /></div>
     <div v-if="expanded" :id="`project-detail-${project.id}`" class="project-detail">
       <div v-if="attention" class="project-attention-summary"><AlertTriangle :size="16" /><span><strong>{{ attentionSummary.label }}</strong> · {{ attentionSummary.detail }}</span><span class="hidden md:inline text-muted ml-auto">先查看日志定位原因，再决定是否重启</span></div>
       <div class="project-actions" role="group" :aria-label="`${project.projectName} 项目操作`">
@@ -38,6 +39,7 @@
           <button v-if="updateInfo?.hasUpdate" :disabled="!project.editable || locked" @click="$emit('upgrade')"><Sparkles :size="15" />平滑升级</button>
           <button :disabled="!project.managed || locked" @click="trigger('ps')"><ListTree :size="15" />查看详细状态</button>
           <button v-if="dbContainers.length" :disabled="!project.managed || locked" @click="$emit('db-dump')"><Database :size="15" />备份数据库</button>
+          <button @click="webuiService = ''; webuiOpen = true"><Globe :size="15" />访问入口</button>
           <button @click="editNote"><Pencil :size="15" />编辑备注</button>
           <hr />
           <button class="text-status-error" :disabled="!project.managed || locked" @click="trigger('stop')"><Square :size="15" />停止项目</button>
@@ -65,7 +67,7 @@
           </header>
           <div v-if="!isServiceCollapsed(group.name)" :id="'service-containers-' + project.id + '-' + group.name" class="service-group__body">
             <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id" :data-container-id="container.id">
-              <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><small v-if="container.ports.length">端口 · {{ portText(container) }}</small></div></div>
+              <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><ContainerPorts :container="container" :links="webuiLinks.filter(link => link.containerId === container.id)" /></div></div>
               <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><span v-else-if="project.managed && container.state === 'running'" class="container-resource text-muted">{{ statsError || '等待指标采样…' }}</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
               <div class="project-container-actions" role="group" :aria-label="container.name + ' 容器级操作'">
                 <span class="container-action-scope">容器级</span>
@@ -87,6 +89,7 @@
   </article>
   <ConfirmDialog :show="!!pendingAction" :title="confirmationTitle" :message="confirmationMessage" tone="warning" :confirm-text="confirmationTitle" @confirm="confirmAction" @cancel="pendingAction = ''" />
   <ConfirmDialog :show="!!pendingServiceAction" :title="`确认${pendingServiceAction?.action === 'stop' ? '停止' : '重启'}服务`" :message="serviceConfirmationMessage" tone="warning" :confirm-text="pendingServiceAction?.action === 'stop' ? '停止服务' : '重启服务'" @confirm="confirmServiceAction" @cancel="pendingServiceAction = null" />
+  <ProjectWebUiModal v-if="webuiOpen" :project="project" :initial-service="webuiService" @close="webuiOpen = false" @saved="loadWebUi" />
   <BaseModal :show="noteOpen" title="编辑项目备注" :close-disabled="noteSaving" size-class="max-w-lg" @close="noteOpen = false">
     <form id="project-note-form" class="space-y-3" @submit.prevent="saveNote">
       <label class="block text-sm">{{ project.projectName }}<textarea v-model="noteDraft" aria-label="项目备注" class="input mt-2 min-h-28 w-full resize-y" maxlength="500" placeholder="记录用途、负责人或操作提醒" :disabled="noteSaving"></textarea></label>
@@ -98,11 +101,13 @@
 
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
-import { AlertTriangle, Bot, Box, Boxes, ChevronDown, Database, Download, FileCode2, FolderCog, FolderOpen, GitBranch, History, KeyRound, ListTree, LoaderCircle, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
+import { AlertTriangle, Bot, Box, Boxes, ChevronDown, Database, Download, FileCode2, FolderCog, FolderOpen, GitBranch, Globe, History, KeyRound, ListTree, LoaderCircle, Pencil, Play, RotateCw, ScrollText, Sparkles, Square, Star, TerminalSquare } from 'lucide-vue-next';
 import ImageUpdatePanel from './ImageUpdatePanel.vue';
 import StatusBadge from '../common/StatusBadge.vue';
 import SparklineChart from '../common/SparklineChart.vue';
 import WebUiLauncher from './WebUiLauncher.vue';
+import ContainerPorts from './ContainerPorts.vue';
+import ProjectWebUiModal from './ProjectWebUiModal.vue';
 import ActionDisclosure from '../common/ActionDisclosure.vue';
 import CapabilityLink from '../common/CapabilityLink.vue';
 import BaseModal from '../common/BaseModal.vue';
@@ -215,6 +220,8 @@ const metrics = ref({});
 const statsError = ref('');
 const updateInfo = ref(null);
 const webuiLinks = ref([]);
+const webuiOpen = ref(false), webuiService = ref('');
+let webuiEpoch = 0;
 const dependencyMap = ref(new Map());
 let statsAbort = null;
 let statsTimer = null;
@@ -231,19 +238,21 @@ onActivated(() => {
   if (!activatedBefore) { activatedBefore = true; return; }
   if (props.expanded) openStats();
 });
-onDeactivated(closeStats);
-onBeforeUnmount(closeStats);
+onDeactivated(() => { closeStats(); webuiOpen.value = false; });
+onBeforeUnmount(() => { closeStats(); webuiEpoch++; });
 
 
 
 async function loadWebUi() {
+  const epoch = ++webuiEpoch;
   webuiLinks.value = [];
   if (!props.project.managed) return;
   try {
     const data = await api.getProjectWebUi(props.project.id);
-    webuiLinks.value = (data?.links || []).flatMap((entry) => entry.ports.map((port) => ({ port: port.port, url: port.url, containerName: entry.containerName })));
+    if (epoch !== webuiEpoch) return;
+    webuiLinks.value = (data?.links || []).flatMap((entry) => entry.ports.map((port) => ({ ...port, containerId: entry.containerId, containerName: entry.containerName, serviceName: entry.serviceName, source: entry.source })));
   } catch {
-    webuiLinks.value = []; // 检测失败静默
+    if (epoch === webuiEpoch) webuiLinks.value = []; // 检测失败静默
   }
 }
 
@@ -354,7 +363,6 @@ async function saveNote() {
   } catch (error) { noteError.value = `备注未保存：${error.message}`; }
   finally { noteSaving.value = false; }
 }
-function portText(container) { return container.ports.map((port) => `${port.public}:${port.private}`).join(', '); }
 function timeAgo(ts) {
   if (!ts) return '';
   const diff = Math.max(0, Date.now() - Number(ts));

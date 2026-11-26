@@ -1,12 +1,15 @@
 import { readFile, writeFile } from 'fs/promises';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { setSetting, addComposeBackupBatch, addOperation, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
-import { readCompose } from './compose-runner.js';
+import { readCompose, spawnComposeCommand, composeProjectOptions } from './compose-runner.js';
 import { getProjectDocker } from './docker-hosts.js';
-import { withRunner, readArchiveFile, putArchiveFile } from './compose-workspace.js';
+import { withRunner, readArchiveFile, putArchiveFile, execInRunner } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
+
+import { fetchRemoteDescription, imageCheckSettings, registryError } from './image-registry.js';
+export { fetchRemoteDigest } from './image-registry.js';
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h,避免 Registry Rate Limit
 const cache = new Map(); // projectId -> { ts, data }
@@ -45,7 +48,7 @@ export function parseImageRef(ref = '') {
   return { registry, image, tag, digest, original: cleaned };
 }
 
-function classifyImageService(service) {
+export function classifyImageService(service) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(service.service)) {
     return { ...service, status: 'unresolved', reason: '服务名称格式不支持安全的自动升级' };
   }
@@ -96,46 +99,6 @@ export function extractImageRefs(composeContent = '') {
     .map((item) => item.parsed.original))];
 }
 
-/** Docker Hub 匿名 token,供 manifest 拉取。 */
-async function dockerHubToken(repo) {
-  const url = `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`registry token ${response.status}`);
-    const data = await response.json();
-    return data.token;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** 拉取远程 manifest 的 digest(HEAD/GET + Docker-Content-Digest 头优先)。 */
-export async function fetchRemoteDigest({ registry, image, tag }) {
-  const base = registry === 'docker.io' ? 'https://registry-1.docker.io' : `https://${registry}`;
-  // Docker Hub official images must retain the library/ namespace in their token scope.
-  const repo = image;
-  const endpoint = `${base}/v2/${image}/manifests/${tag}`;
-  const accept = 'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/json';
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
-  try {
-    const headers = { Accept: accept };
-    if (registry === 'docker.io') headers.Authorization = `Bearer ${await dockerHubToken(repo)}`;
-    const response = await fetch(endpoint, { headers, signal: controller.signal, redirect: 'follow' });
-    if (!response.ok) throw new Error(`registry ${response.status}`);
-    const digest = response.headers.get('docker-content-digest');
-    if (digest) return digest;
-    // 兜底:计算 body sha256
-    const body = await response.arrayBuffer();
-    const hash = await crypto.subtle.digest('SHA-256', body);
-    return `sha256:${[...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function localImageInfo(docker, image) {
   try {
     return await docker.getImage(image).inspect();
@@ -172,6 +135,64 @@ export function compareImageDigests(localInfo, remoteDigest, parsed) {
   return { status: same ? 'current' : 'updated', localDigest, remoteDigest, hasUpdate: !same };
 }
 
+/** Image config SHA is the running image ID, even when it was pulled via a mirror. */
+export function compareRunningImage(localInfo, remote, parsed) {
+  if (!localInfo) return { status: 'unknown', hasUpdate: false, reason: '无法读取容器正在使用的本地镜像' };
+  const config = remote.configDigest;
+  if (config) {
+    return { status: localInfo.Id === config ? 'current' : 'updated', hasUpdate: localInfo.Id !== config,
+      localImageId: localInfo.Id, remoteImageId: config, remoteDigest: remote.digest, platformDigest: remote.platformDigest,
+      reason: '已按当前平台的镜像内容与容器实际使用的镜像比较' };
+  }
+  const compared = compareImageDigests(localInfo, remote.digest, parsed);
+  if (compared.status === 'unknown') {
+    const digest = (localInfo.RepoDigests || []).map((d) => d.split('@').at(-1));
+    if (digest.includes(remote.digest) || digest.includes(remote.platformDigest))
+      return { status: 'current', hasUpdate: false, remoteDigest: remote.digest, localImageId: localInfo.Id };
+  }
+  return compared;
+}
+
+function environmentArgs(containers) {
+  return [...new Set(containers.flatMap((c) => String(c.Labels?.['com.docker.compose.project.environment_file'] || '').split(',').filter(Boolean)))].flatMap((file) => ['--env-file', file]);
+}
+async function resolvedImageServices(project, containers, signal) {
+  const args = [...environmentArgs(containers), 'config', '--format', 'json', '--no-env-resolution'];
+  let output;
+  if (project.mounted) {
+    output = await new Promise((resolve, reject) => {
+      const child = spawnComposeCommand(project, args);
+      let text = '';
+      const stop = () => { child.kill('SIGTERM'); reject(signal.reason); };
+      signal.addEventListener('abort', stop, { once: true });
+      if (signal.aborted) stop();
+      child.stdout.on('data', (chunk) => {
+        text += chunk;
+        if (text.length > 8 * 1024 * 1024) { child.kill('SIGTERM'); reject(new Error('Compose 模型过大')); }
+      });
+      // Config output can contain secrets: never echo stderr or the model in responses/logs.
+      child.stderr.resume();
+      child.on('error', reject);
+      child.on('close', (code) => {
+        signal.removeEventListener('abort', stop);
+        code === 0 ? resolve(text) : reject(new Error('Compose 镜像变量展开失败'));
+      });
+    });
+  } else {
+    output = await withRunner(project, async (container) => {
+      const result = await execInRunner(container,
+        ['docker', 'compose', ...composeProjectOptions(project), ...args], { timeoutMs: 10_000 });
+      if (result.code !== 0) throw new Error('Compose 镜像变量展开失败');
+      return result.stdout;
+    });
+  }
+  signal.throwIfAborted();
+  const model = JSON.parse(output);
+  return extractImageServices(JSON.stringify({ services: model.services || {} }));
+}
+
+export function clearImageUpdateCache() { cache.clear(); }
+
 async function readProjectComposeContents(project) {
   const files = Array.isArray(project.composeFiles) && project.composeFiles.length ? project.composeFiles : [project.composeFile].filter(Boolean);
   if (!files.length) throw new Error('项目没有可读取的 Compose 文件');
@@ -190,15 +211,31 @@ async function readProjectComposeContents(project) {
 }
 
 /** 单项目镜像更新检测(带 1h 缓存)。 */
-export async function getProjectUpdates(project, { force = false } = {}) {
-  const cached = cache.get(project.id);
-  if (!force && cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data;
+export async function getProjectUpdates(project, { force = false, signal } = {}) {
+  signal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]);
+  signal?.throwIfAborted();
   const docker = getProjectDocker(project);
-  const services = extractImageServices(await readProjectComposeContents(project));
+  const containers = (await docker.listContainers({ all: true })).filter((c) =>
+    !c.Labels?.['composeops.helper'] && c.Labels?.['com.docker.compose.project'] === project.projectName &&
+    c.Labels?.['com.docker.compose.project.working_dir'] === project.workingDir);
+  let services;
+  try { services = await resolvedImageServices(project, containers, signal); }
+  catch {
+    signal.throwIfAborted();
+    services = extractImageServices(await readProjectComposeContents(project));
+  }
+  signal?.throwIfAborted();
+  const { proxyUrl } = imageCheckSettings();
+  const fingerprint = createHash('sha256').update(JSON.stringify({ hostId: project.hostId, proxyUrl, services,
+    containers: containers.map((c) => [c.Id, c.ImageID || c.Image]).sort((a, b) => a[0].localeCompare(b[0])),
+  })).digest('hex');
+  const cached = cache.get(project.id);
+  if (!force && cached?.fingerprint === fingerprint && Date.now() - cached.ts < cached.ttl) return cached.data;
   const images = [];
   const remoteDigests = new Map();
   for (const service of services) {
-    const item = { service: service.service, image: service.image || '', status: service.status, hasUpdate: false, localDigest: null, remoteDigest: null, reachable: false, reason: service.reason || '' };
+    signal?.throwIfAborted();
+    const item = { service: service.service, image: service.image || '', status: service.status, hasUpdate: false, localDigest: null, remoteDigest: null, reachable: false, canUpgrade: service.canUpgrade !== false, reason: service.reason || '' };
     if (service.status !== 'remote') {
       item.reachable = service.status === 'local_build' || service.status === 'pinned';
       images.push(item);
@@ -208,16 +245,30 @@ export async function getProjectUpdates(project, { force = false } = {}) {
     item.registry = parsed.registry;
     item.tag = parsed.tag;
     try {
-      const local = await localImageInfo(docker, parsed.original);
-      let remote = remoteDigests.get(parsed.original);
-      if (remote === undefined) {
-        remote = await fetchRemoteDigest(parsed);
-        remoteDigests.set(parsed.original, remote);
+      const members = containers.filter((c) => c.Labels?.['com.docker.compose.service'] === service.service);
+      if (!members.length) {
+        item.status = 'not_deployed';
+        item.reason = '服务尚未创建容器，没有正在使用的镜像可比较';
+        images.push(item);
+        continue;
       }
-      Object.assign(item, compareImageDigests(local, remote, parsed), { reachable: true });
+      const results = [];
+      for (const container of members) {
+        // Inspect by immutable ID: the tag may already point to a newer, unused image.
+        const local = await localImageInfo(docker, container.ImageID || (await docker.getContainer(container.Id).inspect()).Image);
+        const platform = { os: local?.Os || 'linux', architecture: local?.Architecture || 'amd64', variant: local?.Variant || '' };
+        const key = parsed.original + JSON.stringify(platform);
+        if (!remoteDigests.has(key)) remoteDigests.set(key, fetchRemoteDescription(parsed, { signal, proxyUrl, platform }));
+        const remote = await remoteDigests.get(key);
+        results.push({ containerId: container.Id, ...compareRunningImage(local, remote, parsed) });
+      }
+      const representative = results.find((r) => r.hasUpdate) || results.find((r) => r.status === 'unknown') || results[0];
+      Object.assign(item, representative, { containers: results, reachable: true, reason: [service.reason, representative.reason].filter(Boolean).join('；') });
     } catch (error) {
-      item.status = 'failed';
-      item.error = error.message;
+      signal?.throwIfAborted();
+      item.status = service.build && [401, 403, 404].includes(error.registryStatus) ? 'local_build' : 'failed';
+      item.error = item.status === 'local_build' ? '' : registryError(error);
+      if (item.status === 'local_build') item.reason = '本地构建镜像的远端标签不可匿名读取；更新需按项目源码构建';
       item.reachable = false;
     }
     images.push(item);
@@ -229,7 +280,9 @@ export async function getProjectUpdates(project, { force = false } = {}) {
     images,
     hasUpdate: images.some((item) => item.hasUpdate),
   };
-  cache.set(project.id, { ts: Date.now(), data });
+  signal?.throwIfAborted();
+  if (imageCheckSettings().proxyUrl === proxyUrl)
+    cache.set(project.id, { ts: Date.now(), data, fingerprint, ttl: images.some((i) => i.status === 'failed') ? 30_000 : CACHE_TTL_MS });
   return data;
 }
 

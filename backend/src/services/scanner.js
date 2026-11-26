@@ -1,5 +1,6 @@
 import { access } from 'fs/promises';
 import path from 'node:path';
+import { extractHostPorts } from './project-ports.js';
 import { getActiveHostId, getHost, getDockerForHost, listHosts } from './docker-hosts.js';
 import { getProjectMountEnabled, getProjectPreference, getSetting, listCustomComposeProjects } from '../lib/db.js';
 import { safeProjectMountPath } from './mount-plan.js';
@@ -179,6 +180,7 @@ async function scanProjectsUncached(activeDocker, host) {
       id: c.Id,
       name: (c.Names[0] || '').replace(/^\//, ''),
       service: labels['com.docker.compose.service'] || '',
+      networkMode: c.HostConfig?.NetworkMode || '',
       state: c.State,
       statusText: c.Status,
       image: c.Image,
@@ -197,6 +199,16 @@ async function scanProjectsUncached(activeDocker, host) {
       })),
     });
   }
+
+  const hostContainers = [...projects.values()].flatMap(project => project.containers).filter(container => container.networkMode === 'host');
+  let hostIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(6, hostContainers.length) }, async () => {
+    while (hostIndex < hostContainers.length) {
+      const container = hostContainers[hostIndex++];
+      try { container.hostPorts = extractHostPorts(await activeDocker.getContainer(container.id).inspect()); }
+      catch { container.hostPorts = []; }
+    }
+  }));
 
   // 计算每个 project 的状态：running | stopped | partial + 可达性检查
   for (const project of projects.values()) {
