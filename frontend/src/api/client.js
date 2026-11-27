@@ -40,7 +40,7 @@ async function doFetch(path, opts = {}) {
     headers['Content-Type'] = 'application/json';
   }
   const init = {
-    ...Object.fromEntries(Object.entries(opts).filter(([key]) => !['readOnly', 'notify', 'force', 'cacheable', 'cacheKey'].includes(key))),
+    ...Object.fromEntries(Object.entries(opts).filter(([key]) => !['readOnly', 'notify', 'force', 'cacheable', 'cacheKey', 'fresh'].includes(key))),
     headers,
   };
   const epoch = hostEpoch;
@@ -83,14 +83,17 @@ async function doFetch(path, opts = {}) {
 }
 function revalidate(key, path, opts) {
   const entry = swrCache.get(key);
-  if (!entry || entry.inflight) return;
+  if (!entry) return;
+  if (entry.promise) return entry.promise;
   entry.inflight = true;
-  doFetch(path, opts)
+  entry.promise = doFetch(path, opts)
     .then((data) => {
       // 写操作/强刷/切节点会替换或删除 entry,迟到响应不能复活已失效的数据。
-      if (swrCache.get(key) === entry) { entry.data = data; entry.inflight = false; }
+      if (swrCache.get(key) === entry) entry.data = data;
+      return data;
     })
-    .catch(() => { if (swrCache.get(key) === entry) entry.inflight = false; });
+    .finally(() => { if (swrCache.get(key) === entry) { entry.inflight = false; entry.promise = null; } });
+  return entry.promise;
 }
 /** SSE/流式响应的非 2xx 错误统一解析为 Error。 */
 async function streamError(res, fallback) {
@@ -114,7 +117,11 @@ async function request(path, opts = {}) {
   const key = `${hostEpoch}:${path}${opts.cacheKey || ''}`;
   const entry = swrCache.get(key);
   if (entry?.hasData && !opts.force) {
-    revalidate(key, path, opts);
+    const pending = revalidate(key, path, opts);
+    // Critical operational lists retain their visible state in the store, while
+    // refresh must reflect the new network result, including failures.
+    if (opts.fresh) return pending;
+    pending.catch(() => {});
     return entry.data;
   }
   if (entry?.promise && !opts.force) return entry.promise;
@@ -181,7 +188,7 @@ export const api = {
   login: (password) => request('/auth/login', { notify: false, method: 'POST', body: JSON.stringify({ password }) }),
   logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
-  getProjects: (force = false) => request('/projects', { force }),
+  getProjects: (force = false) => request('/projects', { force, fresh: true }),
   getHostDirectories: (params, signal) => request('/projects/directories?' + new URLSearchParams(params), { signal }),
   followDeploymentJob: (jobId, onFrame, signal) => followDeploymentJob(jobId, onFrame, signal),
   getComposeProjectCreateOptions: (signal) => request('/projects/create-options', { signal }),
@@ -241,7 +248,7 @@ export const api = {
   getProjectEnvBackups: (projectId, file = '.env') => request('/projects/' + projectId + '/env/backups?' + new URLSearchParams({ file })),
   restoreProjectEnvBackup: (projectId, file, backup, expectedVersion) => request('/projects/' + projectId + '/env/backups/restore', { method: 'POST', body: JSON.stringify({ file, backup, expectedVersion }) }),
   // docker hosts
-  getHosts: (force = false) => request('/hosts', { force }),
+  getHosts: (force = false) => request('/hosts', { force, fresh: true }),
   saveHost: (payload) => request('/hosts', { method: 'POST', body: JSON.stringify(payload) }),
   deleteHost: (id) => request(`/hosts/${id}`, { method: 'DELETE' }),
   pingHost: (id, probe) => request(`/hosts/${id}/ping`, { readOnly: true, method: 'POST', body: JSON.stringify(probe ? { probe } : {}) }),
@@ -268,7 +275,7 @@ export const api = {
   saveProjectWebUiSettings: (id, data) => request(`/projects/${id}/webui-settings`, { method: 'PUT', body: JSON.stringify(data) }),
   getProjectWebUi: (projectId) => request(`/projects/${projectId}/webui`),
   listDbDumpTargets: (projectId) => request(`/projects/${projectId}/db-dump`),
-  listCronJobs: (force = false) => request('/cron', { force }),
+  listCronJobs: (force = false) => request('/cron', { force, fresh: true }),
   previewCronSchedule: (cron) => request(`/cron/preview?${new URLSearchParams({ cron })}`),
   createCronJob: (payload) => request('/cron', { method: 'POST', body: JSON.stringify(payload) }),
   updateCronJob: (id, payload) => request(`/cron/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),

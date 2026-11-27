@@ -14,18 +14,18 @@ describe('API 缓存刷新', () => {
     window.addEventListener('composeops:data-changed', changed);
     try {
       fetchMock.mockResolvedValueOnce(response('cached'));
-      await api.getProjects();
+      await api.getPreferences();
       fetchMock.mockResolvedValueOnce(response('preview'));
       await api.previewDeploy('p1');
       expect(changed).not.toHaveBeenCalled();
       expect(fetchMock.mock.calls[1][1]).not.toHaveProperty('readOnly');
       fetchMock.mockReturnValueOnce(new Promise(() => {}));
-      expect((await api.getProjects()).projects[0].id).toBe('cached');
+      expect((await api.getPreferences()).projects[0].id).toBe('cached');
       fetchMock.mockResolvedValueOnce(response('saved'));
       await api.saveProjectPreference('p1', { name: 'new' });
       expect(changed).toHaveBeenCalledOnce();
       fetchMock.mockResolvedValueOnce(response('fresh'));
-      expect((await api.getProjects()).projects[0].id).toBe('fresh');
+      expect((await api.getPreferences()).projects[0].id).toBe('fresh');
     } finally { window.removeEventListener('composeops:data-changed', changed); }
   });
 
@@ -43,10 +43,11 @@ describe('API 缓存刷新', () => {
     await api.getProjects();
     const slow = deferred();
     fetchMock.mockReturnValueOnce(slow.promise);
-    await api.getProjects();
+    const pending = api.getProjects();
     fetchMock.mockResolvedValueOnce(response('new'));
     await api.getProjects(true);
     slow.resolve(response('stale'));
+    await pending;
     await new Promise(resolve => setTimeout(resolve, 0));
     fetchMock.mockResolvedValueOnce(response('new'));
     expect((await api.getProjects()).projects[0].id).toBe('new');
@@ -57,9 +58,10 @@ describe('API 缓存刷新', () => {
     await api.getProjects();
     const slow = deferred();
     fetchMock.mockReturnValueOnce(slow.promise);
-    await api.getProjects();
+    const pending = api.getProjects();
     invalidateSwr('/projects');
     slow.resolve(response('stale'));
+    await pending;
     await new Promise(resolve => setTimeout(resolve, 0));
     fetchMock.mockResolvedValueOnce(response('fresh'));
     expect((await api.getProjects()).projects[0].id).toBe('fresh');

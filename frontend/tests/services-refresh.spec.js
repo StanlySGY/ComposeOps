@@ -26,6 +26,16 @@ describe('项目列表刷新顺序', () => {
     store.handleContainerEvent({ type: 'snapshot', projects: [] });
     expect(store.projects).toEqual([]);
   });
+  it('WebSocket新快照到达后，先前HTTP刷新不能覆盖它或留下旧错误', async () => {
+    const store = useServicesStore(), old = deferred();
+    getProjects.mockReturnValueOnce(old.promise);
+    const pending = store.refresh();
+    store.error = '旧故障';
+    store.handleContainerEvent({ type: 'snapshot', projects: [{ id: 'new-snapshot' }] });
+    old.resolve({ projects: [{ id: 'old-http' }] }); await pending;
+    expect(store.projects).toEqual([{ id: 'new-snapshot' }]);
+    expect(store.loading).toBe(false); expect(store.error).toBe('');
+  });
   it('切节点立即清空旧项目,旧请求不能填回列表', async () => {
     const store = useServicesStore();
     store.projects = [{ id: 'previous-host' }];

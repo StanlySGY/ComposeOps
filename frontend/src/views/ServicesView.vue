@@ -183,7 +183,7 @@ watch(metricsCollapsed, (value) => {
 });
 function toggleInspectionCollapsed() { inspectionCollapsed.value = !inspectionCollapsed.value; }
 function toggleMetricsCollapsed() { metricsCollapsed.value = !metricsCollapsed.value; }
-const lastUpdated = ref('');
+const lastUpdated = computed(() => store.lastLoadedAt ? new Date(store.lastLoadedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '');
 const inspectionGradeBadge = computed(() => {
   const grade = inspection.value?.latest?.grade;
   return { healthy: 'text-status-ok', attention: 'text-status-warn', degraded: 'text-status-warn', critical: 'text-status-error' }[grade] || 'text-surface-400';
@@ -277,7 +277,7 @@ async function manualRefresh() {
 const completedBatchTasks = computed(() => batchTasks.value.filter((task) => ['success', 'failed'].includes(task.status)).length);
 const batchProgress = computed(() => batchTasks.value.length ? Math.round(completedBatchTasks.value / batchTasks.value.length * 100) : 0);
 
-function refresh(force = false) { return store.refresh(force === true).finally(() => { if (!store.error) lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false }); }); }
+function refresh(force = false) { return store.refresh(force === true); }
 async function handleCustomComposeCreated(result) {
   await refresh(true);
   if (result?.projectId) {

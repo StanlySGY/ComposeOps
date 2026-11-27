@@ -22,14 +22,15 @@ export const useServicesStore = defineStore('services', () => {
   async function refresh(force = false) {
     if (refreshPromise && !force) return refreshPromise;
     const currentRefresh = ++refreshId;
-    const hasData = projects.value.length > 0;
+    const hasData = lastLoadedAt.value > 0 || projects.value.length > 0;
     if (!hasData) loading.value = true;
     error.value = '';
     const requestPromise = (async () => {
       try {
         const data = await api.getProjects(force);
         if (currentRefresh !== refreshId) return;
-        if (Array.isArray(data?.projects)) projects.value = data.projects;
+        if (!Array.isArray(data?.projects)) throw new Error('项目列表响应格式无效，请重新读取');
+        projects.value = data.projects;
         lastLoadedAt.value = Date.now();
       } catch (e) {
         if (currentRefresh === refreshId) error.value = e.message;
@@ -55,8 +56,12 @@ export const useServicesStore = defineStore('services', () => {
     if (event.type === 'snapshot') {
       const snapshot = event.projects || event.data?.projects;
       if (Array.isArray(snapshot)) {
+        refreshId += 1;
+        refreshPromise = null;
         projects.value = snapshot;
         lastLoadedAt.value = Date.now();
+        loading.value = false;
+        error.value = '';
       }
       return;
     }
