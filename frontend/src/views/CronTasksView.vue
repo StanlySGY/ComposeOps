@@ -85,7 +85,7 @@
         <div v-if="filteredHistory.length" class="table-wrap"><table class="data-table"><thead><tr>
           <th v-for="option in sortOptions" :key="option.key" :aria-sort="ariaSort(option.key)"><button class="inline-flex items-center gap-1 py-1" @click="sortBy(option.key)">{{ option.label }}<span v-if="sortKey === option.key" aria-hidden="true">{{ descending ? '↓' : '↑' }}</span></button></th><th>说明</th>
         </tr></thead><tbody><tr v-for="item in pagedRows" :key="item.id">
-          <td data-label="执行时间" class="whitespace-nowrap">{{ formatTimestamp(item.at) }}</td><td data-label="任务名称">{{ item.jobName }}<p class="text-xs text-muted">{{ item.hostName || (item.scope === 'all' ? '全部节点' : '历史记录未保存范围') }}</p></td><td data-label="状态"><StatusBadge :status="item.status" /></td><td data-label="耗时">{{ item.durationMs ?? '—' }} ms</td><td data-label="说明" class="cron-history-detail"><details v-if="item.error"><summary class="cursor-pointer text-status-error">查看错误</summary><p class="whitespace-pre-wrap text-xs">{{ item.error }}</p></details><span v-else class="text-muted">—</span></td>
+          <td data-label="执行时间" class="whitespace-nowrap">{{ formatTimestamp(item.at) }}</td><td data-label="任务名称">{{ item.jobName }}<p class="text-xs text-muted">{{ item.hostName || (item.scope === 'all' ? '全部节点' : '历史记录未保存范围') }}{{ item.projectName ? ' · 仅 ' + item.projectName : '' }}</p></td><td data-label="状态"><StatusBadge :status="item.status" /></td><td data-label="耗时">{{ item.durationMs ?? '—' }} ms</td><td data-label="说明" class="cron-history-detail"><details v-if="item.error"><summary class="cursor-pointer text-status-error">查看错误</summary><p class="whitespace-pre-wrap text-xs">{{ item.error }}</p></details><span v-else class="text-muted">—</span></td>
         </tr></tbody></table></div>
         <EmptyState v-else-if="!historyLoading && !historyError" compact icon="History" title="暂无执行记录" description="任务按计划或手动执行后，结果会出现在这里。" action-label="刷新记录" @action="loadHistory" />
       </section>
@@ -97,9 +97,10 @@
       <fieldset v-if="editor" :disabled="saving" class="cron-editor">
         <p v-if="editorError" class="alert-error" role="alert">{{ editorError }}</p>
         <div class="cron-field"><label for="cron-name">任务名称</label><input id="cron-name" v-model="editor.name" class="input" placeholder="例如：每日数据库备份" maxlength="60" /></div>
-        <div class="cron-field"><label for="cron-type">任务类型</label><select id="cron-type" v-model="editor.type" class="input"><option v-for="(info, key) in types" :key="key" :value="key">{{ info.label }}</option></select></div>
-        <p class="cron-type-note">{{ types[editor.type]?.description || '任务类型尚未加载，请返回后刷新重试。' }}</p>
-        <template v-if="isNodeJob(editor.type)">
+        <div class="cron-field"><label for="cron-type">任务类型</label><select id="cron-type" :disabled="editor.scope === 'project'" v-model="editor.type" class="input"><option v-for="(info, key) in types" :key="key" :value="key">{{ info.label }}</option></select></div>
+        <p v-if="editor.scope !== 'project'" class="cron-type-note">{{ types[editor.type]?.description || '任务类型尚未加载，请返回后刷新重试。' }}</p>
+        <p v-if="editor.scope === 'project'" class="scope-callout">固定项目：{{ editor.hostName }} · {{ editor.projectName || editor.projectId }}。修改名称或周期不会扩大范围；更换项目或服务器需重新创建计划。</p>
+        <template v-else-if="isNodeJob(editor.type)">
           <div class="cron-field"><label for="cron-host">固定执行节点</label><select id="cron-host" v-model="editor.hostId" class="input" @change="confirmEditorTarget"><option disabled value="">请选择节点</option><option v-for="target in targets" :key="target.hostId" :value="target.hostId">{{ target.hostName }}</option></select></div>
           <p class="cron-type-note">保存后固定此节点，不跟随工作节点切换。连接或服务器身份变化后需要重新确认。<span v-if="editor.type.startsWith('prune-')">清理覆盖此节点的未纳管资源，保留全部容器与数据卷。</span></p>
           <p v-if="editorTargetChanged" class="text-xs text-status-warn" role="status">目标尚未确认或配置已变化。<button type="button" class="underline" :disabled="!selectedEditorTarget" @click="confirmEditorTarget">重新确认所选节点</button></p>
@@ -162,7 +163,7 @@ const jobs = ref([]);
 const types = ref({});
 const targets = ref([]), currentTarget = ref(null);
 function isNodeJob(type) { return ['prune-safe', 'prune-all', 'inspection'].includes(type); }
-function jobScopeLabel(job) { return isNodeJob(job.type) ? (job.target?.hostName || job.hostName || '待确认节点') : '全部节点的纳管项目'; }
+function jobScopeLabel(job) { return job.scope === 'project' ? `${job.target?.hostName || job.hostName} · 仅 ${job.target?.projectName || job.projectName || job.target?.projectId}` : isNodeJob(job.type) ? (job.target?.hostName || job.hostName || '待确认节点') : '全部节点的纳管项目'; }
 const history = ref([]);
 const jobsLoading = ref(false);
 const historyLoading = ref(false);
@@ -297,7 +298,8 @@ function openEdit(job) {
   if (pendingJobs.value.has(job.id) || runningId.value === job.id) return;
   resetAgentContext();
   editingId.value = job.id;
-  editor.value = { name: job.name, type: job.type, cron: job.cron, enabled: job.enabled, hostId: job.target?.hostId || currentTarget.value?.hostId || '', connectionRevision: job.target?.connectionRevision || '' };
+  editor.value = { name: job.name, type: job.type, cron: job.cron, enabled: job.enabled, hostId: job.target?.hostId || currentTarget.value?.hostId || '', connectionRevision: job.target?.connectionRevision || '',
+    ...(job.scope === 'project' ? { scope: 'project', projectId: job.target?.projectId, projectName: job.target?.projectName, hostName: job.target?.hostName } : {}) };
   manualCron.value = !scheduleOptions.some(option => option.value === job.cron);
   editorError.value = '';
 }
@@ -322,7 +324,9 @@ async function saveEditor() {
     if (!editor.value.name.trim()) throw new Error('请填写任务名称');
     if (!editor.value.cron.trim()) throw new Error('请填写 Cron 表达式(5 段)');
     const id = editingId.value, payload = { ...editor.value };
+    delete payload.projectName; delete payload.hostName;
     if (isNodeJob(payload.type)) { if (editorTargetChanged.value) throw new Error('请重新确认执行节点'); }
+    else if (payload.scope === 'project') { delete payload.hostId; delete payload.connectionRevision; delete payload.projectId; }
     else { delete payload.hostId; delete payload.connectionRevision; }
     const job = id ? await api.updateCronJob(id, payload) : await api.createCronJob(payload);
     if (disposed) return;

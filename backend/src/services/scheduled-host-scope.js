@@ -30,17 +30,21 @@ async function readEngineId(hostId) {
   finally { clearTimeout(timer); }
 }
 
-export async function captureScheduledPruneHost(hostId, expectedRevision) {
+export async function captureScheduledEngineHost(hostId, expectedRevision) {
   const target = captureScheduledHost(hostId, expectedRevision);
   const engineId = await readEngineId(target.hostId);
   assertScheduledHost(target);
   return { ...target, engineId };
 }
 
-export async function assertScheduledPruneHost(target) {
+export const captureScheduledPruneHost = captureScheduledEngineHost;
+
+export async function assertScheduledEngineHost(target) {
   assertScheduledHost(target);
-  if (!target.engineId) throw Object.assign(new Error('清理计划尚未确认 Docker Engine 身份，请编辑并重新保存'), { statusCode: 409 });
+  if (!target.engineId) throw Object.assign(new Error('计划尚未确认 Docker Engine 身份，请编辑并重新保存'), { statusCode: 409 });
   const engineId = await readEngineId(target.hostId);
   assertScheduledHost(target);
-  if (engineId !== target.engineId) throw Object.assign(new Error('清理计划的 Docker Engine 身份已变化，请核对后重新保存'), { statusCode: 409 });
+  if (engineId !== target.engineId) throw Object.assign(new Error('计划的 Docker Engine 身份已变化，请核对后重新保存'), { statusCode: 409 });
 }
+
+export const assertScheduledPruneHost = assertScheduledEngineHost;

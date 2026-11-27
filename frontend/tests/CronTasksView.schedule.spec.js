@@ -29,6 +29,21 @@ const buttons = () => wrapper.findAll('button');
 const button = text => buttons().find(item => item.text().includes(text));
 
 describe('定时计划创建与回看', () => {
+  it('项目计划在列表和编辑器明确范围，修改周期不能扩大到全部节点', async () => {
+    const job = { id: 'scoped', name: '项目卷备份', type: 'volume-backup', cron: '0 3 * * *', enabled: false, scope: 'project',
+      target: { hostId: 'remote', hostName: '公司节点', projectId: 'p1', projectName: '应用一', connectionRevision: 'r1', engineId: 'e1' } };
+    mocks.api.listCronJobs.mockResolvedValue({ jobs: [job], types: { 'volume-backup': { label: '数据卷备份', description: '所有纳管项目' } }, targets: [] });
+    mocks.api.updateCronJob.mockResolvedValue(job);
+    await start(); expect(wrapper.text()).toContain('公司节点 · 仅 应用一');
+    await wrapper.get('button[aria-label="编辑定时任务 项目卷备份"]').trigger('click');
+    expect(wrapper.get('[role=dialog]').text()).toContain('固定项目：公司节点 · 应用一');
+    expect(wrapper.get('[role=dialog]').text()).not.toContain('所有纳管项目');
+    expect(wrapper.get('#cron-type').attributes('disabled')).toBeDefined();
+    await wrapper.get('#cron-schedule').setValue('0 2 * * *');
+    await vi.waitFor(() => expect(wrapper.findAll('.cron-preview time')).toHaveLength(3));
+    await button('保存修改').trigger('click'); await flushPromises();
+    expect(mocks.api.updateCronJob).toHaveBeenCalledWith('scoped', { name: '项目卷备份', type: 'volume-backup', cron: '0 2 * * *', enabled: false, scope: 'project' });
+  });
   it('所有快捷计划都显示实际周期，自定义模式保留表达式，重开恢复默认', async () => {
     await start();
     await wrapper.findAll('.cron-preset-card')[1].trigger('click');

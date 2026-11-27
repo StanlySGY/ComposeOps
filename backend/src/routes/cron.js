@@ -20,6 +20,8 @@ const jobFields = {
   cron: { type: 'string', minLength: 1, maxLength: 120 },
   type: { type: 'string', enum: Object.keys(JOB_TYPES) },
   enabled: { type: 'boolean' },
+  scope: { type: 'string', enum: ['all', 'host', 'project'] },
+  projectId: { type: 'string', minLength: 1, maxLength: 300 },
   hostId: { type: 'string', minLength: 1, maxLength: 100 },
   connectionRevision: { type: 'string', minLength: 1, maxLength: 100 },
 };
@@ -38,7 +40,7 @@ export default async function cronRoutes(fastify) {
     catch (error) { return reply.code(400).send({ error: 'invalid_cron', message: error.message }); }
   });
 
-  fastify.get('/', async () => ({ jobs: await listJobs(), types: JOB_TYPES, targets: listScheduledHosts(), currentTarget: captureScheduledHost() }));
+  fastify.get('/', async () => ({ jobs: await listJobs(), types: JOB_TYPES, targets: listScheduledHosts(), currentTarget: captureScheduledHost(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
 
   fastify.post('/', {
     schema: {
@@ -52,7 +54,7 @@ export default async function cronRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const job = await createJob(request.body || {});
-      addOperation({ action: 'cron.create', status: 'success', detail: `${job.name} (${job.cron})` });
+      addOperation({ action: 'cron.create', status: 'success', projectId: job.target?.projectId, projectName: job.target?.projectName, detail: `${job.name} (${job.cron}) · ${job.scope === 'project' ? `仅 ${job.target.hostName}/${job.target.projectName}` : job.scope === 'host' ? job.target.hostName : '全部节点的纳管项目'}` });
       return job;
     } catch (error) {
       return reply.code(error.statusCode || 400).send({ error: 'cron_create_failed', message: error.message });
@@ -72,7 +74,7 @@ export default async function cronRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const job = await updateJob(request.params.id, request.body || {});
-      addOperation({ action: 'cron.update', status: 'success', detail: job.name });
+      addOperation({ action: 'cron.update', status: 'success', projectId: job.target?.projectId, projectName: job.target?.projectName, detail: `${job.name} · ${job.scope === 'project' ? `仅 ${job.target.hostName}/${job.target.projectName}` : job.scope === 'host' ? job.target?.hostName || '待确认节点' : '全部节点的纳管项目'}` });
       return job;
     } catch (error) {
       return reply.code(error.statusCode || 400).send({ error: 'cron_update_failed', message: error.message });

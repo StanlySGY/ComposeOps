@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">定时运维计划</h1>
-        <p class="page-subtitle">把备份、镜像更新与 AI 巡检组合成可复用的定时运维计划</p>
+        <p class="page-subtitle">为指定项目安排命名卷备份与镜像拉取，按需添加节点巡检</p>
       </div>
       <div class="page-actions">
         <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
@@ -13,21 +13,21 @@
     <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载运维任务中心</p>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
 
-    <!-- 任务流生成器 -->
+    <!-- 独立计划生成器 -->
     <section class="section-panel">
       <div class="mb-4"><h2 class="section-title">生成运维计划</h2><p class="mt-1 text-muted">选择目标项目和执行时间，生成当前系统实际支持的定时任务</p></div>
       <div class="grid gap-4 lg:grid-cols-3">
         <div class="lg:col-span-1 space-y-3">
           <div>
             <label class="block text-sm font-medium text-surface-300">目标项目</label>
-            <select v-model="targetProjectId" class="input mt-1.5 w-full" aria-label="目标项目">
+            <select :disabled="creating" v-model="targetProjectId" class="input mt-1.5 w-full" aria-label="目标项目">
               <option value="">选择项目</option>
-              <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
+              <option v-for="p in eligibleProjects" :key="p.id" :value="p.id">{{ p.projectName }} · {{ p.hostName || p.hostId }}</option>
             </select>
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-300">执行时间</label>
-            <select v-model="scheduleCron" class="input mt-1.5 w-full" aria-label="执行时间">
+            <select :disabled="creating" v-model="scheduleCron" class="input mt-1.5 w-full" aria-label="执行时间">
               <option value="0 3 * * *">每天 03:00</option>
               <option value="0 4 * * 0">每周日 04:00</option>
               <option value="0 2 1 * *">每月 1 日 02:00</option>
@@ -36,19 +36,20 @@
           <div class="rounded-xl border border-surface-800 bg-surface-950/40 p-3">
             <div class="flex items-center justify-between">
               <span class="text-sm text-surface-300">自动巡检</span>
-              <label class="toggle-label"><input v-model="enableInspection" type="checkbox" aria-label="自动巡检" /></label>
+              <label class="toggle-label"><input :disabled="creating" v-model="enableInspection" type="checkbox" aria-label="自动巡检" /></label>
             </div>
-            <p class="mt-1 text-xs text-surface-400">按同一周期执行只读 AI 巡检并留存报告</p>
+            <p class="mt-1 text-xs text-surface-400">独立巡检所选项目所在节点，覆盖该节点全部容器</p>
           </div>
-          <button class="btn-primary w-full" :disabled="!targetProjectId || generating" @click="generateFlow">
-            <Sparkles class="w-4 h-4" :class="{ 'animate-pulse': generating }" />{{ generating ? '生成中...' : '生成任务流' }}
+          <button class="btn-primary w-full" :disabled="!targetProject || !targetNode || generating || creating || loading" @click="generateFlow">
+            <Sparkles class="w-4 h-4" :class="{ 'animate-pulse': generating }" />{{ generating ? '生成中...' : '预览定时计划' }}
           </button>
         </div>
 
-        <!-- 任务流预览 -->
+        <!-- 已确认范围预览 -->
         <div class="lg:col-span-2">
           <EmptyState v-if="!flowSteps.length" icon="Bot" title="选择项目后生成计划" description="系统会先列出实际创建的定时任务，确认后再保存。" />
           <div v-else class="space-y-2">
+            <p class="text-sm text-surface-300 break-words" data-testid="plan-scope">{{ flowPlan.projectName }} · {{ flowPlan.hostName }} · {{ flowPlan.scheduleLabel }}（{{ flowPlan.timezone }}）</p>
             <div v-for="(step, idx) in flowSteps" :key="idx" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
               <span class="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-xs" :class="step.tone === 'danger' ? 'border-status-error/40 text-status-error' : step.tone === 'warning' ? 'border-status-warn/40 text-status-warn' : 'border-status-ok/40 text-status-ok'">{{ idx + 1 }}</span>
               <div class="min-w-0 flex-1">
@@ -58,11 +59,11 @@
               <span class="shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold" :class="step.tone === 'danger' ? 'bg-status-error/15 text-status-error' : step.tone === 'warning' ? 'bg-status-warn/15 text-status-warn' : 'bg-status-ok/15 text-status-ok'">{{ step.tag }}</span>
             </div>
             <div class="rounded-lg border border-status-warn/20 bg-status-warn/5 px-3 py-2 text-xs text-status-warn/80">
-              当前计划会创建“数据卷备份”“拉取镜像”和可选的“AI 巡检”定时任务；部署、健康检查和回滚仍需在服务/运维操作中执行，不会被假装成已自动化。
+              每项任务独立按同一周期触发，不保证先后顺序；某项失败不会阻止其它任务。命名卷在线归档不保证数据库一致性，重要数据应使用数据库备份。拉取镜像不会部署或重建服务。
             </div>
             <div class="flex gap-2 pt-1">
               <button class="btn-primary flex-1" :disabled="creating || loading" @click="createFlowJobs"><Rocket class="w-4 h-4" :class="{ 'animate-pulse': creating }" />{{ creating ? '创建中...' : '创建定时任务' }}</button>
-              <button class="btn-secondary" @click="flowSteps = []">清空</button>
+              <button class="btn-secondary" :disabled="creating" @click="clearPlan">清空</button>
             </div>
           </div>
         </div>
@@ -119,7 +120,7 @@
           <thead><tr><th>任务</th><th>类型</th><th>Cron</th><th>状态</th><th>最近执行</th></tr></thead>
           <tbody>
             <tr v-for="job in jobs" :key="job.id" class="hover:bg-surface-800/25">
-              <td class="font-medium text-surface-100">{{ job.name }}</td>
+              <td class="font-medium text-surface-100">{{ job.name }}<p class="mt-1 text-xs text-muted">{{ job.scope === 'project' ? (job.target?.hostName + ' · 仅 ' + job.target?.projectName) : job.scope === 'host' ? job.target?.hostName || '待确认节点' : '全部节点的纳管项目' }}</p></td>
               <td><span class="count-badge text-sky-300">{{ jobTypeLabel(job.type) }}</span></td>
               <td class="font-mono text-xs text-surface-400">{{ job.cron }}</td>
               <td><span class="status-badge" :class="job.enabled ? 'bg-status-ok/10 text-status-ok' : 'bg-surface-800 text-surface-400'">{{ job.enabled ? '启用' : '停用' }}</span></td>
@@ -161,7 +162,7 @@
 
 <script setup>
 import EmptyState from '../components/common/EmptyState.vue';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, FileText, RefreshCw, Rocket, Sparkles, Square } from 'lucide-vue-next';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
@@ -177,7 +178,11 @@ const loadErrors = ref({ jobs: '', inspection: '' });
 const targetProjectId = ref('');
 const scheduleCron = ref('0 3 * * *');
 const enableInspection = ref(true);
-const flowSteps = ref([]);
+const flowPlan = ref(null);
+const flowSteps = computed(() => flowPlan.value?.steps || []);
+const targets = ref([]);
+const timezone = ref('服务器时区');
+const eligibleProjects = computed(() => store.projects.filter(project => project.managed && project.editable));
 const jobs = ref([]);
 const inspectionEnabled = ref(false);
 const inspectionInterval = ref(24);
@@ -188,9 +193,12 @@ const expandedTaskId = ref('');
 const taskLoading = ref(false);
 const agentTaskError = ref('');
 const stopTarget = ref(null);
-let taskPollTimer = null;
+let taskPollTimer = null, active = false, disposed = false, taskEpoch = 0;
 
-const targetProject = computed(() => store.projects.find((p) => p.id === targetProjectId.value));
+const targetProject = computed(() => eligibleProjects.value.find((p) => p.id === targetProjectId.value));
+const targetNode = computed(() => targets.value.find(target => target.hostId === targetProject.value?.hostId));
+function clearPlan() { flowPlan.value = null; }
+watch([targetProjectId, scheduleCron, enableInspection, () => JSON.stringify(targetNode.value), () => !!targetProject.value], clearPlan, { flush: 'sync' });
 
 function jobTypeLabel(type) {
   return { 'db-backup': '数据库备份', 'prune-safe': '安全清理', 'prune-all': '深度清理', 'images-check': '镜像检查', 'pull-images': '拉取镜像', 'volume-backup': '数据卷备份', inspection: 'AI 巡检' }[type] || type;
@@ -205,15 +213,18 @@ function agentTaskTone(status) {
   return 'bg-surface-800 text-surface-400';
 }
 async function loadAgentTasks() {
+  if (!active || taskLoading.value) return;
+  const epoch = taskEpoch;
   taskLoading.value = true;
   try {
     const data = await api.getAgentTasks(50);
+    if (!active || epoch !== taskEpoch) return;
     agentTasks.value = data.tasks || [];
     agentTaskError.value = '';
   } catch (e) {
-    agentTaskError.value = '后台任务加载失败：' + (e.message || '未知错误');
+    if (active && epoch === taskEpoch) agentTaskError.value = '后台任务加载失败：' + (e.message || '未知错误');
   } finally {
-    taskLoading.value = false;
+    if (epoch === taskEpoch) taskLoading.value = false;
   }
 }
 async function toggleTaskOutput(task) {
@@ -261,47 +272,40 @@ const inspectionScheduleLabel = computed(() => (
 ));
 
 function generateFlow() {
-  if (!targetProject.value) return;
-  generating.value = true;
-  const name = targetProject.value.projectName;
+  if (!targetProject.value || !targetNode.value || creating.value) return;
+  error.value = '';
+  const project = targetProject.value, node = targetNode.value;
+  const common = { hostId: node.hostId, connectionRevision: node.connectionRevision, cron: scheduleCron.value, enabled: true };
   const steps = [
-    { title: '备份数据卷', description: `对「${name}」的命名卷执行 tar 备份,保留最近 20 份`, tag: '备份', tone: 'success' },
-    { title: '拉取最新镜像', description: `执行 docker compose pull,获取「${name}」的最新镜像`, tag: '拉取', tone: 'success' },
+    { title: '备份项目命名卷', description: `仅归档「${project.projectName}」的命名卷，保留最近 20 份`, tag: '项目', tone: 'success',
+      request: { ...common, scope: 'project', projectId: project.id, name: `${project.projectName} 数据卷备份`, type: 'volume-backup' } },
+    { title: '拉取项目镜像', description: `仅为「${project.projectName}」执行 compose pull，不重建服务`, tag: '项目', tone: 'success',
+      request: { ...common, scope: 'project', projectId: project.id, name: `${project.projectName} 拉取镜像`, type: 'pull-images' } },
   ];
-  if (enableInspection.value) {
-    steps.push({ title: 'AI 巡检', description: '部署完成后执行一次只读巡检,留存报告', tag: '巡检', tone: 'success' });
-  }
-  flowSteps.value = steps;
-  generating.value = false;
+  if (enableInspection.value) steps.push({ title: '节点只读巡检', description: `独立巡检「${node.hostName}」全部容器和资源并留存报告`, tag: '节点', tone: 'warning',
+    request: { ...common, name: `${node.hostName} AI 巡检`, type: 'inspection' } });
+  flowPlan.value = { projectName: project.projectName, hostName: node.hostName, timezone: timezone.value,
+    scheduleLabel: { '0 3 * * *': '每天 03:00', '0 4 * * 0': '每周日 04:00', '0 2 1 * *': '每月 1 日 02:00' }[scheduleCron.value], steps };
 }
 
 async function createFlowJobs() {
-  if (!targetProject.value || !flowSteps.value.length) return;
+  if (!flowPlan.value || creating.value) return;
+  const plan = structuredClone(flowPlan.value.steps.map(step => ({ ...step.request })));
   creating.value = true;
   error.value = '';
-  const name = targetProject.value.projectName;
-  const expectedCount = enableInspection.value ? 3 : 2;
   const created = [];
   try {
-    // 顺序创建不是原子操作；若中途失败，必须提醒已成功创建的部分，防止用户直接重试造成重复任务。
-    created.push(await api.createCronJob({ name: `${name} 数据卷备份`, cron: scheduleCron.value, type: 'volume-backup', enabled: true }));
-    created.push(await api.createCronJob({ name: `${name} 拉取镜像`, cron: scheduleCron.value, type: 'pull-images', enabled: true }));
-    if (enableInspection.value) {
-      created.push(await api.createCronJob({ name: `${name} AI 巡检`, cron: scheduleCron.value, type: 'inspection', enabled: true }));
-    }
+    // Each request is the exact previewed scope. Creation itself is not an atomic batch.
+    for (const request of plan) created.push(await api.createCronJob(request));
+    clearPlan();
     await load();
-    flowSteps.value = [];
   } catch (e) {
-    if (created.length) {
-      flowSteps.value = [];
-      await load();
-      error.value = `任务仅部分创建：已创建 ${created.length}/${expectedCount} 项，后续创建失败（${e.message}）。请先核对现有定时任务，再手动补齐未创建项；不要直接重试整组计划，以免重复创建。`;
-    } else {
-      error.value = `创建任务失败：${e.message}`;
-    }
-  } finally {
-    creating.value = false;
-  }
+    clearPlan();
+    await load();
+    error.value = created.length
+      ? `任务仅部分创建：已创建 ${created.length}/${plan.length} 项，后续创建失败（${e.message}）。请先核对现有定时任务，再手动补齐未创建项；不要直接重试整组计划，以免重复创建。`
+      : `创建结果未确认：${e.message}。请核对现有任务后再创建，避免重复保存。`;
+  } finally { creating.value = false; }
 }
 
 async function load() {
@@ -315,7 +319,7 @@ async function load() {
       api.getInspectionOverview(1),
       api.getAgentTasks(50),
     ]);
-    if (jobData.status === 'fulfilled') jobs.value = jobData.value.jobs || [];
+    if (jobData.status === 'fulfilled') { jobs.value = jobData.value.jobs || []; targets.value = jobData.value.targets || []; timezone.value = jobData.value.timezone || '服务器时区'; }
     else loadErrors.value.jobs = `定时任务加载失败：${jobData.reason?.message || '未知错误'}`;
     if (taskData.status === 'fulfilled') { agentTasks.value = taskData.value.tasks || []; agentTaskError.value = ''; }
     else agentTaskError.value = '后台任务加载失败：' + (taskData.reason?.message || '未知错误');
@@ -338,10 +342,14 @@ async function load() {
 }
 
 usePullRefresh(load);
-onMounted(async () => {
-  await store.refresh(false);
-  await load();
+function startPolling() {
+  if (active || disposed) return;
+  active = true;
   taskPollTimer = setInterval(() => { void loadAgentTasks(); }, 10000);
-});
-onBeforeUnmount(() => { if (taskPollTimer) clearInterval(taskPollTimer); });
+}
+function stopPolling() { active = false; taskEpoch++; taskLoading.value = false; clearInterval(taskPollTimer); taskPollTimer = null; }
+onMounted(async () => { startPolling(); await store.refresh(false); if (!disposed) await load(); });
+onActivated(startPolling);
+onDeactivated(stopPolling);
+onBeforeUnmount(() => { disposed = true; stopPolling(); });
 </script>

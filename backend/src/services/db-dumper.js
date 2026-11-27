@@ -104,7 +104,7 @@ export async function readDbEnv(project) {
  * 在指定容器内执行 dump,同时把 gzip 输出流提供给响应,并把 .gz 留存到 data/backups/db/。
  * @returns {Promise<{ stream: PassThrough, filename: string, exitCode: number, type: string }>}
  */
-export async function runDbDump(project, containerId, { dbName = '', download = true, signal } = {}) {
+export async function runDbDump(project, containerId, { dbName = '', download = true, signal, beforeEffect = async () => {} } = {}) {
   if (!project?.managed) throw Object.assign(new Error('项目尚未加入管理'), { statusCode: 403 });
   const container = (project.containers || []).find((item) =>
     item.id === containerId || item.id.startsWith(containerId) || item.name === containerId);
@@ -120,6 +120,7 @@ export async function runDbDump(project, containerId, { dbName = '', download = 
   const { cmd, env } = buildDumpCommand(type, envCfg);
 
   const docker = getProjectDocker(project);
+  await beforeEffect();
   const instance = await docker.getContainer(container.id).exec({
     Cmd: cmd,
     AttachStdout: true,
@@ -129,6 +130,7 @@ export async function runDbDump(project, containerId, { dbName = '', download = 
   });
   let execStream;
   try {
+    await beforeEffect();
     execStream = await instance.start({ hijack: false, stdin: false });
   } catch (error) {
     throw Object.assign(new Error(`启动 dump 失败:${error.message}`), { statusCode: 502 });

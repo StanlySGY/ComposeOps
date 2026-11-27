@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import { randomBytes } from 'node:crypto';
 import { pruneScheduledStorage } from './docker-storage.js';
 import { assertScheduledHost, captureScheduledHost, captureScheduledPruneHost } from './scheduled-host-scope.js';
+import { captureScheduledProject, resolveScheduledProject, assertScheduledProject, assertScheduledProjectPermission } from './scheduled-project-scope.js';
+import { withProjectOperationLock } from './project-operation-lock.js';
 import { checkAllUpdates } from './image-updater.js';
 import { listProjectDbContainers, runDbDump } from './db-dumper.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
@@ -89,7 +91,24 @@ export async function getJob(id) {
   return jobs.find((job) => job.id === id) || null;
 }
 
+function jobScope(job) { return job.scope || (job.target?.projectId ? 'project' : JOB_TYPES[job.type]?.scope || 'all'); }
+function requestedScope(type, input, current) {
+  const scope = input.scope ?? (input.projectId ? 'project' : current?.scope === 'project' || current?.target?.projectId ? 'project' : JOB_TYPES[type]?.scope || 'all');
+  if (!['all', 'host', 'project'].includes(scope)) throw Object.assign(new Error('未知计划范围'), { statusCode: 400 });
+  if (input.projectId && scope !== 'project') throw Object.assign(new Error('项目ID与计划范围不一致，已拒绝扩大范围'), { statusCode: 400 });
+  if (scope !== 'project' && scope !== JOB_TYPES[type]?.scope) throw Object.assign(new Error('计划范围与任务类型不一致'), { statusCode: 400 });
+  return scope;
+}
 async function prepareJobTarget(type, input, current) {
+  const scope = requestedScope(type, input, current);
+  if (scope === 'project') {
+    if (current?.target?.projectId && (!input.projectId || input.projectId === current.target.projectId) &&
+        (!input.hostId || input.hostId === current.target.hostId) && (!input.connectionRevision || input.connectionRevision === current.target.connectionRevision)) {
+      await resolveScheduledProject(current.target, type);
+      return current.target;
+    }
+    return captureScheduledProject({ ...current?.target, ...input }, type);
+  }
   if (JOB_TYPES[type]?.scope !== 'host') return null;
   if (input.hostId === undefined && current?.target && type === current.type) {
     assertScheduledHost(current.target);
@@ -99,6 +118,10 @@ async function prepareJobTarget(type, input, current) {
   return type.startsWith('prune-') ? captureScheduledPruneHost(input.hostId, input.connectionRevision) : captureScheduledHost(input.hostId, input.connectionRevision);
 }
 function targetError(job) {
+  if (jobScope(job) === 'project') {
+    try { assertScheduledProjectPermission(job.target, job.type); return ''; }
+    catch (error) { return error.message; }
+  }
   if (JOB_TYPES[job.type]?.scope !== 'host') return '';
   try {
     assertScheduledHost(job.target);
@@ -121,6 +144,7 @@ export async function createJob(input = {}) {
     name,
     cron: expr,
     type,
+    scope: requestedScope(type, input),
     target,
     enabled: input.enabled !== false,
     createdAt: Date.now(),
@@ -144,11 +168,12 @@ export async function updateJob(id, patch = {}) {
     if (patch.cron !== undefined) validateCron(patch.cron);
     if (patch.type !== undefined && !JOB_TYPES[patch.type]) throw Object.assign(new Error('未知任务类型'), { statusCode: 400 });
     const next = { ...job };
-    const targetChange = patch.hostId !== undefined || patch.connectionRevision !== undefined || (patch.type !== undefined && patch.type !== job.type);
+    const targetChange = patch.hostId !== undefined || patch.connectionRevision !== undefined || patch.scope !== undefined || patch.projectId !== undefined || (patch.type !== undefined && patch.type !== job.type);
     if (patch.enabled === true && !targetChange && JOB_TYPES[job.type]?.scope === 'host' && !job.target) {
       throw Object.assign(new Error('请先编辑旧计划并明确选择目标节点，再启用'), { statusCode: 409 });
     }
     if (targetChange || patch.enabled === true) next.target = await prepareJobTarget(patch.type || job.type, patch, job);
+    if (targetChange) next.scope = requestedScope(patch.type || job.type, patch, job);
     if ((patch.enabled === true && !job.enabled) || (patch.cron !== undefined && String(patch.cron).trim() !== job.cron) || targetChange) next.scheduleFromAt = Date.now();
     if (patch.name !== undefined) next.name = String(patch.name).trim().slice(0, 60) || job.name;
     if (patch.cron !== undefined) next.cron = String(patch.cron).trim();
@@ -185,7 +210,7 @@ export function nextScheduledRun(job) {
 function enrich(job) {
   const error = targetError(job);
   const next = error ? null : nextScheduledRun(job);
-  return { ...job, scope: JOB_TYPES[job.type]?.scope || 'all', targetError: error, hostId: job.target?.hostId || null, hostName: job.target?.hostName || null, nextRunAt: next ? next.getTime() : null, typeLabel: JOB_TYPES[job.type]?.label || job.type };
+  return { ...job, scope: jobScope(job), targetError: error, hostId: job.target?.hostId || null, hostName: job.target?.hostName || null, nextRunAt: next ? next.getTime() : null, typeLabel: JOB_TYPES[job.type]?.label || job.type };
 }
 
 /* ---------------- 执行 ---------------- */
@@ -199,7 +224,8 @@ async function recordRun(job, status, error = '', duration) {
     jobId: job.id,
     jobName: job.name,
     type: job.type,
-    scope: JOB_TYPES[job.type]?.scope || 'all', hostId: job.target?.hostId || null, hostName: job.target?.hostName || null,
+    scope: jobScope(job), hostId: job.target?.hostId || null, hostName: job.target?.hostName || null,
+    projectId: job.target?.projectId || null, projectName: job.target?.projectName || null,
     status,
     error: error ? String(error).slice(0, 500) : '',
     durationMs: Math.round(duration),
@@ -226,10 +252,22 @@ async function recordRun(job, status, error = '', duration) {
 async function executeJob(job) {
   const started = Date.now();
   try {
+    if (jobScope(job) === 'project') return await withProjectOperationLock(job.target?.projectId, async () => {
+      const project = await resolveScheduledProject(job.target, job.type);
+      return executeJobBody(job, [project], () => assertScheduledProject(job.target, job.type));
+    });
+    return await executeJobBody(job);
+  } catch (error) {
+    await recordRun(job, 'failed', error.message, Date.now() - started);
+    throw error;
+  }
+}
+
+async function executeJobBody(job, fixedProjects, beforeEffect = async () => {}) {
     if (JOB_TYPES[job.type]?.scope === 'host') assertScheduledHost(job.target);
     switch (job.type) {
       case 'db-backup': {
-        const projects = (await scanProjects()).filter((project) => project.managed);
+        const projects = fixedProjects || (await scanProjects()).filter((project) => project.managed);
         let dumped = 0;
         const errors = [];
         for (const project of projects) {
@@ -238,7 +276,8 @@ async function executeJob(job) {
           catch (error) { errors.push(`${project.projectName}:数据库容器列表读取失败`); continue; }
           for (const target of targets) {
             try {
-              const result = await runDbDump(project, target.containerId, { download: false });
+              await beforeEffect();
+              const result = await runDbDump(project, target.containerId, { download: false, beforeEffect });
               if (result.exitCode === 0) dumped += 1;
               else errors.push(`${project.projectName}/${target.containerName}`);
             } catch (e) {
@@ -268,7 +307,7 @@ async function executeJob(job) {
       }
       case 'volume-backup': {
         const { listProjectVolumes, createVolumeBackup } = await import('./volume-backup.js');
-        const projects = (await scanProjects()).filter((project) => project.managed);
+        const projects = fixedProjects || (await scanProjects()).filter((project) => project.managed);
         let backed = 0;
         const errors = [];
         for (const project of projects) {
@@ -281,7 +320,8 @@ async function executeJob(job) {
           }
           for (const volume of volumes) {
             try {
-              await createVolumeBackup(project, volume.name);
+              await beforeEffect();
+              await createVolumeBackup(project, volume.name, { beforeEffect });
               backed += 1;
             } catch (error) {
               errors.push(`${project.projectName}/${volume.name}:${error.message}`);
@@ -295,13 +335,13 @@ async function executeJob(job) {
       }
       case 'pull-images': {
         const { prepareProjectAction } = await import('./project-action-runner.js');
-        const projects = (await scanProjects()).filter((project) => project.managed && project.editable);
+        const projects = fixedProjects || (await scanProjects()).filter((project) => project.managed && project.editable);
         let pulled = 0;
         const errors = [];
         for (const project of projects) {
           try {
             const prepared = await prepareProjectAction(project, 'pull');
-            const code = await prepared.run(() => {}, () => {}, { timeoutMs: 900000 });
+            const code = await prepared.run(() => {}, () => {}, { timeoutMs: 900000, beforeRun: beforeEffect });
             if (code === 0) pulled += 1;
             else errors.push(project.projectName);
           } catch (e) {
@@ -318,10 +358,6 @@ async function executeJob(job) {
       default:
         throw new Error('未知任务类型');
     }
-  } catch (error) {
-    await recordRun(job, 'failed', error.message, Date.now() - started);
-    throw error;
-  }
 }
 
 /* ---------------- 调度器 ---------------- */

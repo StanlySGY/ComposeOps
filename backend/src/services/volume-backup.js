@@ -189,10 +189,11 @@ async function ensureHelperImage(docker) {
 }
 
 /** 跑一次性 helper 容器执行命令,返回 { exitCode, output }。 */
-async function runHelper(docker, cmd, binds, { onResource = () => {}, timeoutMs = 0 } = {}) {
+async function runHelper(docker, cmd, binds, { onResource = () => {}, timeoutMs = 0, beforeEffect = async () => {} } = {}) {
   await ensureHelperImage(docker);
   const resourceName = 'composeops-backup-' + randomBytes(12).toString('hex');
   await onResource({ kind: 'container', id: resourceName, state: 'reserved' });
+  await beforeEffect();
   const container = await docker.createContainer({
     name: resourceName, Image: HELPER_IMAGE,
     Cmd: ['sh', '-c', cmd],
@@ -202,6 +203,7 @@ async function runHelper(docker, cmd, binds, { onResource = () => {}, timeoutMs 
   });
   try {
     await onResource({ kind: 'container', id: resourceName, state: 'created' });
+    await beforeEffect();
     await container.start();
     let timeout;
     const wait = timeoutMs > 0
@@ -269,11 +271,12 @@ async function volumeBinds(volume, mode, host = getActiveHost(), docker = getDoc
 }
 
 /** 备份单个命名卷,返回新纪录。 */
-export async function createVolumeBackup(project, volumeName) {
+export async function createVolumeBackup(project, volumeName, { beforeEffect = async () => {} } = {}) {
   volumeName = assertVolumeName(volumeName);
   const host = getProjectHost(project);
   const hostId = host?.id || 'local';
   return withVolumeOperationLock(project?.id, hostId, volumeName, async () => {
+    await beforeEffect();
     const volumes = await listProjectVolumes(project, host);
     const match = volumes.find((item) => item.name === volumeName);
     if (!match) throw Object.assign(new Error('该卷未在项目 Compose 配置中声明'), { statusCode: 404 });
@@ -306,6 +309,7 @@ export async function createVolumeBackup(project, volumeName) {
       docker,
       command,
       await volumeBinds(volumeName, 'ro', host, docker),
+      { beforeEffect },
     ).catch((error) => {
       throw Object.assign(new Error(`helper 容器执行失败:${error.message}`), { statusCode: 502 });
     });

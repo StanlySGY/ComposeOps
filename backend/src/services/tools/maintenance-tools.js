@@ -242,7 +242,7 @@ export function registerMaintenanceTools(agent) {
       },
     })
     .registerTool('cron.create', {
-      description: '创建定时任务。清理/巡检固定节点，先server.inspect获取hostId/connectionRevision；清理含未纳管资源但保留容器与卷。备份/拉取/镜像检查覆盖全部节点的纳管项目',
+      description: '创建独立定时任务，不是顺序流程。清理/巡检固定节点，先server.inspect获取hostId/connectionRevision；清理保留容器与卷。备份/拉取可传scope=project与projectId固定项目，未限定项目则覆盖全部节点纳管项目；镜像检查始终全节点',
       category: 'maintenance',
       requiredPermission: 'managed',
       confirmationRequired: true,
@@ -253,16 +253,18 @@ export function registerMaintenanceTools(agent) {
           name: { type: 'string', description: '任务名称' },
           type: { type: 'string', enum: ['db-backup', 'prune-safe', 'prune-all', 'images-check', 'pull-images', 'volume-backup', 'inspection'], description: '任务类型' },
           cron: { type: 'string', description: '5 段 cron 表达式(分 时 日 月 周)' },
-          hostId: { type: 'string', description: '清理/巡检必填，server.inspect返回的节点ID' },
-          connectionRevision: { type: 'string', description: '清理/巡检必填，server.inspect返回的连接修订' },
+          scope: { type: 'string', enum: ['all', 'host', 'project'], description: '项目备份或拉取须明确传project；all明确覆盖所有节点，host用于清理/巡检' },
+          projectId: { type: 'string', description: '限定项目时必填，真实扫描得到的项目ID' },
+          hostId: { type: 'string', description: '清理/巡检/项目计划必填，server.inspect返回的节点ID' },
+          connectionRevision: { type: 'string', description: '清理/巡检/项目计划必填，server.inspect返回的连接修订' },
         },
         required: ['name', 'type', 'cron'],
       },
       execute: async (params) => {
-        if (['prune-safe', 'prune-all', 'inspection'].includes(params.type) && (!params.hostId || !params.connectionRevision)) {
+        if ((params.projectId || params.scope === 'project' || ['prune-safe', 'prune-all', 'inspection'].includes(params.type)) && (!params.hostId || !params.connectionRevision)) {
           throw Object.assign(new Error('请先调用 server.inspect 核对节点，再传入 hostId 和 connectionRevision 创建计划'), { statusCode: 409 });
         }
-        return createJob({ name: params.name, type: params.type, cron: params.cron, hostId: params.hostId, connectionRevision: params.connectionRevision });
+        return createJob({ name: params.name, type: params.type, cron: params.cron, hostId: params.hostId, connectionRevision: params.connectionRevision, scope: params.scope, projectId: params.projectId });
       },
     })
     .registerTool('cron.list', {

@@ -42,6 +42,16 @@ function frame(text) {
   return Buffer.concat([header, payload]);
 }
 
+test('等待helper镜像期间授权失效，不能再创建备份容器或新增归档', async t => {
+  let revoked = false;
+  t.mock.method(docker, 'listVolumes', async () => ({ Volumes: [{ Name: 'test-volume' }] }));
+  t.mock.method(docker, 'getImage', () => ({ inspect: async () => { revoked = true; return {}; } }));
+  const create = t.mock.method(docker, 'createContainer', async () => { throw new Error('不得创建'); });
+  const before = listVolumeBackups(project.id).length;
+  await assert.rejects(createVolumeBackup(project, 'test-volume', { beforeEffect: async () => { if (revoked) throw new Error('项目权限已撤销'); } }), /权限已撤销/);
+  assert.equal(create.mock.callCount(), 0); assert.equal(listVolumeBackups(project.id).length, before);
+});
+
 test('备份文件删除失败时保留记录并报告失败', async (t) => {
   const id = addVolumeBackup({ projectId: 'delete-test', projectName: 'delete-test', volume: 'test-volume', file: 'delete-test.tar.gz', bytes: 123, host: 'local' });
   t.mock.method(docker, 'getImage', () => ({ inspect: async () => ({}) }));

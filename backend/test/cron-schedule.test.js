@@ -44,6 +44,7 @@ test('新任务首次到点执行一次；再次扫描不会重复；重新启�
   assert.equal((await listHistory()).length, 1);
   silence.mock.restore();
   await updateJob(job.id, { enabled: false });
+  stored.type = 'images-check'; // Restore the supported type before testing normal editing.
   now = new Date(2026, 10, 10, 4).getTime();
   const enabled = await updateJob(job.id, { enabled: true });
   assert.equal(new Date(enabled.nextRunAt).getDate(), 11);

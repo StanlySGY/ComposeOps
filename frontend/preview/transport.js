@@ -12,14 +12,15 @@ const unsupported = () => json({ message: '此操作未在离线预览中模拟�
 const aiConfig = () => ({ channels, failoverEnabled: true, apiKey: '••••demo', model: channels[0]?.model || '', baseUrl: channels[0]?.baseUrl || '', systemPrompt: '离线示例：按实际应用的审批流程演示排障。' });
 const eventRecords = [{ id: 1, eventType: 'alert', source: 'alert-monitor', title: alerts[0].title, detail: alerts[0].detail, severity: 'warning', status: 'open', assetName: 'knowledge-base', createdAt: at, payload: { projectId: 'knowledge-base', to: '/logs?projectId=knowledge-base&containerId=demo-wiki-api&from=events' } }];
 const cronJobs = [];
+const cronTarget = { hostId: 'local', hostName: '本机 · 示例', connectionRevision: 'preview-local', engineId: 'preview-engine' };
 const cronTypes = {
-  'db-backup': { label: '数据库自动备份', description: '对纳管项目中的数据库执行备份' },
-  'prune-safe': { label: 'Docker 安全清理', description: '清理悬空镜像、退出容器与未使用构建缓存' },
-  'prune-all': { label: 'Docker 自动深度清理', description: '清理悬空镜像、退出容器与全部未使用构建缓存，不删除数据卷' },
-  'images-check': { label: '镜像更新检查', description: '只读检查镜像更新，不拉取或重建容器' },
-  'pull-images': { label: '定时拉取镜像', description: '对可编辑项目拉取镜像' },
-  'volume-backup': { label: '数据卷备份', description: '备份纳管项目的命名卷' },
-  inspection: { label: 'AI 巡检', description: '只读巡检并保存报告' },
+  'db-backup': { scope: 'all', label: '数据库自动备份', description: '对纳管项目中的数据库执行备份' },
+  'prune-safe': { scope: 'host', label: 'Docker 安全清理', description: '清理悬空镜像与未使用构建缓存，保留全部容器和数据卷' },
+  'prune-all': { scope: 'host', label: 'Docker 自动深度清理', description: '清理悬空镜像与全部未使用构建缓存，保留全部容器和数据卷' },
+  'images-check': { scope: 'all', label: '镜像更新检查', description: '只读检查镜像更新，不拉取或重建容器' },
+  'pull-images': { scope: 'all', label: '定时拉取镜像', description: '对可编辑项目拉取镜像' },
+  'volume-backup': { scope: 'all', label: '数据卷备份', description: '备份纳管项目的命名卷' },
+  inspection: { scope: 'host', label: 'AI 巡检', description: '只读巡检并保存报告' },
 };
 const enrichCronJob = job => ({ ...job, nextRunAt: job.enabled ? nextRunTime(job.cron)?.getTime() : null, typeLabel: cronTypes[job.type]?.label });
 const sessions = [];
@@ -156,7 +157,7 @@ export async function previewFetch(input, options = {}) {
     '/jobs': { jobs: [...jobs.values()] },
     '/ops-tickets': { tickets: [], stats: { open: 0, blocked: 0, review: 0, terminal: 0 } },
     '/ops-tickets/worker/status': { running: false, mode: 'disabled' },
-    '/cron': { jobs: cronJobs.map(enrichCronJob), types: cronTypes }, '/cron/history': { history: [] },
+    '/cron': { jobs: cronJobs.map(enrichCronJob), types: cronTypes, targets: [cronTarget], currentTarget: cronTarget, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, '/cron/history': { history: [] },
     '/gitops': { repos: [] }, '/gitops/drift': { repos: [], summary: {} },
     '/metrics/alerts': { alerts: [] }, '/metrics/historical': { data: [], metrics: [] },
     '/system/mcp': { enabled: false, mode: 'readonly', tokenConfigured: false, tools: [], endpoints: {} },
@@ -183,6 +184,12 @@ export async function previewFetch(input, options = {}) {
     try { validateCron(body.cron); } catch (error) { return json({ message: error.message }, 400); }
     if (!body.name?.trim() || !cronTypes[body.type]) return json({ message: '请填写名称并选择任务类型' }, 400);
     const job = { name: body.name.trim().slice(0, 60), cron: body.cron.trim(), type: body.type, enabled: body.enabled !== false, id: 'demo-cron-' + serial++, createdAt: Date.now() };
+    job.scope = body.scope || (body.projectId ? 'project' : cronTypes[body.type].scope);
+    if (job.scope === 'project') {
+      const project = projects.find(item => item.id === body.projectId && item.managed && item.hostId === body.hostId);
+      if (!project || !['db-backup', 'volume-backup', 'pull-images'].includes(body.type)) return json({ message: '示例项目范围无效' }, 400);
+      job.target = { ...cronTarget, projectId: project.id, projectName: project.projectName };
+    } else if (job.scope === 'host') job.target = { ...cronTarget };
     cronJobs.push(job); return json(enrichCronJob(job));
   }
   if (path.startsWith('/cron/') && ['PUT', 'DELETE'].includes(method)) {
