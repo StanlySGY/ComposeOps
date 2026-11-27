@@ -34,7 +34,7 @@
       <span class="stat-item">最小: <strong>{{ stats.min }}</strong></span>
       <span class="stat-item">平均: <strong>{{ stats.avg }}</strong></span>
       <span class="stat-item">最大: <strong>{{ stats.max }}</strong></span>
-      <span class="stat-item current">当前: <strong>{{ stats.current }}</strong></span>
+      <span class="stat-item current" title="当前可见范围的最后一个历史数据点，不是实时读数">末点: <strong>{{ stats.current }}</strong></span>
     </div>
   </div>
 </template>

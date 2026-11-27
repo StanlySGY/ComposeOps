@@ -63,8 +63,10 @@
         <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
             <h2 class="section-title">{{ metricTypes.find(m => m.key === selectedMetric)?.label }}趋势</h2>
-            <p class="mt-1 text-muted">{{ currentContainer?.name || '当前容器' }} · {{ periods.find(p => p.key === period)?.label }}<template v-if="!['network', 'disk'].includes(selectedMetric)"> · 异常点以阴影标记</template></p>
+            <p class="mt-1 text-muted">{{ currentContainer?.name || '当前容器' }} · {{ periods.find(p => p.key === period)?.label }}<template v-if="!['network', 'disk'].includes(selectedMetric)"> · 统计异常点以阴影标记</template></p>
             <p v-if="['network', 'disk'].includes(selectedMetric)" class="mt-1 text-xs text-surface-400">展示容器累计计数，重启可能归零；每秒速率请查看实时总览。</p>
+            <p v-if="historySampling" class="mt-1 text-xs leading-relaxed text-surface-400" data-testid="history-sampling">{{ historySampling.sourceSamples }} 个原始样本<template v-if="historySampling.aggregationSeconds"> · 按 {{ historySampling.aggregationSeconds }} 秒聚合</template><template v-else-if="historySampling.retainedBuckets"> · 历史保留桶</template><template v-if="historySampling.adjusted"> · 已按绘图上限调整粒度</template><template v-if="historySampling.approximate"> · 边界或旧数据为近似统计</template></p>
+            <p v-if="anomalyAnalysis && !['network', 'disk'].includes(selectedMetric)" class="mt-1 text-xs leading-relaxed text-surface-400" data-testid="history-analysis"><template v-if="!anomalyAnalysis.sufficientSamples">有效点不足 10 个，暂不作统计异常判断。</template><template v-else-if="anomalyAnalysis.basis === 'bucket-means'">异常检测依据聚合均值，短时尖峰可能被平滑。</template><template v-else>异常检测仅提供历史统计线索。</template> 未发现异常不代表业务健康。</p>
           </div>
           <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="历史指标时间范围">
             <button v-for="p in periods" :key="p.key"
@@ -194,6 +196,8 @@ const error = ref('');
 const alertsError = ref('');
 const historySeries = ref([]);
 const historyError = ref('');
+const historySampling = ref(null);
+const anomalyAnalysis = ref(null);
 const anomalies = ref([]);
 let metricsRequestId = 0;
 let metricsController = null;
@@ -381,6 +385,7 @@ function invalidateMetrics() {
   metricDataContainerId = '';
   historySeries.value = [];
   historyError.value = '';
+  historySampling.value = null; anomalyAnalysis.value = null;
   anomalies.value = [];
 }
 
@@ -434,6 +439,7 @@ async function loadMetrics() {
   const controller = new AbortController(); metricsController = controller;
   if (metricDataContainerId !== context.containerId) metricsData.value = null;
   historySeries.value = []; anomalies.value = []; historyError.value = '';
+  historySampling.value = null; anomalyAnalysis.value = null;
   loading.value = true;
   error.value = '';
   try {
@@ -461,10 +467,14 @@ async function loadMetrics() {
     });
     const seriesResult = results[4], anomalyResult = results[5];
     if (seriesResult.status === 'fulfilled' && Array.isArray(seriesResult.value?.metrics)) {
+      historySampling.value = seriesResult.value.sampling || null;
       historySeries.value = seriesResult.value.metrics.filter(item => [item.timestamp, item.value].every(value => ['number', 'string'].includes(typeof value) && String(value).trim() !== ''))
         .map(item => ({ ...item, timestamp: Number(item.timestamp), value: Number(item.value) })).filter(item => Number.isFinite(item.timestamp) && Number.isFinite(item.value));
     } else { historyError.value = '历史趋势读取失败：' + (seriesResult.reason?.message || '响应无效'); failures.push(historyError.value); }
-    if (anomalyResult.status === 'fulfilled' && Array.isArray(anomalyResult.value?.anomalies)) anomalies.value = anomalyResult.value.anomalies;
+    if (anomalyResult.status === 'fulfilled' && Array.isArray(anomalyResult.value?.anomalies)) {
+      anomalies.value = anomalyResult.value.anomalies;
+      anomalyAnalysis.value = anomalyResult.value.analysis || null;
+    }
     else failures.push('异常检测：' + (anomalyResult.reason?.message || '响应无效'));
     if (failures.length) error.value = '部分指标暂不可用；成功读取的结果已保留。' + failures.join('；');
   } catch (err) {

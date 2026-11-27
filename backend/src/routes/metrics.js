@@ -3,7 +3,9 @@ import { createAlertRule, listAlertRules, deleteAlertRule, ALERT_METRICS, ALERT_
 import { acknowledgeAlertAction } from '../services/resource-alert-actions.js';
 import { getSetting } from '../lib/db.js';
 import {
-  queryHistoricalMetrics,
+  queryHistoricalMetricWindow,
+  normalizeMetricQuery,
+  HISTORY_METRIC_TYPES,
   getMetricsStats,
   detectAnomalies,
   evaluateAlertRules,
@@ -124,32 +126,31 @@ export default async function metricsRoutes(fastify) {
       schema: {
         querystring: {
           type: 'object',
+          required: ['containerId', 'metricType'],
           properties: {
-            containerId: { type: 'string', description: '容器 ID' },
-            metricType: { type: 'string', description: '指标类型' },
+            containerId: { type: 'string', minLength: 1, description: '容器 ID' },
+            metricType: { type: 'string', enum: [...HISTORY_METRIC_TYPES], description: '指标类型' },
             startTime: { type: 'integer', description: '开始时间戳（毫秒）' },
             endTime: { type: 'integer', description: '结束时间戳（毫秒）' },
-            aggregation: { type: 'string', description: '聚合方式（auto 或秒数）', default: 'auto' },
+            aggregation: { type: 'string', pattern: '^(auto|[0-9]{1,5})$', description: '聚合方式（auto 或秒数，结果最多2000点）', default: 'auto' },
           }
         }
       }
     },
     async (request) => {
       const { containerId, metricType, startTime, endTime, aggregation = 'auto' } = request.query;
+      const options = normalizeMetricQuery({ containerId, metricType, startTime, endTime, aggregation: aggregation === 'auto' ? aggregation : Number(aggregation) });
       const { project, container } = await resolveManagedContainer(containerId);
-      
-      const metrics = queryHistoricalMetrics({
+      const { metrics, sampling } = queryHistoricalMetricWindow({
+        ...options,
         hostId: project.hostId,
         containerId: container.id,
-        metricType,
-        startTime: startTime !== undefined ? parseInt(startTime, 10) : undefined,
-        endTime: endTime !== undefined ? parseInt(endTime, 10) : undefined,
-        aggregation: aggregation === 'auto' ? 'auto' : parseInt(aggregation, 10),
       });
 
       return { 
         metrics,
         count: metrics.length,
+        sampling,
       };
     }
   );
@@ -164,13 +165,13 @@ export default async function metricsRoutes(fastify) {
           required: ['containerId', 'metricType'],
           properties: {
             containerId: { type: 'string', description: '容器 ID' },
-            metricType: { type: 'string', description: '指标类型' },
+            metricType: { type: 'string', enum: [...HISTORY_METRIC_TYPES], description: '指标类型' },
           }
         },
         querystring: {
           type: 'object',
           properties: {
-            hours: { type: 'integer', description: '统计小时数', default: 24 },
+            hours: { type: 'integer', minimum: 1, maximum: 720, description: '统计小时数', default: 24 },
           }
         }
       }
@@ -203,12 +204,12 @@ export default async function metricsRoutes(fastify) {
           required: ['containerId', 'metricType'],
           properties: {
             containerId: { type: 'string', description: '容器 ID' },
-            metricType: { type: 'string', description: '指标类型' },
-            hours: { type: 'integer', description: '检测小时数', default: 24 },
+            metricType: { type: 'string', enum: ['cpu', 'memory'], description: '指标类型，仅支持CPU与内存占用率' },
+            hours: { type: 'integer', minimum: 1, maximum: 720, description: '检测小时数', default: 24 },
             startTime: { type: 'integer', description: '开始时间戳(毫秒,优先于 hours)' },
             endTime: { type: 'integer', description: '结束时间戳(毫秒,优先于 hours)' },
             algorithms: { 
-              type: 'array', 
+              type: 'array', minItems: 1, maxItems: 3, uniqueItems: true,
               items: { type: 'string', enum: ['z_score', 'moving_average', 'trend'] },
               description: '使用的算法',
               default: ['z_score', 'moving_average', 'trend'],
@@ -217,25 +218,16 @@ export default async function metricsRoutes(fastify) {
         }
       }
     },
-    async (request, reply) => {
+    async (request) => {
       const { containerId, metricType, hours = 24, startTime: requestedStart, endTime: requestedEnd, algorithms = ['z_score', 'moving_average', 'trend'] } = request.body;
+      const endTime = requestedEnd === undefined ? Date.now() : requestedEnd;
+      const startTime = requestedStart === undefined ? Math.max(0, endTime - hours * 3600000) : requestedStart;
+      const options = normalizeMetricQuery({ containerId, metricType, startTime, endTime });
       const { project, container } = await resolveManagedContainer(containerId);
-
-      const endTime = Number.isFinite(Number(requestedEnd)) ? Number(requestedEnd) : Date.now();
-      const requestedHours = Number(hours);
-      const startTime = Number.isFinite(Number(requestedStart))
-        ? Number(requestedStart)
-        : endTime - (Number.isFinite(requestedHours) && requestedHours >= 0 ? requestedHours : 24) * 3600 * 1000;
-      if (startTime > endTime) {
-        return reply.code(400).send({ error: 'invalid_time_range', message: '指标时间范围无效' });
-      }
-
-      const metrics = queryHistoricalMetrics({
+      const { metrics, sampling } = queryHistoricalMetricWindow({
+        ...options,
         hostId: project.hostId,
         containerId: container.id,
-        metricType,
-        startTime,
-        endTime,
       });
 
       const anomalies = detectAnomalies(metrics, algorithms);
@@ -244,6 +236,9 @@ export default async function metricsRoutes(fastify) {
         anomalies,
         count: anomalies.length,
         timeRange: { start: startTime, end: endTime, hours: (endTime - startTime) / 3600000 },
+        sampling,
+        analysis: { basis: sampling.aggregated || metrics.some(row => row.sample_count > 1) ? 'bucket-means' : 'raw-samples', points: metrics.length,
+          sufficientSamples: metrics.length >= 10, meaning: '历史统计线索，未发现异常不代表业务健康；聚合后的均值可能平滑尖峰。' },
       };
     }
   );

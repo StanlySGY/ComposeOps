@@ -120,6 +120,18 @@ function detectAnomaliesTrend(metrics, windowSize = 5, slopeThreshold = 0.5) {
  * 综合异常检测
  */
 export function detectAnomalies(metrics, algorithms = ['z_score', 'moving_average', 'trend']) {
+  const series = new Map();
+  for (const row of metrics) {
+    if (!['cpu', 'memory'].includes(row.metric_type) || !Number.isFinite(row.value) || row.value < 0 || !Number.isFinite(row.timestamp)) continue;
+    const key = JSON.stringify([row.host_id || 'local', row.container_id, row.metric_type]);
+    if (!series.has(key)) series.set(key, []);
+    series.get(key).push(row);
+  }
+  return [...series.values()].flatMap(rows => detectSeriesAnomalies(rows.sort((a, b) => a.timestamp - b.timestamp), algorithms))
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function detectSeriesAnomalies(metrics, algorithms) {
   const anomalyMap = new Map();
 
   if (algorithms.includes('z_score')) {
@@ -179,6 +191,23 @@ export function detectAnomalies(metrics, algorithms = ['z_score', 'moving_averag
 /**
  * 查询历史指标数据
  */
+export const HISTORY_METRIC_TYPES = Object.freeze(['cpu', 'memory', 'network_rx', 'network_tx', 'disk_read', 'disk_write']);
+export const HISTORY_MAX_POINTS = 2000;
+export const HISTORY_MAX_DAYS = 30;
+const invalidQuery = message => { throw Object.assign(new Error(message), { statusCode: 400 }); };
+
+export function normalizeMetricQuery(options = {}) {
+  const endTime = options.endTime === undefined ? Date.now() : options.endTime;
+  const startTime = options.startTime === undefined ? Math.max(0, endTime - 86400000) : options.startTime;
+  if (![startTime, endTime].every(value => Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000)
+    || startTime > endTime || endTime - startTime > HISTORY_MAX_DAYS * 86400000) invalidQuery('历史指标时间范围须有效且不超过30天');
+  if (typeof options.containerId !== 'string' || !options.containerId.trim()) invalidQuery('历史指标必须指定容器');
+  if (options.metricType !== undefined && !HISTORY_METRIC_TYPES.includes(options.metricType)) invalidQuery('不支持的历史指标类型');
+  const aggregation = options.aggregation === undefined ? 'auto' : options.aggregation;
+  if (aggregation !== 'auto' && (!Number.isSafeInteger(aggregation) || aggregation < 0 || aggregation > 86400)) invalidQuery('聚合间隔须为auto或0至86400之间的整数秒');
+  return { ...options, hostId: options.hostId || 'local', startTime, endTime, aggregation };
+}
+
 function metricFilter({ containerId, hostId, metricType, startTime, endTime }) {
   const clauses = ['1=1']; const params = [];
   for (const [column, value] of [['host_id', hostId], ['container_id', containerId], ['metric_type', metricType]]) {
@@ -195,32 +224,54 @@ function metricFilter({ containerId, hostId, metricType, startTime, endTime }) {
   return { where: clauses.join(' AND '), params, hasStart, hasEnd };
 }
 
-export function queryHistoricalMetrics(options) {
-  const { startTime, endTime, aggregation = 'auto' } = options;
-  const { where, params, hasStart, hasEnd } = metricFilter(options);
-  const interval = aggregation === 'auto' && hasStart && hasEnd
+export function queryHistoricalMetricWindow(options) {
+  const normalized = normalizeMetricQuery(options);
+  const { startTime, endTime, aggregation } = normalized;
+  const { where, params, hasStart, hasEnd } = metricFilter(normalized);
+  const requestedInterval = aggregation === 'auto' && hasStart && hasEnd
     ? getAggregationInterval(Number(endTime) - Number(startTime)).interval
-    : (typeof aggregation === 'number' && Number.isFinite(aggregation) ? aggregation : 0);
+    : aggregation;
+  // Include overlapping retained buckets and reserve space for all metric types if omitted internally.
+  const pointBudget = Math.floor(HISTORY_MAX_POINTS / (normalized.metricType ? 1 : HISTORY_METRIC_TYPES.length));
+  const boundedInterval = Math.max(1, Math.ceil((endTime - startTime + 300000) / (pointBudget - 1) / 1000));
+  let interval = Math.max(requestedInterval, boundedInterval);
   const approximation = ['stats_approximate', ...(hasStart ? [`COALESCE(range_start, timestamp) < ${Number(startTime)}`] : []), ...(hasEnd ? [`COALESCE(range_end, timestamp) > ${Number(endTime)}`] : [])].join(' OR ');
-  if (interval <= 2) return db.prepare(`SELECT host_id, container_id, metric_type, value, unit, timestamp,
+  const finish = (metrics, seconds) => ({ metrics, sampling: {
+    startTime, endTime, aggregationSeconds: seconds, requestedAggregation: aggregation,
+    maxPoints: HISTORY_MAX_POINTS, aggregated: seconds > 0 || metrics.some(row => row.sample_count > 1),
+    retainedBuckets: metrics.some(row => row.sample_count > 1) && seconds === 0,
+    adjusted: seconds > (requestedInterval <= 2 ? 0 : requestedInterval),
+    approximate: metrics.some(row => !!row.stats_approximate),
+    sourceSamples: metrics.reduce((sum, row) => sum + row.sample_count, 0),
+  } });
+  if (interval <= 2) {
+    const raw = db.prepare(`SELECT host_id, container_id, metric_type, value, unit, timestamp,
     sample_count, COALESCE(value_sum, value) AS value_sum, COALESCE(value_min, value) AS value_min,
-    COALESCE(value_max, value) AS value_max, (${approximation}) AS stats_approximate FROM container_metrics WHERE ${where} ORDER BY timestamp`).all(...params);
+    COALESCE(value_max, value) AS value_max, (${approximation}) AS stats_approximate FROM container_metrics WHERE ${where} ORDER BY timestamp LIMIT ${HISTORY_MAX_POINTS + 1}`).all(...params);
+    if (raw.length <= HISTORY_MAX_POINTS) return finish(raw, 0);
+    interval = Math.max(1, boundedInterval);
+  }
   // Only aggregated points cross the SQLite/JS boundary, never the entire raw window.
   const bucket = Math.max(1, Math.floor(interval * 1000));
-  return db.prepare(`SELECT host_id, container_id, metric_type, unit,
+  const metrics = db.prepare(`SELECT host_id, container_id, metric_type, unit,
     CAST(timestamp / ${bucket} AS INTEGER) * ${bucket} AS timestamp,
     SUM(COALESCE(value_sum, value)) / SUM(sample_count) AS value,
     SUM(COALESCE(value_sum, value)) AS value_sum, SUM(sample_count) AS sample_count,
     MIN(COALESCE(value_min, value)) AS value_min, MAX(COALESCE(value_max, value)) AS value_max,
     MAX(${approximation}) AS stats_approximate
     FROM container_metrics WHERE ${where}
-    GROUP BY host_id, container_id, metric_type, CAST(timestamp / ${bucket} AS INTEGER) ORDER BY timestamp`).all(...params);
+    GROUP BY host_id, container_id, metric_type, CAST(timestamp / ${bucket} AS INTEGER) ORDER BY timestamp LIMIT ${HISTORY_MAX_POINTS + 1}`).all(...params);
+  if (metrics.length > HISTORY_MAX_POINTS) throw Object.assign(new Error('历史序列超出查询上限，请指定单个指标或缩短范围'), { statusCode: 413 });
+  return finish(metrics, interval);
 }
+
+export function queryHistoricalMetrics(options) { return queryHistoricalMetricWindow(options).metrics; }
 
 /** Raw windows have exact quantiles; retained buckets use weighted means and explicitly report approximation. */
 export function getMetricsStats(containerId, metricType, hours = 24, hostId) {
+  if (typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0 || hours > HISTORY_MAX_DAYS * 24) invalidQuery('指标统计时长须大于0且不超过720小时');
   const endTime = Date.now(); const startTime = endTime - hours * 3600000;
-  const { where, params } = metricFilter({ containerId, metricType, hostId, startTime, endTime });
+  const { where, params } = metricFilter(normalizeMetricQuery({ containerId, metricType, hostId, startTime: Math.floor(startTime), endTime }));
   const stats = db.prepare(`SELECT SUM(sample_count) AS count,
     SUM(COALESCE(value_sum, value)) / SUM(sample_count) AS mean,
     MIN(COALESCE(value_min, value)) AS min, MAX(COALESCE(value_max, value)) AS max,
@@ -303,13 +354,6 @@ export function evaluateAlertRules(containerId, hostId) {
       condition: (stats) => stats && stats.mean > 95,
       message: (stats) => `内存使用率接近上限（平均: ${stats.mean.toFixed(1)}%）`,
       priority: 'critical',
-    },
-    {
-      name: 'network_spike',
-      metricType: 'network_rx',
-      condition: (stats) => stats && stats.max > stats.mean * 10,
-      message: (stats) => `网络接收流量出现异常峰值（最大: ${(stats.max / 1024 / 1024).toFixed(1)}MB/s）`,
-      priority: 'info',
     },
   ];
 

@@ -60,6 +60,21 @@ async function mountView(props = {}) {
   return wrapper;
 }
 
+it('显示聚合依据与采样不足，失败后不遗留上次统计说明', async () => {
+  metricsApi.getHistoricalMetrics.mockResolvedValue({ metrics: [{ timestamp: 1000, value: 20 }], sampling: { sourceSamples: 5000, aggregationSeconds: 60, adjusted: true, approximate: true } });
+  metricsApi.detectAnomalies.mockResolvedValue({ anomalies: [], analysis: { sufficientSamples: false, basis: 'bucket-means' } });
+  await mountView();
+  expect(wrapper.get('[data-testid="history-sampling"]').text()).toContain('5000 个原始样本 · 按 60 秒聚合');
+  expect(wrapper.get('[data-testid="history-sampling"]').text()).toContain('近似统计');
+  expect(wrapper.get('[data-testid="history-analysis"]').text()).toContain('不足 10 个');
+  expect(wrapper.get('[data-testid="history-analysis"]').text()).toContain('不代表业务健康');
+  metricsApi.getHistoricalMetrics.mockRejectedValue(new Error('暂不可用'));
+  metricsApi.detectAnomalies.mockRejectedValue(new Error('暂不可用'));
+  await wrapper.get('[aria-label="选择内存指标"]').trigger('click'); await flushPromises();
+  expect(wrapper.find('[data-testid="history-sampling"]').exists()).toBe(false);
+  expect(wrapper.find('[data-testid="history-analysis"]').exists()).toBe(false);
+});
+
 describe('资源监控告警配置弹窗的键盘可访问性', () => {
   it('提供命名模态框语义及正确关联的表单标签，并在打开时聚焦弹窗内', async () => {
     await mountView();
