@@ -5,18 +5,21 @@
 import { getDockerForHost, getActiveHostId, onHostsChange } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 import { getSetting, setSetting } from '../lib/db.js';
-import { readDockerDiskUsage } from './docker-disk-usage.js';
+import { summarizeDockerDiskUsage } from '../lib/docker-storage-summary.js';
+import { readDockerDiskUsage, onDiskUsageInvalidated } from './docker-disk-usage.js';
 
 // 成本扫描要逐容器拉 stats、跑 docker df,较慢;结果做 2 分钟 TTL 内存缓存(按活跃宿主分键),
 // 成本页重复进入与后台预热不再反复全量扫描
 const COST_CACHE_TTL_MS = 2 * 60 * 1000;
 const costCache = new Map();
 const costPending = new Map();
-onHostsChange(id => {
+function invalidateCostData(id) {
   for (const cache of [costCache, costPending]) {
     for (const key of cache.keys()) if (key.startsWith(`${id}:`)) cache.delete(key);
   }
-});
+}
+onHostsChange(invalidateCostData);
+onDiskUsageInvalidated(invalidateCostData);
 async function withCostCache(key, fetcher, hostId) {
   const cacheKey = `${hostId}:${key}`;
   const hit = costCache.get(cacheKey);
@@ -122,34 +125,12 @@ export function getStorageStats(hostId = getActiveHostId()) {
 }
 async function fetchStorageStats(hostId) {
   try {
-    const dfOutput = await readDockerDiskUsage(hostId);
-    // LayersSize is total storage, not reclaimable storage. Match the Engine
-    // disk-usage estimate by subtracting unique layers of referenced images.
-    const layersSize = Math.max(0, Number(dfOutput.LayersSize) || 0);
-    const usedUnique = (dfOutput.Images || []).filter(image => image.Containers > 0 && image.Size >= 0 && image.SharedSize >= 0)
-      .reduce((sum, image) => sum + Math.max(0, (Number(image.Size) || 0) - Math.max(0, Number(image.SharedSize) || 0)), 0);
-    return {
-      images: {
-        active: dfOutput.Images?.filter(i => i.Containers > 0).length || 0,
-        total: dfOutput.Images?.length || 0,
-        sizeMB: Math.round(layersSize / 1024 / 1024 * 100) / 100,
-        reclaimableMB: Math.round(Math.max(0, layersSize - usedUnique) / 1024 / 1024 * 100) / 100
-      },
-      containers: {
-        active: dfOutput.Containers?.filter(c => c.State === 'running').length || 0,
-        total: dfOutput.Containers?.length || 0,
-        sizeMB: Math.round((dfOutput.Containers?.reduce((sum, c) => sum + (c.SizeRw || 0), 0) || 0) / 1024 / 1024 * 100) / 100
-      },
-      volumes: {
-        active: dfOutput.Volumes?.filter(v => v.UsageData?.RefCount > 0).length || 0,
-        total: dfOutput.Volumes?.length || 0,
-        sizeMB: Math.round((dfOutput.Volumes?.reduce((sum, v) => sum + (v.UsageData?.Size || 0), 0) || 0) / 1024 / 1024 * 100) / 100
-      },
-      buildCache: {
-        sizeMB: Math.round((dfOutput.BuildCache?.reduce((sum, b) => sum + (b.Size || 0), 0) || 0) / 1024 / 1024 * 100) / 100,
-        reclaimableMB: Math.round((dfOutput.BuildCache?.filter(b => b.InUse === false).reduce((sum, b) => sum + (b.Size || 0), 0) || 0) / 1024 / 1024 * 100) / 100
-      }
-    };
+    const usage = summarizeDockerDiskUsage(await readDockerDiskUsage(hostId));
+    const mb = value => Math.round(value / 1024 / 1024 * 100) / 100;
+    return { ...Object.fromEntries(['images', 'containers', 'volumes', 'buildCache'].map(key => [key, {
+      active: usage[key].active, total: usage[key].count,
+      sizeMB: mb(usage[key].total), reclaimableMB: mb(usage[key].reclaimable),
+    }])), estimated: usage.estimated };
   } catch (cause) { throw Object.assign(new Error('节点成本数据暂不可用，请检查连接后重试', { cause }), { statusCode: 503 }); }
 }
 
@@ -261,9 +242,9 @@ async function fetchCostAnalysisReport(hostId) {
       runningContainers: containers.filter(c => c.state === 'running').length,
       totalCPUPercent: Math.round(containers.reduce((sum, c) => sum + c.cpuPercent, 0) * 100) / 100,
       totalMemoryMB: Math.round(containers.reduce((sum, c) => sum + c.memoryUsageMB, 0) * 100) / 100,
-      totalImagesMB: Math.round(images.reduce((sum, i) => sum + i.sizeMB, 0) * 100) / 100,
-      storageTotalMB: Math.round((storage.images.sizeMB + storage.containers.sizeMB + storage.volumes.sizeMB) * 100) / 100,
-      reclaimableMB: Math.round((storage.images.reclaimableMB + storage.buildCache.reclaimableMB) * 100) / 100
+      totalImagesMB: storage.images.sizeMB,
+      storageTotalMB: Math.round((storage.images.sizeMB + storage.containers.sizeMB + storage.volumes.sizeMB + storage.buildCache.sizeMB) * 100) / 100,
+      reclaimableMB: Math.round((storage.images.reclaimableMB + storage.containers.reclaimableMB + storage.volumes.reclaimableMB + storage.buildCache.reclaimableMB) * 100) / 100
     },
     containers,
     images: images.slice(0, 20), // 前 20 个最大镜像
@@ -285,9 +266,9 @@ export async function getOptimizationSuggestions() {
     suggestions.push({
       type: 'storage',
       severity: 'high',
-      title: '可回收悬空镜像层过多',
-      description: `发现 ${Math.round(report.storage.images.reclaimableMB)} MB 可回收空间`,
-      action: '运行 docker system prune 清理'
+      title: '未引用镜像占用较多',
+      description: `估计存在 ${Math.round(report.storage.images.reclaimableMB)} MB 潜在可回收空间，包含带标签的未引用镜像`,
+      action: '在资源页核对镜像用途与回退需要后逐项清理；默认清理仅处理悬空镜像'
     });
   }
   
@@ -302,14 +283,14 @@ export async function getOptimizationSuggestions() {
   }
   
   // 检查未使用容器
-  const stoppedContainers = report.containers.filter(c => c.state !== 'running');
+  const stoppedContainers = report.containers.filter(c => ['exited', 'created', 'dead'].includes(c.state));
   if (stoppedContainers.length > 5) {
     suggestions.push({
       type: 'cleanup',
       severity: 'low',
       title: '存在多个已停止容器',
       description: `发现 ${stoppedContainers.length} 个已停止容器`,
-      action: '清理不再使用的容器'
+      action: '先核对服务运行意图及可写层数据，确认不再需要后在服务页逐项删除'
     });
   }
   

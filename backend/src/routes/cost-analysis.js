@@ -25,6 +25,7 @@ const costStorageSectionSchema = {
 const costStorageSchema = {
   type: 'object',
   properties: {
+    estimated: { type: 'boolean' },
     images: costStorageSectionSchema,
     containers: costStorageSectionSchema,
     volumes: costStorageSectionSchema,
@@ -134,6 +135,7 @@ export default async function costAnalysisRoutes(api, _opts) {
         200: {
           type: 'object',
           properties: {
+            estimated: { type: 'boolean' },
             images: costStorageSectionSchema,
             containers: costStorageSectionSchema,
             volumes: costStorageSectionSchema,

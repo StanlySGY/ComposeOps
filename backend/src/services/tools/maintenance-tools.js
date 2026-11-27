@@ -7,6 +7,7 @@ import { createAlertRule, deleteAlertRule, listAlertRules } from '../alert-rules
 import { queryContainerMetrics } from '../agent-metrics.js';
 import { readCompose } from '../compose-runner.js';
 import { createJob, listJobs } from '../cron-scheduler.js';
+import { getSystemStorageDf, pruneStorageResources } from '../docker-storage.js';
 import { getActivityDocker } from '../docker-hosts.js';
 import { getProjectUpdates } from '../image-updater.js';
 import { checkImageUpdates } from '../maintenance.js';
@@ -15,10 +16,6 @@ import { findProject, scanProjects } from '../scanner.js';
 import { readContainerStat } from '../stats.js';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
-
-function sumSpace(reclaimed) {
-  return Object.values(reclaimed || {}).reduce((total, value) => total + (Number(value) || 0), 0);
-}
 
 function runSafeHostCommand(command) {
   const commands = {
@@ -122,8 +119,14 @@ export function registerMaintenanceTools(agent) {
         return { ok: true, removed: result?.rule?.id || null, deleted: outcome.deleted };
       },
     })
+    .registerTool('maintenance.inspect', {
+      description: '只读查看当前Docker节点空间与清理范围，返回hostId和hostRevision供确认清理使用；含未纳管资源',
+      category: 'maintenance', requiredPermission: 'readonly', confirmationRequired: false, requiresProject: false,
+      parameters: { type: 'object', properties: {} },
+      execute: async () => getSystemStorageDf(),
+    })
     .registerTool('maintenance.clean', {
-      description: '清理未使用的镜像/卷/网络/构建缓存',
+      description: '按已预览节点清理悬空镜像、未引用匿名卷、未使用网络或构建缓存；包含未纳管资源，保留容器及命名卷。先调用maintenance.inspect，再确认具体范围',
       category: 'maintenance',
       requiredPermission: 'admin',
       confirmationRequired: true,
@@ -131,32 +134,20 @@ export function registerMaintenanceTools(agent) {
       parameters: {
         type: 'object',
         properties: {
-          scope: { type: 'string', enum: ['images', 'volumes', 'networks', 'all'], description: '清理范围' },
+          scope: { type: 'string', enum: ['images', 'volumes', 'networks', 'builder', 'all'], description: 'all包括悬空镜像、未引用匿名卷、未使用网络和构建缓存' },
+          expectedHostId: { type: 'string', description: 'maintenance.inspect返回的hostId' },
+          hostRevision: { type: 'string', description: 'maintenance.inspect返回的hostRevision，原样传递' },
         },
-        required: ['scope'],
+        required: ['scope', 'expectedHostId', 'hostRevision'],
       },
-      execute: async (params) => {
-        const docker = getActivityDocker();
+      execute: async params => {
         const scope = params.scope;
-        const reclaimed = {};
-        if (scope === 'images' || scope === 'all') {
-          const res = await docker.pruneImages({ filters: { dangling: ['false'] } });
-          reclaimed.images = sumSpace(res?.SpaceReclaimed ? { SpaceReclaimed: res.SpaceReclaimed } : {});
-        }
-        if (scope === 'volumes' || scope === 'all') {
-          const res = await docker.pruneVolumes();
-          reclaimed.volumes = sumSpace({ SpaceReclaimed: res?.SpaceReclaimed });
-        }
-        if (scope === 'networks' || scope === 'all') {
-          const res = await docker.pruneNetworks();
-          reclaimed.networks = sumSpace({ SpaceReclaimed: res?.SpaceReclaimed });
-        }
-        if (scope === 'all') {
-          const res = await docker.pruneBuilds();
-          reclaimed.buildCache = sumSpace({ SpaceReclaimed: res?.SpaceReclaimed });
-        }
-        const total = Object.values(reclaimed).reduce((acc, value) => acc + (Number(value) || 0), 0);
-        return { scope, reclaimedBytes: total, reclaimedMB: Math.round((total / 1024 / 1024) * 10) / 10, reclaimed };
+        if (!['images', 'volumes', 'networks', 'builder', 'all'].includes(scope)) throw new Error('不支持的清理范围');
+        const result = await pruneStorageResources({
+          images: scope === 'images' || scope === 'all', volumes: scope === 'volumes' || scope === 'all',
+          networks: scope === 'networks' || scope === 'all', buildCache: scope === 'builder' || scope === 'all', allBuildCache: true,
+        }, params, scope);
+        return { ...result, scope, reclaimedBytes: Object.values(result.reclaimed).reduce((total, value) => total + value, 0) };
       },
     })
     .registerTool('maintenance.update', {

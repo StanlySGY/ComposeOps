@@ -61,7 +61,7 @@ export const TOOL_CATEGORIES = {
     description: '清理、备份、更新、告警',
     icon: 'wrench',
     risk: 'high',
-    tools: ['maintenance.clean', 'maintenance.update', 'backup.trigger', 'alert.create', 'cron.create', 'cron.list', 'app.deploy']
+    tools: ['maintenance.inspect', 'maintenance.clean', 'maintenance.update', 'backup.trigger', 'alert.create', 'cron.create', 'cron.list', 'app.deploy']
   },
   security: {
     label: '安全审计',
@@ -385,7 +385,7 @@ export const MACRO_TOOLS = {
   },
   'macro.full_cleanup': {
     name: 'macro.full_cleanup',
-    description: '完整清理：停止所有服务 → 清理悬空镜像 → 清理卷 → 清理网络',
+    description: '在已预览节点清理悬空镜像、可选未引用匿名卷和未使用网络，含未纳管资源；保留容器与命名卷。先调用maintenance.inspect',
     category: 'maintenance',
     risk: 'critical',
     requiredPermission: 'admin',
@@ -393,13 +393,16 @@ export const MACRO_TOOLS = {
     parameters: {
       type: 'object',
       properties: {
-        includeVolumes: { type: 'boolean', description: '是否清理卷（危险）', default: false }
-      }
+        expectedHostId: { type: 'string', description: 'maintenance.inspect返回的hostId' },
+        hostRevision: { type: 'string', description: 'maintenance.inspect返回的hostRevision' },
+        includeVolumes: { type: 'boolean', description: '是否删除未引用匿名卷的数据（不可撤销）', default: false }
+      },
+      required: ['expectedHostId', 'hostRevision']
     },
     steps: [
-      { tool: 'maintenance.clean', params: { scope: 'images' } },
-      { tool: 'maintenance.clean', params: { scope: 'volumes' }, condition: (ctx) => ctx.includeVolumes === true },
-      { tool: 'maintenance.clean', params: { scope: 'networks' } }
+      { tool: 'maintenance.clean', params: ctx => ({ scope: 'images', expectedHostId: ctx.expectedHostId, hostRevision: ctx.hostRevision }) },
+      { tool: 'maintenance.clean', params: ctx => ({ scope: 'volumes', expectedHostId: ctx.expectedHostId, hostRevision: ctx.hostRevision }), condition: (ctx) => ctx.includeVolumes === true },
+      { tool: 'maintenance.clean', params: ctx => ({ scope: 'networks', expectedHostId: ctx.expectedHostId, hostRevision: ctx.hostRevision }) }
     ]
   }
 };

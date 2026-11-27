@@ -141,13 +141,13 @@
       </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" :disabled="savingUpdates" @click="saveUpdates"><Save class="w-4 h-4" />{{ savingUpdates ? '保存中…' : '保存更新策略' }}</button><button v-if="updatesDraft.dirty.value" class="btn-secondary" @click="updatesDraft.revert">撤销修改</button><span class="text-xs text-muted" role="status">{{ updatesDraft.dirty.value ? '有未保存修改' : '已保存' }}</span><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
       </fieldset>
       <SettingsLoadState :state="loads.usage" name="usage" label="磁盘用量" @retry="loadUsage" />
-      <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" aria-label="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>
+      <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" aria-label="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />查看与清理</button></div></div>
         <div class="card p-3">
-          <div class="flex items-center justify-between text-sm"><span class="text-surface-300">磁盘占用</span><span v-if="usage" class="text-muted">{{ formatBytes(usageTotal) }} · 可释放 {{ formatBytes(usageReclaimable) }}</span></div>
-          <div v-if="usage" class="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-800"><span class="block h-full rounded-full bg-linear-to-r from-emerald-500 to-teal-400 transition-all duration-500" :style="{ width: usagePercent }"></span></div>
-          <p class="mt-2 flex flex-wrap gap-3 text-[11px] text-surface-400"><span>镜像 {{ usage ? formatBytes(usage.images.total) : '—' }}</span><span>缓存 {{ usage ? formatBytes(usage.buildCache.total) : '—' }}</span><span>卷 {{ usage ? formatBytes(usage.volumes.total) : '—' }} · 停止容器 {{ usage ? usage.containers.count : '—' }}</span></p>
+          <div class="flex flex-wrap items-center justify-between gap-2 text-sm"><span class="text-surface-300">Docker 资源统计</span><span v-if="usage" class="text-muted">{{ formatBytes(usageTotal) }} · 潜在可回收 {{ formatBytes(usageReclaimable) }}</span></div>
+          <div v-if="usage" class="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-surface-800" aria-hidden="true"><span v-for="part in usageParts" :key="part.key" class="h-full" :class="part.color" :style="{ width: `${part.percent}%` }"></span></div>
+          <p class="mt-2 flex flex-wrap gap-3 text-[11px] text-surface-400"><span>镜像 {{ usage ? formatBytes(usage.images.total) : '—' }}</span><span>缓存 {{ usage ? formatBytes(usage.buildCache.total) : '—' }}</span><span>卷 {{ usage ? formatBytes(usage.volumes.total) : '—' }}</span><span>容器 {{ usage ? formatBytes(usage.containers.total) : '—' }} · {{ usage ? usage.containers.count : '—' }} 个</span></p>
         </div>
-        <p class="text-sm text-surface-400">打开清理 Hub 可查看分段占用、一键极速安全清理,或深度清理孤儿卷与构建缓存(需二次确认)。</p></div></section>
+        <p class="text-sm text-surface-400">统计来自所选节点。资源可能共享底层数据，可回收量为估算；打开“查看与清理”可核对目标节点和删除范围。</p></div></section>
 
     <DataMaintenancePanel v-if="tab === 'maintenance'" />
 
@@ -368,7 +368,7 @@ const managementConfirm = ref(false);
 const removedProjectCount = computed(() => savedManagedProjectIds.value.filter((id) => !selectedProjectIds.value.includes(id)).length);
 const usageTotal = computed(() => Number(usage.value?.total) || 0);
 const usageReclaimable = computed(() => Number(usage.value?.reclaimable) || 0);
-const usagePercent = computed(() => (usage.value?.total && usage.value?.disk?.free ? Math.min(100, Math.max(2, (usage.value.total / (usage.value.total + usage.value.disk.free)) * 100)) : 2) + '%');
+const usageParts = computed(() => [['images', 'bg-blue-500'], ['buildCache', 'bg-emerald-500'], ['volumes', 'bg-violet-500'], ['containers', 'bg-amber-500']].map(([key, color]) => ({ key, color, percent: usageTotal.value > 0 ? Math.max(0, usage.value?.[key]?.total || 0) / usageTotal.value * 100 : 0 })));
 const projectGroups = useProjectGroupsStore();
 const groupSelections = ref({}), savedGroupSelections = ref({});
 let managementHostId = '';

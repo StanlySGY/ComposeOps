@@ -296,7 +296,7 @@ export const api = {
   checkAllUpdates: (options = {}) => request('/ops/updates/check-all', { method: 'POST', readOnly: true, signal: options.signal }),
   // docker storage
   getStorageDf: async () => normalizeStorageDf(await request('/ops/storage/df')),
-  pruneStorage: (mode, confirm) => request('/ops/storage/prune', { method: 'POST', body: JSON.stringify({ mode, confirm }) }),
+  pruneStorage: (mode, confirm, expectedHostId, hostRevision) => request('/ops/storage/prune', { method: 'POST', body: JSON.stringify({ mode, confirm, expectedHostId, hostRevision }) }),
   getStorageResources: (force = false) => request('/ops/storage/resources', { force }),
   getProjectVolumes: (projectId) => request(`/ops/storage/volume-volumes?projectId=${encodeURIComponent(projectId)}`),
   getVolumeBackups: (projectId = '') => request(`/ops/storage/volume-backups${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),

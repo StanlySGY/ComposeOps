@@ -1,10 +1,13 @@
 import { getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
-import { readDockerDiskUsage, invalidateDiskUsage } from './docker-disk-usage.js';
+import { readDockerDiskUsage } from './docker-disk-usage.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
 import db, { pruneAiData, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { pruneEvents } from './event-center.js';
 import { pruneStateHistory } from './state-history.js';
+import { storageHostScope } from './storage-host-scope.js';
+import { pruneStorageResources } from './docker-storage.js';
+import { summarizeDockerDiskUsage } from '../lib/docker-storage-summary.js';
 import { checkAllUpdates } from './image-updater.js';
 
 function sum(items, key) {
@@ -15,11 +18,12 @@ export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 6
   hostId = hostId || getActiveHostId();
   // Resolve before collecting: an unknown explicit node is a 404, not an empty total.
   const selected = (hostId === 'all' ? listHosts().map(host => host.id) : [hostId])
-    .map(id => ({ id, docker: getDockerForHost(id) }));
-  const snapshots = await Promise.all(selected.map(async ({ id }) => {
+    .map(id => ({ id, docker: getDockerForHost(id), scope: storageHostScope(id) }));
+  const snapshots = await Promise.all(selected.map(async ({ id, scope }) => {
     try {
       const data = await readDockerDiskUsage(id, { timeoutMs });
-      return { id, data };
+      if (storageHostScope(id).hostRevision !== scope.hostRevision) throw new Error('节点配置已变化');
+      return { id, data: summarizeDockerDiskUsage(data), scope };
     } catch (error) {
       return { id, data: null, error };
     }
@@ -27,28 +31,16 @@ export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 6
   const unavailable = snapshots.filter(item => !item.data).map(item => item.id);
   const data = snapshots.filter(item => item.data).map(item => item.data);
   if (!data.length) throw Object.assign(new Error(`节点存储暂不可达：${unavailable.join('、')}`), { code: 'HOST_UNAVAILABLE', statusCode: 503 });
-  const images = data.flatMap(item => item.Images || []);
-  const containers = data.flatMap(item => item.Containers || []);
-  const buildCache = data.flatMap(item => item.BuildCache || []);
-  const volumes = data.flatMap(item => item.Volumes || []);
-  const imagesTotal = sum(images, 'Size');
-  const imagesReclaimable = sum(images.filter((item) => Number(item.Containers) <= 0), 'Size');
-  const containersReclaimable = sum(containers.filter((item) => item.State !== 'running'), 'SizeRw');
-  const buildCacheTotal = sum(buildCache, 'Size');
-  const buildCacheReclaimable = sum(buildCache.filter((item) => !item.InUse), 'Size');
-  const unusedVolumes = volumes.filter((item) => Number(item.UsageData?.RefCount) <= 0);
-  const volumesReclaimable = unusedVolumes
-    .reduce((total, item) => total + (Number(item.UsageData?.Size) || 0), 0);
-  return {
-    images: { count: images.length, total: imagesTotal, reclaimable: imagesReclaimable },
-    containers: { count: containers.length, reclaimable: containersReclaimable },
-    buildCache: { count: buildCache.length, total: buildCacheTotal, reclaimable: buildCacheReclaimable },
-    volumes: { count: unusedVolumes.length, reclaimable: volumesReclaimable },
-    total: imagesTotal + buildCacheTotal,
-    reclaimable: imagesReclaimable + containersReclaimable + buildCacheReclaimable + volumesReclaimable,
-    hostId,
-    unavailableHosts: unavailable,
-  };
+  const sections = data;
+  const result = {};
+  for (const key of ['images', 'containers', 'buildCache', 'volumes']) {
+    result[key] = Object.fromEntries(['count', 'active', 'total', 'reclaimable', ...(key === 'volumes' ? ['orphans', 'unknown'] : [])]
+      .map(field => [field, sections.reduce((total, section) => total + (section[key][field] || 0), 0)]));
+  }
+  return { ...result, total: sum(sections, 'total'), reclaimable: sum(sections, 'reclaimable'),
+    estimated: sections.some(section => section.estimated), hostId,
+    ...(hostId === 'all' ? {} : snapshots.find(item => item.data).scope), unavailableHosts: unavailable };
+
 }
 
 /** 将雷达结果转换为设置页/通知使用的兼容格式；只读查询，不执行 docker pull。 */
@@ -77,17 +69,10 @@ export async function checkImageUpdates(onProgress = () => {}) {
   return results;
 }
 
-export async function pruneDocker({ images = true, buildCache = true, containers = false, volumes = false }) {
-  const hostId = getActiveHostId();
-  const docker = getDockerForHost(hostId);
-  const result = {};
-  try {
-    if (images) result.images = await docker.pruneImages({ filters: { dangling: ['false'] } });
-    if (buildCache) result.buildCache = await docker.pruneBuilds();
-    if (containers) result.containers = await docker.pruneContainers();
-    if (volumes) result.volumes = await docker.pruneVolumes();
-    return result;
-  } finally { invalidateDiskUsage(hostId); }
+/** Compatibility endpoint uses the same scope and conservative policy as settings. */
+export async function pruneDocker({ images = true, buildCache = true, containers = false, volumes = false } = {}, scope) {
+  if (containers) throw Object.assign(new Error('批量清理不删除容器，请在服务页逐项确认停止容器及其数据'), { statusCode: 400 });
+  return pruneStorageResources({ images, buildCache, volumes, allBuildCache: false }, scope);
 }
 
 /* ---------------------------------------------------------------------------

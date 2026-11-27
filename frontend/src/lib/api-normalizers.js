@@ -25,6 +25,11 @@ export function normalizeStorageDf(value) {
   const data = objectOrEmpty(value);
   const disk = objectOrEmpty(data.disk);
   return {
+    hostId: String(data.hostId || ''),
+    hostName: String(data.hostName || ''),
+    hostRevision: String(data.hostRevision || ''),
+    estimated: data.estimated === true,
+    checkedAt: numberOrZero(data.checkedAt),
     images: normalizeStorageSection(data.images),
     containers: normalizeStorageSection(data.containers),
     volumes: normalizeStorageSection(data.volumes, { orphans: numberOrZero(data.volumes?.orphans) }),

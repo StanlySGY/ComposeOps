@@ -1,5 +1,7 @@
-import { execFile } from 'node:child_process';
-import { getActivityDocker } from './docker-hosts.js';
+import { getActiveHostId, getDockerForHost } from './docker-hosts.js';
+import { readDockerDiskUsage, invalidateDiskUsage } from './docker-disk-usage.js';
+import { summarizeDockerDiskUsage } from '../lib/docker-storage-summary.js';
+import { storageHostScope, assertStorageHostScope } from './storage-host-scope.js';
 
 function emptyDf() {
   return {
@@ -221,87 +223,97 @@ function sum(items, key) {
   return (items || []).reduce((total, item) => total + (Number(item?.[key]) || 0), 0);
 }
 
-/** GET /api/system/storage/df:调用 docker system df --format json。 */
-export async function getSystemStorageDf() {
-  let parsed;
+/** Same node-scoped Engine snapshot as maintenance/cost; unavailable is an error. */
+export async function getSystemStorageDf(hostId = getActiveHostId()) {
+  const scope = storageHostScope(hostId);
   try {
-    const { stdout } = await new Promise((resolve, reject) => {
-      execFile('docker', ['system', 'df', '--format', 'json'], { timeout: 20000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) {
-          reject(Object.assign(new Error(`docker 命令失败:${error.message}`), { statusCode: 502 }));
-          return;
-        }
-        resolve({ stdout, stderr });
-      });
-    });
-    parsed = parseDockerDfOutput(stdout);
+    const snapshot = await readDockerDiskUsage(hostId);
+    assertStorageHostScope(scope);
+    return { ...summarizeDockerDiskUsage(snapshot), ...scope, disk: null, checkedAt: Date.now() };
   } catch (error) {
-    // 尽力回退:尝试无 --format 的纯文本输出
-    console.debug('[docker-storage] docker system df --format json 失败,尝试文本模式:', error.message);
-    try {
-      const { stdout } = await new Promise((resolve, reject) => {
-        execFile('docker', ['system', 'df'], { timeout: 20000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-          if (error) return reject(error);
-          resolve({ stdout });
-        });
-      });
-      parsed = parseDockerDfOutput(stdout);
-    } catch {
-      parsed = emptyDf();
-    }
+    if (error.statusCode) throw error;
+    throw Object.assign(new Error('目标节点空间统计暂不可用，请检查节点连接后重试'), { statusCode: 503 });
   }
-  // 磁盘剩余估算(df 总可用)
-  let disk = null;
-  try {
-    const df = await new Promise((resolve, reject) => {
-      execFile('df', ['-B1', '/'], { timeout: 5000 }, (error, stdout) => {
-        if (error) return reject(error);
-        const line = String(stdout).split('\n')[1] || '';
-        const parts = line.trim().split(/\s+/);
-        resolve(parts.length >= 4 ? { total: Number(parts[1]) || 0, used: Number(parts[2]) || 0, free: Number(parts[3]) || 0 } : null);
-      });
-    });
-    disk = { mount: '/', total: df.total, used: df.used, free: df.free };
-  } catch (error) {
-    console.debug('[docker-storage] df 读取失败:', error.message);
-  }
-  return { ...parsed, disk, checkedAt: Date.now() };
 }
 
-/**
- * 分级清理:
- * - safe:悬空镜像(dangling)、不再使用且非 running 的容器、未被引用的 build cache
- * - builder:全部构建缓存
- * - volumes:孤儿持久卷
- * - all:safe + volumes + builder (仅供手动且已二次确认的深度清理)
- * - scheduled:safe + builder, 永不清理数据卷 (供无人值守的定时任务使用)
- * 返回释放字节数。
- */
-export async function pruneStorage(mode = 'safe') {
-  const docker = getActivityDocker();
-  const reclaimed = { images: 0, containers: 0, volumes: 0, buildCache: 0 };
-  if (mode === 'safe' || mode === 'all' || mode === 'scheduled') {
-    const images = await docker.pruneImages({ filters: { dangling: ['true'] } });
-    reclaimed.images = sumBytes(images?.SpaceReclaimed);
-    const containers = await docker.pruneContainers({ filters: { status: ['exited'] } });
-    reclaimed.containers = sumBytes(containers?.SpaceReclaimed);
-    if (mode === 'safe') {
-      const builder = await docker.pruneBuilds({ filters: { inUse: ['false'] } });
+/** Prune only the displayed host. Stopped containers retain their writable
+ * layer and volume references; removing them is a separate explicit action. */
+export async function pruneStorage(mode = 'safe', scope = {}) {
+  if (!['safe', 'volumes', 'builder', 'all', 'scheduled'].includes(mode)) throw Object.assign(new Error('不支持的清理模式'), { statusCode: 400 });
+  return pruneStorageResources({ images: mode === 'safe' || mode === 'scheduled',
+    buildCache: ['safe', 'builder', 'all', 'scheduled'].includes(mode),
+    allBuildCache: mode !== 'safe', volumes: mode === 'volumes' || mode === 'all' }, scope, mode);
+}
+
+const pruningHosts = new Set();
+
+// Engine API < 1.42 prunes named volumes as well. Refuse that behavior rather
+// than relying on a default whose meaning differs across daemon versions.
+async function requireAnonymousVolumePrune(docker) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    const version = await Promise.race([
+      Promise.resolve().then(() => docker.version({ abortSignal: controller.signal })),
+      new Promise((_, reject) => { timer = setTimeout(() => {
+        controller.abort(); reject(Object.assign(new Error('无法确认节点的数据卷清理能力，请检查连接后重试'), { statusCode: 503 }));
+      }, 10000); }),
+    ]);
+    const match = /^(\d+)\.(\d+)$/.exec(version?.ApiVersion || '');
+    const requested = /^v?(\d+)\.(\d+)$/.exec(docker.modem?.version || version?.ApiVersion || '');
+    if (![match, requested].every(v => v && (Number(v[1]) > 1 || (Number(v[1]) === 1 && Number(v[2]) >= 42)))) {
+      throw Object.assign(new Error('此节点不支持限定匿名卷的批量清理，请在资源页逐项核对删除'), { statusCode: 409 });
+    }
+  } finally { clearTimeout(timer); }
+}
+
+export async function pruneStorageResources(selection, { expectedHostId, hostRevision } = {}, mode = 'custom') {
+  if (!expectedHostId || !hostRevision) throw Object.assign(new Error('请先读取目标节点空间统计，再确认清理'), { statusCode: 409 });
+  const scope = { ...storageHostScope(expectedHostId), hostRevision };
+  assertStorageHostScope(scope);
+  if (pruningHosts.has(scope.hostId)) throw Object.assign(new Error('该节点已有清理正在执行，请等待结果后重新读取'), { statusCode: 409 });
+  const docker = getDockerForHost(scope.hostId);
+  const reclaimed = { images: 0, containers: 0, volumes: 0, buildCache: 0, networks: 0 };
+  pruningHosts.add(scope.hostId);
+  try {
+    if (selection.volumes) await requireAnonymousVolumePrune(docker);
+    assertStorageHostScope(scope);
+    if (selection.images) {
+      const images = await docker.pruneImages({ filters: { dangling: ['true'] } });
+      reclaimed.images = sumBytes(images?.SpaceReclaimed);
+    }
+    if (selection.buildCache) {
+      assertStorageHostScope(scope);
+      const builder = await pruneBuildCache(docker, !!selection.allBuildCache);
       reclaimed.buildCache = sumBytes(builder?.SpaceReclaimed);
     }
-  }
-  if (mode === 'builder' || mode === 'all' || mode === 'scheduled') {
-    const builder = await docker.pruneBuilds({ filters: { inUse: ['false'] } });
-    reclaimed.buildCache = sumBytes(builder?.SpaceReclaimed);
-  }
-  if (mode === 'volumes' || mode === 'all') {
-    const volumes = await docker.pruneVolumes({});
-    reclaimed.volumes = sumBytes(volumes?.SpaceReclaimed);
-  }
-  const reusedTotal = Object.values(reclaimed).reduce((total, v) => total + v, 0);
-  return { mode, reclaimedMB: Math.round((reusedTotal / 1024 / 1024) * 10) / 10, reclaimed };
+    if (selection.volumes) {
+      assertStorageHostScope(scope);
+      const volumes = await docker.pruneVolumes({ filters: { all: ['false'] } });
+      reclaimed.volumes = sumBytes(volumes?.SpaceReclaimed);
+    }
+    if (selection.networks) {
+      assertStorageHostScope(scope);
+      await docker.pruneNetworks();
+    }
+    const total = Object.values(reclaimed).reduce((sum, value) => sum + value, 0);
+    return { ...scope, mode, reclaimedMB: Math.round(total / 1024 / 1024 * 10) / 10, reclaimed };
+  } catch (error) {
+    error.partialReclaimed = reclaimed;
+    throw error;
+  } finally { pruningHosts.delete(scope.hostId); invalidateDiskUsage(scope.hostId); }
 }
 
 function sumBytes(value) {
   return Number(value) || 0;
+}
+
+
+/** dockerode's pruneBuilder omits options in the installed version. Keep the
+ * authenticated modem transport, but explicitly pass the Engine query flags. */
+export function pruneBuildCache(docker, all = false) {
+  return new Promise((resolve, reject) => docker.modem.dial({
+    path: '/build/prune?', method: 'POST', options: { all },
+    statusCodes: { 200: true, 400: 'invalid parameters', 409: 'prune already running', 500: 'server error' },
+  }, (error, data) => error ? reject(error) : resolve(data)));
 }

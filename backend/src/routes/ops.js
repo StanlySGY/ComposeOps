@@ -19,7 +19,7 @@ import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
 
 /**
  * 本文件的 schema 一律不收紧服务端已有的归一化语义:
- * 1. mode/confirm 不设 enum/const —— 处理函数把未知 mode 归一为 safe,并自己返回
+ * 1. mode 严格限定已展示范围，confirm 由处理函数校验并返回
  *    confirmation_required 机器码,schema 抢先拦下会改变语义或降级错误码;
  * 2. days/limit 只挡非数值,越界由 db.js 的 clamp 兜住;
  * 3. blueprints/deploy 的 values 是蓝图自带的模板变量表(键由蓝图定义,无法枚举),
@@ -64,22 +64,25 @@ export default async function opsRoutes(fastify, { blueprintDeployer = deployBlu
         type: 'object',
         additionalProperties: false,
         properties: {
-          mode: { type: 'string', maxLength: 16 },
+          mode: { type: 'string', enum: ['safe', 'volumes', 'builder', 'all'] },
+          expectedHostId: { type: 'string', minLength: 1, maxLength: 128 },
+          hostRevision: { type: 'string', minLength: 1, maxLength: 128 },
           confirm: { type: 'string', maxLength: 32 },
         },
       },
     },
   }, async (request, reply) => {
-    const mode = ['safe', 'volumes', 'builder', 'all'].includes(request.body?.mode) ? request.body.mode : 'safe';
-    if ((mode === 'volumes' || mode === 'all') && request.body?.confirm !== 'PRUNE') {
-      return reply.code(400).send({ error: 'confirmation_required', message: '深度清理需要二次确认(输入 PRUNE)' });
-    }
+    const { mode = 'safe', expectedHostId, hostRevision, confirm } = request.body || {};
+    if (!expectedHostId || !hostRevision) return reply.code(409).send({ error: 'storage_review_required', message: '请先读取目标节点空间统计，再确认清理' });
+    if (confirm !== 'PRUNE') return reply.code(400).send({ error: 'confirmation_required', message: '请确认目标节点和清理范围' });
     try {
-      const result = await pruneStorage(mode);
-      addOperation({ action: `storage.prune.${mode}`, status: 'success', detail: `${result.reclaimedMB} MB` });
+      const result = await pruneStorage(mode, { expectedHostId, hostRevision });
+      addOperation({ action: `storage.prune.${mode}`, status: 'success', detail: `${result.hostId}: ${result.reclaimedMB} MB` });
       return { ok: true, ...result };
     } catch (error) {
-      return reply.code(502).send({ error: 'storage_prune_failed', message: error.message });
+      addOperation({ action: `storage.prune.${mode}`, status: 'failed', detail: `${expectedHostId}: ${error.message}` });
+      return reply.code(error.statusCode || 502).send({ error: error.code || 'storage_prune_failed', message: error.message,
+        partialReclaimed: error.partialReclaimed, outcome: error.partialReclaimed ? '需核对已执行的部分清理，失败不代表自动撤销' : undefined });
     }
   });
 

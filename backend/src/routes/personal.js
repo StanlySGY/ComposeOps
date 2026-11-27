@@ -103,6 +103,8 @@ export default async function personalRoutes(fastify) {
         additionalProperties: false,
         properties: {
           confirmation: { type: 'string', maxLength: 32 },
+          expectedHostId: { type: 'string', minLength: 1, maxLength: 128 },
+          hostRevision: { type: 'string', minLength: 1, maxLength: 128 },
           options: {
             type: 'object',
             additionalProperties: false,
@@ -121,9 +123,15 @@ export default async function personalRoutes(fastify) {
       return reply.code(400).send({ error: 'confirmation_required', message: '请输入 PRUNE 确认清理' });
     }
     const options = request.body?.options || {};
-    const result = await pruneDocker(options);
-    addOperation({ action: 'docker.prune', status: 'success', detail: JSON.stringify(options) });
-    return { ok: true, result };
+    const scope = { expectedHostId: request.body.expectedHostId, hostRevision: request.body.hostRevision };
+    try {
+      const result = await pruneDocker(options, scope);
+      addOperation({ action: 'docker.prune', status: 'success', detail: JSON.stringify({ ...scope, options }) });
+      return { ok: true, result };
+    } catch (error) {
+      addOperation({ action: 'docker.prune', status: 'failed', detail: `${scope.expectedHostId || ''}: ${error.message}` });
+      return reply.code(error.statusCode || 502).send({ error: error.code || 'storage_prune_failed', message: error.message, partialReclaimed: error.partialReclaimed });
+    }
   });
 
   fastify.get('/updates', async () => {

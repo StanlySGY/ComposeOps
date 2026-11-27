@@ -45,7 +45,7 @@ test('cost storage excludes referenced unique image layers from reclaimable spac
   const { default: docker } = await import('../src/services/docker.js');
   const original = docker.df; t.after(() => { docker.df = original; });
   const mb = 1024 * 1024;
-  docker.df = async () => ({ LayersSize: 10 * mb, Images: [
+  docker.df = async () => ({ Containers: [], LayersSize: 10 * mb, Images: [
     { Containers: 1, Size: 8 * mb, SharedSize: 2 * mb },
     { Containers: 0, Size: 4 * mb, SharedSize: 2 * mb },
   ] });

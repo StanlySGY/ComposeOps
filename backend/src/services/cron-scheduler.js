@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'node:crypto';
 import { pruneStorage } from './docker-storage.js';
+import { storageHostScope } from './storage-host-scope.js';
 import { checkAllUpdates } from './image-updater.js';
 import { listProjectDbContainers, runDbDump } from './db-dumper.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
@@ -15,8 +16,8 @@ export const CRON_DATA_FILE = process.env.CRON_DATA_FILE || path.join(__dirname,
 
 const JOB_TYPES = {
   'db-backup': { label: '数据库自动备份', description: '对所有纳管项目中运行的数据库容器执行 Dump 并留存本地' },
-  'prune-safe': { label: 'Docker 安全清理', description: '清理悬空镜像、退出容器与未使用构建缓存' },
-  'prune-all': { label: 'Docker 自动深度清理', description: '自动清理悬空镜像、退出容器与全部未使用构建缓存;不会删除数据卷' },
+  'prune-safe': { label: 'Docker 安全清理', description: '清理悬空镜像与未使用构建缓存；保留停止容器' },
+  'prune-all': { label: 'Docker 自动深度清理', description: '自动清理悬空镜像与未使用构建缓存；保留停止容器和数据卷' },
   'images-check': { label: '镜像更新检查', description: '只读查询纳管项目的远端镜像更新；不会拉取或重建容器' },
   'pull-images': { label: '定时拉取镜像', description: '对所有可编辑项目执行 docker compose pull' },
   'volume-backup': { label: '数据卷备份', description: '对所有纳管项目的命名卷执行 tar 备份,保留最近份数' },
@@ -215,7 +216,8 @@ async function executeJob(job) {
       case 'prune-all': {
         // 定时任务无人值守,即使类型名为 prune-all 也不得删除孤儿数据卷。
         // 数据卷清理只允许通过需要显式 PRUNE 确认的手动接口执行。
-        const result = await pruneStorage(job.type === 'prune-all' ? 'scheduled' : 'safe');
+        const scope = storageHostScope();
+        const result = await pruneStorage(job.type === 'prune-all' ? 'scheduled' : 'safe', { expectedHostId: scope.hostId, hostRevision: scope.hostRevision });
         return `Docker 清理完成,释放 ${result.reclaimedMB} MB`;
       }
       case 'images-check': {

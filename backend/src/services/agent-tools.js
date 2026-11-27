@@ -57,6 +57,7 @@ export const RISK_LEVELS = {
   'alert.list': 'low',
   'alert.delete': 'medium',
   'maintenance.clean': 'critical',
+  'maintenance.inspect': 'low',
   'maintenance.update': 'low',
   'metrics.query': 'low',
   'backup.trigger': 'low',

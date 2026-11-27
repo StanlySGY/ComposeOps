@@ -10,6 +10,7 @@ process.env.DB_PATH = path.join(tempDir, 'test.db');
 const { parseImageRef, extractImageRefs, extractImageServices, compareImageDigests, fetchRemoteDigest } = await import('../src/services/image-updater.js');
 const { flattenUpdateResults } = await import('../src/services/maintenance.js');
 const { parseDockerDf, parseDockerDfOutput, pruneStorage } = await import('../src/services/docker-storage.js');
+const { storageHostScope } = await import('../src/services/storage-host-scope.js');
 const { getActivityDocker } = await import('../src/services/docker-hosts.js');
 const { removeDockerResource, listDockerResources, countVolumeReferences } = await import('../src/services/docker-resources.js');
 const { renderBlueprintCompose, renderBlueprintEnv, getBlueprint, listBlueprints } = await import('../src/services/app-blueprints.js');
@@ -138,29 +139,31 @@ test('docker-storage: parseDockerDf 解析 df json 并汇总 reclaimable', () =>
   assert.equal(parsed.reclaimable, 1000 + 200 + 300 + 50);
 });
 
-test('docker-storage: scheduled 深度清理包含常规资源和构建缓存,但绝不清理数据卷', async () => {
+test('docker-storage: scheduled 清理悬空镜像和构建缓存,保留退出容器与数据卷', async () => {
   const docker = getActivityDocker();
   const originals = {
     pruneImages: docker.pruneImages,
     pruneContainers: docker.pruneContainers,
-    pruneBuilds: docker.pruneBuilds,
+    dial: docker.modem.dial,
     pruneVolumes: docker.pruneVolumes,
   };
   const calls = [];
   docker.pruneImages = async () => { calls.push('images'); return { SpaceReclaimed: 1024 }; };
   docker.pruneContainers = async () => { calls.push('containers'); return { SpaceReclaimed: 2048 }; };
-  docker.pruneBuilds = async () => { calls.push('builds'); return { SpaceReclaimed: 4096 }; };
+  docker.modem.dial = (options, callback) => { assert.equal(options.path, '/build/prune?'); assert.equal(options.options.all, true); calls.push('builds'); callback(null, { SpaceReclaimed: 4096 }); };
   docker.pruneVolumes = async () => { calls.push('volumes'); return { SpaceReclaimed: 8192 }; };
   try {
-    const result = await pruneStorage('scheduled');
-    assert.deepEqual(calls, ['images', 'containers', 'builds']);
+    const scope = storageHostScope();
+    const result = await pruneStorage('scheduled', { expectedHostId: scope.hostId, hostRevision: scope.hostRevision });
+    assert.deepEqual(calls, ['images', 'builds']);
     assert.equal(result.reclaimed.volumes, 0);
     assert.equal(result.reclaimedMB, 0);
     assert.equal(result.reclaimed.images, 1024);
-    assert.equal(result.reclaimed.containers, 2048);
+    assert.equal(result.reclaimed.containers, 0);
     assert.equal(result.reclaimed.buildCache, 4096);
   } finally {
     for (const [name, method] of Object.entries(originals)) {
+      if (name === 'dial') { docker.modem.dial = method; continue; }
       if (method === undefined) delete docker[name];
       else docker[name] = method;
     }
@@ -232,6 +235,7 @@ test('docker-resources: 以所有容器 Mounts 为准，包含已停止容器并
     assert.equal(result.counts.orphanVolumes, 1);
   } finally {
     for (const [name, method] of Object.entries(originals)) {
+      if (name === 'dial') { docker.modem.dial = method; continue; }
       if (method === undefined) delete docker[name];
       else docker[name] = method;
     }

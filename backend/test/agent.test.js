@@ -31,13 +31,13 @@ const {
 } = await import('../src/lib/db.js');
 const { observeAgentAlertState, readAgentAlertRules } = await import('../src/services/alert-monitor.js');
 
-test('agent: 注册 67 个工具并暴露元数据(含风险等级)', () => {
+test('agent: 注册 68 个工具并暴露元数据(含风险等级)', () => {
   const agent = getAgent();
   const tools = agent.listTools();
-  assert.equal(tools.length, 67);
+  assert.equal(tools.length, 68);
   const names = new Set(tools.map((tool) => tool.name));
   for (const expected of [
-    'compose.up', 'compose.restart', 'config.edit', 'diagnostic.probe', 'maintenance.clean', 'metrics.query',
+    'compose.up', 'compose.restart', 'config.edit', 'diagnostic.probe', 'maintenance.clean', 'maintenance.inspect', 'metrics.query',
     'compose.scale', 'compose.exec', 'config.rollback', 'config.diff', 'environment.get', 'environment.set',
     'network.inspect', 'security.audit', 'volume.mount', 'backup.trigger', 'notification.test', 'cron.create', 'performance.baseline',
     'project.list_managed', 'web.search', 'web.open', 'web.interact', 'ui.present', 'memory.search', 'memory.save', 'memory.delete', 'memory.sleep', 'config.inspect', 'config.propose', 'server.inspect', 'server.command', 'app.list', 'app.deploy', 'cron.list',

@@ -143,7 +143,7 @@ const TOOL_INTENTS = [
 const READ_ONLY_TOOLS = new Set([
   'compose.ps', 'compose.logs', 'config.inspect', 'config.preview', 'config.validate', 'config.diff',
   'environment.get', 'diagnostic.probe', 'diagnostic.analyze', 'network.inspect', 'security.audit',
-  'server.inspect', 'alert.list', 'metrics.query', 'event.list', 'event.diagnose', 'project.list_managed',
+  'server.inspect', 'maintenance.inspect', 'alert.list', 'metrics.query', 'event.list', 'event.diagnose', 'project.list_managed',
   'web.search', 'web.open', 'app.list', 'memory.search', 'inspection.status', 'gitops.drift',
   'task.list', 'task.output', 'skill.list', 'skill.use', 'database.probe', 'volume.verify', 'volume.list_backups',
 ]);
@@ -173,7 +173,7 @@ export function selectAgentTools(tools, role, userMessage = '', context = {}) {
   const mutationIntent = MUTATION_ACTIONS.some((action) => action.pattern.test(text)) || /(取消|终止|停止任务)/i.test(text);
   const selected = new Set([
     'project.list_managed', 'memory.search', 'skill.list', 'task.list', 'task.output', 'event.list', 'ui.present',
-    'web.search', 'web.open', 'compose.ps', 'compose.logs', 'server.inspect', 'metrics.query',
+    'web.search', 'web.open', 'compose.ps', 'compose.logs', 'server.inspect', 'maintenance.inspect', 'metrics.query',
     'diagnostic.probe', 'diagnostic.analyze', 'network.inspect', 'config.validate', 'config.preview',
   ]);
   for (const intent of matched) {

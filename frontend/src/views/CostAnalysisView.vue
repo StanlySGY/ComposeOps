@@ -17,7 +17,7 @@
         <MetricTile title="CPU 使用" :value="`${numberValue(report.summary.totalCPUPercent).toFixed(1)}%`" :icon="Cpu" to="/monitor?from=cost" />
         <MetricTile title="内存使用" :value="formatSize(report.summary.totalMemoryMB)" :icon="MemoryStick" to="/monitor?from=cost" />
         <MetricTile title="镜像占用" :value="formatSize(report.summary.totalImagesMB)" :icon="Layers" to="/resources?tab=images&from=cost" />
-        <MetricTile title="可回收空间" :value="formatSize(report.summary.reclaimableMB)" :icon="HardDrive" tone="text-status-ok" sub="查看资源后选择清理" to="/resources?from=cost" />
+        <MetricTile title="潜在可回收" :value="formatSize(report.summary.reclaimableMB)" :icon="HardDrive" tone="text-status-ok" sub="估算 · 核对用途后清理" to="/resources?from=cost" />
       </section>
       <section class="section-panel space-y-4">
         <div class="flex items-center justify-between"><h2 class="section-title">优化建议</h2><span class="count-badge">{{ suggestions.length }} 项</span></div>
@@ -50,7 +50,7 @@
           </tbody></table></div>
         </section>
         <section class="section-panel min-w-0 space-y-4">
-          <h2 class="section-title">占用最大的 10 个镜像</h2>
+          <h2 class="section-title">体积最大的 10 个镜像</h2><p class="text-muted">单个镜像体积包含共享层，不能直接求和作为磁盘占用。</p>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>镜像</th><th>大小</th></tr></thead><tbody>
             <tr v-for="image in report.images.slice(0, 10)" :key="image.id"><td class="max-w-64 truncate" :title="image.tags?.[0] || image.id">{{ image.tags?.[0] || image.id }}</td><td class="whitespace-nowrap">{{ formatSize(image.sizeMB) }}</td></tr>
             <tr v-if="!report.images.length"><td colspan="2"><EmptyState compact title="暂无镜像数据" description="可前往资源页检查当前节点的镜像。"><router-link to="/resources?from=cost" class="btn-secondary btn-sm">查看资源</router-link></EmptyState></td></tr>
@@ -59,6 +59,7 @@
       </div>
       <section class="section-panel space-y-4">
         <div class="flex items-center justify-between gap-3"><h2 class="section-title">存储分布</h2><router-link to="/resources?from=cost" class="btn-ghost btn-sm">管理存储<ArrowUpRight class="h-4 w-4" /></router-link></div>
+        <p class="text-muted">各类资源可能共享底层数据，合计不等同于文件系统实际占用；可回收空间为估算。</p>
         <div class="grid grid-cols-2 gap-3 xl:grid-cols-4"><MetricTile v-for="item in storageItems" :key="item.key" :title="item.label" :value="formatSize(report.storage[item.key]?.sizeMB)" :sub="item.key === 'buildCache' ? `可回收 ${formatSize(report.storage[item.key]?.reclaimableMB)}` : `${report.storage[item.key]?.active || 0} 使用中 / ${report.storage[item.key]?.total || 0} 总数`" /></div>
       </section>
     </template>
