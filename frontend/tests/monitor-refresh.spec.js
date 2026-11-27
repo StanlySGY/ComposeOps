@@ -7,6 +7,7 @@ import { nextTick } from 'vue';
 const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getMetrics', 'getDockerUsage', 'getCapabilities', 'getPreferences', 'getHosts', 'getProjects', 'setActiveHost'].map(name => [name, vi.fn()])) }));
 vi.mock('../src/api/client.js', () => ({ api, bumpHostEpoch: vi.fn() }));
 import MonitorView from '../src/views/MonitorView.vue';
+import MetricTile from '../src/components/common/MetricTile.vue';
 
 const metrics = (cpu = 23) => ({ host: { cpu: { percent: cpu, cores: 4 }, memory: { percent: 40, used: 100, total: 250 }, uptime: 60 }, network: { rx: 0, tx: 0 }, containers: [] });
 const usage = { images: { total: 0, reclaimable: 0 }, buildCache: { total: 0, reclaimable: 0 }, reclaimable: 0 };
@@ -130,8 +131,8 @@ describe('实时监控刷新与生命周期', () => {
     await start('/monitor?containerId=old&from=node-groups');
     await wrapper.get('select[aria-label="监控节点"]').setValue('remote'); await flushPromises();
     expect(router.currentRoute.value.query).toEqual({ hostId: 'remote', from: 'node-groups' });
-    expect(api.getMetrics).toHaveBeenLastCalledWith('remote');
-    expect(api.getDockerUsage).toHaveBeenLastCalledWith('remote');
+    expect(api.getMetrics).toHaveBeenLastCalledWith('remote', expect.any(AbortSignal));
+    expect(api.getDockerUsage).toHaveBeenLastCalledWith('remote', expect.any(AbortSignal));
     expect(wrapper.text()).toContain('固定来自面板所在环境');
     expect(api.setActiveHost).not.toHaveBeenCalled();
   });
@@ -168,6 +169,27 @@ describe('实时监控刷新与生命周期', () => {
     old.resolve({ ...usage, images: { total: 8192, reclaimable: 0 } }); await flushPromises();
     expect(wrapper.text()).toContain('2.0 KB');
     expect(wrapper.text()).not.toContain('8.0 KB');
+  });
+
+  it('未知的面板CPU和网络显示占位而非0，趋势不插入伪零值', async () => {
+    const { resetMonitorTrends, monitorTrends } = await import('../src/lib/monitor-trends.js'); resetMonitorTrends();
+    api.getMetrics.mockResolvedValue({ ...metrics(), host: { cpu: { percent: null, cores: 4, loadavg: [null] }, memory: { used: null, total: null, percent: null }, uptime: null }, network: { rx: null, tx: null } });
+    await start();
+    const environment = wrapper.get('[aria-label="面板运行环境"]').text();
+    expect(environment).toContain('尚未获得有效采样'); expect(environment).not.toContain('null');
+    expect(wrapper.findAllComponents(MetricTile).slice(0, 4).map(tile => tile.props('value'))).toEqual(['—', '—', '↓ —', '—']);
+    expect(environment).not.toContain('0 B/s'); expect(monitorTrends.value).toEqual({ cpu: [], mem: [], net: [] });
+  });
+
+  it('切换节点、历史tab或卸载页面都会中止旧指标与存储请求', async () => {
+    api.getMetrics.mockImplementation(() => new Promise(() => {})); api.getDockerUsage.mockImplementation(() => new Promise(() => {}));
+    await start(); const first = api.getMetrics.mock.calls[0][1];
+    expect(first).toBe(api.getDockerUsage.mock.calls[0][1]);
+    await router.replace('/monitor?hostId=remote'); await flushPromises(); expect(first.aborted).toBe(true);
+    const next = api.getMetrics.mock.calls.at(-1)[1];
+    await router.replace('/monitor?hostId=remote&tab=history'); await flushPromises(); expect(next.aborted).toBe(true);
+    await router.replace('/monitor'); await flushPromises(); const last = api.getMetrics.mock.calls.at(-1)[1];
+    wrapper.unmount(); wrapper = null; expect(last.aborted).toBe(true);
   });
 
 });

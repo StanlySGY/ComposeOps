@@ -31,9 +31,16 @@ describe('API response normalizers', () => {
     const result = normalizeMetrics({ host: { memory: { total: 8 } } });
 
     expect(result.host.memory.total).toBe(8);
-    expect(result.host.cpu.loadavg).toEqual([0, 0, 0]);
-    expect(result.network.rx).toBe(0);
+    expect(result.host.cpu.loadavg).toEqual([null, null, null]);
+    expect(result.network.rx).toBe(null);
     expect(result.containers).toEqual([]);
+  });
+
+  it('监控未知/无效值保留null，有效零值不丢失', () => {
+    const result = normalizeMetrics({ host: { cpu: { percent: null, loadavg: [null, '0', false] }, memory: { used: 0, percent: -1 } }, network: { rx: null, tx: '0' } });
+    expect(result.host.cpu.percent).toBe(null); expect(result.host.cpu.loadavg).toEqual([null, 0, null]);
+    expect(result.host.memory.used).toBe(0); expect(result.host.memory.percent).toBe(null);
+    expect(result.network.rx).toBe(null); expect(result.network.tx).toBe(0);
   });
 
   it('补齐成本报告的 summary、storage 和数组字段', () => {

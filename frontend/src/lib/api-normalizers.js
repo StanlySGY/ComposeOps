@@ -6,6 +6,12 @@ function numberOrZero(value) {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
 }
 
+function metricOrNull(value) {
+  if (value == null || value === '' || typeof value === 'boolean') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
 function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -60,11 +66,11 @@ export function normalizeMetrics(value) {
     ...data,
     host: {
       ...host,
-      cpu: { percent: numberOrZero(cpu.percent), cores: numberOrZero(cpu.cores), loadavg: arrayOrEmpty(cpu.loadavg).map(numberOrZero).concat([0, 0, 0]).slice(0, 3) },
-      memory: { total: numberOrZero(memory.total), used: numberOrZero(memory.used), free: numberOrZero(memory.free), percent: numberOrZero(memory.percent) },
-      uptime: numberOrZero(host.uptime),
+      cpu: { percent: metricOrNull(cpu.percent), cores: metricOrNull(cpu.cores), loadavg: arrayOrEmpty(cpu.loadavg).map(metricOrNull).concat([null, null, null]).slice(0, 3) },
+      memory: { total: metricOrNull(memory.total), used: metricOrNull(memory.used), free: metricOrNull(memory.free), percent: metricOrNull(memory.percent) },
+      uptime: metricOrNull(host.uptime),
     },
-    network: { ...network, rx: numberOrZero(network.rx), tx: numberOrZero(network.tx) },
+    network: { ...network, rx: metricOrNull(network.rx), tx: metricOrNull(network.tx) },
     containers: arrayOrEmpty(data.containers),
     disk: arrayOrEmpty(data.disk),
   };

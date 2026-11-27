@@ -371,7 +371,7 @@ export const api = {
     return result?.preview || null;
   },
   // system
-  getMetrics: async (hostId = '') => normalizeMetrics(await request(`/system/metrics${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`)),
+  getMetrics: async (hostId = '', signal) => normalizeMetrics(await request(`/system/metrics${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`, { signal })),
   getInfrastructure: (hostId, signal) => request(`/system/infrastructure?${new URLSearchParams({ hostId })}`, { signal }),
   getInfrastructureHistory: (params, signal) => request(`/system/infrastructure/history?${new URLSearchParams(params)}`, { signal }),
   getInfrastructureStorage: (hostId, signal) => request(`/system/infrastructure/storage?${new URLSearchParams({ hostId })}`, { signal }),
@@ -382,7 +382,7 @@ export const api = {
   saveNotifications: (payload) => request('/personal/notifications', { method: 'PUT', body: JSON.stringify(payload) }),
   testNotifications: (payload) => request('/personal/notifications/test', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getOperations: () => request('/personal/operations', { cacheable: true }),
-  getDockerUsage: async (hostId = '') => normalizeDockerUsage(await request(`/personal/maintenance/usage${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`)),
+  getDockerUsage: async (hostId = '', signal) => normalizeDockerUsage(await request(`/personal/maintenance/usage${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`, { signal })),
   getCostAnalysisReport: async () => normalizeCostReport(await request('/cost-analysis/report')),
   getCostTrends: () => request('/cost-analysis/trends?days=7'),
   getCostSuggestions: () => request('/cost-analysis/suggestions'),

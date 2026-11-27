@@ -8,33 +8,12 @@ import { queryContainerMetrics } from '../agent-metrics.js';
 import { readCompose } from '../compose-runner.js';
 import { createJob, listJobs } from '../cron-scheduler.js';
 import { getSystemStorageDf, pruneStorageResources } from '../docker-storage.js';
-import { getActivityDocker } from '../docker-hosts.js';
+import { inspectServer, runServerDiagnostic } from '../server-diagnostics.js';
 import { getProjectUpdates } from '../image-updater.js';
 import { checkImageUpdates } from '../maintenance.js';
 import { getNotificationConfig, sendNotification } from '../notifications.js';
 import { findProject, scanProjects } from '../scanner.js';
 import { readContainerStat } from '../stats.js';
-import os from 'node:os';
-import { execFileSync } from 'node:child_process';
-
-function runSafeHostCommand(command) {
-  const commands = {
-    uname: ['uname', ['-a']],
-    uptime: ['uptime', []],
-    memory: ['free', ['-h']],
-    disk: ['df', ['-h', '/', '/var/lib/docker']],
-    docker: ['docker', ['info', '--format', '{{json .}}']],
-    containers: ['docker', ['ps', '-a', '--format', '{{json .}}']],
-    dockerDisk: ['docker', ['system', 'df']],
-  };
-  const selected = commands[command];
-  if (!selected) throw Object.assign(new Error('不允许执行该服务器命令'), { statusCode: 400 });
-  try {
-    return execFileSync(selected[0], selected[1], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 }).trim();
-  } catch (error) {
-    throw Object.assign(new Error(`服务器命令执行失败: ${error.message}`), { statusCode: 502 });
-  }
-}
 
 /** 读取指定 Compose 文件当前内容(兼容 mounted / workspace)。 */
 async function currentComposeContent(project, fileIndex = 0) {
@@ -53,29 +32,10 @@ export function registerMaintenanceTools(agent) {
       confirmationRequired: false,
       requiresProject: false,
       parameters: { type: 'object', properties: {} },
-      execute: async () => {
-        const docker = getActivityDocker();
-        const [info, containers] = await Promise.all([
-          docker.info().catch(() => null),
-          docker.listContainers({ all: true }).catch(() => []),
-        ]);
-        const totalMemory = os.totalmem();
-        const freeMemory = os.freemem();
-        return {
-          scope: 'host',
-          hostname: os.hostname(),
-          platform: `${os.type()} ${os.release()}`,
-          uptimeSeconds: os.uptime(),
-          cpu: { cores: os.cpus().length, loadAverage: os.loadavg() },
-          memory: { totalBytes: totalMemory, freeBytes: freeMemory, usedBytes: totalMemory - freeMemory, usedPercent: +((totalMemory - freeMemory) / totalMemory * 100).toFixed(1) },
-          docker: info ? { serverVersion: info.ServerVersion, containers: info.Containers, running: info.ContainersRunning, paused: info.ContainersPaused, stopped: info.ContainersStopped, images: info.Images } : { available: false },
-          containers: containers.map((item) => ({ id: item.Id, name: (item.Names?.[0] || '').replace(/^\//, ''), image: item.Image, state: item.State, status: item.Status })).slice(0, 200),
-          note: '这是服务器级只读概览,可继续使用 server.command 查询白名单内的原始命令输出。',
-        };
-      },
+      execute: async () => inspectServer(),
     })
     .registerTool('server.command', {
-      description: '执行服务器只读诊断命令(仅允许 uname/uptime/free/df/docker info/ps/system df,不可执行任意命令)',
+      description: '读取所选节点的系统、内存、磁盘与Docker诊断；仅允许固定类型，宿主采集不可用时明确报错，不回退面板本机',
       category: 'diagnostic',
       requiredPermission: 'readonly',
       confirmationRequired: false,
@@ -85,7 +45,7 @@ export function registerMaintenanceTools(agent) {
         properties: { command: { type: 'string', enum: ['uname', 'uptime', 'memory', 'disk', 'docker', 'containers', 'dockerDisk'], description: '白名单命令名' } },
         required: ['command'],
       },
-      execute: async (params) => ({ command: params.command, output: runSafeHostCommand(params.command) }),
+      execute: async params => runServerDiagnostic(params.command),
     })
     .registerTool('alert.create', {
       description: '创建容器资源告警规则(CPU/内存/重启次数阈值)',

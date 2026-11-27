@@ -21,7 +21,8 @@
           <header class="monitor-section-heading"><div><h2 class="section-title"><Server class="h-4 w-4" />面板运行环境</h2><p class="text-muted mt-1">{{ scopeLabel }} · 固定来自面板所在环境，不随节点筛选切换</p></div><div class="flex items-center gap-3"><button v-if="data && environmentExpanded" class="text-link" @click="resetTrends">重置趋势</button><button class="btn-secondary btn-sm" :aria-expanded="environmentExpanded" aria-controls="panel-environment-metrics" @click="environmentExpanded = !environmentExpanded">{{ environmentExpanded ? '收起指标' : '展开指标' }}<ChevronDown class="h-3.5 w-3.5 monitor-disclosure" :class="{ 'rotate-180': environmentExpanded }"/></button></div></header>
           <div id="panel-environment-metrics" v-show="environmentExpanded">
           <Skeleton v-if="loading && !data" variant="cards" :rows="4" label="监控数据加载中" />
-          <div v-if="data" class="grid grid-cols-2 xl:grid-cols-4 gap-3"><MetricTile title="环境 CPU" :value="`${data.host.cpu.percent}%`" :sub="`${data.host.cpu.cores} 核 · Load ${numberValue(data.host.cpu.loadavg?.[0]).toFixed(2)}`" tone="text-sky-400" :trend="trends.cpu"/><MetricTile title="环境内存" :value="formatBytes(data.host.memory.used)" :sub="`${data.host.memory.percent}% / ${formatBytes(data.host.memory.total)}`" tone="text-status-ok" :trend="trends.mem"/><MetricTile title="网络速率" :value="`↓ ${formatRate(data.network.rx)}`" :sub="`↑ ${formatRate(data.network.tx)}`" tone="text-violet-400" :trend="trends.net"/><MetricTile title="运行时间" :value="formatUptime(data.host.uptime)" sub="面板环境持续运行时长"/></div>
+          <div v-if="data" class="grid grid-cols-2 xl:grid-cols-4 gap-3"><MetricTile title="环境 CPU" :value="metricPercent(data.host.cpu, 'percent')" :sub="`${data.host.cpu.cores ?? '—'} 核 · Load ${formatLoad(data.host.cpu.loadavg?.[0])}`" tone="text-sky-400" :trend="trends.cpu"/><MetricTile title="环境内存" :value="formatBytes(data.host.memory.used)" :sub="`${metricPercent(data.host.memory, 'percent')} / ${formatBytes(data.host.memory.total)}`" tone="text-status-ok" :trend="trends.mem"/><MetricTile title="网络速率" :value="`↓ ${formatRate(data.network.rx)}`" :sub="`↑ ${formatRate(data.network.tx)}`" tone="text-violet-400" :trend="trends.net"/><MetricTile title="运行时间" :value="formatUptime(data.host.uptime)" sub="面板环境持续运行时长"/></div>
+          <p v-if="data" class="text-muted mt-3">{{ data.host.note || '面板所在操作系统视角，不代表所选 Docker 节点或 ComposeOps 容器配额。' }}<span v-if="data.host.cpu.percent == null || data.network.rx == null"> — 表示尚未获得有效采样，首次差分需要等待下一次刷新。</span></p>
           <div v-if="data" class="monitor-thresholds"><span>环境阈值</span><span>CPU ≥ {{ alertThresholds.cpu }}%</span><span>内存 ≥ {{ alertThresholds.mem }}%</span><strong v-if="crossedThreshold" class="text-status-error">当前已超出阈值</strong></div>
           </div>
         </section>
@@ -109,14 +110,17 @@ watch(hostFilter, onHostChanged);
 const alertThresholds = { cpu: 85, mem: 90 };
 let mounted = false;
 let requestId = 0;
+let refreshController;
 const scopeLabel = computed(() => capabilities.value.hostMetricsScope === 'host' ? '面板所在宿主机' : 'ComposeOps 运行环境');
 async function refresh() {
   if (!mounted || tab.value !== 'live' || loading.value) return;
   const currentRequest = ++requestId;
+  const controller = new AbortController();
+  refreshController = controller;
   loading.value = true;
   const errors = [];
   const isCurrent = () => mounted && currentRequest === requestId;
-  const metricRequest = api.getMetrics(hostFilter.value).then(result => {
+  const metricRequest = api.getMetrics(hostFilter.value, controller.signal).then(result => {
     if (!isCurrent()) return;
     data.value = result;
     const unavailable = (result.hosts || []).filter(host => !host.ok);
@@ -128,13 +132,13 @@ async function refresh() {
     data.value = null; lastUpdated.value = ''; crossedThreshold.value = false;
     errors.push(`实时指标加载失败：${cause?.message || '请重试'}`);
   }).finally(() => { if (isCurrent()) error.value = errors.join('；'); });
-  const usageRequest = api.getDockerUsage(hostFilter.value).then(result => { if (isCurrent()) usage.value = result; }).catch(cause => {
+  const usageRequest = api.getDockerUsage(hostFilter.value, controller.signal).then(result => { if (isCurrent()) usage.value = result; }).catch(cause => {
     if (!isCurrent()) return;
     usage.value = null;
     errors.push(`Docker 存储加载失败：${cause?.message || '请重试'}`);
   }).finally(() => { if (isCurrent()) error.value = errors.join('；'); });
   await Promise.allSettled([metricRequest, usageRequest]);
-  if (isCurrent()) loading.value = false;
+  if (isCurrent()) { loading.value = false; refreshController = null; }
 }
 
 function accumulate() {
@@ -147,8 +151,8 @@ function accumulate() {
   }
   histories.value = next;
   if (data.value) {
-    const rx = data.value.network?.rx || 0;
-    pushMonitorTrend({ cpu: data.value.host.cpu.percent, mem: data.value.host.memory.percent, net: Math.max(0, Math.round((rx / 1024 / 1024) * 100) / 100) });
+    const rx = data.value.network?.rx;
+    pushMonitorTrend({ cpu: data.value.host.cpu.percent, mem: data.value.host.memory.percent, net: Number.isFinite(rx) ? Math.max(0, Math.round((rx / 1024 / 1024) * 100) / 100) : null });
     crossedThreshold.value = data.value.host.cpu.percent >= alertThresholds.cpu || data.value.host.memory.percent >= alertThresholds.mem;
   }
 }
@@ -157,9 +161,9 @@ function setTimer() {
   timer = undefined;
   if (mounted && tab.value === 'live' && autoRefresh.value) timer = setInterval(refresh, intervalMs.value);
 }
-function numberValue(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; } function formatBytes(value = 0) { const units = ['B','KB','MB','GB','TB']; let n = numberValue(value), i = 0; while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; } return `${n.toFixed(i ? 1 : 0)} ${units[i]}`; } function formatRate(n) { return `${formatBytes(n)}/s`; } function formatUptime(s) { const d = Math.floor(numberValue(s) / 86400), h = Math.floor((numberValue(s) % 86400) / 3600), m = Math.floor((numberValue(s) % 3600) / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`; }
+function numberValue(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; } function formatLoad(value) { return Number.isFinite(value) ? value.toFixed(2) : '—'; } function formatBytes(value) { if (!Number.isFinite(value)) return '—'; const units = ['B','KB','MB','GB','TB']; let n = numberValue(value), i = 0; while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; } return `${n.toFixed(i ? 1 : 0)} ${units[i]}`; } function formatRate(n) { return Number.isFinite(n) ? `${formatBytes(n)}/s` : '—'; } function formatUptime(s) { if (!Number.isFinite(s)) return '—'; const d = Math.floor(numberValue(s) / 86400), h = Math.floor((numberValue(s) % 86400) / 3600), m = Math.floor((numberValue(s) % 3600) / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`; }
 watch([autoRefresh, intervalMs], setTimer);
-function invalidateRequest() { requestId += 1; loading.value = false; }
+function invalidateRequest() { requestId += 1; refreshController?.abort(); refreshController = null; loading.value = false; }
 function onHostChanged() {
   invalidateRequest();
   data.value = null;

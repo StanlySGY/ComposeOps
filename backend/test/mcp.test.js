@@ -16,6 +16,13 @@ const { buildApp } = await import('../src/app.js');
 const mcp = await import('../src/routes/mcp.js');
 const { getSetting } = await import('../src/lib/db.js');
 const { assessRisk } = await import('../src/services/agent-tools.js');
+const { getDockerForHost } = await import('../src/services/docker-hosts.js');
+// MCP协议用隔离的只读Engine夹具；宿主采样边界由server-diagnostics测试覆盖。
+test.beforeEach(t => {
+  const docker = getDockerForHost('local');
+  t.mock.method(docker, 'info', async () => ({ ID: 'mcp-fixture', Name: 'mcp-fixture', OSType: 'linux', KernelVersion: 'fixture' }));
+  t.mock.method(docker, 'listContainers', async () => []);
+});
 
 const app = await buildApp({ logger: false });
 await app.ready();
@@ -143,7 +150,7 @@ test('mcp: 头与请求体不一致回 -32020 HeaderMismatch,缺失头放行', a
   const nameMismatch = await app.inject({
     method: 'POST', url: '/mcp',
     headers: { authorization: `Bearer ${token}`, 'mcp-name': 'compose_up' },
-    payload: { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'server.command', arguments: { command: 'uptime' } } },
+    payload: { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'server.command', arguments: { command: 'uname' } } },
   });
   assert.equal(nameMismatch.statusCode, 400);
   assert.equal(nameMismatch.json().error.code, -32020);
@@ -177,7 +184,7 @@ test('mcp: 一致的头照常放行(Base64 sentinel 也解开比对)', async () 
   const encodedName = await app.inject({
     method: 'POST', url: '/mcp',
     headers: { authorization: `Bearer ${token}`, 'mcp-name': `=?base64?${encoded}?=` },
-    payload: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'server.command', arguments: { command: 'uptime' } } },
+    payload: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'server.command', arguments: { command: 'uname' } } },
   });
   assert.equal(encodedName.statusCode, 200);
 });
@@ -318,7 +325,7 @@ test('mcp: 只读工具真实执行并回 structuredContent + 脱敏', async () 
   const response = await app.inject({
     method: 'POST', url: '/mcp',
     headers: { authorization: `Bearer ${token}` },
-    payload: { jsonrpc: '2.0', id: 15, method: 'tools/call', params: { name: 'server.command', arguments: { command: 'uptime' } } },
+    payload: { jsonrpc: '2.0', id: 15, method: 'tools/call', params: { name: 'server.command', arguments: { command: 'uname' } } },
   });
   assert.equal(response.statusCode, 200);
   const result = response.json().result;
@@ -331,7 +338,7 @@ test('mcp: 下划线别名解析到规范名(早期客户端兼容)', async () =
   const response = await app.inject({
     method: 'POST', url: '/mcp',
     headers: { authorization: `Bearer ${token}` },
-    payload: { jsonrpc: '2.0', id: 16, method: 'tools/call', params: { name: 'server_command', arguments: { command: 'uptime' } } },
+    payload: { jsonrpc: '2.0', id: 16, method: 'tools/call', params: { name: 'server_command', arguments: { command: 'uname' } } },
   });
   const result = response.json().result;
   assert.equal(result.isError, false);
