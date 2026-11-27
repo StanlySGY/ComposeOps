@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, mkdir, readdir, lstat } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
-import { buildRestorePlan, validateRestoreTar, readRestoreManifest } from '../src/services/maintenance-restore.js';
-import { encryptArtifact } from '../src/services/maintenance-archive.js';
+import { buildRestorePlan, validateRestoreTar, readRestoreManifest, runRestore } from '../src/services/maintenance-restore.js';
+import { encryptArtifact, digestFile } from '../src/services/maintenance-archive.js';
 const manifest = () => ({ id: randomUUID(), type: 'full', sources: [{ kind: 'project', source: '/apps/web' }], artifacts: [
   { kind: 'project', source: '/apps/web', archiveRoot: 'web', file: 'source-0.tar.enc' },
   { kind: 'volume', source: 'prod_db', archiveRoot: '1', file: 'source-1.tar.enc' },
@@ -68,4 +68,27 @@ test('恢复必须用认证清单核对所有产物；删减和损坏收据不�
   await assert.rejects(readRestoreManifest(dir, randomBytes(32)));
   const content = await readFile(path.join(dir, artifact.file)); content[20] ^= 1; await writeFile(path.join(dir, artifact.file), content);
   await assert.rejects(readRestoreManifest(dir, key), /校验失败/);
+});
+
+test('恢复确认后 Engine、清单、父目录身份变化或目标已存在都在修改资源前拒绝', async t => {
+  const dir = await mkdtemp('/tmp/restore-confirmation-'); t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = path.join(dir, 'backup'), output = path.join(dir, 'restore');
+  await mkdir(source); await mkdir(output);
+  const key = randomBytes(32), input = manifest();
+  for (const artifact of input.artifacts) Object.assign(artifact, await encryptArtifact('fixture', path.join(source, artifact.file), key));
+  const encrypted = { ...await encryptArtifact(JSON.stringify(input), path.join(source, 'manifest.json.enc'), key), kind: 'manifest' };
+  await writeFile(path.join(source, 'receipt.json'), JSON.stringify({ id: input.id, type: 'full', complete: true, fileVerified: true, artifacts: [...input.artifacts, encrypted] }));
+  const info = await lstat(output);
+  const config = { id: randomUUID(), backupId: input.id, engineId: 'engine', destination: output, key: key.toString('base64'), manifestDigest: await digestFile(path.join(source, 'manifest.json.enc')), destinationIdentity: { dev: String(info.dev), ino: String(info.ino) } };
+  const docker = { info: async () => ({ ID: 'engine' }), loadImage: async () => assert.fail('确认无效时不能导入镜像') };
+  const options = { source, output, docker };
+  await assert.rejects(runRestore({ ...config, engineId: 'changed' }, options), /Engine 身份/);
+  await assert.rejects(runRestore({ ...config, manifestDigest: 'changed' }, options), /确认后已变化/);
+  await assert.rejects(runRestore({ ...config, destinationIdentity: { ...config.destinationIdentity, ino: 'changed' } }, options), /确认后被替换/);
+  assert.deepEqual(await readdir(output), []);
+  const target = path.join(output, 'composeops-restore-' + config.id); await mkdir(target);
+  await writeFile(path.join(target, 'keep'), 'already exists');
+  await assert.rejects(runRestore(config, options), { code: 'EEXIST' });
+  assert.deepEqual(await readdir(target), ['keep']);
+  assert.equal(await readFile(path.join(target, 'keep'), 'utf8'), 'already exists');
 });

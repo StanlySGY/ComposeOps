@@ -69,7 +69,9 @@ async function localRuntime(hostId) {
   if (info.OSType !== 'linux') throw fault('完整备份执行需要 Linux Docker 宿主');
   let self;
   try {
-    self = await docker.getContainer(process.env.HOSTNAME || '').inspect();
+    const hostname = process.env.HOSTNAME?.trim();
+    // 空 ID 会请求 /containers//json，Docker 的重定向会使 socket 请求错误地走 DNS。
+    if (hostname) self = await docker.getContainer(hostname).inspect();
   } catch {
     /* 本机开发可显式指定 runner 镜像 */
   }

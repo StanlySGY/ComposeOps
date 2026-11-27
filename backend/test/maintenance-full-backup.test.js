@@ -294,3 +294,31 @@ for (const healthy of [true, false]) test(`恢复原运行状态必须验证健�
   await assert.rejects(runRecovery({ ...config, engineId: 'different' }, options), /Engine 身份/);
   await assert.rejects(runRecovery({ ...config, originalIdentities: [] }, options), /身份或配置/);
 });
+
+test('恢复原运行范围时单个容器失败仍尝试其他容器，失败记录不能被清空', async t => {
+  const output = await mkdtemp(path.join(os.tmpdir(), 'recovery-partial-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  await mkdir(path.join(output, 'original'));
+  const journal = path.join(output, 'original', 'journal.json');
+  await writeFile(journal, JSON.stringify({ resumeIds: ['healthy', 'broken'] }));
+  const runtime = ['broken', 'healthy'].map(Id => ({ Id, Image: 'sha256:original', Config: { Labels: {} }, HostConfig: {}, Mounts: [], State: { Running: false } }));
+  const config = {
+    originalId: 'original', engineId: 'engine', originallyRunning: runtime.map(c => c.Id),
+    originalIdentities: runtime.map(c => ({ id: c.Id, signature: createHash('sha256').update(JSON.stringify(containerIdentity(c))).digest('hex') })),
+  };
+  const started = [];
+  const docker = { info: async () => ({ ID: 'engine' }), getContainer: id => ({
+    inspect: async () => structuredClone(runtime.find(c => c.Id === id)),
+    start: async () => { started.push(id); if (id === 'broken') throw new Error('启动失败'); runtime.find(c => c.Id === id).State.Running = true; },
+  }) };
+  await assert.rejects(runRecovery(config, { output, docker, attempts: 1, wait: async () => {} }));
+  assert.deepEqual(started, ['broken', 'healthy']);
+  assert.equal(runtime.find(c => c.Id === 'healthy').State.Running, true);
+  assert.ok(JSON.parse(await readFile(journal, 'utf8')).resumeIds.includes('broken'));
+  // 后续容器身份不符时，预检查必须在任何一个 start 之前完成。
+  started.splice(0);
+  runtime.forEach(c => { c.State.Running = false; });
+  runtime.find(c => c.Id === 'healthy').Config.Image = 'changed';
+  await assert.rejects(runRecovery(config, { output, docker, attempts: 1, wait: async () => {} }), /身份或配置已变化/);
+  assert.deepEqual(started, []);
+});

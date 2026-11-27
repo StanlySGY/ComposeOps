@@ -503,19 +503,34 @@ export async function runRecovery(config, {
     throw new Error('恢复日志包含不属于原运行范围的容器，禁止执行');
   // 即使 journal 已清空，仍要复核全部原运行容器，避免健康检查失败后的恢复被误报成功。
   const ids = [...new Set([...journal.resumeIds].reverse().concat(config.originallyRunning))];
+  const containers = [];
+  // 先核对全部身份，再开始恢复，不能在后续发现身份变化前已启动部分容器。
   for (const id of ids) {
     const c = docker.getContainer(id), info = await c.inspect();
     const signature = createHash('sha256').update(JSON.stringify(containerIdentity({ ...info, State: { ...info.State, Running: false } }))).digest('hex');
     if (!config.originalIdentities?.some(item => item.id === id && item.signature === signature)) throw new Error('原容器身份或配置已变化，不能恢复');
-    if (!info.State.Running) await c.start();
-    let healthy = false;
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const now = await c.inspect();
-      if (now.State.Running && (!now.State.Health || now.State.Health.Status === 'healthy')) { healthy = true; break; }
-      await wait();
-    }
-    if (!healthy) throw new Error('原运行容器健康检查未通过：' + id);
+    containers.push({ id, c, running: info.State.Running });
   }
+  const failures = [];
+  // 与备份退出时的恢复一致：单个容器启动失败不能阻止其余原运行容器恢复。
+  for (const { id, c, running } of containers) {
+    try {
+      if (!running) await c.start();
+    } catch { failures.push(id); }
+  }
+  for (const { id, c } of containers) {
+    if (failures.includes(id)) continue;
+    try {
+      let healthy = false;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const now = await c.inspect();
+        if (now.State.Running && (!now.State.Health || now.State.Health.Status === 'healthy')) { healthy = true; break; }
+        await wait();
+      }
+      if (!healthy) failures.push(id);
+    } catch { failures.push(id); }
+  }
+  if (failures.length) throw new Error('原运行容器未全部恢复或健康检查未通过：' + failures.join('、'));
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const file = path.join(directory, 'journal.json');
   await writeFile(file + '.tmp', JSON.stringify({ resumeIds: [] }), { mode: 0o600 });

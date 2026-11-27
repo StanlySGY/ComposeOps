@@ -246,7 +246,9 @@ export function resolveMountedHostPath(containerInfo, targetPath) {
 async function resolveBackupDirForDocker(docker, host, dir) {
   if (!isLocalHost(host)) return dir;
   try {
-    const appContainer = await docker.getContainer(process.env.HOSTNAME).inspect();
+    const hostname = process.env.HOSTNAME?.trim();
+    if (!hostname) throw new Error('当前环境没有面板容器身份');
+    const appContainer = await docker.getContainer(hostname).inspect();
     return resolveMountedHostPath(appContainer, dir);
   } catch (error) {
     if (error?.statusCode === 400) throw error;

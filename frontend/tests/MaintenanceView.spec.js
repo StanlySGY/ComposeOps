@@ -235,6 +235,41 @@ describe('完整备份界面的真实确认条件', () => {
     window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises();
     expect(button('执行隔离恢复')).toBeUndefined();
   });
+  it('恢复预检期间修改目录，旧映射不能重新出现或用于确认', async () => {
+    route.current.query = { tab: 'backups' };
+    client.getMaintenance.mockResolvedValue({ ...overview(), backups: [{ id: 'backup1', names: ['app'], path: '/backups/apps/b1' }] });
+    let finish;
+    client.prepareFullRestore.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await show(); await button('隔离恢复').trigger('click');
+    const input = wrapper.get('input[placeholder="/srv/restore"]');
+    await input.setValue('/old');
+    await button('校验备份并预览映射').trigger('click');
+    await input.setValue('/new');
+    finish({ token: 'old-token', root: '/old/unique', mappings: [], blockers: [] });
+    await flushPromises();
+    expect(button('执行隔离恢复')).toBeUndefined();
+    expect(wrapper.text()).toContain('目录已修改');
+    expect(client.executeFullRestore).not.toHaveBeenCalled();
+    client.prepareFullRestore.mockResolvedValueOnce({ token: 'new-token', root: '/new/unique', mappings: [], blockers: [] });
+    await button('校验备份并预览映射').trigger('click'); await flushPromises();
+    expect(wrapper.text()).toContain('/new/unique');
+    expect(button('执行隔离恢复').element.disabled).toBe(true);
+  });
+  it('备份重新预检期间再次修改路径，旧结果不能恢复确认权限', async () => {
+    await show(); await button('备份').trigger('click'); await flushPromises();
+    const input = wrapper.get('input[aria-label="本次备份保存路径"]');
+    await input.setValue('/backups/second');
+    let finish;
+    client.prepareMaintenance.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await button('重新预检路径及范围').trigger('click');
+    await input.setValue('/backups/third');
+    finish({ ...backupPlan(), backupPath: '/backups/second' });
+    await flushPromises();
+    for (const check of wrapper.findAll('input[type="checkbox"]')) await check.setValue(true);
+    expect(button('开始完整备份').element.disabled).toBe(true);
+    expect(wrapper.text()).toContain('目录已修改');
+    expect(client.executeMaintenance).not.toHaveBeenCalled();
+  });
   it('代理测试不会保存地址，保存后才强制重新检查', async () => {
     client.getMaintenance.mockResolvedValue({
       ...overview(),
@@ -441,7 +476,7 @@ describe('完整备份界面的真实确认条件', () => {
     expect(client.executeMaintenance).toHaveBeenCalledWith(
       expect.objectContaining({ confirmed: true, keySaved: true, token: 'token' })
     );
-    expect(wrapper.text()).toContain('原“运维任务”已合并');
+    expect(wrapper.get('#maintenance-tab-tasks').attributes('aria-selected')).toBe('true');
   });
   it('任何未覆盖项阻止执行，修改保存目录后必须重新预检', async () => {
     const plan = backupPlan();
@@ -527,4 +562,24 @@ it('缓存页面停用后停止轮询和镜像请求，重新激活恢复且不�
     await flushPromises();
     expect(client.getMaintenance).toHaveBeenCalledTimes(4);
   } finally { wrapper.unmount(); wrapper = null; vi.useRealTimers(); }
+});
+
+it('缓存页面离开时作废未完成预检，换节点返回后解除忙碌并重新确认', async () => {
+  const visible = ref(true);
+  let finish;
+  client.prepareMaintenance.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  wrapper = mount({ setup: () => () => h(KeepAlive, null, () => visible.value ? h(MaintenanceView) : null) }, {
+    global: { stubs: { OperationsCenterView: true, FullBackupPlanPanel: true, BaseModal: true, ConfirmDialog: true } },
+  });
+  await flushPromises(); await button('备份').trigger('click');
+  visible.value = false; await flushPromises();
+  client.getMaintenance.mockResolvedValue({ ...overview(), hostId: 'other', settings: { backupPath: '/other/backups' } });
+  window.dispatchEvent(new Event('composeops:host-changed'));
+  finish(backupPlan()); await flushPromises();
+  visible.value = true; await flushPromises();
+  expect(button('开始完整备份')).toBeUndefined();
+  expect(wrapper.text()).not.toContain('正在预检完整范围');
+  expect(button('备份').element.disabled).toBe(false);
+  await button('备份').trigger('click'); await flushPromises();
+  expect(client.prepareMaintenance).toHaveBeenLastCalledWith(expect.objectContaining({ backupPath: '/other/backups' }));
 });

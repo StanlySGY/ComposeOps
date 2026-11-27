@@ -53,7 +53,6 @@
 
               class="input mt-2 w-full"
               aria-label="本次备份保存路径"
-              @input="invalidatePlan"
           /></label>
           <p class="mt-2 break-all text-xs text-muted">本次清单使用：{{ plan.backupPath }}</p>
           <button
@@ -293,7 +292,7 @@
             <p v-if="!maintenanceGroups.length && !loading" class="p-6 text-center text-sm text-muted" role="status">{{ updateFilter === 'updatable' ? (checkingUpdates ? '正在检查镜像，可更新的应用会陆续显示' : '没有符合条件的可更新应用') : '没有匹配应用或容器' }}</p>
           </div>
           <p class="text-xs text-muted">
-            更新自动使用默认路径完整备份，成功后拉取并重建整个 Compose 应用；备份失败不更新，完成后保留原启停状态并检查健康。面板自身、临时辅助容器或无法完整保存的数据会在预检中明确阻止；独立容器需先有 Compose 定义才能更新。
+            镜像检查只报告更新状态；更新需前往项目完成发布评审。完整备份需单独预检并确认停机范围，成功后恢复原启停状态并检查健康。面板自身、临时辅助容器或无法完整保存的数据会在备份预检中明确阻止。
           </p>
         </template>
 
@@ -421,7 +420,7 @@
 
         <template v-if="tab === 'tasks'">
           <p class="text-xs text-muted">
-            原“运维任务”已合并。统一查看更新、完整备份、同步及失败记录。
+            在此查看完整备份、隔离恢复、同步及原运行状态恢复的任务记录。
           </p>
           <section v-for="task in data.tasks" :key="task.id" class="section-panel space-y-2">
             <div class="flex flex-wrap justify-between gap-2">
@@ -486,7 +485,7 @@
       <div class="p-4 space-y-4">
         <p class="text-sm text-muted">在指定父目录下新建唯一恢复目录。数据卷重映射为独立目录，网络与端口隔离，不覆盖原应用。</p>
         <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
-        <label class="block text-sm">已存在的宿主机父目录<input v-model="restoreDirectory" class="input mt-2 w-full" placeholder="/srv/restore" @input="restorePlan = null; restoreConfirmed = false" /></label>
+        <label class="block text-sm">已存在的宿主机父目录<input v-model="restoreDirectory" class="input mt-2 w-full" placeholder="/srv/restore" /></label>
         <button class="btn-secondary" :disabled="busy || !restoreDirectory" @click="previewRestore">校验备份并预览映射</button>
         <template v-if="restorePlan">
           <p class="text-xs break-all">新目录：{{ restorePlan.root }}</p>
@@ -730,6 +729,7 @@ const authSession = ref(null),
 let pollTimer,
   authTimer,
   epoch = 0,
+  viewActive = false,
   disposed = false;
 const expandedGroups = ref(new Set());
 const collapsedSearchGroups = ref(new Set());
@@ -827,7 +827,7 @@ const canExecute = computed(
     keySaved.value
 );
 async function load(quiet = false) {
-  if (loading.value || disposed) return;
+  if (loading.value || disposed || !viewActive) return;
   loading.value = true;
   const current = epoch;
   try {
@@ -852,7 +852,7 @@ async function load(quiet = false) {
   }
 }
 async function perform(fn) {
-  if (busy.value) return;
+  if (busy.value || !viewActive) return;
   busy.value = true;
   error.value = '';
   notice.value = '';
@@ -897,15 +897,19 @@ function tabKeydown(event) {
   setTab(tabs[next].id);
   document.getElementById('maintenance-tab-' + tabs[next].id)?.focus();
 }
+let backupPlanRevision = 0;
 function invalidatePlan() {
+  backupPlanRevision++;
   planStale.value = true;
   confirmed.value = false;
 }
+watch(backupPath, invalidatePlan, { flush: 'sync' });
 function prepare(action, ids) {
   if (busy.value) return;
   stopUpdateChecks();
   return perform(async (valid) => {
     preparing.value = true;
+    const revision = backupPlanRevision;
     try {
       const result = await api.prepareMaintenance({
         action,
@@ -913,6 +917,10 @@ function prepare(action, ids) {
         backupPath: backupPath.value,
       });
       if (!valid()) return;
+      if (revision !== backupPlanRevision) {
+        notice.value = '目录已修改，请重新预检备份路径及范围。';
+        return;
+      }
       plan.value = result;
       planStale.value = false;
       confirmed.value = false;
@@ -1003,7 +1011,7 @@ function stopUpdateChecks() {
   checkSummary.value = '检查已停止，已完成的结果保留；可重新检查';
 }
 async function checkUpdates(force = false, projectId = null) {
-  if (checkingUpdates.value || disposed) return;
+  if (checkingUpdates.value || disposed || !viewActive) return;
   checksStarted = true;
   const current = ++updateGeneration,
     currentEpoch = epoch;
@@ -1239,9 +1247,7 @@ function recover() {
     }
   });
 }
-function hostChanged() {
-  query.value = '';
-  updateFilter.value = 'all';
+function resetContext() {
   expandedGroups.value = new Set();
   collapsedSearchGroups.value = new Set();
   preparing.value = false;
@@ -1251,20 +1257,32 @@ function hostChanged() {
   loading.value = false;
   busy.value = false;
   data.value = { containers: [], tasks: [], backups: [], settings: {} };
+  targets.value = [];
   selected.value = [];
   updates.value = {};
   updateTarget.value = null;
   restoreTarget.value = null; restorePlan.value = null;
   backupPath.value = '';
   plan.value = null;
+  confirmed.value = false;
+  keySaved.value = false;
+  recoverTarget.value = null;
   draft.value = null;
   syncChoice.value = null;
   stopAuth();
   proxyOpen.value = false;
   proxyBusy.value = false;
   proxyUrl.value = '';
+  error.value = '';
+  notice.value = '';
+}
+function hostChanged() {
+  query.value = '';
+  updateFilter.value = 'all';
+  resetContext();
+  const current = epoch;
   void load().then(() => {
-    if (tab.value === 'containers') void checkUpdates(false);
+    if (current === epoch && viewActive && tab.value === 'containers') void checkUpdates(false);
   });
 }
 function bytes(n) {
@@ -1302,12 +1320,15 @@ function actionLabel(action) {
 }
 function activate() {
   if (pollTimer || disposed) return;
-  void load().then(() => { if (tab.value === 'containers') void checkUpdates(false); });
+  viewActive = true;
+  const current = epoch;
+  void load().then(() => { if (current === epoch && viewActive && tab.value === 'containers') void checkUpdates(false); });
   window.addEventListener('composeops:host-changed', hostChanged);
   pollTimer = setInterval(() => { void load(true); }, 5000);
 }
 function deactivate() {
-  stopUpdateChecks(); epoch++; loading.value = false;
+  viewActive = false;
+  resetContext();
   clearInterval(pollTimer); pollTimer = null; clearTimeout(authTimer);
   window.removeEventListener('composeops:host-changed', hostChanged);
 }
@@ -1317,13 +1338,26 @@ onDeactivated(deactivate);
 onBeforeUnmount(() => { deactivate(); disposed = true; });
 const scopeVisible = ref(false);
 const restoreTarget = ref(null), restoreDirectory = ref(''), restorePlan = ref(null), restoreStart = ref(false), restoreConfirmed = ref(false);
+let restorePlanRevision = 0;
+watch([restoreDirectory, restoreTarget], () => {
+  restorePlanRevision++;
+  restorePlan.value = null;
+  restoreConfirmed.value = false;
+}, { flush: 'sync' });
 function openRestore(backup) {
   error.value = ''; restoreTarget.value = backup; restorePlan.value = null; restoreConfirmed.value = false; restoreStart.value = false;
 }
 function previewRestore() {
   return perform(async valid => {
+    const revision = restorePlanRevision;
     const result = await api.prepareFullRestore({ backupId: restoreTarget.value.id, destination: restoreDirectory.value, expectedHostId: data.value.hostId });
-    if (valid()) { restorePlan.value = result; restoreConfirmed.value = false; }
+    if (!valid()) return;
+    if (revision !== restorePlanRevision) {
+      notice.value = '目录已修改，请重新校验备份并预览映射。';
+      error.value = notice.value;
+      return;
+    }
+    restorePlan.value = result; restoreConfirmed.value = false;
   });
 }
 function executeRestore() {

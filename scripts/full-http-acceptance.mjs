@@ -35,12 +35,29 @@ try{
  const password=randomBytes(24).toString('hex');cookie=(await api('/auth/setup',{method:'POST',body:{password}})).cookie;assert.ok(cookie);
  for(const {url,methods} of routes){if(!url.startsWith('/api/v1/'))continue;for(const method of methods.filter(m=>!['GET','HEAD'].includes(m)))await request(url.replace(/:[A-Za-z]+/g,'acceptance-missing'),{method,origin:'https://untrusted.invalid',status:403});}
  checks.push('every registered API write rejects foreign Origin before execution');
- const needsQuery=new Set(['/api/v1/metrics/historical','/api/v1/cron/preview','/api/v1/sre/onboarding/context','/api/v1/ops/storage/volume-volumes','/api/v1/sre/business-recovery/candidates','/api/v1/sre/recovery/candidates']);
+ const needsQuery=new Set(['/api/v1/metrics/historical','/api/v1/cron/preview','/api/v1/sre/onboarding/context','/api/v1/ops/storage/volume-volumes','/api/v1/ops/storage/full-backup-plan','/api/v1/projects/directories','/api/v1/sre/business-recovery/candidates','/api/v1/sre/recovery/candidates']);
  const readResults=[];
  for(const {url,methods} of routes){if(!url.startsWith('/api/v1/')||!methods.includes('GET')||url.includes(':')||url.endsWith('/')||url.includes('/auth/')||url.endsWith('/stream'))continue;
   const result=await request(url,{status:needsQuery.has(url)?[400,404]:200});readResults.push({url,keys:typeof result.data==='object'?Object.keys(result.data):[]});
  }
  writeFileSync(path.join(output,'read-results.json'),JSON.stringify(readResults,null,2));checks.push('authenticated read endpoints return expected JSON or explicit required-context validation');
+ const hostId=(await api('/hosts/active')).data.activeHostId;
+ const listing=(await api('/projects/directories?'+new URLSearchParams({expectedHostId:hostId,directory:tmpdir()}))).data;
+ assert.equal(listing.path,tmpdir());assert.ok(Array.isArray(listing.entries));
+ await api('/projects/directories?'+new URLSearchParams({expectedHostId:'acceptance-wrong-host',directory:tmpdir()}),{status:409});
+ await api('/ops/storage/full-backup-plan?projectId=acceptance-missing',{status:404});
+ checks.push('host directory browsing accepts the current node and rejects stale node identity; backup preview rejects missing project');
+ await api('/maintenance/image-check/settings',{method:'PUT',body:{proxyUrl:'http://127.0.0.1:7897'}});
+ assert.equal((await api('/maintenance/image-check/settings')).data.proxyUrl,'http://127.0.0.1:7897');
+ await api('/maintenance/image-check/settings',{method:'PUT',body:{proxyUrl:'http://user:secret@localhost:7897'},status:400});
+ await api('/maintenance/image-check/settings',{method:'PUT',body:{proxyUrl:''}});
+ await api('/maintenance/settings',{method:'PUT',body:{backupPath:'/'},status:400});
+ await api('/maintenance/plans',{method:'POST',body:{action:'backup',backupPath:directory,containerIds:[]},status:400});
+ const absentToken='00000000-0000-4000-8000-000000000000';
+ await api('/maintenance/execute',{method:'POST',body:{token:absentToken,confirmed:true,keySaved:true},status:409});
+ await api('/maintenance/restore',{method:'POST',body:{token:absentToken,confirmed:true},status:409});
+ await api('/maintenance/tasks/'+absentToken+'/recover',{method:'POST',body:{confirmed:false},status:400});
+ checks.push('image proxy persistence/validation and backup/restore/recovery guards through authenticated HTTP');
  await api('/personal/preferences',{method:'PUT',body:{refreshInterval:15,logTail:300}});assert.equal((await api('/personal/preferences')).data.logTail,300);
  const job=(await api('/cron',{method:'POST',body:{name:'acceptance schedule',cron:'0 0 * * *',type:'images-check',enabled:false}})).data;
  assert.ok(job.id);await api('/cron/'+job.id,{method:'PUT',body:{name:'updated acceptance'}});assert.equal((await api('/cron')).data.jobs.find(j=>j.id===job.id).enabled,false);

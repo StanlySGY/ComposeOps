@@ -56,12 +56,18 @@ export async function validateWorkspaceProjectPaths(project, resolvePath = realp
 
 async function runnerImage() {
   if (process.env.COMPOSEOPS_RUNNER_IMAGE) return process.env.COMPOSEOPS_RUNNER_IMAGE;
+  const hostname = process.env.HOSTNAME?.trim();
+  if (!hostname) throw Object.assign(new Error('宿主机运行请配置 COMPOSEOPS_RUNNER_IMAGE，当前无法识别面板容器镜像'), { statusCode: 409 });
   if (!runnerImagePromise) {
-    runnerImagePromise = docker.getContainer(process.env.HOSTNAME || '').inspect()
+    runnerImagePromise = docker.getContainer(hostname).inspect()
       .then((inspection) => inspection.Config?.Image)
       .then((image) => {
         if (!image) throw new Error('无法识别 ComposeOps 当前镜像');
         return image;
+      })
+      .catch((error) => {
+        runnerImagePromise = undefined;
+        throw error;
       });
   }
   return runnerImagePromise;
