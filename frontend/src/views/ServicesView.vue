@@ -3,6 +3,7 @@
     <div class="page-header">
       <div><h1 class="page-title">服务总览</h1><p class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
       <div class="page-actions service-page-actions">
+        <router-link to="/settings?tab=mounts" class="btn-secondary">纳管与分组</router-link>
         <button class="btn-secondary compose-create-button" :disabled="busy" @click="createComposeOpen = true"><Plus class="h-4 w-4" />新建 Compose</button>
       </div>
     </div>
@@ -55,13 +56,14 @@
     <div v-if="store.projects.length" class="toolbar-panel service-toolbar">
       <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" type="search" aria-label="搜索服务项目" placeholder="搜索项目、容器、镜像或路径" /></label>
       <select v-model="filter" class="input sm:w-40" aria-label="状态筛选"><option value="all">全部项目</option><option value="attention">需要关注</option><option value="running">健康运行</option><option value="stopped">已停止</option><option value="managed">已纳管</option><option value="unmanaged">未纳管</option><option value="favorites">仅收藏</option></select>
+      <select v-model="groupFilter" class="input sm:w-40" aria-label="项目分组筛选"><option value="">全部分组</option><option value="ungrouped">未分组</option><option v-for="group in projectGroups.groups" :key="group.id" :value="group.id">{{ group.name }}</option></select><button class="btn-ghost btn-sm" @click="groupsOpen = true">管理分组</button>
       <select v-model="sort" class="input sm:w-40" aria-label="项目排序"><option value="priority">异常与收藏优先</option><option value="name">按项目名称</option><option value="owner">按项目归属</option></select>
       <button class="btn-ghost btn-sm" :disabled="!expandedIds.size" @click="collapseAll">全部收起</button>
       <label class="service-select-all"><input type="checkbox" :checked="allVisibleSelected" :indeterminate="someVisibleSelected && !allVisibleSelected" :disabled="busy || !visibleManagedProjects.length" @change="toggleAllVisible" />选择当前</label>
       <span class="ml-auto whitespace-nowrap text-muted" role="status" aria-live="polite">显示 {{ visibleProjects.length }} / {{ store.projects.length }}</span>
     </div>
-    <div v-if="searchQuery || filter !== 'all'" class="filter-summary" role="group" aria-label="当前服务筛选">
-      <span>正在筛选</span>
+    <div v-if="searchQuery || filter !== 'all' || groupFilter" class="filter-summary" role="group" aria-label="当前服务筛选">
+      <span>正在筛选</span><button v-if="groupFilter" class="filter-chip" @click="groupFilter = ''">{{ projectGroups.groups.find(g => g.id === groupFilter)?.name || '未分组' }} ×</button>
       <button v-if="searchQuery" class="filter-chip" aria-label="清除搜索关键词" @click="searchQuery = ''"><Search class="h-3 w-3 shrink-0" /><span>{{ searchQuery }}</span><X class="h-3 w-3 shrink-0" /></button>
       <button v-if="filter !== 'all'" class="filter-chip" aria-label="清除状态筛选" @click="filter = 'all'"><span>{{ filterLabels[filter] }}</span><X class="h-3 w-3" /></button>
       <button class="filter-reset" @click="resetFilters">重置筛选</button>
@@ -73,14 +75,20 @@
     <Skeleton v-if="store.loading && !store.projects.length" variant="cards" :rows="4" label="服务列表加载中" class="flex-1" />
     <EmptyState v-else-if="!store.projects.length" icon="Boxes" title="暂未发现 Compose 项目" description="可重新扫描当前节点，或从应用市场部署第一个应用。" action-label="重新扫描" @action="refresh" />
     <EmptyState v-else-if="!visibleProjects.length" icon="Search" title="没有匹配当前条件的项目" description="调整搜索关键词或筛选条件后重试" action-label="清除筛选" class="flex-1" @action="resetFilters" />
-    <div v-else class="flex-1 space-y-3">
+    <div v-else class="flex-1 space-y-4">
+      <section v-for="group in groupedProjects" :key="group.id" class="service-project-group">
+        <header class="service-group-heading"><button class="service-group-toggle" :aria-expanded="groupOpen(group)" @click="toggleGroup(group.id)"><ChevronDown :size="16" :class="{ '-rotate-90': !groupOpen(group) }" /><strong>{{ group.name }}</strong><span>{{ group.projects.length }} 个项目</span></button><button v-if="group.projects.some(hasAttention)" class="text-status-warn text-xs" @click="filter = 'attention'; groupFilter = group.id || 'ungrouped'">{{ group.projects.filter(hasAttention).length }} 项需关注</button></header>
+        <div v-if="groupOpen(group)" class="service-group-content space-y-3">
       <ServiceProjectCard
-        v-for="project in visibleProjects" :key="project.id" :project="project"
-        :expanded="expandedIds.has(project.id)" :selected="selectedIds.includes(project.id)" :focused="route.query.focus === project.id || kbFocusId === project.id"
+        v-for="project in group.projects" :key="project.id" :project="project"
+        :expanded="expandedIds.has(project.id) || !!searchQuery" :selected="selectedIds.includes(project.id)" :focused="route.query.focus === project.id || kbFocusId === project.id"
         :busy="busy" :last-results="updateSettings.lastResults" :action-running="project.id === runningAction.id ? runningAction.action : ''"
         @toggle-expand="toggleExpanded(project.id)" @toggle-select="toggleSelection(project.id)" @refresh="refresh" @note-saved="project.note = $event" @activity="activityProject = project" @env="envProject = project" @upgrade="upgradeProject = project" @db-dump="dbDumpProject = project" @action="(action) => run(project, action)"
       />
+        </div>
+      </section>
     </div>
+    <ProjectGroupsModal :show="groupsOpen" :projects="store.projects" :selected-ids="selectedIds" :host-id="hosts.activeHostId" @close="groupsOpen = false" @changed="refresh" />
     <StandaloneContainersPanel :host-id="hosts.activeHostId" @refresh="refresh(true)" />
     <OperationOutputDrawer v-if="output.open" :label="actionLabel(output.action)" :action="output.action" :context-valid="output.hostId === hosts.activeHostId" :name="output.name" :text="output.text" :project-id="output.projectId" :exit-code="output.exitCode" :failure-reason="output.failureReason" :running="output.running" :batch-tasks="batchTasks" :batch-progress="batchProgress" :completed-count="completedBatchTasks" @close="output.open = false" @diagnose="openDiagnosisForOutput" @inspect="inspectOutputProject" @logs="openOutputTool('logs')" @review="openOutputTool('compose')" />
     <ProjectEnvModal v-if="envProject" :project="envProject" @close="closeEnv" @refresh="refresh" @apply="handleEnvApply" />
@@ -93,6 +101,10 @@
 </template>
 
 <script setup>
+import { useProjectGroupsStore } from '../stores/project-groups.js';
+import ProjectGroupsModal from '../components/services/ProjectGroupsModal.vue';
+import { useResourceTree } from '../composables/useResourceTree.js';
+import { groupProjects } from '../lib/project-groups.js';
 import { needsAttention as hasAttention, isHealthyProject } from '../lib/project-health.js';
 import MetricTile from '../components/common/MetricTile.vue';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
@@ -130,8 +142,10 @@ const route = useRoute();
 const router = useRouter();
 const { openAgent, updateAgentContext } = useAgentConsole();
 const autoRefresh = ref(true); const busy = ref(false); const expandedIds = ref(new Set());
-const createComposeOpen = ref(false);
-const { searchQuery, filter, sort, resetFilters } = useServiceFilters();
+const createComposeOpen = ref(false), groupsOpen = ref(false);
+const projectGroups = useProjectGroupsStore();
+const { collapsedGroups, toggleGroup } = useResourceTree(computed(() => hosts.activeHostId), 'services');
+const { searchQuery, filter, sort, groupFilter, resetFilters } = useServiceFilters();
 const filterLabels = { attention: '需要关注', running: '健康运行', stopped: '已停止', managed: '已纳管', unmanaged: '未纳管', favorites: '仅收藏' };
 const selectedIds = ref([]); const updateSettings = ref({ lastResults: [] }); const focusedProject = ref('');
 const inspection = ref(null); const inspectionLoading = ref(false);
@@ -242,11 +256,13 @@ const healthTone = computed(() => healthScore.value === '—' ? 'text-surface-40
 const filteredProjects = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   const matcher = statusMatchers[filter.value];
-  const matches = store.projects.filter((project) => (!matcher || matcher(project)) && (!query || searchIndex(project).includes(query)));
+  const matches = store.projects.filter((project) => (!groupFilter.value || (groupFilter.value === 'ungrouped' ? !project.groupId : project.groupId === groupFilter.value)) && (!matcher || matcher(project)) && (!query || searchIndex(project).includes(query)));
   return [...matches].sort(sortComparators[sort.value]);
 });
 const focusedOutsideFilter = computed(() => store.projects.find(project => project.id === route.query.focus && !filteredProjects.value.some(item => item.id === project.id)));
 const visibleProjects = computed(() => focusedOutsideFilter.value ? [focusedOutsideFilter.value, ...filteredProjects.value] : filteredProjects.value);
+const groupedProjects = computed(() => groupProjects(visibleProjects.value, projectGroups.groups));
+function groupOpen(group) { return !!searchQuery.value || group.projects.some(p => p.id === route.query.focus || p.id === kbFocusId.value) || !collapsedGroups.value.has(group.id); }
 const visibleManagedProjects = computed(() => visibleProjects.value.filter((project) => project.managed));
 const selectedProjects = computed(() => store.projects.filter((project) => selectedIds.value.includes(project.id) && project.managed));
 const allVisibleSelected = computed(() => visibleManagedProjects.value.length > 0 && visibleManagedProjects.value.every((project) => selectedIds.value.includes(project.id)));
@@ -268,7 +284,7 @@ async function handleCustomComposeCreated(result) {
     expandedIds.value = new Set([...expandedIds.value, result.projectId]);
   }
 }
-function searchIndex(project) { return [project.projectName, project.owner, project.workingDir, project.note, ...project.containers.flatMap((container) => [container.name, container.image])].join(' ').toLowerCase(); }
+function searchIndex(project) { return [project.projectName, project.groupName, project.owner, project.workingDir, project.note, ...project.containers.flatMap((container) => [container.name, container.service, container.image])].join(' ').toLowerCase(); }
 const statusMatchers = { attention: (p) => hasAttention(p), running: isHealthyProject, managed: (p) => p.managed, unmanaged: (p) => !p.managed, favorites: (p) => p.favorite, stopped: (p) => p.containers.some((c) => c.state !== 'running') };
 const sortComparators = { name: (a, b) => a.projectName.localeCompare(b.projectName), owner: (a, b) => a.owner.localeCompare(b.owner) || a.projectName.localeCompare(b.projectName), priority: (a, b) => Number(hasAttention(b)) - Number(hasAttention(a)) || Number(b.favorite) - Number(a.favorite) || Number(b.managed) - Number(a.managed) || a.projectName.localeCompare(b.projectName) };
 function toggleSelection(projectId) { selectedIds.value = selectedIds.value.includes(projectId) ? selectedIds.value.filter((id) => id !== projectId) : [...selectedIds.value, projectId]; }
@@ -519,7 +535,7 @@ usePullRefresh(manualRefresh, { keepAlive: true });
 onMounted(async () => {
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
   // 后续 WS 打开成功会做一次非重连刷新,失败则降级轮询。
-  await store.refresh(false);
+  await Promise.all([store.refresh(false), projectGroups.load()]);
   // 更新策略只是辅助信息,读取失败不能让整个服务页进入全局异常态。
   try { updateSettings.value = await api.getUpdateSettings(); }
   catch (error) { console.warn('[ServicesView] 更新策略读取失败,保留默认设置:', error?.message || error); }
@@ -539,7 +555,7 @@ watch(kbFocusId, (id) => {
   nextTick(() => { document.getElementById(`project-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
 });
 useKeyboardNavigation({
-  enabled: computed(() => route.name === 'services' && !envProject.value && !dbDumpProject.value && !upgradeProject.value && !activityProject.value && !diagnosis.value),
+  enabled: computed(() => route.name === 'services' && !envProject.value && !dbDumpProject.value && !upgradeProject.value && !activityProject.value && !diagnosis.value && !groupsOpen.value && !createComposeOpen.value),
   onCheatSheet: () => { window.dispatchEvent(new CustomEvent('composeops:open-cheatsheet')); },
   getProjectIds: () => visibleProjects.value.map((project) => project.id),
   onMove: (id) => { kbFocusId.value = id; },
@@ -602,6 +618,9 @@ onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); }
 </script>
 
 <style scoped>
+.service-group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--panel-surface);border:1px solid var(--line-subtle);border-radius:8px;margin-bottom:10px;flex-wrap:wrap}.service-group-toggle{display:flex;align-items:center;gap:8px;text-align:left;min-width:0}.service-group-toggle strong{overflow-wrap:anywhere}.service-group-toggle span{font-size:12px;color:var(--text-soft)}.service-group-content{margin-left:20px;padding-left:12px;border-left:1px solid var(--line-subtle)}
+@media(max-width:600px){.service-group-content{margin-left:8px;padding-left:8px}}
+
 .compose-create-button { background: color-mix(in srgb,var(--color-link) 10%,var(--panel-surface)); border-color: color-mix(in srgb,var(--color-link) 35%,var(--line-subtle)); color: var(--color-link); box-shadow: none; }
 .compose-create-button:hover { background: color-mix(in srgb,var(--color-link) 16%,var(--panel-surface)); }
 .service-refresh-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:12px; padding-bottom:8px; border-bottom:1px solid var(--line-subtle); flex-wrap:wrap; }

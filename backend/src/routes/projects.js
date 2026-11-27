@@ -20,6 +20,8 @@ import { createComposeChangePreview, validateComposeSemantics } from '../service
 import { getProjectDocker } from '../services/docker-hosts.js';
 import { listProjectDbContainers, runDbDump } from '../services/db-dumper.js';
 import { registerProjectWebUiRoutes } from './project-webui-settings.js';
+import { registerProjectGroupRoutes, groupAssignmentsSchema } from './project-groups.js';
+import { applyProjectManagement } from '../services/project-groups.js';
 import { listStandaloneContainers, runStandaloneContainerAction, runComposeServiceAction } from '../services/container-management.js';
 import {
   addOperation,
@@ -27,7 +29,6 @@ import {
   getComposeBackup,
   listComposeBackups,
   listProjectOperations,
-  setProjectManagement,
   setProjectPreference,
 } from '../lib/db.js';
 
@@ -102,6 +103,7 @@ const CONTENT_MAX = 1048576;
 const fileIndexField = { type: 'number' };
 
 export default async function projectRoutes(fastify) {
+  registerProjectGroupRoutes(fastify);
   fastify.get('/', async () => ({ projects: await scanProjects() }));
 
   // 默认目录作为快捷入口，位置可在目标宿主机自由选择。
@@ -200,7 +202,7 @@ export default async function projectRoutes(fastify) {
       body: {
         type: 'object',
         additionalProperties: false,
-        properties: { projectIds: projectIdList, mountProjectIds: projectIdList },
+        properties: { projectIds: projectIdList, mountProjectIds: projectIdList, assignments: groupAssignmentsSchema, expectedHostId: { type: 'string', minLength: 1, maxLength: 128 } },
       },
     },
   }, async (request, reply) => {
@@ -212,7 +214,10 @@ export default async function projectRoutes(fastify) {
         mountProjectIds.some((id) => typeof id !== 'string')) {
       return reply.code(400).send({ error: 'invalid_project_ids', message: '项目选择格式无效' });
     }
-    const projects = await scanProjects();
+    const hostId = getActiveHostId();
+    if (request.body.expectedHostId && request.body.expectedHostId !== hostId) return reply.code(409).send({ message: '节点已切换，请刷新后重试' });
+    const projects = await scanProjects(hostId);
+    if (hostId !== getActiveHostId()) return reply.code(409).send({ message: '节点已切换，请刷新后重试' });
     const discoveredIds = projects.map((project) => project.id);
     const discoveredSet = new Set(discoveredIds);
     if (projectIds.some((id) => !discoveredSet.has(id)) || mountProjectIds.some((id) => !discoveredSet.has(id))) {
@@ -220,8 +225,10 @@ export default async function projectRoutes(fastify) {
     }
     const selectedIds = [...new Set(projectIds)];
     const selectedMountIds = [...new Set(mountProjectIds)].filter((id) => selectedIds.includes(id));
-    const result = setProjectManagement(discoveredIds, selectedIds, selectedMountIds);
-    pruneWorkspaceRunners(selectedMountIds);
+    let result;
+    try { result = applyProjectManagement(projects, hostId, selectedIds, selectedMountIds, request.body.assignments); }
+    catch (error) { return reply.code(error.statusCode || 400).send({ message: error.message }); }
+    pruneWorkspaceRunners(selectedMountIds, hostId);
     addOperation({
       action: 'projects.management',
       status: 'success',
@@ -241,7 +248,9 @@ export default async function projectRoutes(fastify) {
         mountProjectIds.some((id) => typeof id !== 'string')) {
       return reply.code(400).send({ error: 'invalid_project_ids', message: '项目选择格式无效' });
     }
-    const projects = await scanProjects();
+    const hostId = getActiveHostId();
+    const projects = await scanProjects(hostId);
+    if (hostId !== getActiveHostId()) return reply.code(409).send({ message: '节点已切换，请刷新后重试' });
     const discoveredIds = projects.map((project) => project.id);
     const discoveredSet = new Set(discoveredIds);
     if (mountProjectIds.some((id) => !discoveredSet.has(id))) {
@@ -249,8 +258,8 @@ export default async function projectRoutes(fastify) {
     }
     const managedIds = projects.filter((project) => project.managed).map((project) => project.id);
     const selectedMountIds = [...new Set(mountProjectIds)].filter((id) => managedIds.includes(id));
-    const result = setProjectManagement(discoveredIds, managedIds, selectedMountIds);
-    pruneWorkspaceRunners(selectedMountIds);
+    const result = applyProjectManagement(projects, hostId, managedIds, selectedMountIds);
+    pruneWorkspaceRunners(selectedMountIds, hostId);
     addOperation({ action: 'projects.mounts', status: 'success', detail: selectedMountIds.join(', ') });
     return result;
   });

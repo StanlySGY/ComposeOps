@@ -6,6 +6,7 @@ const SORTS = ['priority', 'name', 'owner'];
 
 export function readServiceFilters(query = {}) {
   return {
+    group: typeof query.group === 'string' ? query.group : '',
     q: typeof query.q === 'string' ? query.q : '',
     filter: FILTERS.includes(query.filter) ? query.filter : 'all',
     sort: SORTS.includes(query.sort) ? query.sort : 'priority',
@@ -26,7 +27,7 @@ export function useServiceFilters() {
     Object.assign(state, patch);
     const query = { ...route.query };
     delete query.focus;
-    for (const key of ['q', 'filter', 'sort']) {
+    for (const key of ['q', 'filter', 'sort', 'group']) {
       const value = state[key];
       if (!value || (key === 'filter' && value === 'all') || (key === 'sort' && value === 'priority')) delete query[key];
       else query[key] = value;
@@ -38,7 +39,7 @@ export function useServiceFilters() {
 
   const field = key => computed({ get: () => state[key], set: value => setFilters({ [key]: value }) });
   return {
-    searchQuery: field('q'), filter: field('filter'), sort: field('sort'),
-    resetFilters: () => setFilters({ q: '', filter: 'all', sort: 'priority' }),
+    groupFilter: field('group'), searchQuery: field('q'), filter: field('filter'), sort: field('sort'),
+    resetFilters: () => setFilters({ q: '', filter: 'all', sort: 'priority', group: '' }),
   };
 }

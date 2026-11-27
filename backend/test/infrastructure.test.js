@@ -1,3 +1,4 @@
+import './helpers/isolated-db.js';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -7,7 +8,6 @@ import { containerMemory } from '../src/lib/container-metrics.js';
 import { hostSnapshot, parseHostProbe, counterRate } from '../src/lib/host-probe.js';
 import { parseContainerStat } from '../src/services/stats.js';
 const directory = mkdtempSync(path.join(os.tmpdir(), 'cockpit-test-'));
-process.env.DB_PATH = path.join(directory, 'db.sqlite');
 const { default: db } = await import('../src/lib/db.js');
 const { groupInfrastructureContainers, storageAssociations, collectInfrastructure, infrastructureSnapshot } = await import('../src/services/infrastructure.js');
 const { sampleContainers, mapLimited } = await import('../src/services/container-sampler.js');
@@ -104,4 +104,31 @@ test('100-container sampling has bounded concurrency and shared reads; unavailab
   deleteHost(host.id);
   await assert.rejects(async () => infrastructureSnapshot(host.id), /不存在/);
   let concurrent = 0, max = 0; await mapLimited(Array(50), 3, async () => { max = Math.max(max, ++concurrent); await Promise.resolve(); concurrent--; }); assert.equal(max, 3);
+});
+
+
+test('容器限额与健康元数据缓存，实时健康优先，失败不伪装无限额', async t => {
+  const host = upsertHost({ id: 'limits-test', type: 'tcp', name: 'limits', host: '127.0.0.1' });
+  t.after(() => deleteHost(host.id));
+  const docker = getDockerForHost(host.id);
+  let inspections = 0, status = 'Up (healthy)', state = 'running';
+  t.mock.method(docker, 'listContainers', async () => [{ Id: 'limited', State: state, Status: status }]);
+  t.mock.method(docker, 'info', async () => ({ NCPU: 4 }));
+  t.mock.method(docker, 'getContainer', () => ({
+    inspect: async () => { inspections++; return { HostConfig: { Memory: 1073741824, CpuQuota: 150000, CpuPeriod: 100000, CpusetCpus: '0-1' }, RestartCount: 3, State: { Health: { Status: 'healthy' }, OOMKilled: true } }; },
+    stats: async () => ({ memory_stats: { usage: 10, limit: 1073741824 } }),
+  }));
+  let [row] = (await sampleContainers(host.id, 0)).containers;
+  assert.equal(row.configuredMemory, 1073741824); assert.equal(row.configuredCpu, 1.5); assert.equal(row.cpuSet, '0-1');
+  assert.equal(row.restartCount, 3); assert.equal(row.oomKilled, true); assert.equal(row.detailsReady, true);
+  status = 'Up (unhealthy)';
+  [row] = (await sampleContainers(host.id, 0)).containers;
+  assert.equal(inspections, 1); assert.equal(row.health, 'unhealthy');
+  status = 'Up (health: starting)';
+  [row] = (await sampleContainers(host.id, 0)).containers;
+  assert.equal(row.health, 'starting');
+  state = 'exited';
+  t.mock.method(docker, 'getContainer', () => ({ inspect: async () => { throw new Error('unavailable'); } }));
+  [row] = (await sampleContainers(host.id, 0)).containers;
+  assert.equal(row.detailsReady, false); assert.equal(row.configuredMemory, undefined);
 });

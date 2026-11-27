@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import { reactive } from 'vue';
 import SettingsView from '../src/views/SettingsView.vue';
 
 const mocks = vi.hoisted(() => {
   const api = {};
   for (const name of [
-    'getPreferences', 'getNotifications', 'getUpdateSettings', 'getCapabilities', 'getMountPlan',
+    'saveProjectManagement', 'getProjectGroups', 'getPreferences', 'getNotifications', 'getUpdateSettings', 'getCapabilities', 'getMountPlan',
     'getStorageDf', 'getNotificationEvents', 'savePreferences', 'changePassword', 'saveNotifications',
     'saveNotificationEvents', 'testNotifications', 'saveUpdateSettings', 'checkUpdates', 'getAiConfig',
     'pingHost', 'saveMcpConfig', 'getMcpConfig', 'getProjects', 'getProjectManagement', 'revealMcpToken',
@@ -21,14 +23,17 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('../src/api/client.js', () => ({ api: mocks.api }));
 vi.mock('../src/stores/ai.js', () => ({ useAiStore: () => mocks.aiStore }));
-vi.mock('../src/stores/hosts.js', () => ({ useHostsStore: () => mocks.hostsStore }));
+vi.mock('../src/stores/hosts.js', () => ({ useHostsStore: () => reactive(mocks.hostsStore) }));
 vi.mock('../src/composables/usePullRefresh.js', () => ({ usePullRefresh: vi.fn() }));
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
 
 let wrapper;
 beforeEach(() => {
+  setActivePinia(createPinia());
   vi.clearAllMocks();
+  mocks.hostsStore.activeHostId = 'local';
   mocks.route.query = { tab: 'personal' };
+  mocks.api.getProjectGroups.mockResolvedValue({ groups: [] });
   Object.assign(mocks.aiStore.config, { channels: [], failoverEnabled: true, systemPrompt: '', searchProvider: 'builtin', searchProviders: ['builtin'], searchApiKey: '' });
   mocks.api.getPreferences.mockResolvedValue({ refreshInterval: 5, logTail: 200 });
   mocks.api.getNotifications.mockResolvedValue({ enabled: true, intervalSeconds: 30, memoryThreshold: 90, dockerStorageThresholdGb: 1, channels: [] });
@@ -286,4 +291,27 @@ describe('设置页面表单可访问性', () => {
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain('请填写当前密码');
   });
+});
+
+
+it('保存纳管期间切换节点，迟到结果不覆盖新节点草稿或结束新节点加载', async () => {
+  mocks.route.query = { tab: 'mounts' };
+  mocks.api.getProjectGroups.mockResolvedValue({ groups: [{ id: 'mine', name: '我的业务' }] });
+  const plan = name => ({ projects: [{ id: name, projectName: name, managed: true, mountEnabled: false }], unsupportedProjects: [], summary: {} });
+  mocks.api.getMountPlan.mockResolvedValueOnce(plan('local-project'));
+  let finishSave, finishRemote;
+  mocks.api.saveProjectManagement.mockImplementationOnce(() => new Promise(resolve => { finishSave = resolve; }));
+  await mountSettings();
+  await wrapper.get('select[aria-label="项目 local-project 的分组"]').setValue('mine');
+  await wrapper.findAll('button').find(b => b.text().includes('应用选择')).trigger('click');
+  expect(mocks.api.saveProjectManagement).toHaveBeenCalledWith(['local-project'], [], { expectedHostId: 'local', assignments: [{ projectId: 'local-project', groupId: 'mine' }] });
+  mocks.api.getMountPlan.mockImplementationOnce(() => new Promise(resolve => { finishRemote = resolve; }));
+  reactive(mocks.hostsStore).activeHostId = 'remote';
+  await flushPromises();
+  finishSave({ ok: true }); await flushPromises();
+  expect(mocks.api.getMountPlan).toHaveBeenCalledTimes(2);
+  expect(wrapper.text()).not.toContain('纳管、分组与 Compose 目录选择已更新');
+  finishRemote(plan('remote-project')); await flushPromises();
+  expect(wrapper.text()).toContain('remote-project');
+  expect(wrapper.text()).not.toContain('local-project');
 });

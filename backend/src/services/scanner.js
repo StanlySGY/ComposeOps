@@ -9,6 +9,7 @@ import { composeProjectId } from './project-id.js';
 const COMPOSE_PROJECT_LABEL = 'com.docker.compose.project';
 const COMPOSE_WORKDIR_LABEL = 'com.docker.compose.project.working_dir';
 const COMPOSE_CONFIG_LABEL = 'com.docker.compose.project.config_files';
+import { projectGroupMetadata } from './project-groups.js';
 const OWNER_LABEL = 'myops.owner';
 const UNCATEGORIZED = 'Uncategorized';
 
@@ -79,6 +80,7 @@ function projectSnapshot(data) {
     project.favorite = !!preference.favorite;
     project.note = preference.note || '';
     project.operationalIntent = preference.operationalIntent || 'unknown';
+    Object.assign(project, projectGroupMetadata(project.id));
     return project;
   }).sort((a, b) => Number(b.managed) - Number(a.managed) || Number(b.favorite) - Number(a.favorite) ||
     a.owner.localeCompare(b.owner) || a.projectName.localeCompare(b.projectName));

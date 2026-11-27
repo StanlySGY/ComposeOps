@@ -13,6 +13,8 @@ export const projects = [
   project('cache', [container('redis', 'redis:7.4-alpine')]),
   project('sandbox', [container('worker', 'example/worker:1.0')], false),
 ];
+export const projectGroups = [{ id: 'demo-business', name: '我的业务', pinned: true }, { id: 'demo-shared', name: '公共服务', pinned: false }];
+for (const p of projects) { p.hostId = 'local'; p.groupId = p.id === 'sandbox' ? null : p.id === 'cache' ? 'demo-shared' : 'demo-business'; p.groupName = projectGroups.find(g => g.id === p.groupId)?.name || '未分组'; }
 export const metrics = {
   host: { hostname: 'homelab-demo', platform: 'linux', arch: 'x64', cpu: { percent: 18, cores: 4, loadavg: [0.6, 0.7, 0.5] }, memory: { total: 8 * GB, used: 3.4 * GB, free: 4.6 * GB, percent: 42.5 }, uptime: 172800 },
   containers: projects.flatMap(p => p.containers.map((c, i) => ({ id: c.id, name: c.name, image: c.image, hostId: 'local', hostName: '本机 · 示例', memUsage: 180 * 1024 ** 2, memLimit: GB, memPercent: 18, projectId: p.id, projectName: p.projectName, state: c.state, cpuPercent: i ? 7 : 2, memoryUsage: 180 * 1024 ** 2, memoryLimit: GB, memoryPercent: 18, networkRx: 1048576, networkTx: 524288, netIO: { rx: 1048576, tx: 524288 }, blockIO: { read: 0, write: 0 } }))),

@@ -12,7 +12,7 @@ const sample = (hostId = 'local', percent = 34) => ({ nodes: [{ hostId, name: ho
 describe('服务器驾驶舱', () => {
   let wrapper, router;
   beforeEach(() => {
-    vi.useFakeTimers(); vi.clearAllMocks();
+    vi.useFakeTimers(); vi.clearAllMocks(); localStorage.clear();
     state.hosts = reactive({ activeHostId: 'local', hosts: [{ id: 'local', name: '本机' }, { id: 'remote', name: '远端' }] });
     api.getInfrastructure.mockImplementation(id => Promise.resolve(sample(id)));
     api.getInfrastructureHistory.mockResolvedValue({ points: [], start: Date.now() - 3600000, end: Date.now(), interval: 10000 });
@@ -77,6 +77,21 @@ describe('服务器驾驶舱', () => {
     await start(); await wrapper.get('.cockpit-alerts button').trigger('click'); await flushPromises();
     expect(router.currentRoute.value.query.resource).toBe('disk:b:ext4');
     expect(wrapper.findAll('.cockpit-metric')[2].attributes('aria-pressed')).toBe('true');
+  });
+  it('双向网络与磁盘历史切换保留范围，组内筛选不改变整机卡片', async () => {
+    const data = sample(); data.groups = [{ id: 'mine', name: '我的业务' }];
+    data.nodes[0].services[0].groupId = 'mine'; data.nodes[0].services[0].managed = true;
+    data.nodes[0].host.cpu.loadavg = [1, 2, 3];
+    api.getInfrastructure.mockResolvedValue(data);
+    await start(); expect(wrapper.text()).toContain('1.00 / 2.00 / 3.00');
+    await wrapper.findAll('.cockpit-metric')[3].trigger('click'); await flushPromises();
+    await wrapper.get('[aria-label="趋势指标方向"]').setValue('tx'); await flushPromises();
+    expect(api.getInfrastructureHistory.mock.calls.at(-1)[0].metric).toBe('tx');
+    await wrapper.get('[aria-label="资源项目分组"]').setValue('ungrouped'); await flushPromises();
+    expect(wrapper.find('.cockpit-project').exists()).toBe(false); expect(wrapper.text()).toContain('34.0%');
+    await router.replace('/dashboard?metric=disk&resource=service:p:db&direction=readRate'); await flushPromises();
+    expect(api.getInfrastructureHistory.mock.calls.at(-1)[0].metric).toBe('readRate');
+    expect(cockpitReturn('/dashboard?group=mine&scope=managed&direction=tx')).toBe('/dashboard?group=mine&scope=managed&direction=tx');
   });
 });
 

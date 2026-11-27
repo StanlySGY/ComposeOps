@@ -152,9 +152,10 @@
     <DataMaintenancePanel v-if="tab === 'maintenance'" />
 
     <section v-if="tab === 'mounts'" class="settings-section">
+      <p v-if="projectGroups.error" class="alert-error" role="alert">分组读取失败：{{ projectGroups.error }}<button class="text-link ml-2" @click="projectGroups.load">重试</button></p>
       <SettingsLoadState :state="loads.mounts" name="mounts" label="项目权限" @retry="loadMountPlan()" />
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div><h2 class="section-title">Compose 项目纳管</h2><p class="text-sm text-surface-400 mt-1">自动发现的项目默认没有操作权限，只有明确勾选并应用后才加入管理。</p></div>
+        <div><h2 class="section-title">Compose 项目纳管与分组</h2><p class="text-sm text-surface-400 mt-1">自动发现的项目默认没有操作权限，只有明确勾选并应用后才加入管理。</p></div>
         <button class="btn-secondary" :disabled="mountLoading" @click="loadMountPlan"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': mountLoading }" />重新扫描</button>
       </div>
 
@@ -168,7 +169,7 @@
       <div v-if="mountPlan" class="space-y-2">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div><h3 class="section-title">选择管理范围</h3><p class="text-xs text-surface-400 mt-1">第一项授权容器控制、日志、终端和 AI 诊断；第二项允许按需挂载该 Compose 目录，启用配置编辑、拉取和创建缺失服务。</p></div>
-          <button class="btn-primary" :disabled="mountLoading || !selectionDirty" @click="saveManagement"><ShieldCheck class="w-4 h-4" />应用选择</button>
+          <button class="btn-primary" :disabled="mountLoading || !selectionDirty || !!projectGroups.error" @click="saveManagement"><ShieldCheck class="w-4 h-4" />应用选择</button>
         </div>
         <p v-if="selectionDirty" class="alert-warning">当前选择尚未应用；保存前不会改变项目权限或 Compose 目录范围。</p>
         <EmptyState v-if="!mountPlan.projects.length" icon="FolderCog" title="暂未发现 Compose 项目" description="重新扫描以发现新的 Docker Compose 项目" action-label="重新扫描" action-icon="RefreshCw" :action-disabled="mountLoading" @action="loadMountPlan" />
@@ -179,6 +180,7 @@
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2"><span class="font-mono text-sm">{{ project.projectName }}</span><span class="count-badge">{{ projectAccessLabel(project) }}</span><span class="count-badge">{{ project.containerCount }} 个容器</span></div>
+            <label class="block text-xs text-muted mt-3">项目分组<ProjectGroupPicker v-model="groupSelections[project.id]" class="mt-1" :disabled="mountLoading || !!projectGroups.error" :suggestion="['Uncategorized', 'Personal'].includes(project.owner) ? '' : project.owner" :label="`项目 ${project.projectName} 的分组`" /></label>
             <div class="text-muted font-mono break-all mt-1">{{ project.workingDir || 'Docker 标签未提供工作目录' }}</div>
           </div>
         </div>
@@ -308,6 +310,8 @@
 </template>
 
 <script setup>
+import ProjectGroupPicker from '../components/services/ProjectGroupPicker.vue';
+import { useProjectGroupsStore } from '../stores/project-groups.js';
 import { useFormDraft, useUnsavedChanges } from '../composables/useFormDraft.js';
 import { useSelectedTabReveal } from '../composables/useSelectedTabReveal.js';
 import ThemeSelect from '../components/common/ThemeSelect.vue';
@@ -365,6 +369,10 @@ const removedProjectCount = computed(() => savedManagedProjectIds.value.filter((
 const usageTotal = computed(() => Number(usage.value?.total) || 0);
 const usageReclaimable = computed(() => Number(usage.value?.reclaimable) || 0);
 const usagePercent = computed(() => (usage.value?.total && usage.value?.disk?.free ? Math.min(100, Math.max(2, (usage.value.total / (usage.value.total + usage.value.disk.free)) * 100)) : 2) + '%');
+const projectGroups = useProjectGroupsStore();
+const groupSelections = ref({}), savedGroupSelections = ref({});
+let managementHostId = '';
+const groupsDirty = computed(() => JSON.stringify(groupSelections.value) !== JSON.stringify(savedGroupSelections.value));
 const selectedProjectIds = ref([]); const savedManagedProjectIds = ref([]);
 const selectedMountProjectIds = ref([]); const savedMountProjectIds = ref([]);
 const managementDirty = computed(() => {
@@ -375,7 +383,7 @@ const mountsDirty = computed(() => {
   const selected = [...selectedMountProjectIds.value].sort(); const saved = [...savedMountProjectIds.value].sort();
   return selected.length !== saved.length || selected.some((id, index) => id !== saved[index]);
 });
-const selectionDirty = computed(() => managementDirty.value || mountsDirty.value);
+const selectionDirty = computed(() => managementDirty.value || mountsDirty.value || groupsDirty.value);
 const unsavedSections = computed(() => [
   { tab: 'ai', label: '通用 AI', dirty: aiDraft.dirty.value },
   { tab: 'ai', label: 'AI 渠道', dirty: ai.value.channels.some(channel => channel.dirty || channel.saved === false) },
@@ -655,33 +663,53 @@ async function saveUpdates() { if (savingUpdates.value || !loads.updates.ready) 
 function loadUsage() { return loadSection('usage', () => api.getStorageDf(), result => { usage.value = result; }); }
 function applyMountPlan(plan) {
   mountPlan.value = plan;
+  groupSelections.value = Object.fromEntries(plan.projects.map(p => [p.id, p.groupId || '']));
+  savedGroupSelections.value = { ...groupSelections.value };
   savedManagedProjectIds.value = plan.projects.filter((project) => project.managed).map((project) => project.id);
   savedMountProjectIds.value = plan.projects.filter((project) => project.managed && project.mountEnabled).map((project) => project.id);
   selectedProjectIds.value = [...savedManagedProjectIds.value];
   selectedMountProjectIds.value = [...savedMountProjectIds.value];
 }
-async function loadMountPlan(showMessage = true) {
-  if (mountLoading.value) return;
-  mountLoading.value = true;
+let mountRequest = 0;
+async function loadMountPlan(showMessage = true, force = false) {
+  if (mountLoading.value && !force) return;
+  const version = ++mountRequest, hostId = hostsStore.activeHostId;
+  mountLoading.value = true; loads.mounts.loading = true; loads.mounts.error = '';
   try {
-    await loadSection('mounts', () => api.getMountPlan(), plan => { applyMountPlan(plan); if (showMessage) ok('项目与权限状态已重新扫描'); });
-  } finally { mountLoading.value = false; }
+    const [plan] = await Promise.all([api.getMountPlan(), projectGroups.load()]);
+    if (disposed || version !== mountRequest || hostId !== hostsStore.activeHostId) return;
+    managementHostId = hostId; applyMountPlan(plan); loads.mounts.ready = true;
+    if (showMessage) ok('项目、分组与权限状态已重新扫描');
+  } catch (cause) { if (!disposed && version === mountRequest) loads.mounts.error = cause.message; }
+  finally { if (version === mountRequest) { mountLoading.value = false; loads.mounts.loading = false; } }
 }
+watch(() => hostsStore.activeHostId, () => {
+  mountPlan.value = null; loads.mounts.ready = false;
+  void loadMountPlan(false, true);
+});
 async function saveManagement() {
   if (removedProjectCount.value) { managementConfirm.value = true; return; }
   await confirmSaveManagement();
 }
 async function confirmSaveManagement() {
+  if (mountLoading.value || !mountPlan.value) return;
   managementConfirm.value = false;
+  const savedHost = managementHostId, version = ++mountRequest;
   mountLoading.value = true;
   try {
     selectedMountProjectIds.value = selectedMountProjectIds.value.filter((id) => selectedProjectIds.value.includes(id));
-    await api.saveProjectManagement(selectedProjectIds.value, selectedMountProjectIds.value);
-    applyMountPlan(await api.getMountPlan());
+    if (managementHostId !== hostsStore.activeHostId) throw new Error('节点已切换，请重新扫描后应用');
+    await api.saveProjectManagement(selectedProjectIds.value, selectedMountProjectIds.value, { expectedHostId: managementHostId, assignments: mountPlan.value.projects.map(p => ({ projectId: p.id, groupId: groupSelections.value[p.id] || null })) });
+    if (disposed || version !== mountRequest || savedHost !== hostsStore.activeHostId) return;
+    const plan = await api.getMountPlan();
+    if (disposed || version !== mountRequest || savedHost !== hostsStore.activeHostId) return;
+    applyMountPlan(plan);
     window.dispatchEvent(new CustomEvent('composeops:projects-changed'));
-    ok('管理与 Compose 目录选择已更新');
+    projectGroups.changed();
+    ok('纳管、分组与 Compose 目录选择已更新');
   }
-  catch (e) { fail(e); } finally { mountLoading.value = false; }
+  catch (e) { if (!disposed && version === mountRequest) fail(e); }
+  finally { if (version === mountRequest) mountLoading.value = false; }
 }
 function projectAccessLabel(project) { if (!project.managed) return '未纳管'; if (!project.mountEnabled) return '仅管理容器'; if (project.editable) return project.mounted ? 'Compose 直连' : 'Compose 按需'; return 'Compose 路径需处理'; }
 function formatBytes(value = 0) { const units = ['B','KB','MB','GB','TB']; let n = value; let i = 0; while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; } return `${n.toFixed(i ? 1 : 0)} ${units[i]}`; }

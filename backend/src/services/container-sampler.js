@@ -25,12 +25,30 @@ export async function sampleContainers(hostId, maxAge = 10000) {
   state.pending = (async () => {
     const signal = AbortSignal.timeout(8000);
     const [list, info] = await Promise.all([docker.listContainers({ all: true, abortSignal: signal }), docker.info({ abortSignal: signal })]);
+    state.details ||= new Map();
+    const present = new Set(list.map(item => item.Id));
+    for (const id of state.details.keys()) if (!present.has(id)) state.details.delete(id);
     const rows = await mapLimited(list, 6, async item => {
       const labels = item.Labels || {};
       const projectName = labels['com.docker.compose.project'] || '';
       const workingDir = labels['com.docker.compose.project.working_dir'] || '';
       const projectId = projectName ? composeProjectId(workingDir, projectName, hostId, getSetting('projects.legacy_host_id', 'local')) : '';
-      const identity = { id: item.Id, hostId, projectId, projectName, service: labels['com.docker.compose.service'] || '', name: (item.Names?.[0] || item.Id.slice(0, 12)).replace(/^\//, ''), image: item.Image, state: item.State, status: item.Status, mounts: item.Mounts || [], workingDir };
+      let details = state.details.get(item.Id);
+      if (!details || Date.now() - details.at > 60000 || details.state !== item.State) {
+        try {
+          signal.throwIfAborted();
+          const inspect = await docker.getContainer(item.Id).inspect({ abortSignal: AbortSignal.any([signal, AbortSignal.timeout(2000)]) });
+          const config = inspect.HostConfig || {};
+          details = { at: Date.now(), state: item.State, value: { detailsReady: true, detailsAt: Date.now(),
+            configuredMemory: Number(config.Memory) > 0 ? Number(config.Memory) : null,
+            configuredCpu: Number(config.NanoCpus) > 0 ? Number(config.NanoCpus) / 1e9 : Number(config.CpuQuota) > 0 && Number(config.CpuPeriod) > 0 ? Number(config.CpuQuota) / Number(config.CpuPeriod) : null,
+            cpuSet: config.CpusetCpus || '', restartCount: inspect.RestartCount ?? null, oomKilled: !!inspect.State?.OOMKilled,
+            health: inspect.State?.Health?.Status || null, stateError: inspect.State?.Error ? '容器启动错误，查看日志排查' : '' } };
+          state.details.set(item.Id, details);
+        } catch { details = { value: { detailsReady: false } }; }
+      }
+      const currentHealth = /\((?:health: )?(healthy|unhealthy|starting)\)/.exec(item.Status || '')?.[1];
+      const identity = { id: item.Id, hostId, projectId, projectName, service: labels['com.docker.compose.service'] || '', name: (item.Names?.[0] || item.Id.slice(0, 12)).replace(/^\//, ''), image: item.Image, state: item.State, status: item.Status, mounts: item.Mounts || [], workingDir, ...details.value, health: currentHealth || details.value.health || null };
       if (item.State !== 'running') return { ...identity, sampledAt: Date.now(), metricsPending: true };
       try {
         signal.throwIfAborted();

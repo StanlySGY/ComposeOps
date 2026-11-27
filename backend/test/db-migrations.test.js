@@ -47,7 +47,7 @@ test('db-migrations: runMigrations 对空库应用全部迁移并更新 user_ver
   assert.ok(applied.includes(17));
   assert.ok(applied.includes(18));
   assert.ok(applied.includes(19));
-  assert.equal(db.pragma('user_version', { simple: true }), 33);
+  assert.equal(db.pragma('user_version', { simple: true }), 34);
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'volume_backups'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'event_records'").get());
@@ -123,7 +123,7 @@ test('db-migrations: v6 创建 inspections 表', () => {
   `);
   const applied = runMigrations(db);
   assert.ok(applied.includes(6));
-  assert.equal(db.pragma('user_version', { simple: true }), 33);
+  assert.equal(db.pragma('user_version', { simple: true }), 34);
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inspections'").get());
   // 验证 inspections 表列结构
   const cols = db.prepare('PRAGMA table_info(inspections)').all();
@@ -145,7 +145,7 @@ test('db-migrations: v6 前创建 inspections 表后跳过(列不重复添加)',
   db.pragma('user_version = 6');
   const applied = runMigrations(db);
   assert.ok(!applied.includes(6));
-  assert.equal(db.pragma('user_version', { simple: true }), 33);
+  assert.equal(db.pragma('user_version', { simple: true }), 34);
 });
 
 test('db-migrations: 已应用版本跳过,重放返回空数组', () => {
@@ -159,8 +159,8 @@ test('db-migrations: 已应用版本跳过,重放返回空数组', () => {
   `);
   db.pragma('user_version = 9');
   const applied = runMigrations(db);
-  assert.deepEqual(applied, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]);
-  assert.equal(db.pragma('user_version', { simple: true }), 33);
+  assert.deepEqual(applied, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]);
+  assert.equal(db.pragma('user_version', { simple: true }), 34);
   // v10 未越界:compacted_before_id 只在 v10 加过一次
   assert.ok(db.prepare('PRAGMA table_info(ai_sessions)').all().filter((c) => c.name === 'compacted_before_id').length === 1);
 });
@@ -185,7 +185,7 @@ test('db-migrations: 真实 user_version=0 历史库(列已在)幂等升到 v4',
   assert.ok(applied.includes(2));
   assert.ok(applied.includes(3));
   assert.ok(applied.includes(4));
-  assert.equal(reopened.pragma('user_version', { simple: true }), 33);
+  assert.equal(reopened.pragma('user_version', { simple: true }), 34);
   assert.ok(reopened.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_memories'").get());
   reopened.close();
   rmSync(dir, { recursive: true, force: true });
@@ -197,4 +197,22 @@ test('db-migrations: 失败的迁移不提交版本号(事务包裹)', () => {
   const badMigrations = [{ version: 99, name: 'broken', up: () => { throw new Error('fail'); } }];
   assert.throws(() => runMigrations(db, badMigrations), /fail/);
   assert.equal(db.pragma('user_version', { simple: true }), 0);
+});
+
+
+test('v33→34 保留既有项目权限、备注和运行意图，删组仅解除归属', () => {
+  const database = new Database(':memory:');
+  try {
+    database.pragma('foreign_keys = ON');
+    database.exec("CREATE TABLE project_preferences(project_id TEXT PRIMARY KEY, managed INTEGER, mount_enabled INTEGER, favorite INTEGER, note TEXT, operational_intent TEXT); INSERT INTO project_preferences VALUES('existing',1,1,1,'备注','maintenance'); PRAGMA user_version=33");
+    assert.deepEqual(runMigrations(database), [34]);
+    const before = database.prepare('SELECT * FROM project_preferences').get();
+    assert.equal(before.managed, 1); assert.equal(before.mount_enabled, 1); assert.equal(before.favorite, 1);
+    assert.equal(before.note, '备注'); assert.equal(before.operational_intent, 'maintenance');
+    assert.equal(before.group_id, null); assert.equal(before.host_id, null);
+    database.exec("INSERT INTO project_groups(id,name) VALUES('group','业务'); UPDATE project_preferences SET group_id='group'; DELETE FROM project_groups");
+    assert.deepEqual(database.prepare('SELECT * FROM project_preferences').get(), before);
+    assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
+    assert.deepEqual(runMigrations(database), []);
+  } finally { database.close(); }
 });

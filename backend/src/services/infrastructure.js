@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
-import db, { addAlertEvent, getSetting } from '../lib/db.js';
+import db, { addAlertEvent, getSetting, getProjectPreference } from '../lib/db.js';
+import { listProjectGroups, projectGroupMetadata } from './project-groups.js';
 import { HOST_PROBE_COMMAND, parseHostProbe, hostSnapshot } from '../lib/host-probe.js';
 import { getHost, listHosts, onHostsChange } from './docker-hosts.js';
 import { sshExec } from './remote-shell.js';
@@ -142,10 +143,12 @@ export async function collectInfrastructure() {
 export function infrastructureSnapshot(hostId = 'all') {
   const hosts = listHosts().filter(host => hostId === 'all' || host.id === hostId);
   if (!hosts.length) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
-  return { checkedAt: Date.now(), interval: 10000, nodes: hosts.map(host => {
+  return { checkedAt: Date.now(), interval: 10000, groups: listProjectGroups(), nodes: hosts.map(host => {
     const node = latest.get(host.id);
     if (!node) return { hostId: host.id, name: host.name, status: 'pending', host: { status: 'unavailable', reason: '等待首次采样' }, containers: [], services: [], alerts: [] };
     const result = structuredClone(node);
+    result.services = result.services.map(service => ({ ...service,
+      ...(service.projectId ? { ...projectGroupMetadata(service.projectId), managed: !!getProjectPreference(service.projectId).managed, operationalIntent: getProjectPreference(service.projectId).operationalIntent } : { managed: false, groupId: null }) }));
     if (Date.now() - result.sampledAt > 30000) result.status = 'stale';
     if (Date.now() - result.host.sampledAt > 30000 && result.host.status === 'ready') result.host.status = 'stale';
     return result;

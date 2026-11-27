@@ -12,7 +12,7 @@ export function metricValue(value, unit = '%') {
 export function cockpitReturn(value) {
   if (typeof value !== 'string' || value.length > 2048 || !/^\/dashboard(?:\?|$)/.test(value)) return '/dashboard';
   const input = new URLSearchParams(value.split('?')[1] || ''), query = new URLSearchParams();
-  for (const key of ['hostId', 'hours', 'metric', 'sort', 'q', 'resource', 'disk']) if (input.has(key)) query.set(key, input.get(key));
+  for (const key of ['hostId', 'hours', 'metric', 'sort', 'q', 'resource', 'disk', 'group', 'scope', 'direction']) if (input.has(key)) query.set(key, input.get(key));
   return '/dashboard' + (query.size ? '?' + query.toString() : '');
 }
 export function serviceFocusLocation(item, returnTo) {
@@ -22,14 +22,27 @@ export function rankProjects(services, sort = 'cpu', query = '') {
   const keys = { cpu: 'cpuHostPercent', memory: 'memUsage', network: 'networkRx', disk: 'diskWrite' }, key = keys[sort] || keys.cpu;
   const groups = new Map();
   for (const row of services) {
-    if (query && !`${row.projectName} ${row.name} ${(row.containers || []).map(c => c.name).join(' ')}`.toLowerCase().includes(query.toLowerCase())) continue;
+    if (query && !`${row.groupName || ''} ${row.projectName} ${row.name} ${(row.containers || []).map(c => c.name).join(' ')}`.toLowerCase().includes(query.toLowerCase())) continue;
     const id = row.projectId || 'standalone';
-    if (!groups.has(id)) groups.set(id, { id, name: row.projectName || '独立容器', hostId: row.hostId, services: [] });
+    if (!groups.has(id)) groups.set(id, { id, name: row.projectName || '独立容器', hostId: row.hostId, groupId: row.groupId, groupName: row.groupName, groupPinned: row.groupPinned, managed: row.managed, services: [] });
     groups.get(id).services.push(row);
   }
-  return [...groups.values()].map(group => ({ ...group, value: group.services.every(row => row[key] != null) ? group.services.reduce((n, row) => n + row[key], 0) : null,
+  return [...groups.values()].map(group => ({ ...group, ...resourceTotals(group.services), value: resourceTotals(group.services)[key],
     services: [...group.services].sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1) || a.name.localeCompare(b.name)) }))
     .sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.name.localeCompare(b.name));
+}
+export function resourceTotals(rows) {
+  return Object.fromEntries(['cpuHostPercent', 'memUsage', 'networkRx', 'networkTx', 'diskRead', 'diskWrite'].map(key => [key, rows.length && rows.every(row => Number.isFinite(row[key])) ? rows.reduce((n, row) => n + row[key], 0) : null]));
+}
+export function serviceAttention(service) {
+  const containers = service.containers || [];
+  return containers.some(c => c.health === 'unhealthy' || c.oomKilled || c.state === 'restarting' || c.stateError) ||
+    (service.operationalIntent === 'running' && containers.some(c => c.state !== 'running'));
+}
+export function containerLimit(container, kind) {
+  if (!container.detailsReady) return '限额待确认';
+  if (kind === 'memory') return container.configuredMemory ? `限额 ${formatResourceBytes(container.configuredMemory)}` : '未设置内存限额';
+  return [container.configuredCpu ? `配额 ${container.configuredCpu.toFixed(2)} 核` : '未设置 CPU 配额', container.cpuSet ? `绑定核 ${container.cpuSet}` : ''].filter(Boolean).join(' · ');
 }
 /** Break the stroke at missing samples; never interpolate across an outage. */
 export function trendSegments(points, interval, start, end, width = 640, height = 160) {

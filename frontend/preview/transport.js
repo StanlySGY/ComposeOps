@@ -1,6 +1,6 @@
 import { previewSchedule, validateCron, nextRunTime } from '../../backend/src/lib/cron-expression.js';
 import { parseDocument } from 'yaml';
-import { at, projects, metrics, inspection, operations, alerts, storage, costReport, resources, marketplaceTemplates, channels, preferences, backups, logs, compose } from './fixtures.js';
+import { at, projects, projectGroups, metrics, inspection, operations, alerts, storage, costReport, resources, marketplaceTemplates, channels, preferences, backups, logs, compose } from './fixtures.js';
 
 import { previewIncidentFetch } from './incidents.js';
 import { previewSreFetch } from './sre.js';
@@ -86,6 +86,22 @@ export async function previewFetch(input, options = {}) {
   try { body = JSON.parse(options.body || '{}'); } catch { return json({ message: '示例请求格式无效' }, 400); }
   const sreResponse = previewSreFetch(path, method, body);
   if (sreResponse) return sreResponse;
+  if (path === '/projects/groups' && method === 'GET') return json({ groups: projectGroups });
+  if (path === '/projects/groups' && method === 'POST') {
+    const name = String(body.name || '').trim(); if (!name) return json({ message: '请填写分组名称' }, 400);
+    let group = projectGroups.find(g => g.name === name); if (!group) { group = { id: 'demo-group-' + serial++, name, pinned: !!body.pinned }; projectGroups.push(group); } return json(group);
+  }
+  if (path.startsWith('/projects/groups/')) {
+    const id = path.split('/').at(-1), group = projectGroups.find(g => g.id === id);
+    if (method === 'DELETE') { const index = projectGroups.findIndex(g => g.id === id); if (index >= 0) projectGroups.splice(index, 1); for (const p of projects) if (p.groupId === id) { p.groupId = null; p.groupName = '未分组'; } return json({ ok: true }); }
+    if (method === 'PATCH' && group) { Object.assign(group, body); for (const p of projects) if (p.groupId === id) p.groupName = group.name; return json(group); }
+  }
+  if ((path === '/projects/management' || path === '/projects/group-assignments') && method === 'PUT') {
+    if (body.expectedHostId && body.expectedHostId !== 'local') return json({ message: '节点已变化' }, 409);
+    if (path.endsWith('/management')) for (const p of projects) { p.managed = (body.projectIds || []).includes(p.id); p.mountEnabled = p.managed && (body.mountProjectIds || []).includes(p.id); }
+    for (const a of body.assignments || []) { const p = projects.find(p => p.id === a.projectId); if (p) { p.groupId = a.groupId; p.groupName = projectGroups.find(g => g.id === a.groupId)?.name || '未分组'; } }
+    return json({ ok: true });
+  }
   const pid = path.split('/')[2];
   const project = projects.find(item => item.id === pid);
   const reads = {

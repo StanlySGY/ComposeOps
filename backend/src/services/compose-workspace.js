@@ -9,7 +9,7 @@ import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
 import { addComposeBackup } from '../lib/db.js';
 import { configuredComposeProjectRoots, safeProjectMountPath } from './mount-plan.js';
-import { getActiveHost, getDockerForHost, getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
+import { getActiveHostId, getActiveHost, getDockerForHost, getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
 import { sshExec, sshReadFile, sshWriteFile, sshListDirectory } from './remote-shell.js';
 
 import { normalizeHostDirectory, hostDirectoryInspector } from './host-directory-paths.js';
@@ -152,6 +152,7 @@ function createRunnerEntry(project, key) {
   const entry = {
     key,
     projectId: project.id,
+    hostId: project.hostId || getActiveHostId(),
     root: projectPaths(project).root,
     active: 0,
     lastUsedAt: Date.now(),
@@ -337,10 +338,10 @@ export async function withNewWorkspace(project, callback) {
 
 export { withRunner, execInRunner, readArchiveFile, putArchiveFile };
 
-export function pruneWorkspaceRunners(allowedProjectIds = []) {
+export function pruneWorkspaceRunners(allowedProjectIds = [], hostId) {
   const allowed = new Set(allowedProjectIds);
   for (const entry of workspaceRunners.values()) {
-    if (allowed.has(entry.projectId)) continue;
+    if ((hostId && entry.hostId !== hostId) || allowed.has(entry.projectId)) continue;
     retireRunner(entry);
     if (entry.active === 0) void destroyRunner(entry);
   }

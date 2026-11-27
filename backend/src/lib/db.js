@@ -2,7 +2,7 @@ import Database from './sqlite.js';
 import { chmodSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isSensitiveKey } from './redaction.js';
 import { redactSecretValue } from './secret-redactor.js';
 import { installSreObservabilitySchema } from './sre-observability-schema.js';
@@ -972,6 +972,15 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS idx_infrastructure_host_resource ON infrastructure_metrics(host_id, container_id, metric_type, timestamp);
     CREATE INDEX IF NOT EXISTS idx_infrastructure_time ON infrastructure_metrics(timestamp);`);
+  } },
+  { version: 34, name: '项目命名分组与节点管理范围', up(database) {
+    database.exec(`CREATE TABLE IF NOT EXISTS project_groups (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      pinned INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    addColumn(database, 'project_preferences', 'group_id', 'TEXT REFERENCES project_groups(id) ON DELETE SET NULL');
+    addColumn(database, 'project_preferences', 'host_id', 'TEXT');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_project_preferences_group ON project_preferences(group_id)');
   } },
 ];
 
@@ -1976,8 +1985,9 @@ export function exportUserData() {
   return {
     exportedAt: new Date().toISOString(),
     settings,
+    projectGroups: db.prepare('SELECT id, name, pinned FROM project_groups').all(),
     projectPreferences: db.prepare(
-      'SELECT project_id AS projectId, managed, mount_enabled AS mountEnabled, favorite, note, operational_intent AS operationalIntent, updated_at AS updatedAt FROM project_preferences'
+      'SELECT project_id AS projectId, managed, mount_enabled AS mountEnabled, favorite, note, operational_intent AS operationalIntent, group_id AS groupId, host_id AS hostId, updated_at AS updatedAt FROM project_preferences'
     ).all(),
     operations: listOperations(500),
     cron: JSON.parse(db.prepare('SELECT payload FROM cron_state WHERE id = 1').get()?.payload || '{"jobs":[],"history":[]}'),
@@ -1991,6 +2001,15 @@ export function importUserData(payload) {
     'updates.auto_enabled', 'updates.interval_hours',
   ]);
   const transaction = db.transaction(() => {
+    const importedGroups = new Map();
+    for (const group of Array.isArray(payload.projectGroups) ? payload.projectGroups.slice(0, 1000) : []) {
+      const name = typeof group?.name === 'string' ? group.name.trim() : '';
+      if (!name || name.length > 40 || [...name].some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) || typeof group.id !== 'string') continue;
+      const current = db.prepare('SELECT id FROM project_groups WHERE name=? COLLATE NOCASE').get(name);
+      const id = current?.id || randomUUID();
+      if (!current) db.prepare('INSERT INTO project_groups(id,name,pinned) VALUES(?,?,?)').run(id, name, Number(!!group.pinned));
+      importedGroups.set(group.id, id);
+    }
     for (const [key, value] of Object.entries(payload.settings || {})) {
       if (allowedSettings.has(key) && typeof value === 'string') setSetting(key, value);
     }
@@ -2003,6 +2022,8 @@ export function importUserData(payload) {
         note: typeof preference.note === 'string' ? preference.note : '',
         ...(['unknown', 'running', 'stopped', 'maintenance'].includes(preference.operationalIntent) ? { operationalIntent: preference.operationalIntent } : {}),
       });
+      if (preference.groupId === null || importedGroups.has(preference.groupId)) db.prepare('UPDATE project_preferences SET group_id=? WHERE project_id=?').run(importedGroups.get(preference.groupId) || null, preference.projectId);
+      if (typeof preference.hostId === 'string' && preference.hostId.length <= 128) db.prepare('UPDATE project_preferences SET host_id=? WHERE project_id=?').run(preference.hostId, preference.projectId);
     }
   });
   transaction();
