@@ -404,7 +404,24 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     }
     return sshExec(container.host, cmd, { onOutput, onExec, timeoutMs });
   }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new TypeError('命令期限必须为正数');
+  const controller = new AbortController();
+  let timer;
+  const timedOut = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = Object.assign(new Error('Compose 工作命令执行超时，已执行操作需核对'), { statusCode: 504 });
+      reject(error); controller.abort(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([executeDockerCommand(container, cmd, { input, onOutput, onExec, abortSignal: controller.signal }), timedOut]);
+  } finally { clearTimeout(timer); controller.abort(); }
+}
+
+async function executeDockerCommand(container, cmd, { input, onOutput, onExec, abortSignal }) {
+  abortSignal.throwIfAborted();
   const instance = await container.exec({
+    abortSignal,
     Cmd: cmd,
     AttachStdin: input !== undefined,
     AttachStdout: true,
@@ -412,9 +429,10 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     Tty: false,
     Env: ['COMPOSE_HTTP_TIMEOUT=300', 'COMPOSE_PROGRESS=plain'],
   });
-  const stream = await instance.start({ hijack: input !== undefined, stdin: input !== undefined });
+  abortSignal.throwIfAborted();
+  const stream = await instance.start({ hijack: input !== undefined, stdin: input !== undefined, abortSignal });
+  if (abortSignal.aborted) { stream.destroy?.(); throw abortSignal.reason; }
   const demux = demuxStream();
-  stream.pipe(demux);
   const stdout = [];
   const stderr = [];
   let stdoutBytes = 0;
@@ -436,9 +454,9 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     }
     onOutput('stderr', chunk.toString('utf8').slice(-20000));
   });
-  let timer;
   let rejectCancelled;
   const onStreamError = error => rejectCancelled?.(error);
+  const onAbort = () => rejectCancelled?.(abortSignal.reason);
   const onStreamClose = () => {
     if (!stream.readableEnded) rejectCancelled?.(Object.assign(new Error('Compose 输出连接已中断，执行结果需核对'), { code: 'STREAM_CLOSED' }));
   };
@@ -447,23 +465,23 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
       new Promise((resolve, reject) => demux.stdout.on('end', resolve).on('error', reject)),
       new Promise((resolve, reject) => demux.stderr.on('end', resolve).on('error', reject)),
     ]);
-    const timedOut = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(Object.assign(new Error('Compose 工作命令执行超时'), { statusCode: 504 })), timeoutMs);
-    });
     const cancelled = new Promise((_, reject) => { rejectCancelled = reject; });
+    abortSignal.addEventListener('abort', onAbort, { once: true });
     stream.once('error', onStreamError);
     stream.once('close', onStreamClose);
-    const completion = Promise.race([outputDone, timedOut, cancelled]);
+    const completion = Promise.race([outputDone, cancelled]);
     // 断流仅停止本次等待，无法保证远端进程回滚。先安装监听再交付句柄，
     // 避免初始化期间已取消的请求同步 kill 后等待到 5 分钟超时。
     if (typeof onExec === 'function') onExec({ kill: () => {
       rejectCancelled(Object.assign(new Error('Compose 输出已断开，已执行操作需在项目中核对'), { name: 'AbortError' }));
       try { stream.destroy?.(); demux.destroy?.(); } catch { /* 尽力而为 */ }
     } });
+    if (abortSignal.aborted) onAbort();
+    if (!stream.destroyed) stream.pipe(demux);
     if (input !== undefined && !stream.destroyed) stream.end(input);
     await completion;
     // 退出检查也受同一命令期限约束。
-    const result = await Promise.race([instance.inspect(), timedOut, cancelled]);
+    const result = await Promise.race([instance.inspect({ abortSignal }), cancelled]);
     return {
       code: result.ExitCode ?? 1,
       stdout: Buffer.concat(stdout).toString('utf8'),
@@ -474,7 +492,7 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     demux.destroy?.();
     throw error;
   } finally {
-    clearTimeout(timer);
+    abortSignal.removeEventListener('abort', onAbort);
     stream.off('error', onStreamError);
     stream.off('close', onStreamClose);
   }

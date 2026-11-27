@@ -89,54 +89,44 @@ function assertAbsolute(filePath) {
 
 export function sshExec(host, args, { onOutput = () => {}, onExec = null, timeoutMs = 300000 } = {}) {
   const command = shellJoin(args);
-  return withSsh(host, (conn) => new Promise((resolve, reject) => {
-    conn.exec(command, (error, stream) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      const stdout = [];
-      const stderr = [];
-      let stdoutBytes = 0;
-      let stderrBytes = 0;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new TypeError('命令期限必须为正数');
+  return withSsh(host, conn => new Promise((resolve, reject) => {
+    let stream, settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); conn.off('close', disconnected);
+      if (error) { stream?.close(); conn.destroy(); reject(error); }
+      else resolve(result);
+    };
+    const disconnected = () => finish(Object.assign(new Error('SSH 命令连接已中断，执行结果需核对'), { code: 'STREAM_CLOSED' }));
+    const timer = setTimeout(() => finish(Object.assign(new Error('远端命令执行超时，已执行操作需核对'), { statusCode: 504 })), timeoutMs);
+    conn.once('close', disconnected);
+    // The deadline starts before exec channel creation; a server that never
+    // accepts a channel must not retain a request indefinitely.
+    try { conn.exec(command, (error, channel) => {
+      if (error) { finish(error); return; }
+      channel.on('error', finish);
+      if (settled) { channel.close(); return; }
+      stream = channel;
+      const stdout = [], stderr = [];
+      let stdoutBytes = 0, stderrBytes = 0;
       const maxOutputBytes = 1024 * 1024;
-      const timer = setTimeout(() => {
-        stream.close();
-        reject(Object.assign(new Error('远端命令执行超时'), { statusCode: 504 }));
-      }, timeoutMs);
-      timer.unref?.();
+      stream.on('data', chunk => {
+        if (settled) return;
+        if (stdoutBytes < maxOutputBytes) { const part = chunk.subarray(0, maxOutputBytes - stdoutBytes); stdout.push(part); stdoutBytes += part.length; }
+        try { onOutput('stdout', chunk.toString('utf8').slice(-20000)); } catch (failure) { finish(failure); }
+      });
+      stream.stderr.on('data', chunk => {
+        if (settled) return;
+        if (stderrBytes < maxOutputBytes) { const part = chunk.subarray(0, maxOutputBytes - stderrBytes); stderr.push(part); stderrBytes += part.length; }
+        try { onOutput('stderr', chunk.toString('utf8').slice(-20000)); } catch (failure) { finish(failure); }
+      });
+      stream.on('close', code => finish(null, { code: code ?? 1, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }));
       if (typeof onExec === 'function') {
-        onExec({ kill: () => { try { stream.close(); } catch { /* 断流即止损 */ } } });
+        try { onExec({ kill: () => finish(Object.assign(new Error('远端命令等待已取消，已执行操作需核对'), { name: 'AbortError' })) }); }
+        catch (failure) { finish(failure); }
       }
-      stream.on('data', (chunk) => {
-        if (stdoutBytes < maxOutputBytes) {
-          const part = chunk.subarray(0, maxOutputBytes - stdoutBytes);
-          stdout.push(part);
-          stdoutBytes += part.length;
-        }
-        onOutput('stdout', chunk.toString('utf8').slice(-20000));
-      });
-      stream.stderr.on('data', (chunk) => {
-        if (stderrBytes < maxOutputBytes) {
-          const part = chunk.subarray(0, maxOutputBytes - stderrBytes);
-          stderr.push(part);
-          stderrBytes += part.length;
-        }
-        onOutput('stderr', chunk.toString('utf8').slice(-20000));
-      });
-      stream.on('error', (streamError) => {
-        clearTimeout(timer);
-        reject(streamError);
-      });
-      stream.on('close', (code) => {
-        clearTimeout(timer);
-        resolve({
-          code: code ?? 1,
-          stdout: Buffer.concat(stdout).toString('utf8'),
-          stderr: Buffer.concat(stderr).toString('utf8'),
-        });
-      });
-    });
+    }); } catch (error) { finish(error); }
   }));
 }
 

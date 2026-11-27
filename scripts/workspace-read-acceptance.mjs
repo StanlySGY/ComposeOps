@@ -8,10 +8,11 @@ import path from 'node:path';
 const root = await mkdtemp(path.join(tmpdir(), 'composeops-read-acceptance-'));
 process.env.DB_PATH = path.join(root, 'test.db');
 process.env.COMPOSEOPS_RUNNER_IMAGE ||= 'stanly1997/opsdash:latest';
-const { withReadOnlyRunner, withRunner, execInRunner, readWorkspaceCompose, readArchiveFile, closeAllWorkspaceRunners } = await import('../backend/src/services/compose-workspace.js');
+const { withReadOnlyRunner, withRunner, execInRunner, readWorkspaceCompose, readArchiveFile, workspaceRunnerStats, closeAllWorkspaceRunners } = await import('../backend/src/services/compose-workspace.js');
 const { readProjectEnv, saveProjectEnv, listProjectEnvFiles } = await import('../backend/src/services/project-env.js');
+const { getProjectUpdates } = await import('../backend/src/services/image-updater.js');
 const { default: db } = await import('../backend/src/lib/db.js');
-const project = { id: path.basename(root), hostId: 'local', activeHostAtScan: 'local', projectName: path.basename(root), workingDir: root, composeFiles: [path.join(root, 'compose.yml')], managed: true, editable: true, workspaceAvailable: true, mounted: false };
+const project = { id: path.basename(root), hostId: 'local', activeHostAtScan: 'local', projectName: path.basename(root).toLowerCase(), workingDir: root, composeFiles: [path.join(root, 'compose.yml')], managed: true, editable: true, workspaceAvailable: true, mounted: false };
 const checks = [];
 try {
   await writeFile(project.composeFiles[0], 'services: {}\n');
@@ -54,6 +55,19 @@ try {
   await symlink('/etc/hostname', path.join(root, '.env.link'));
   await assert.rejects(readProjectEnv(project, '.env.link'), { code: 'ENV_UNSAFE_TARGET' });
   checks.push('workspace env symlink outside the project refused');
+  await closeAllWorkspaceRunners();
+  await writeFile(project.composeFiles[0], 'services:\n  check:\n    image: ${IMAGE:-busybox:latest}\n');
+  await writeFile(path.join(root, '.env'), 'IMAGE=alpine:latest\n');
+  await withReadOnlyRunner(project, async runner => {
+    const config = await execInRunner(runner, ['docker', 'compose', '--project-name', project.projectName, '-f', project.composeFiles[0], 'config', '--format', 'json', '--no-env-resolution']);
+    assert.equal(config.code, 0, config.stderr);
+  });
+  const updates = await getProjectUpdates(project);
+  assert.equal(updates.images[0].image, 'alpine:latest');
+  assert.equal(updates.images[0].status, 'not_deployed');
+  assert(workspaceRunnerStats().entries.every(entry => entry.mode === 'read'));
+  checks.push('image inspection resolves Compose variables using only the read helper');
+  await writeFile(project.composeFiles[0], 'services: {}\n');
   await withRunner(project, async runner => {
     assert.notEqual(runner.id, original);
     assert.equal((await execInRunner(runner, ['docker', 'compose', '-f', project.composeFiles[0], 'config', '--quiet'])).code, 0);

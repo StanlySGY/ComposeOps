@@ -131,3 +131,28 @@ test('new workspace: 符号链接父目录必须改用解析后的真实路径',
   assert.equal(calls.configs.length, 1);
   assert.equal(calls.removed, 1);
 });
+
+test('workspace exec: 创建执行实例卡住也受同一期限限制', async () => {
+  let signal;
+  await assert.rejects(execInRunner({ exec(options) { signal = options.abortSignal; return new Promise(() => {}); } }, ['true'], { timeoutMs: 20 }), { statusCode: 504 });
+  assert.equal(signal.aborted, true);
+});
+
+test('workspace exec: 超时后迟到的实例不能再启动命令', async () => {
+  let arrive, starts = 0;
+  const promise = execInRunner({ exec() { return new Promise(resolve => { arrive = resolve; }); } }, ['true'], { timeoutMs: 20 });
+  await assert.rejects(promise, { statusCode: 504 });
+  arrive({ start() { starts++; return new PassThrough(); } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(starts, 0);
+});
+
+test('workspace exec: 启动卡住后迟到的输出流立即销毁', async () => {
+  let arrive, signal;
+  const promise = execInRunner({ async exec() { return { start(options) { signal = options.abortSignal; return new Promise(resolve => { arrive = resolve; }); } }; } }, ['true'], { timeoutMs: 20 });
+  await assert.rejects(promise, { statusCode: 504 });
+  assert.equal(signal.aborted, true);
+  const stream = new PassThrough(); arrive(stream);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stream.destroyed, true);
+});

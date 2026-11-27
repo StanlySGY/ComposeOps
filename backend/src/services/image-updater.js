@@ -5,7 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { setSetting, addComposeBackupBatch, addOperation, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
 import { readCompose, spawnComposeCommand, composeProjectOptions } from './compose-runner.js';
 import { getProjectDocker } from './docker-hosts.js';
-import { withRunner, readArchiveFile, putArchiveFile, execInRunner } from './compose-workspace.js';
+import { withRunner, withReadOnlyRunner, readArchiveFile, putArchiveFile, execInRunner } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 
 import { fetchRemoteDescription, imageCheckSettings, registryError } from './image-registry.js';
@@ -179,7 +179,7 @@ async function resolvedImageServices(project, containers, signal) {
       });
     });
   } else {
-    output = await withRunner(project, async (container) => {
+    output = await withReadOnlyRunner(project, async (container) => {
       const result = await execInRunner(container,
         ['docker', 'compose', ...composeProjectOptions(project), ...args], { timeoutMs: 10_000 });
       if (result.code !== 0) throw new Error('Compose 镜像变量展开失败');
@@ -202,7 +202,7 @@ async function readProjectComposeContents(project) {
     return contents;
   }
   if (project.workspaceAvailable) {
-    return withRunner(project, async (container) => Promise.all(files.map(async (file) => {
+    return withReadOnlyRunner(project, async (container) => Promise.all(files.map(async (file) => {
       const { content } = await readArchiveFile(container, file);
       return content;
     })));
