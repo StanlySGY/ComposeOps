@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, h, KeepAlive, ref } from 'vue';
+import { notifyDataChanged } from '../src/lib/data-changes.js';
 
 const reviewDeployment = vi.hoisted(() => vi.fn());
 const previewDeploy = vi.hoisted(() => vi.fn());
@@ -14,7 +15,6 @@ vi.mock('../src/api/client.js', () => ({
   streamComposeControl,
 }));
 vi.mock('../src/stores/services.js', () => ({ useServicesStore: () => store }));
-vi.mock('../src/composables/usePullRefresh.js', () => ({ usePullRefresh: vi.fn() }));
 
 import ChangeReviewView from '../src/views/ChangeReviewView.vue';
 
@@ -228,7 +228,7 @@ describe('评审上下文与部署前置条件', () => {
 });
 
 describe('缓存评审生命周期', () => {
-  it('切换标签后丢弃挂起请求，返回重新加载；完成结果返回后可打开确认', async () => {
+  it('返回评审重新加载完整配置，避免回滚标签恢复文件后继续使用旧评审', async () => {
     const visible = ref(true);
     let resolveOld;
     reviewDeployment.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
@@ -241,11 +241,17 @@ describe('缓存评审生命周期', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('规则风险等级'));
     const calls = reviewDeployment.mock.calls.length;
     visible.value = false; await flushPromises();
+    notifyDataChanged({ source: 'restore' });
+    reviewDeployment.mockResolvedValueOnce({ token: 'restored-token', projectId: 'p1', projectName: '测试项目', hostId: 'local', files: ['restored-compose.yaml'], content: 'services: { restored: { image: nginx } }', issues: [], preview: { added: [], changed: [], restarted: [], removed: [], portConflicts: [] } });
     visible.value = true; await flushPromises();
-    expect(reviewDeployment).toHaveBeenCalledTimes(calls);
+    expect(reviewDeployment).toHaveBeenCalledTimes(calls + 1);
+    expect(wrapper.text()).toContain('restored-compose.yaml');
     const deploy = wrapper.findAll('button').find(b => b.text().includes('确认部署…'));
     expect(deploy.element.disabled).toBe(false);
     await deploy.trigger('click');
     expect(wrapper.find('.modal-stub').exists()).toBe(true);
+    await wrapper.findAll('.modal-stub button').find(b => b.text().includes('确认部署')).trigger('click');
+    await flushPromises();
+    expect(streamComposeControl.mock.calls[0][4]).toEqual({ action: 'up', reviewToken: 'restored-token' });
   });
 });

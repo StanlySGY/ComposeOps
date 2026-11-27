@@ -115,6 +115,8 @@ test('本地镜像检查停滞也返回明确失败，不假设默认平台再�
 
 test('无法确认更新的服务不能通过升级预检', async t => {
   const { project } = await fixture(t, 1);
+  const { setProjectPreference } = await import('../src/lib/db.js');
+  setProjectPreference(project.id, { managed: true, mountEnabled: true });
   t.mock.method(globalThis, 'fetch', async () => { throw new DOMException('timeout', 'TimeoutError'); });
   await assert.rejects(upgradeProject(project, { services: ['app0'] }), { statusCode: 409 });
 });

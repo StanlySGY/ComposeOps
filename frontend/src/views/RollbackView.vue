@@ -39,7 +39,7 @@
 
     <!-- Compose 配置备份 -->
     <section class="section-panel">
-      <div class="mb-4"><h2 class="section-title">Compose 配置备份</h2><p class="mt-1 text-muted">保存配置或升级时自动留存的版本,可一键恢复</p></div>
+      <div class="mb-4"><h2 class="section-title">Compose 配置备份</h2><p class="mt-1 text-muted">选择一个历史文件版本恢复；要让运行中的服务使用它，请随后评审并发布</p></div>
       <p v-if="loadErrors.compose" class="alert-error" role="alert">{{ loadErrors.compose }}</p>
       <EmptyState v-else-if="!loading && !composeBackups.length" compact title="暂无 Compose 配置备份" description="保存配置时会自动保留旧版本。"><router-link to="/compose?from=review" class="btn-secondary btn-sm">查看配置</router-link></EmptyState>
       <div v-else class="table-wrap">
@@ -145,10 +145,11 @@
     <!-- 回滚输出抽屉 -->
     <BaseModal :show="output.open" :title="output.title" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex min-h-0 flex-1 flex-col p-0" @close="output.open = false">
       <template #header-actions>
-        <span v-if="output.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="output.running ? 'text-sky-300' : output.status === 'failed' ? 'text-status-error' : output.status === 'cancelled' || output.status === 'unknown' ? 'text-status-warn' : 'text-status-ok'">{{ output.running ? '回滚执行中' : output.status === 'failed' ? '回滚失败' : output.status === 'cancelled' ? '回滚已中断' : output.status === 'unknown' ? '回滚结果未确认' : '回滚完成' }}</span>
+        <span v-if="output.open" role="status" aria-live="polite" aria-atomic="true" class="count-badge" :class="output.running ? 'text-sky-300' : output.status === 'failed' ? 'text-status-error' : output.status === 'cancelled' || output.status === 'unknown' ? 'text-status-warn' : 'text-status-ok'">{{ output.running ? '回滚执行中' : output.status === 'failed' ? '回滚失败' : output.status === 'cancelled' ? '回滚已中断' : output.status === 'unknown' ? '回滚结果未确认' : output.reviewLocation ? '配置已恢复，待发布' : '回滚完成' }}</span>
       </template>
       <pre class="terminal-output max-h-[70vh] min-h-48 flex-1 overflow-auto p-4" role="region" aria-label="回滚执行输出" tabindex="0" aria-live="off" :aria-busy="output.running">{{ output.text || '等待输出...' }}</pre>
       <template #footer>
+        <router-link v-if="output.reviewLocation && output.status === 'completed'" :to="output.reviewLocation" class="btn-primary" @click="output.open = false">评审并发布此配置</router-link>
         <button class="btn-secondary" @click="output.open = false">关闭</button>
       </template>
     </BaseModal>
@@ -296,9 +297,11 @@ watch(() => props.projectId, id => {
 });
 
 function restoreCompose(backup) {
+  const project = store.projects.find(item => item.id === backup.projectId);
+  if (!project?.managed || !project.editable || busy.value) return;
   confirmTarget.value = {
     title: '恢复 Compose 配置',
-    message: `节点「${selectedProject.value?.hostName || selectedProject.value?.hostId || '当前节点'}」，文件「${backup.filePath}」：确认将项目「${backup.projectName}」的配置恢复到 ${formatTime(backup.createdAt)} 的版本?`,
+    message: `节点「${project.hostName || project.hostId || '当前节点'}」，文件「${backup.filePath}」：确认将项目「${backup.projectName}」的配置恢复到 ${formatTime(backup.createdAt)} 的版本？本次只恢复所选文件，运行中的容器不会重建；随后可评审并发布该配置。`,
     tone: 'warning',
     confirmText: '恢复配置',
   };
@@ -308,20 +311,11 @@ async function doRestoreCompose(backup) {
   busy.value = true;
   output.value = { open: true, text: '', title: `恢复配置 · ${backup.projectName}`, running: true, status: 'running' };
   try {
-    await api.restoreBackup(backup.projectId, backup.id);
-    output.value.text += '配置已恢复,正在重建容器...\n';
-    let exitCode = null;
-    let streamReportedError = false;
-    await api.streamRollback(backup.projectId, (frame) => {
-      if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text += frame.data;
-      else if (frame.type === 'error') { streamReportedError = true; output.value.text += `\n[错误] ${frame.data}`; }
-      else if (frame.type === 'exit') { exitCode = Number(frame.data?.code); output.value.text += `\n[退出码 ${frame.data.code}]`; }
-    }, rollbackController?.signal);
-    if (streamReportedError || exitCode !== 0) {
-      output.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
-      if (exitCode === null && !streamReportedError) output.value.text += '\n[未收到 Compose 退出码，恢复结果未确认]';
-      return;
-    }
+    const result = await api.restoreBackup(backup.projectId, backup.id);
+    if (result?.ok !== true) throw new Error('未收到配置恢复成功确认，请核对文件后重试');
+    output.value.text = `已恢复所选备份：${backup.filePath}（${formatTime(backup.createdAt)}）。\n运行中的容器保持当前配置。请点击“评审并发布此配置”检查完整文件组，再确认发布。`;
+    const project = store.projects.find(item => item.id === backup.projectId);
+    output.value.reviewLocation = { path: '/review', query: { projectId: backup.projectId, ...(project?.hostId ? { hostId: project.hostId } : {}) } };
     output.value.status = 'completed';
     try { await store.refresh(true); } catch (refreshError) { output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
   } catch (e) {
@@ -419,15 +413,20 @@ async function doRollbackUpgrade(project) {
   rollbackController = new AbortController();
   try {
     let exitCode = null;
-    let streamReportedError = false;
+    let streamReportedError = false, confirmed = false;
     await api.streamRollback(project.id, (frame) => {
-      if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text += frame.data;
+      if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text = (output.value.text + frame.data).slice(-65536);
       else if (frame.type === 'error') { streamReportedError = true; output.value.text += `\n[错误] ${frame.data}`; }
-      else if (frame.type === 'exit') { exitCode = Number(frame.data?.code); output.value.text += `\n[退出码 ${frame.data.code}]`; }
+      else if (frame.type === 'exit' && Number.isInteger(frame.data?.code)) { exitCode = frame.data.code; output.value.text += `\n[退出码 ${frame.data.code}]`; }
+      else if (frame.type === 'result') {
+        confirmed = frame.data?.ok === true;
+        if (frame.data?.ok === false) { streamReportedError = true; output.value.text += `\n[失败] ${frame.data.message || '配置恢复未成功完成'}`; }
+      }
     }, rollbackController.signal);
-    if (streamReportedError || exitCode !== 0) {
-      output.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';
-      if (exitCode === null && !streamReportedError) output.value.text += '\n[未收到 Compose 退出码，回滚结果未确认]';
+    if (streamReportedError || exitCode !== 0 || !confirmed) {
+      output.value.status = streamReportedError || (exitCode !== null && exitCode !== 0) ? 'failed' : 'unknown';
+      if (output.value.status === 'unknown') output.value.text += exitCode === null
+        ? '\n[未收到 Compose 退出码，回滚结果未确认]' : '\n[未收到成功终帧，回滚结果未确认]';
       return;
     }
     output.value.status = 'completed';
@@ -452,6 +451,7 @@ function confirmAction() {
 
 function deactivate() {
   active = false;
+  rollbackController?.abort();
   loadRequestId += 1;
   historyVersion += 1;
   if (loading.value || !mountedReady) needsReload = true;
@@ -461,6 +461,8 @@ function deactivate() {
   output.value.open = false;
 }
 function onHostChanged() {
+  rollbackController?.abort();
+  output.value.open = false;
   loadRequestId += 1;
   historyVersion += 1;
   cancelConfirmation();

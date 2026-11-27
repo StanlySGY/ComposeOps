@@ -473,7 +473,7 @@ function deactivate() {
   hostPreview.value.loading = false;
   deployOutput.value.open = false;
 }
-onActivated(() => { active.value = true; if (mountedReady && selectedProjectId.value && !reviewed.value && !deploying.value) void loadProject(); });
+onActivated(() => { active.value = true; });
 onDeactivated(deactivate);
 onBeforeUnmount(() => {
   disposed = true;
@@ -482,7 +482,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('composeops:host-changed', onHostChanged);
   emit('busy', false);
 });
-usePullRefresh(loadProject, { keepAlive: true, enabled: () => !deploying.value });
+// One activation owner also consumes the shared data revision after a restore.
+usePullRefresh(loadProject, { keepAlive: true, refreshOnActivate: true, enabled: () => !deploying.value });
 onMounted(async () => {
   window.addEventListener('composeops:host-changed', onHostChanged);
   await store.refresh(false);

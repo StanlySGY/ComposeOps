@@ -2,11 +2,12 @@ import { readFile, writeFile } from 'fs/promises';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { setSetting, addComposeBackupBatch, addOperation, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
+import { setSetting, addComposeBackupBatch, addOperation, COMPOSE_BACKUP_KEEP, getProjectPreference, getProjectMountEnabled } from '../lib/db.js';
 import { readCompose, spawnComposeCommand, composeProjectOptions } from './compose-runner.js';
-import { getProjectDocker } from './docker-hosts.js';
+import { getProjectDocker, assertProjectHostUnchanged } from './docker-hosts.js';
 import { withRunner, withReadOnlyRunner, readArchiveFile, putArchiveFile, execInRunner } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
+import { verifyImageUpgradeHealth } from './image-upgrade-health.js';
 
 import { fetchRemoteDescription, imageCheckSettings, registryError } from './image-registry.js';
 export { fetchRemoteDigest } from './image-registry.js';
@@ -240,7 +241,7 @@ export async function getProjectUpdates(project, { force = false, signal: caller
   signal?.throwIfAborted();
   const docker = getProjectDocker(project);
   const containers = (await waitForCheck(() => docker.listContainers({ all: true, abortSignal: signal }), signal)).filter((c) =>
-    !c.Labels?.['composeops.helper'] && c.Labels?.['com.docker.compose.project'] === project.projectName &&
+    !c.Labels?.['composeops.helper'] && String(c.Labels?.['com.docker.compose.oneoff']).toLowerCase() !== 'true' && c.Labels?.['com.docker.compose.project'] === project.projectName &&
     c.Labels?.['com.docker.compose.project.working_dir'] === project.workingDir);
   let services;
   try { services = await waitForCheck(() => resolvedImageServices(project, containers, signal), signal); }
@@ -360,7 +361,8 @@ export async function checkAllUpdates({ signal } = {}) {
   return { projects: results };
 }
 
-async function writeUpgradeBackups(project) {
+async function writeUpgradeBackups(project, signal) {
+  assertImageOperationAllowed(project, signal);
   const files = Array.isArray(project.composeFiles) && project.composeFiles.length
     ? project.composeFiles
     : [project.composeFile].filter(Boolean);
@@ -372,7 +374,8 @@ async function writeUpgradeBackups(project) {
     if (project.mounted) {
       for (const file of files) snapshots.push({ file, content: await readFile(file, 'utf8') });
     } else if (project.workspaceAvailable) {
-      await withRunner(project, async (container) => {
+      await withReadOnlyRunner(project, async (container) => {
+        signal?.throwIfAborted();
         for (const file of files) {
           const { content } = await readArchiveFile(container, file);
           snapshots.push({ file, content });
@@ -389,6 +392,7 @@ async function writeUpgradeBackups(project) {
     throw Object.assign(new Error('升级前 Compose 配置备份不完整，已中止升级'), { statusCode: 409 });
   }
 
+  assertImageOperationAllowed(project, signal);
   const backupReason = 'upgrade:' + Date.now() + ':' + randomBytes(3).toString('hex');
   try {
     addComposeBackupBatch(project.id, snapshots.map((snapshot) => ({
@@ -401,17 +405,19 @@ async function writeUpgradeBackups(project) {
   return snapshots;
 }
 
-/**
- * 平滑升级:备份 -> compose pull -> up -d -> 健康轮询(15s)。
- * 返回 { code, upgraded, degraded, rollbackAvailable, backups }。
- * 持项目操作锁:升级的 pull/up 与停止/重启/env.apply 并发会互相踩踏。
- */
-export async function upgradeProject(project, options = {}) {
-  if (!project?.managed || !project.editable) {
-    throw Object.assign(new Error('当前节点下该项目不支持平滑升级(需要 Compose 能力)'), { statusCode: 403 });
+function assertImageOperationAllowed(project, signal) {
+  signal?.throwIfAborted();
+  assertProjectHostUnchanged(project);
+  if (!project?.managed || !project.editable || !getProjectPreference(project.id).managed || !getProjectMountEnabled(project.id)) {
+    throw Object.assign(new Error('该项目的纳管或 Compose 目录授权已失效，请重新确认权限'), { statusCode: 403 });
   }
-  if (!Array.isArray(options.services) || !options.services.length || options.services.some((service) => typeof service !== 'string' || !service.trim())) {
-    throw Object.assign(new Error('请至少选择一个有更新的 Compose 服务'), { statusCode: 400 });
+}
+
+/** 备份 -> pull -> up -> 容器健康验收；所有阶段持同一项目锁。 */
+export async function upgradeProject(project, options = {}) {
+  assertImageOperationAllowed(project, options.signal);
+  if (!Array.isArray(options.services) || !options.services.length || options.services.some((service) => typeof service !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(service))) {
+    throw Object.assign(new Error('请至少选择一个有效的 Compose 服务'), { statusCode: 400 });
   }
   if (new Set(options.services).size !== options.services.length) {
     throw Object.assign(new Error('升级服务列表包含重复项'), { statusCode: 400 });
@@ -419,73 +425,76 @@ export async function upgradeProject(project, options = {}) {
   return withProjectOperationLock(project.id, () => upgradeProjectLocked(project, options));
 }
 
-async function upgradeProjectLocked(project, { services, onOutput = () => {}, onChild = () => {} } = {}) {
-  const latest = await getProjectUpdates(project, { force: true });
+async function runImageComposeStep(project, args, { onOutput = () => {}, onChild = () => {}, signal } = {}) {
+  assertImageOperationAllowed(project, signal);
+  if (project.mounted) return runStep(spawnComposeCommand(project, args), onOutput, onChild, signal);
+  const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
+  return runWorkspaceComposeArgs(project, args, onOutput, {
+    signal, onExec: onChild, timeoutMs: 15 * 60_000,
+    beforeExecute: () => assertImageOperationAllowed(project, signal),
+  });
+}
+
+async function upgradeProjectLocked(project, options) {
+  const { services, signal } = options;
+  assertImageOperationAllowed(project, signal);
+  const latest = await getProjectUpdates(project, { force: true, signal });
+  assertImageOperationAllowed(project, signal);
   const updateable = new Set(latest.images.filter((item) => item.hasUpdate).map((item) => item.service));
-  const selected = [...new Set(services || [])];
+  const selected = [...services];
   const stale = selected.filter((service) => !updateable.has(service));
   if (stale.length) {
     throw Object.assign(new Error(`这些服务当前没有可确认的镜像更新，请重新检查：${stale.join(', ')}`), { statusCode: 409 });
   }
-  const backups = await writeUpgradeBackups(project);
-  const expectedComposeFiles = Array.isArray(project.composeFiles) && project.composeFiles.length
-    ? project.composeFiles
-    : [project.composeFile].filter(Boolean);
-  if (!expectedComposeFiles.length || backups.length !== expectedComposeFiles.length) {
-    throw Object.assign(new Error('升级前 Compose 配置备份不完整，已中止升级；未执行镜像拉取或容器重建'), { statusCode: 409 });
-  }
-  const { spawnComposeCommand } = await import('./compose-runner.js');
-  const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
-  let code;
-  if (project.mounted) {
-    code = await runStep(spawnComposeCommand(project, ['pull', ...selected]), onOutput, onChild);
-    if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
-    code = await runStep(spawnComposeCommand(project, ['up', '-d', '--no-deps', ...selected]), onOutput, onChild);
-  } else {
-    code = await runWorkspaceComposeArgs(project, ['pull', ...selected], onOutput);
-    if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
-    code = await runWorkspaceComposeArgs(project, ['up', '-d', '--no-deps', ...selected], onOutput);
-  }
-  if (code !== 0) return { code, upgraded: false, degraded: true, rollbackAvailable: backups.length > 0, backups };
-
-  // 健康轮询 15s:全部 running 且(如有 health)非 unhealthy 视为健康
-  const docker = getProjectDocker(project);
-  const deadline = Date.now() + 15000;
-  let degraded = false;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    const currentContainers = await docker.listContainers({ all: true, filters: { label: [`com.docker.compose.project=${project.projectName}`] } });
-    const targets = currentContainers.filter((item) => selected.includes(item.Labels?.['com.docker.compose.service']));
-    const checks = await Promise.all(targets.map(async (item) => {
-      try {
-        const inspection = await docker.getContainer(item.Id).inspect();
-        const state = inspection.State || {};
-        const health = state.Health?.Status === 'healthy' || !state.Health;
-        const running = state.Status === 'running';
-        return { id: item.Id, name: (item.Names?.[0] || '').replace(/^\//, ''), ok: running && health };
-      } catch { return { id: item.Id, name: (item.Names?.[0] || '').replace(/^\//, ''), ok: false }; }
-    }));
-    degraded = checks.length === 0 || checks.some((item) => !item.ok);
-    if (!degraded) break;
-  }
-  addOperation({
-    projectId: project.id,
-    projectName: project.projectName,
-    action: 'images.upgrade',
-    status: degraded ? 'failed' : 'success',
-    detail: degraded ? `所选服务升级后未通过健康检查：${selected.join(', ')}` : `已升级并通过健康检查：${selected.join(', ')}`,
-  });
-  cache.delete(project.id);
-  return { code, upgraded: true, degraded, services: selected, rollbackAvailable: backups.length > 0, backups };
+  const snapshots = await writeUpgradeBackups(project, signal);
+  // The API needs backup identities, never the full configuration (which may contain secrets).
+  const backups = snapshots.map(({ file }) => ({ file }));
+  const expectedCounts = Object.fromEntries(latest.images.filter(item => selected.includes(item.service))
+    .map(item => [item.service, item.containers?.length || 1]));
+  try {
+    let code = await runImageComposeStep(project, ['pull', ...selected], options);
+    signal?.throwIfAborted();
+    if (code !== 0) return { ok: false, code, upgraded: false, degraded: true, rollbackAvailable: true, backups, message: '镜像拉取失败，未执行容器重建' };
+    code = await runImageComposeStep(project, ['up', '-d', '--no-deps', ...selected], options);
+    signal?.throwIfAborted();
+    if (code !== 0) return { ok: false, code, upgraded: false, degraded: true, rollbackAvailable: true, backups, message: '容器重建未成功完成，请核对实际运行状态' };
+    const health = await verifyImageUpgradeHealth(project, selected, { signal, expectedCounts });
+    addOperation({
+      projectId: project.id, projectName: project.projectName, action: 'images.upgrade',
+      status: health.ok ? 'success' : 'failed',
+      detail: health.ok ? `所选服务已通过容器健康验收：${selected.join(', ')}` : `所选服务未通过容器健康验收：${selected.join(', ')}`,
+    });
+    return { ok: health.ok, code, upgraded: true, degraded: !health.ok, services: selected,
+      health, message: health.ok ? '' : health.message, rollbackAvailable: true, backups };
+  } finally { cache.delete(project.id); }
 }
 
-function runStep(child, onOutput, onChild) {
+// Attach close/error listeners before exposing the child to a cancellation callback.
+// Keep the project lock until the local CLI has actually stopped.
+function runStep(child, onOutput, onChild, signal) {
   return new Promise((resolve, reject) => {
-    onChild(child);
-    child.stdout.on('data', (chunk) => onOutput('stdout', chunk.toString('utf8')));
-    child.stderr.on('data', (chunk) => onOutput('stderr', chunk.toString('utf8')));
-    child.on('error', reject);
-    child.on('close', (exitCode) => resolve(exitCode ?? 1));
+    let error, killTimer;
+    const stop = () => {
+      if (child.exitCode !== null || child.signalCode) return;
+      child.kill('SIGTERM');
+      killTimer ||= setTimeout(() => { if (child.exitCode === null && !child.signalCode) child.kill('SIGKILL'); }, 2000);
+    };
+    const timeout = setTimeout(() => { error = Object.assign(new Error('Compose 命令执行超时，请核对已执行操作'), { statusCode: 504 }); stop(); }, 15 * 60_000);
+    const output = (type, chunk) => {
+      if (signal?.aborted || error) return;
+      try { onOutput(type, chunk.toString('utf8')); } catch (failure) { error = failure; stop(); }
+    };
+    child.stdout.on('data', chunk => output('stdout', chunk));
+    child.stderr.on('data', chunk => output('stderr', chunk));
+    child.on('error', failure => { error = failure; });
+    child.once('close', code => {
+      clearTimeout(timeout); clearTimeout(killTimer); signal?.removeEventListener('abort', stop);
+      const failure = signal?.aborted ? signal.reason : error;
+      failure ? reject(failure) : resolve(code ?? 1);
+    });
+    signal?.addEventListener('abort', stop, { once: true });
+    try { onChild(child); } catch (failure) { error = failure; stop(); }
+    if (signal?.aborted) stop();
   });
 }
 
@@ -565,13 +574,13 @@ export async function restoreComposeBackupBatch(backups, currentContents, writeC
 
 /** 从最近一次升级批次恢复全部 Compose 文件并 up -d。持项目操作锁,与升级/重启互斥。 */
 export async function rollbackProject(project, options = {}) {
-  if (!project?.managed || !project.editable) {
-    throw Object.assign(new Error('当前节点下该项目不支持回滚'), { statusCode: 403 });
-  }
+  assertImageOperationAllowed(project, options.signal);
   return withProjectOperationLock(project.id, () => rollbackProjectLocked(project, options));
 }
 
-async function rollbackProjectLocked(project, { onOutput = () => {}, onChild = () => {} } = {}) {
+async function rollbackProjectLocked(project, options = {}) {
+  const { signal } = options;
+  assertImageOperationAllowed(project, signal);
   const { listComposeBackups, getComposeBackup } = await import('../lib/db.js');
   const files = Array.isArray(project.composeFiles) && project.composeFiles.length
     ? project.composeFiles
@@ -612,10 +621,13 @@ async function rollbackProjectLocked(project, { onOutput = () => {}, onChild = (
     throw Object.assign(new Error('无法完整读取当前 Compose 配置，恢复已取消且未修改文件：' + error.message), { statusCode: 409 });
   }
 
+  assertImageOperationAllowed(project, signal);
   if (project.mounted) {
     await restoreComposeBackupBatch(backupContents, currentContents, (filePath, content) => writeFile(filePath, content, 'utf8'));
   } else {
-    await withRunner(project, async (container) => restoreComposeBackupBatch(
+    await withRunner(project, async (container) => {
+      assertImageOperationAllowed(project, signal);
+      return restoreComposeBackupBatch(
       backupContents,
       currentContents,
       (filePath, content, previous) => putArchiveFile(
@@ -625,16 +637,14 @@ async function rollbackProjectLocked(project, { onOutput = () => {}, onChild = (
         content,
         previous.header,
       ),
-    ));
+    );
+    });
   }
   const restored = backupContents.length;
 
-  const { spawnComposeCommand } = await import('./compose-runner.js');
-  const { runWorkspaceComposeArgs } = await import('./compose-workspace.js');
-  const code = project.mounted
-    ? await runStep(spawnComposeCommand(project, ['up', '-d', '--force-recreate']), onOutput, onChild)
-    : await runWorkspaceComposeArgs(project, ['up', '-d', '--force-recreate'], onOutput);
+  const code = await runImageComposeStep(project, ['up', '-d', '--force-recreate'], options);
+  signal?.throwIfAborted();
   cache.delete(project.id);
   addOperation({ projectId: project.id, projectName: project.projectName, action: 'images.rollback', status: code === 0 ? 'success' : 'failed', detail: '已恢复 ' + restored + ' 个 Compose 配置文件；不保证回退浮动 tag 对应的镜像版本' });
-  return { code, restored };
+  return { ok: code === 0, code, restored };
 }

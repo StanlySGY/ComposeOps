@@ -15,6 +15,16 @@ test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 test.afterEach(() => setSetting('docker.active_host', 'local'));
 const project = { id: 'test-new', hostId: 'local', activeHostAtScan: 'local', workingDir: '/projects/test-new', composeFiles: ['/projects/test-new/docker-compose.yml'] };
 
+test('执行器外部取消覆盖 exec 建立阶段，迟到句柄不能启动命令', async () => {
+  const controller = new AbortController(); let arrive, started = 0;
+  const task = execInRunner({ exec() { return new Promise(resolve => { arrive = resolve; }); } }, ['true'], { signal: controller.signal });
+  const rejected = assert.rejects(task, { name: 'AbortError' });
+  controller.abort(); await rejected;
+  arrive({ start() { started++; } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(started, 0);
+});
+
 function fixture(t, { code = 0, afterCreate = () => {}, startFails = false, actualRoot = null } = {}) {
   const calls = { removed: 0, commands: [], config: null, configs: [] };
   t.mock.method(docker, 'createContainer', async config => {

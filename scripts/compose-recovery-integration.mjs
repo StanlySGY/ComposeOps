@@ -47,12 +47,13 @@ try {
   compose(['config', '--quiet']);
 
   // Import only after DB_PATH points at this isolated integration run.
-  const { addComposeBackupBatch } = await import('../backend/src/lib/db.js');
+  const { addComposeBackupBatch, setProjectPreference } = await import('../backend/src/lib/db.js');
   const { restoreComposeBackupBatch, rollbackProject } = await import('../backend/src/services/image-updater.js');
   const snapshots = [
     { filePath: composeFile, content: originalMain },
     { filePath: overrideFile, content: originalOverride },
   ];
+  setProjectPreference(projectId, { managed: true, mountEnabled: true });
   addComposeBackupBatch(projectId, snapshots, 'upgrade:' + suffix);
 
   const result = await rollbackProject({

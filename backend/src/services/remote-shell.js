@@ -87,20 +87,24 @@ function assertAbsolute(filePath) {
   }
 }
 
-export function sshExec(host, args, { onOutput = () => {}, onExec = null, timeoutMs = 300000 } = {}) {
+export function sshExec(host, args, { onOutput = () => {}, onExec = null, timeoutMs = 300000, signal } = {}) {
+  signal?.throwIfAborted();
   const command = shellJoin(args);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new TypeError('命令期限必须为正数');
   return withSsh(host, conn => new Promise((resolve, reject) => {
     let stream, settled = false;
     const finish = (error, result) => {
       if (settled) return;
-      settled = true; clearTimeout(timer); conn.off('close', disconnected);
+      settled = true; clearTimeout(timer); conn.off('close', disconnected); signal?.removeEventListener('abort', abort);
       if (error) { stream?.close(); conn.destroy(); reject(error); }
       else resolve(result);
     };
     const disconnected = () => finish(Object.assign(new Error('SSH 命令连接已中断，执行结果需核对'), { code: 'STREAM_CLOSED' }));
+    const abort = () => finish(signal.reason);
     const timer = setTimeout(() => finish(Object.assign(new Error('远端命令执行超时，已执行操作需核对'), { statusCode: 504 })), timeoutMs);
     conn.once('close', disconnected);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) { abort(); return; }
     // The deadline starts before exec channel creation; a server that never
     // accepts a channel must not retain a request indefinitely.
     try { conn.exec(command, (error, channel) => {

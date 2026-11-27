@@ -32,7 +32,7 @@ beforeEach(() => {
   store.refresh.mockClear().mockResolvedValue(undefined);
   getVolumeBackups.mockResolvedValue({ backups: [] });
   getBackups.mockResolvedValue({ backups: [{ id: 'upgrade-a', projectId: 'a', filePath: 'compose.yml', reason: 'upgrade', createdAt: '2026-11-05T00:00:00' }] });
-  restoreBackup.mockResolvedValue(undefined);
+  restoreBackup.mockResolvedValue({ ok: true });
   restoreVolumeBackup.mockResolvedValue({ message: '数据卷恢复完成' });
   streamRollback.mockResolvedValue(undefined);
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ repositories: [] }), { status: 200, headers: { 'content-type': 'application/json' } })));
@@ -61,6 +61,36 @@ function mountCachedView(visible) {
 }
 
 describe('回滚中心加载反馈与执行结果语义', () => {
+  it('恢复指定备份只写该版本，不再触发最近升级批次覆盖；提供评审发布入口', async () => {
+    wrapper = mountView(); await flushPromises();
+    await wrapper.findAll('button').find(button => button.text() === '恢复').trigger('click');
+    expect(wrapper.get('.confirm-stub').text()).toContain('运行中的容器不会重建');
+    await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises();
+    expect(restoreBackup).toHaveBeenCalledWith('a', 'upgrade-a');
+    expect(streamRollback).not.toHaveBeenCalled();
+    expect(wrapper.get('[aria-label="回滚执行输出"]').text()).toContain('评审并发布');
+    expect(wrapper.text()).toContain('评审并发布此配置');
+  });
+
+  it('回滚退出码为零但终帧失败时显示失败原因', async () => {
+    streamRollback.mockImplementationOnce(async (_id, onFrame) => {
+      onFrame({ type: 'exit', data: { code: 0 } });
+      onFrame({ type: 'result', data: { ok: false, message: '恢复后验证未通过' } });
+    });
+    wrapper = mountView(); await flushPromises();
+    await wrapper.findAll('button').find(button => button.text().includes('恢复升级前配置')).trigger('click');
+    await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises();
+    expect(wrapper.get('[role="status"][aria-live="polite"]').text()).toBe('回滚失败');
+    expect(wrapper.get('[aria-label="回滚执行输出"]').text()).toContain('恢复后验证未通过');
+  });
+
+  it('回滚退出码为零但无成功终帧时，仍然是结果未确认', async () => {
+    streamRollback.mockImplementationOnce(async (_id, onFrame) => onFrame({ type: 'exit', data: { code: 0 } }));
+    wrapper = mountView(); await flushPromises();
+    await wrapper.findAll('button').find(button => button.text().includes('恢复升级前配置')).trigger('click');
+    await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises();
+    expect(wrapper.get('[role="status"][aria-live="polite"]').text()).toBe('回滚结果未确认');
+  });
   it('数据卷备份读取失败时播报错误，不伪装成没有备份', async () => {
     getVolumeBackups.mockRejectedValueOnce(new Error('storage offline'));
     wrapper = mountView();

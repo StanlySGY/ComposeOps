@@ -397,16 +397,22 @@ export function workspaceRunnerStats() {
   };
 }
 
-async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec = null, timeoutMs = 300000 } = {}) {
+async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec = null, timeoutMs = 300000, signal } = {}) {
+  signal?.throwIfAborted();
   if (container?.__ssh) {
     if (input !== undefined) {
       throw Object.assign(new Error('远端 SSH 执行不接受标准输入'), { statusCode: 400 });
     }
-    return sshExec(container.host, cmd, { onOutput, onExec, timeoutMs });
+    return sshExec(container.host, cmd, { onOutput, onExec, timeoutMs, signal });
   }
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new TypeError('命令期限必须为正数');
   const controller = new AbortController();
   let timer;
+  const abort = () => controller.abort(signal.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  let rejectAborted;
+  const aborted = new Promise((_, reject) => { rejectAborted = () => reject(controller.signal.reason); });
+  controller.signal.addEventListener('abort', rejectAborted, { once: true });
   const timedOut = new Promise((_, reject) => {
     timer = setTimeout(() => {
       const error = Object.assign(new Error('Compose 工作命令执行超时，已执行操作需核对'), { statusCode: 504 });
@@ -414,8 +420,11 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
     }, timeoutMs);
   });
   try {
-    return await Promise.race([executeDockerCommand(container, cmd, { input, onOutput, onExec, abortSignal: controller.signal }), timedOut]);
-  } finally { clearTimeout(timer); controller.abort(); }
+    return await Promise.race([executeDockerCommand(container, cmd, { input, onOutput, onExec, abortSignal: controller.signal }), timedOut, aborted]);
+  } finally {
+    clearTimeout(timer); signal?.removeEventListener('abort', abort);
+    controller.signal.removeEventListener('abort', rejectAborted); controller.abort();
+  }
 }
 
 async function executeDockerCommand(container, cmd, { input, onOutput, onExec, abortSignal }) {
@@ -592,10 +601,13 @@ export async function saveWorkspaceCompose(project, fileIndex, content, reason =
 }
 
 export async function runWorkspaceComposeArgs(project, args, onOutput = () => {}, options = {}) {
+  options.signal?.throwIfAborted();
   const { files } = projectPaths(project);
   if (!Array.isArray(args) || !args.length) throw Object.assign(new Error('无效的 Compose 参数'), { statusCode: 400 });
   return withRunner(project, async (container) => {
-    const result = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, files), ...args], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs });
+    options.signal?.throwIfAborted();
+    options.beforeExecute?.();
+    const result = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, files), ...args], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs, signal: options.signal });
     return result.code;
   });
 }

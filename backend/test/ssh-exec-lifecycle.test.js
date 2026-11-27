@@ -43,3 +43,8 @@ test('SSH 回调失败有清理，不留下未处理异常', async t => {
   const host = await fixture(t, 'normal');
   await assert.rejects(sshExec(host, ['true'], { onOutput: () => { throw new Error('consumer stopped'); } }), /consumer stopped/);
 });
+
+test('SSH 外部取消覆盖会话建立，不需要等到命令句柄回调', async t => {
+  const host = await fixture(t, 'session');
+  await assert.rejects(sshExec(host, ['true'], { signal: AbortSignal.timeout(200), timeoutMs: 1000 }), { name: 'TimeoutError' });
+});

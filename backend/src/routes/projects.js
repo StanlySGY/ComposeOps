@@ -15,6 +15,7 @@ import { composeProjectCreateOptions, createCustomComposeProject, validateProjec
 import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles } from '../services/project-env.js';
 import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
+import { streamImageOperation } from '../lib/image-operation-stream.js';
 import { readContainerStat } from '../services/stats.js';
 import { createComposeChangePreview, validateComposeSemantics } from '../services/compose-validator.js';
 import { getProjectDocker } from '../services/docker-hosts.js';
@@ -102,7 +103,7 @@ const CONTENT_MAX = 1048576;
 // 只挡非数值:越界与缺省由处理函数的 `Number(x) || 0` 与下游读取器兜住(见文件头第 5 条)。
 const fileIndexField = { type: 'number' };
 
-export default async function projectRoutes(fastify) {
+export default async function projectRoutes(fastify, { imageUpgrade = upgradeProject, imageRollback = rollbackProject } = {}) {
   registerProjectGroupRoutes(fastify);
   fastify.get('/', async () => ({ projects: await scanProjects() }));
 
@@ -878,77 +879,14 @@ export default async function projectRoutes(fastify) {
     },
   }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
-    if (!project) return;
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    const send = (type, data) => {
-      if (reply.raw.destroyed || reply.raw.writableEnded) return;
-      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
-    };
-    let output = '';
-    let finished = false;
-    const finish = (payload) => {
-      if (finished) return;
-      finished = true;
-      send('result', payload);
-      reply.raw.end();
-    };
-    let child;
-    upgradeProject(project, {
-      services: request.body.services,
-      onOutput: (type, text) => { output += text; send(type, text); },
-      onChild: (process) => { child = process; },
-    }).then((result) => {
-      send('exit', { code: result.code });
-      finish({ ok: true, ...result, output });
-    }).catch((error) => {
-      const text = `${error.message}\n`;
-      output += text;
-      send('stderr', text);
-      finish({ ok: false, message: error.message, output });
-    });
-    reply.raw.on('close', () => {
-      if (!finished && child && child.exitCode === null && !child.killed) child.kill('SIGTERM');
-    });
+    if (!project || !requireEditable(project, reply)) return;
+    await streamImageOperation(reply, options => imageUpgrade(project, { services: request.body.services, ...options }));
   });
 
   fastify.post('/:id/rollback', { schema: { params: idParams } }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
-    if (!project) return;
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    const send = (type, data) => {
-      if (reply.raw.destroyed || reply.raw.writableEnded) return;
-      reply.raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
-    };
-    let finished = false;
-    const finish = (payload) => {
-      if (finished) return;
-      finished = true;
-      send('result', payload);
-      reply.raw.end();
-    };
-    let child;
-    rollbackProject(project, {
-      onOutput: (type, text) => { send(type, text); },
-      onChild: (process) => { child = process; },
-    }).then((result) => {
-      send('exit', { code: result.code });
-      finish({ ok: true, ...result });
-    }).catch((error) => {
-      finish({ ok: false, message: error.message });
-    });
-    reply.raw.on('close', () => {
-      if (!finished && child && child.exitCode === null && !child.killed) child.kill('SIGTERM');
-    });
+    if (!project || !requireEditable(project, reply)) return;
+    await streamImageOperation(reply, options => imageRollback(project, options));
   });
 
   // ---- 数据库一键 Dump ----
