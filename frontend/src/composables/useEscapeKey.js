@@ -20,7 +20,7 @@ let bodyLockCount = 0;
  * @param {string} [opts.layer='modal']               分层语义:modal | drawer | event | command
  * @param {boolean} [opts.lockBody=false]             打开期间锁定 body 滚动
  */
-export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBody = false }) {
+export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBody = false, closeOnQueryChange = true }) {
   const route = useRoute();
 
   watch(
@@ -60,7 +60,7 @@ export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBo
 
   watch(
     // route 在无 router 上下文(纯函数式调用/单测)时为 undefined,防御性可选
-    () => route?.fullPath,
+    () => closeOnQueryChange ? route?.fullPath : route?.path,
     () => {
       if (active.value) onClose();
       else removeLayer();

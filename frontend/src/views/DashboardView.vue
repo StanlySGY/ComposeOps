@@ -16,16 +16,12 @@
       <span>{{ loadError }}</span>
       <button class="btn-secondary btn-sm" :disabled="loading" @click="load">重试</button>
     </div>
-    <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="4" label="总览数据加载中" />
-    <template v-else>
+    <ServerCockpit />
+    <Skeleton v-if="loading && !hasLoaded && route.query.hostId !== 'all'" variant="cards" :rows="4" label="总览数据加载中" />
+    <template v-else-if="route.query.hostId !== 'all'">
       <EnvironmentBrief :projects="store.projects" :incomplete="!!loadError" />
       <OnCallSummary />
-      <div class="metric-grid">
-        <MetricTile title="项目总数" aria-label="查看全部项目" :value="projectCount" :sub="`健康 ${healthyProjects}`" :icon="Boxes" to="/services?from=dashboard" />
-        <MetricTile title="容器总数" aria-label="查看容器状态" :value="containerCount" :sub="`运行 ${runningContainers}`" :icon="Container" tone="text-status-ok" to="/services?from=dashboard" />
-        <MetricTile title="环境 CPU" aria-label="查看 CPU 实时监控" :value="cpu == null ? '—' : `${cpu}%`" :sub="cpuState" :icon="Cpu" :tone="cpuTone" :trend="monitorTrends.cpu" to="/monitor?from=dashboard" />
-        <MetricTile title="环境内存" aria-label="查看内存实时监控" :value="memory == null ? '—' : `${memory}%`" :sub="memoryState" :icon="MemoryStick" :tone="memoryTone" :trend="monitorTrends.mem" to="/monitor?from=dashboard" />
-      </div>
+
 
       <div class="overview-columns">
         <div class="overview-primary">
@@ -85,19 +81,21 @@
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router';
+const route = useRoute();
 import { deepLink } from '../lib/deep-links.js';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
-import { AlertTriangle, ArrowRight, ArrowUpRight, Bot, Boxes, DollarSign, HardDrive, GitBranch, CircleCheckBig, Container, Cpu, FileCode2, History, MemoryStick, RefreshCw, ScrollText, ShieldCheck } from 'lucide-vue-next';
+import { AlertTriangle, ArrowRight, ArrowUpRight, Bot, Boxes, DollarSign, HardDrive, GitBranch, CircleCheckBig, FileCode2, History, RefreshCw, ScrollText, ShieldCheck } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
 import Skeleton from '../components/common/Skeleton.vue';
-import MetricTile from '../components/common/MetricTile.vue';
+import ServerCockpit from '../components/dashboard/ServerCockpit.vue';
 import EnvironmentBrief from '../components/dashboard/EnvironmentBrief.vue';
-import { monitorTrends, pushMonitorTrend } from '../lib/monitor-trends.js';
 
-import { projectAttention, projectLogTarget, needsAttention, isHealthyProject } from '../lib/project-health.js';
+
+import { projectAttention, projectLogTarget, needsAttention } from '../lib/project-health.js';
 import OnCallSummary from '../components/OnCallSummary.vue';
 
 const quickActions = [
@@ -116,7 +114,7 @@ function eventTarget(event) {
 }
 
 const store = useServicesStore();
-const metrics = ref(null);
+
 const inspection = ref(null);
 const recentEvents = ref([]);
 const loading = ref(false);
@@ -127,21 +125,11 @@ let requestId = 0;
 let disposed = false;
 
 const projectCount = computed(() => store.projects.length);
-const containerCount = computed(() => store.projects.reduce((n, p) => n + (p.containers?.length || 0), 0));
-const runningContainers = computed(() => store.projects.reduce((n, p) => n + (p.containers || []).filter(c => c.state === 'running').length, 0));
 const attentionProjects = computed(() => store.projects.filter(needsAttention).length);
-const healthyProjects = computed(() => store.projects.filter(isHealthyProject).length);
 const attentionProjectList = computed(() => [...store.projects]
   .filter(needsAttention)
   .sort((a, b) => Number(b.status !== 'running') - Number(a.status !== 'running') || a.projectName.localeCompare(b.projectName))
   .slice(0, 5));
-
-const cpu = computed(() => metrics.value?.host?.cpu?.percent ?? null);
-const memory = computed(() => metrics.value?.host?.memory?.percent ?? null);
-const cpuState = computed(() => cpu.value == null ? '暂无指标' : cpu.value > 80 ? '负载较高' : '运行正常');
-const memoryState = computed(() => memory.value == null ? '暂无指标' : memory.value > 80 ? '内存偏高' : '资源充足');
-const cpuTone = computed(() => cpu.value == null ? 'text-surface-400' : cpu.value > 80 ? 'text-status-warn' : 'text-status-ok');
-const memoryTone = computed(() => memory.value == null ? 'text-surface-400' : memory.value > 80 ? 'text-status-warn' : 'text-status-ok');
 
 const inspectionScore = computed(() => inspection.value?.latest?.score ?? '--');
 const inspectionSummary = computed(() => inspection.value?.latest?.summary ?? '暂无巡检数据');
@@ -217,8 +205,7 @@ async function load() {
   loading.value = true;
   const errors = [];
   try {
-    const [metricsRes, inspectionRes, eventsRes, projectsRes] = await Promise.allSettled([
-      api.getMetrics(),
+    const [inspectionRes, eventsRes, projectsRes] = await Promise.allSettled([
       api.getInspectionOverview(1),
       loadRecentEvents(errors),
       store.refresh(true),
@@ -228,12 +215,6 @@ async function load() {
     if (projectsRes.status === 'rejected') errors.push(projectsRes.reason);
     if (eventsRes.status === 'fulfilled') recentEvents.value = eventsRes.value;
     else { recentEvents.value = []; errors.push(eventsRes.reason); }
-    if (metricsRes.status === 'fulfilled') {
-      metrics.value = metricsRes.value;
-      const host = metricsRes.value?.host;
-      const rx = metricsRes.value?.network?.rx || 0;
-      if (host) pushMonitorTrend({ cpu: host.cpu?.percent, mem: host.memory?.percent, net: Math.max(0, Math.round((rx / 1024 / 1024) * 100) / 100) });
-    } else { metrics.value = null; errors.push(metricsRes.reason); }
     if (inspectionRes.status === 'fulfilled') inspection.value = inspectionRes.value;
     else { inspection.value = null; errors.push(inspectionRes.reason); }
     loadError.value = errors.length ? `部分数据加载失败:${errors[0]?.message || '未知错误'}` : '';
@@ -255,7 +236,6 @@ function onHostChanged() {
   requestId += 1;
   loading.value = false;
   hasLoaded.value = false;
-  metrics.value = null;
   inspection.value = null;
   recentEvents.value = [];
   lastUpdated.value = '';

@@ -68,6 +68,8 @@ async function select(host) {
   if (host.id === store.activeHostId) { open.value = false; return; }
   try {
     await store.switchHost(host.id);
+    const route = router.currentRoute.value;
+    if (route.path === '/dashboard') await router.replace({ query: { ...route.query, hostId: host.id, resource: 'host' } });
     toast.success(`已切换到节点 ${host.name},项目列表正在刷新`);
     open.value = false;
   } catch (e) {

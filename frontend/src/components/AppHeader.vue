@@ -277,7 +277,7 @@ async function runCommand(item) {
 async function switchNode(host) {
   try {
     await hostsStore.switchHost(host.id);
-    window.dispatchEvent(new CustomEvent('composeops:host-changed'));
+    if (route.path === '/dashboard') await router.replace({ query: { ...route.query, hostId: host.id, resource: 'host' } });
   } catch (error) {
     toast.error(`切换到 ${host.name} 失败：${error?.message || '未知错误'}`);
   }

@@ -3,13 +3,11 @@
     <div class="page-header">
       <div><h1 class="page-title">服务总览</h1><p class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
       <div class="page-actions service-page-actions">
-        <span v-if="lastUpdated" class="text-xs text-muted whitespace-nowrap">更新于 {{ lastUpdated }}</span>
-        <button class="btn-primary" :disabled="busy" @click="createComposeOpen = true"><Plus class="h-4 w-4" />新建 Compose</button>
-        <label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label>
-        <button class="btn-secondary" :disabled="manualRefreshing || store.loading" :aria-busy="manualRefreshing" @click="manualRefresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': manualRefreshing || store.loading }" />{{ manualRefreshing ? '刷新中' : '刷新' }}</button>
-        <button class="icon-btn hidden md:inline-grid" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button>
+        <button class="btn-secondary compose-create-button" :disabled="busy" @click="createComposeOpen = true"><Plus class="h-4 w-4" />新建 Compose</button>
       </div>
     </div>
+    <div class="service-refresh-toolbar"><span v-if="lastUpdated" class="text-xs text-muted">更新于 {{ lastUpdated }}</span><label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label><button class="btn-secondary btn-sm" :disabled="manualRefreshing || store.loading" :aria-busy="manualRefreshing" @click="manualRefresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': manualRefreshing || store.loading }" />{{ manualRefreshing ? '刷新中' : '刷新' }}</button><button class="icon-btn hidden md:inline-grid" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button></div>
+    <p v-if="focusNotice" class="scope-callout" role="status">{{ focusNotice }}</p>
     <p v-if="store.error" class="alert-error" role="alert">{{ store.error }}</p>
     <button v-if="output.action && !output.open" class="operation-receipt" :data-state="output.running ? 'running' : output.failureReason || (output.exitCode != null && output.exitCode !== 0) ? 'failed' : 'done'" @click="output.open = true">
       <RefreshCw v-if="output.running" class="h-4 w-4 animate-spin" /><History v-else class="h-4 w-4" />
@@ -429,14 +427,28 @@ async function pollJob(jobId) {
   finally { if (activeJobId === jobId) jobPollInFlight = false; }
   if (busy.value && activeJobId === jobId) jobPollTimer = setTimeout(() => void pollJob(jobId), 900);
 }
+const focusNotice = ref('');
 async function focusProject() {
   const projectId = String(route.query.focus || '');
-  if (!projectId || focusedProject.value === projectId || !store.projects.some((project) => project.id === projectId)) return;
-  focusedProject.value = projectId;
+  const containerId = String(route.query.containerId || '');
+  const service = String(route.query.service || '');
+  const key = `${hosts.activeHostId}:${projectId}:${service}:${containerId}`;
+  if (!projectId || focusedProject.value === key || store.loading || route.name !== 'services') return;
+  const project = store.projects.find(item => item.id === projectId);
+  if (!project) { focusNotice.value = '目标项目已移除或不属于当前节点，请返回来源页面核对。'; return; }
+  focusNotice.value = containerId && !project.containers.some(c => c.id === containerId)
+    ? '目标容器已移除或重建，已定位原项目；请核对当前服务。'
+    : service && !project.containers.some(c => c.service === service) ? '目标服务已不在当前项目中，已定位原项目。' : '';
+  focusedProject.value = key;
   if (!expandedIds.value.has(projectId)) toggleExpanded(projectId);
   await nextTick();
-  if (route.name === 'services' && route.query.focus === projectId) document.getElementById(`project-${projectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (route.name !== 'services' || route.query.focus !== projectId) return;
+  const card = document.getElementById(`project-${projectId}`);
+  const target = [...(card?.querySelectorAll('[data-container-id]') || [])].find(el => el.dataset.containerId === containerId)
+    || [...(card?.querySelectorAll('[data-service-name]') || [])].find(el => el.dataset.serviceName === service) || card;
+  target?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
 }
+
 function closeEnv() {
   envProject.value = null;
   if (route.query.env) {
@@ -497,9 +509,9 @@ watch(autoRefresh, (value) => {
   }
   startRealtime();
 });
-watch([() => route.name, () => route.query.focus, () => store.projects], () => {
+watch([() => route.name, () => route.query.focus, () => route.query.service, () => route.query.containerId, () => store.loading, () => store.projects], () => {
   if (route.name === 'services') {
-    if (!route.query.focus) focusedProject.value = '';
+    if (!route.query.focus) { focusedProject.value = ''; focusNotice.value = ''; }
     void focusProject();
   } else focusedProject.value = '';
 }, { deep: true });
@@ -590,6 +602,11 @@ onUnmounted(() => { pageActive = false; pageActivationToken += 1; pausePage(); }
 </script>
 
 <style scoped>
+.compose-create-button { background: color-mix(in srgb,var(--color-link) 10%,var(--panel-surface)); border-color: color-mix(in srgb,var(--color-link) 35%,var(--line-subtle)); color: var(--color-link); box-shadow: none; }
+.compose-create-button:hover { background: color-mix(in srgb,var(--color-link) 16%,var(--panel-surface)); }
+.service-refresh-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:12px; padding-bottom:8px; border-bottom:1px solid var(--line-subtle); flex-wrap:wrap; }
+@media(max-width:600px) { .compose-create-button { min-height:44px; }.service-refresh-toolbar { gap:8px; } }
+
 .operation-receipt { display: flex; gap: 12px; align-items: center; text-align: left; padding: 13px 16px; border: 1px solid var(--line-subtle); border-radius: 10px; background: var(--panel-surface); transition: border-color 150ms, background-color 150ms; }
 .operation-receipt:hover { border-color: var(--line-hover); background: var(--panel-raised); }.operation-receipt > svg { flex-shrink: 0; color: var(--color-link); }.operation-receipt strong { display: block; font-size: 12px; font-weight: 500; }.operation-receipt small { display: block; margin-top: 4px; font-size: 11px; color: var(--color-surface-400); }.receipt-open { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-link); white-space: nowrap; }
 .operation-receipt[data-state="failed"] { border-color: rgba(253,164,175,.25); }

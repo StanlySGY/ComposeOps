@@ -51,7 +51,7 @@
 
       <div class="project-container-table" aria-label="Compose 服务列表">
         <div class="service-list-heading"><div><span class="service-list-eyebrow">WORKLOADS</span><strong>服务与容器</strong><span>服务级操作作用于该服务的全部副本；容器级操作只作用于单个容器</span></div><div class="service-list-tools"><span class="service-total">{{ serviceGroups.length }} 个服务 · {{ project.containers.length }} 个容器</span><button v-if="serviceGroups.length > 1" class="service-view-toggle" @click="toggleAllServiceGroups">{{ allServicesCollapsed ? '全部展开' : '全部折叠' }}</button></div></div>
-        <section v-for="group in serviceGroups" :key="group.name" :data-service-name="group.name" class="service-group" :class="{ 'service-group--attention': group.attention }">
+        <section v-for="group in serviceGroups" :key="group.name" :data-service-name="group.name" class="service-group" :class="{ 'service-group--attention': group.attention, 'resource-focused': focused && route.query.service === group.name }">
           <header class="service-group__header">
             <button class="service-group__summary" :aria-expanded="!isServiceCollapsed(group.name)" :aria-controls="'service-containers-' + project.id + '-' + group.name" @click="toggleServiceGroup(group.name)">
               <span class="service-group__glyph"><Boxes :size="17" /></span>
@@ -67,7 +67,7 @@
             </div>
           </header>
           <div v-if="!isServiceCollapsed(group.name)" :id="'service-containers-' + project.id + '-' + group.name" class="service-group__body">
-            <div v-for="container in group.containers" :key="container.id" class="project-container-row" :data-container="container.id" :data-container-id="container.id">
+            <div v-for="container in group.containers" :key="container.id" class="project-container-row" :class="{ 'resource-focused': focused && route.query.containerId === container.id }" :data-container="container.id" :data-container-id="container.id">
               <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><ContainerPorts :container="container" :links="webuiLinks.filter(link => link.containerId === container.id)" /></div></div>
               <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><span v-else-if="project.managed && container.state === 'running'" class="container-resource text-muted">{{ statsError || '等待指标采样…' }}</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
               <div class="project-container-actions" role="group" :aria-label="container.name + ' 容器级操作'">
@@ -165,6 +165,11 @@ const serviceGroups = computed(() => {
     attention: needsAttention({ operationalIntent: props.project.operationalIntent, containers, status: containers.every(item => item.state === 'running') ? 'running' : containers.some(item => item.state === 'running') ? 'partial' : 'stopped' }),
   }));
 });
+watch([() => props.focused, () => route.query.service, () => route.query.containerId, () => props.expanded], () => {
+  if (!props.focused || !props.expanded) return;
+  const service = String(route.query.service || props.project.containers.find(c => c.id === route.query.containerId)?.service || '');
+  const next = new Set(collapsedServiceGroups.value); next.delete(service); collapsedServiceGroups.value = next;
+}, { immediate: true, flush: 'sync' });
 function isServiceCollapsed(name) { return collapsedServiceGroups.value.has(name); }
 const allServicesCollapsed = computed(() => serviceGroups.value.length > 0 && serviceGroups.value.every(group => isServiceCollapsed(group.name)));
 function toggleAllServiceGroups() {
@@ -395,6 +400,7 @@ function containerStateHint(container) {
 </script>
 
 <style scoped>
+.resource-focused { outline: 1px solid var(--color-link); outline-offset:-1px; background: color-mix(in srgb,var(--color-link) 8%,var(--panel-surface)); }
 .service-project-card { border-radius: 13px; }
 .service-group__health.is-neutral { color: var(--color-surface-400); }
 .service-group__health.is-neutral i { background: var(--color-surface-400); }

@@ -63,10 +63,12 @@ export function preloadRouteChunks() {
 
 // Container alert links may target another node. Switch before loading the destination.
 router.beforeEach(async (to) => {
-  if (!to.query.hostId || !['/logs', '/services', '/shell', '/agent', '/resources', '/review', '/compose'].includes(to.path)) return;
+  if (!to.query.hostId || !['/dashboard', '/logs', '/services', '/shell', '/agent', '/resources', '/review', '/compose'].includes(to.path)) return;
+  if (to.path === '/dashboard' && to.query.hostId === 'all') return;
   const store = useHostsStore();
-  await store.load(true);
   const id = String(to.query.hostId);
+  if (id === store.activeHostId && store.hosts.length) return;
+  await store.load(true);
   if (id === store.activeHostId) return;
   if (!store.hosts.some(host => host.id === id)) { useToastStore().error('目标节点已移除，请返回事件中心核对'); return false; }
   try { await store.switchHost(id); }

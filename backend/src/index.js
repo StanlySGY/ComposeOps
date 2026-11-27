@@ -13,6 +13,7 @@ import { startOpsEffectWorker, stopOpsEffectWorker } from './services/ops-effect
 import { startWorkflowCronTriggers, stopWorkflowCronTriggers } from './services/event-router.js';
 import { startTaskWatchdog, stopTaskWatchdog, markInterruptedAgentPlansUnknown } from './services/task-watchdog.js';
 import { initGitOps } from './services/gitops.js';
+import { startInfrastructureCollection, stopInfrastructureCollection } from './services/infrastructure.js';
 import { startMetricsCollection } from './services/metrics-collector.js';
 import { startDataMaintenance } from './services/maintenance.js';
 import { startStateRecorder, stopStateRecorder } from './services/container-events.js';
@@ -80,6 +81,7 @@ const start = async () => {
     startInspectionScheduler(); // 自动巡检(默认关闭,按 setting 的间隔触发,见 inspection.js)
     initGitOps();
     const metricsIntervalSeconds = Number(process.env.METRICS_INTERVAL_SECONDS || 30);
+    startInfrastructureCollection();
     const metricsTimers = startMetricsCollection(metricsIntervalSeconds); // 默认 30 秒,可通过环境变量调整(最小 5 秒)
     stopMetricsTimers = () => {
       if (metricsTimers?.intervalId) clearInterval(metricsTimers.intervalId);
@@ -102,6 +104,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   fastify.log.info({ signal }, 'shutting down');
   try { await Promise.race([stopPlatformMonitor(), new Promise(resolve => setTimeout(resolve, 5000))]); } catch { /* 独立检查器会继续观测面板停机。 */ }
+  stopInfrastructureCollection();
   try { stopMetricsTimers?.(); } catch { /* 未启动时无需清理 */ }
   try { stopStateRecorder(); } catch { /* 未启动时无需清理 */ }
   try { await Promise.race([stopSreRuntime(), new Promise(resolve => setTimeout(resolve, 5000))]); } catch { /* durable runs remain unknown on interrupted shutdown */ }

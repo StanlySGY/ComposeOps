@@ -1,3 +1,4 @@
+import { cockpitReturn } from './infrastructure.js';
 import { returnTarget } from './deep-links.js';
 import { projectReturnLocation } from './project-navigation.js';
 
@@ -46,6 +47,7 @@ export function historyTarget(router, value, current) {
 
 export function fallbackTarget(router, route) {
   const source = returnTarget(route.query?.from) ? route.query.from : null;
+  if (source === 'dashboard') return router.resolve(cockpitReturn(route.query?.returnTo));
   const name = source || pageDetails(route).parent || 'dashboard';
   if (route.name === name) return null;
   const projectId = typeof route.query?.projectId === 'string' ? route.query.projectId : '';

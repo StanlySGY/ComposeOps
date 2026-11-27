@@ -23,6 +23,7 @@ test('同路径同名项目偏好、操作、状态和指标按节点隔离', as
   for (const id of ['local', remote.id]) {
     const docker = getDockerForHost(id);
     t.mock.method(docker, 'listContainers', async () => [row]);
+    t.mock.method(docker, 'info', async () => ({ ID: id, Name: id, KernelVersion: 'linux', NCPU: 4 }));
     t.mock.method(docker, 'getContainer', () => ({ stats: async () => ({ memory_stats: { usage: id === 'local' ? 100 : 700, limit: 1000 } }) }));
   }
   const [a] = await scanProjects('local');
@@ -121,6 +122,7 @@ test('远端失联不影响面板健康，全部节点指标接口保留来源',
   for (const id of ['local', remote.id]) {
     const docker = getDockerForHost(id);
     t.mock.method(docker, 'listContainers', async () => [row]);
+    t.mock.method(docker, 'info', async () => ({ ID: id, Name: id, KernelVersion: 'linux', NCPU: 4 }));
     t.mock.method(docker, 'getContainer', () => ({ stats: async () => ({}) }));
   }
   const setup = await app.inject({ method: 'POST', url: '/api/v1/auth/setup', payload: { password: 'isolated-multi-host-test' } });

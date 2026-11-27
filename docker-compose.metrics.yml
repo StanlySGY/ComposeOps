@@ -1,0 +1,8 @@
+# Optional Linux host metrics. Mount only sanitized snapshots, never / or /proc.
+# Start scripts/host-metrics-agent.mjs outside Docker before using this overlay.
+services:
+  opsdash:
+    environment:
+      HOST_METRICS_FILE: /run/composeops-host/host.json
+    volumes:
+      - ${COMPOSEOPS_HOST_METRICS_DIR:?Set an external host metrics directory}:/run/composeops-host:ro

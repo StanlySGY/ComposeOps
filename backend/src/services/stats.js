@@ -1,4 +1,5 @@
 import { getActivityDocker } from './docker-hosts.js';
+import { containerMemory } from '../lib/container-metrics.js';
 
 /**
  * 读取指定容器的单次资源快照。
@@ -23,12 +24,16 @@ export function parseContainerStat(raw) {
   if (sysDelta > 0 && cpuDelta >= 0) {
     cpuPercent = cpuDelta / sysDelta * onlineCpus * 100;
   }
-  const memUsage = raw?.memory_stats?.usage || 0;
-  const memLimit = raw?.memory_stats?.limit || 0;
+  const memory = containerMemory(raw?.memory_stats);
+  const memUsage = memory.used;
+  const memLimit = memory.limit;
   const netIO = sumNetwork(raw?.networks);
   const blockIO = sumBlock(raw?.blkio_stats || raw?.blkioio_stats);
   return {
     cpuPercent: round2(cpuPercent),
+    cpuReady: prevSys > 0 && sysDelta > 0 && cpuDelta >= 0,
+    memUsage,
+    memLimit,
     memUsageMB: round2(memUsage / 1024 / 1024),
     memLimitMB: round2(memLimit / 1024 / 1024),
     memPercent: memLimit > 0 ? round2(memUsage / memLimit * 100) : 0,

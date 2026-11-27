@@ -6,8 +6,10 @@ const APP_VERSION = require('../../package.json').version;
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import os from 'os';
-import { getDockerForHost, listHosts, getActiveHostId } from '../services/docker-hosts.js';
-import { parseContainerStat } from '../services/stats.js';
+import { listHosts, getActiveHostId } from '../services/docker-hosts.js';
+import { sampleContainers } from '../services/container-sampler.js';
+import { infrastructureSnapshot, infrastructureStorage } from '../services/infrastructure.js';
+import { infrastructureHistory } from '../services/infrastructure-history.js';
 import { getMcpStatus, saveMcpConfig, revealMcpToken } from './mcp.js';
 
 /**
@@ -104,35 +106,9 @@ function readNetStats(prev) {
   } catch { /* /proc/net/dev 不可读时返回零速率。 */ }
   return net;
 }
-async function bounded(promise) {
-  let timer;
-  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('节点指标读取超时')), 2500); })]); }
-  finally { clearTimeout(timer); }
-}
-
 async function readContainerStats(host) {
-  const docker = getDockerForHost(host.id);
-  const containers = await bounded(docker.listContainers({ all: false }));
-  const rows = await Promise.all(containers.map(async (c) => {
-    try {
-      const stat = await bounded(docker.getContainer(c.Id).stats({ stream: false }));
-      const parsed = parseContainerStat(stat);
-      return {
-        id: c.Id,
-        hostId: host.id,
-        hostName: host.name,
-        name: (c.Names[0] || '').replace(/^\//, ''),
-        image: c.Image,
-        cpuPercent: parsed.cpuPercent,
-        memUsage: Math.round(parsed.memUsageMB * 1024 * 1024),
-        memLimit: Math.round(parsed.memLimitMB * 1024 * 1024),
-        memPercent: parsed.memPercent,
-      };
-    } catch { return null; }
-  }));
-  const stats = rows.filter(Boolean);
-  stats.sort((a, b) => b.memUsage - a.memUsage);
-  return stats;
+  const sample = await sampleContainers(host.id);
+  return sample.containers.filter(item => item.state === 'running').map(({ raw: _, netIO: __, blockIO: ___, ...item }) => ({ ...item, hostName: host.name }));
 }
 
 // 模块级状态：前一次网络/容器快照
@@ -158,6 +134,18 @@ export default async function systemRoutes(fastify) {
     }));
     return { host, disk, network: net, hosts: hosts.map(({ containers: _, ...item }) => item), containers: hosts.flatMap(item => item.containers) };
   });
+
+  fastify.get('/infrastructure', async request => infrastructureSnapshot(request.query.hostId || getActiveHostId()));
+  fastify.get('/infrastructure/history', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+    hostId: { type: 'string', maxLength: 100 }, resource: { type: 'string', maxLength: 400 },
+    metric: { type: 'string', enum: ['cpu', 'memory', 'memoryUsed', 'rx', 'tx', 'used', 'free', 'diskPercent', 'inodePercent', 'readRate', 'writeRate'] },
+    hours: { type: 'number', minimum: .25, maximum: 720 },
+  } } } }, async request => {
+    const hostId = request.query.hostId || getActiveHostId();
+    infrastructureSnapshot(hostId);
+    return infrastructureHistory(hostId, request.query);
+  });
+  fastify.get('/infrastructure/storage', async request => infrastructureStorage(request.query.hostId || getActiveHostId()));
 
   // ---- MCP 服务管理(token/模式/开关) ----
   fastify.get('/mcp', async () => getMcpStatus());

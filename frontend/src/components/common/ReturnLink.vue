@@ -7,6 +7,7 @@
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ArrowLeft } from 'lucide-vue-next';
+import { cockpitReturn } from '../../lib/infrastructure.js';
 import { returnTarget } from '../../lib/deep-links.js';
 defineProps({ excludePath: String });
 const route = useRoute();
@@ -15,6 +16,6 @@ const target = computed(() => returnTarget(route.query.from));
 function back() {
   const previous = window.history.state?.back;
   if (previous && router.resolve(previous).path === target.value.path) router.back();
-  else router.push(target.value.path);
+  else router.push(route.query.from === 'dashboard' ? cockpitReturn(route.query.returnTo) : target.value.path);
 }
 </script>

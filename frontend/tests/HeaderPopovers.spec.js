@@ -24,6 +24,7 @@ function routerInstance() {
     history: createMemoryHistory(),
     routes: [
       { path: '/', name: 'dashboard', component: { template: '<main><h1>运维总览</h1></main>' } },
+      { path: '/dashboard', component: { template: '<main>资源大屏</main>' } },
       { path: '/services', name: 'services', component: { template: '<main><h1>服务总览</h1></main>' } },
       { path: '/settings', name: 'settings', component: { template: '<main><h1>设置</h1></main>' } },
     ],
@@ -74,6 +75,14 @@ async function start(component, stubs = {}) {
 }
 
 describe('顶部下拉控件的可访问性与焦点恢复', () => {
+  it('顶部切节点同步驾驶舱地址并保留时间范围，清除旧节点资源', async () => {
+    await start(HostSwitcher);
+    await router.replace('/dashboard?hostId=local&hours=24&resource=service:old:db');
+    await wrapper.get('.host-switch').trigger('click');
+    await wrapper.findAll('.host-item').find(item => item.text().includes('测试节点')).trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.query).toMatchObject({ hostId: 'remote', hours: '24', resource: 'host' });
+  });
   it('连接检查完成前保持未知状态，控制台连通不代表业务服务健康', async () => {
     let respond;
     fetch.mockReturnValueOnce(new Promise(resolve => { respond = resolve; }));

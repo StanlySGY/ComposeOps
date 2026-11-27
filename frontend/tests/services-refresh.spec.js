@@ -61,4 +61,16 @@ describe('项目列表刷新顺序', () => {
     wrapper.unmount();
     vi.useRealTimers();
   });
+  it('独立容器切节点时丢弃旧请求，不能重新显示旧节点容器', async () => {
+    const slow = deferred();
+    getStandaloneContainers.mockReturnValueOnce(slow.promise).mockResolvedValueOnce({ hostId: 'remote', hostName: 'Remote', containers: [] });
+    const wrapper = mount(StandaloneContainersPanel, { props: { hostId: 'local' }, global: { stubs: ['ConfirmDialog', 'StatusBadge'] } });
+    await wrapper.setProps({ hostId: 'remote' }); await flushPromises();
+    slow.resolve({ hostId: 'local', hostName: 'Old', containers: [{ id: 'old', name: '旧节点容器', image: 'old', ports: [] }] });
+    await flushPromises();
+    expect(getStandaloneContainers).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).not.toContain('旧节点容器');
+    expect(wrapper.text()).toContain('Remote');
+    wrapper.unmount();
+  });
 });

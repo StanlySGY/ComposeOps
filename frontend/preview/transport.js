@@ -4,6 +4,7 @@ import { at, projects, metrics, inspection, operations, alerts, storage, costRep
 
 import { previewIncidentFetch } from './incidents.js';
 import { previewSreFetch } from './sre.js';
+import { previewInfrastructure } from './infrastructure.js';
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const unsupported = () => json({ message: '此操作未在离线预览中模拟，请在自己的部署中使用。没有执行任何真实操作。' }, 501);
@@ -78,6 +79,7 @@ export async function previewFetch(input, options = {}) {
   if (url.origin !== location.origin) return unsupported();
   const path = url.pathname.replace(/^\/api\/v1/, '');
   const method = (options.method || input?.method || 'GET').toUpperCase();
+  if (method === 'GET' && /^\/system\/infrastructure(?:\/history|\/storage)?$/.test(path)) return json(previewInfrastructure(path, url.searchParams));
   const incidentResponse = previewIncidentFetch(path, method);
   if (incidentResponse) return incidentResponse;
   let body = {};

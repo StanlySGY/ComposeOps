@@ -341,6 +341,9 @@ export const api = {
   },
   // system
   getMetrics: async (hostId = '') => normalizeMetrics(await request(`/system/metrics${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`)),
+  getInfrastructure: (hostId, signal) => request(`/system/infrastructure?${new URLSearchParams({ hostId })}`, { signal }),
+  getInfrastructureHistory: (params, signal) => request(`/system/infrastructure/history?${new URLSearchParams(params)}`, { signal }),
+  getInfrastructureStorage: (hostId, signal) => request(`/system/infrastructure/storage?${new URLSearchParams({ hostId })}`, { signal }),
   getCapabilities: () => request('/system/capabilities'),
   getPreferences: () => request('/personal/preferences'),
   savePreferences: (payload) => request('/personal/preferences', { method: 'PUT', body: JSON.stringify(payload) }),

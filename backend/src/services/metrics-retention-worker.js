@@ -9,6 +9,7 @@ try {
   // No app initialization, schedulers, Docker access or network calls here.
   database = new Database(workerData.databasePath, { fileMustExist: true });
   database.pragma('busy_timeout = 5000');
+  await compactMetrics(database, workerData.now, true);
   response = { result: await compactMetrics(database, workerData.now) };
 } catch (error) {
   response = { error: error.message };

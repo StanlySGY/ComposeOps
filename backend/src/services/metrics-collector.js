@@ -4,36 +4,31 @@
  * 后台定时采集容器资源指标并存储到数据库
  */
 
-import { getDockerForHost, listHosts } from './docker-hosts.js';
+import { listHosts } from './docker-hosts.js';
 import db from '../lib/db.js';
+import { mapLimited, sampleContainers } from './container-sampler.js';
 import { applyRetentionPolicy } from './metrics.js';
+import { containerMemory } from '../lib/container-metrics.js';
 
 const collectionState = { promise: null };
-
-/** 给一个 Promise 加超时,避免 Docker API 调用挂起时采集循环无限堆积。 */
-function withTimeout(promise, ms, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} 超时(${ms}ms)`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-const STATS_TIMEOUT = 10000; // container.stats 单次最多等 10 秒
 
 /**
  * 采集所有运行中容器的指标
  */
 export async function collectAllMetrics() {
   if (collectionState.promise) return { collected: 0, skipped: true, timestamp: Date.now() };
-  const operation = Promise.all(listHosts().map(async host => {
+  const operation = mapLimited(listHosts(), 3, async host => {
     try {
-      const docker = getDockerForHost(host.id);
-      const containers = await withTimeout(docker.listContainers({ filters: { status: ['running'] } }), STATS_TIMEOUT, '节点容器列表');
-      const results = await Promise.allSettled(containers.map(container => collectContainerMetrics(container.Id, docker, host.id)));
-      return { hostId: host.id, collected: results.filter(result => result.status === 'fulfilled').length, ok: true };
+      const sample = await sampleContainers(host.id);
+      let collected = 0;
+      for (const container of sample.containers) {
+        if (!container.raw) continue;
+        persistContainerMetrics(container.id, container.raw, host.id, container.sampledAt);
+        collected++;
+      }
+      return { hostId: host.id, collected, ok: true };
     } catch { return { hostId: host.id, collected: 0, ok: false }; }
-  })).then(hosts => ({ hosts, collected: hosts.reduce((count, host) => count + host.collected, 0), timestamp: Date.now() }));
+  }).then(hosts => ({ hosts, collected: hosts.reduce((count, host) => count + host.collected, 0), timestamp: Date.now() }));
   collectionState.promise = operation;
   return operation.finally(() => {
     if (collectionState.promise === operation) collectionState.promise = null;
@@ -74,7 +69,7 @@ export function parseContainerMetrics(containerId, stats = {}, timestamp = Date.
   const systemDelta = finiteMetricNumber(cpuStats.system_cpu_usage)
     - finiteMetricNumber(previousCpuStats.system_cpu_usage);
   const onlineCpus = finiteMetricNumber(cpuStats.online_cpus, 1);
-  if (systemDelta > 0 && onlineCpus > 0) {
+  if (finiteMetricNumber(previousCpuStats.system_cpu_usage) > 0 && systemDelta > 0 && onlineCpus > 0) {
     const cpuPercent = Math.max(0, (cpuDelta / systemDelta) * onlineCpus * 100);
     if (Number.isFinite(cpuPercent)) {
       metrics.push({
@@ -88,10 +83,7 @@ export function parseContainerMetrics(containerId, stats = {}, timestamp = Date.
   }
 
   // 内存没有 limit 时不写入无意义的 Infinity;缓存字段缺失按 0 处理。
-  const memoryStats = source.memory_stats || {};
-  const memoryUsed = Math.max(0,
-    finiteMetricNumber(memoryStats.usage) - finiteMetricNumber(memoryStats.stats?.cache));
-  const memoryLimit = finiteMetricNumber(memoryStats.limit);
+  const { used: memoryUsed, limit: memoryLimit } = containerMemory(source.memory_stats);
   if (memoryLimit > 0) {
     const memoryPercent = (memoryUsed / memoryLimit) * 100;
     if (Number.isFinite(memoryPercent)) {
@@ -161,10 +153,8 @@ export function parseContainerMetrics(containerId, stats = {}, timestamp = Date.
 /**
  * 采集单个容器的指标
  */
-async function collectContainerMetrics(containerId, docker, hostId) {
-  const container = docker.getContainer(containerId);
-  const stats = await withTimeout(container.stats({ stream: false }), STATS_TIMEOUT, `容器 ${containerId} stats`);
-  const metrics = parseContainerMetrics(containerId, stats);
+function persistContainerMetrics(containerId, stats, hostId, sampledAt) {
+  const metrics = parseContainerMetrics(containerId, stats, sampledAt);
 
   // 批量插入数据库
   const insert = db.prepare(`

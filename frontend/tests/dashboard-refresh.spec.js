@@ -8,6 +8,8 @@ const { api, state } = vi.hoisted(() => ({
 }));
 vi.mock('../src/api/client.js', () => ({ api }));
 vi.mock('../src/stores/services.js', () => ({ useServicesStore: () => state.store }));
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }));
+vi.mock('../src/components/dashboard/ServerCockpit.vue', () => ({ default: { template: '<section aria-label="服务器驾驶舱">服务器资源</section>' } }));
 import DashboardView from '../src/views/DashboardView.vue';
 const metrics = (cpu = 23) => ({ host: { cpu: { percent: cpu }, memory: { percent: 40 } }, network: { rx: 0 } });
 
@@ -25,31 +27,29 @@ describe('总览数据与跳转', () => {
     wrapper = mount(DashboardView, { global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } });
     await flushPromises();
   }
-  it('指标请求失败时不显示虚假的正常状态', async () => {
-    api.getMetrics.mockRejectedValue(new Error('指标暂不可用'));
+  it('服务器驾驶舱独立于巡检加载，避免旧环境指标误作宿主数据', async () => {
+    api.getInspectionOverview.mockRejectedValue(new Error('巡检暂不可用'));
     await start();
-    expect(wrapper.text()).toContain('指标暂不可用');
-    expect(wrapper.text()).toContain('暂无指标');
-    expect(wrapper.text()).not.toContain('运行正常');
-    expect(wrapper.text()).not.toContain('资源充足');
+    expect(wrapper.text()).toContain('巡检暂不可用');
+    expect(wrapper.find('[aria-label="服务器驾驶舱"]').exists()).toBe(true);
+    expect(api.getMetrics).not.toHaveBeenCalled();
   });
-  it('切换节点后刷新指标并忽略旧节点的迟到响应', async () => {
+  it('切换节点后刷新运维摘要并忽略旧节点的迟到响应', async () => {
     let resolve;
-    api.getMetrics.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    api.getInspectionOverview.mockReturnValueOnce(new Promise(r => { resolve = r; }));
     await start();
-    api.getMetrics.mockResolvedValue(metrics(72));
+    api.getInspectionOverview.mockResolvedValue({ latest: { score: 72 } });
     window.dispatchEvent(new CustomEvent('composeops:host-changed'));
     await flushPromises();
-    expect(wrapper.text()).toContain('72%');
-    resolve(metrics(13));
+    expect(wrapper.get('[aria-label="查看巡检报告"]').text()).toContain('72');
+    resolve({ latest: { score: 13 } });
     await flushPromises();
-    expect(wrapper.text()).toContain('72%');
-    expect(wrapper.text()).not.toContain('13%');
+    expect(wrapper.get('[aria-label="查看巡检报告"]').text()).toContain('72');
   });
   it('无 Compose 项目时保留环境指标和可操作的空状态', async () => {
     state.store.projects = [];
     await start();
-    expect(wrapper.text()).toContain('23%');
+    expect(wrapper.find('[aria-label="服务器驾驶舱"]').exists()).toBe(true);
     expect(wrapper.findAll('a[href="/marketplace?from=dashboard"]').some(link => link.text().includes('浏览应用市场'))).toBe(true);
   });
   it('刷新使用最新项目数据且指标可以直达详情页', async () => {
@@ -57,7 +57,7 @@ describe('总览数据与跳转', () => {
     await wrapper.get('button').trigger('click');
     await flushPromises();
     expect(state.store.refresh).toHaveBeenLastCalledWith(true);
-    expect(wrapper.findAll('a[href="/monitor?from=dashboard"]')).toHaveLength(2);
+    expect(wrapper.find('[aria-label="服务器驾驶舱"]').exists()).toBe(true);
     expect(wrapper.get('a[aria-label="查看巡检报告"]').text()).toContain('95');
   });
   it('常用运维入口直达服务、Compose、日志和 AI 助手', async () => {

@@ -963,6 +963,16 @@ const MIGRATIONS = [
   { version: 32, name: '项目运行意图', up(database) {
     addColumn(database, 'project_preferences', 'operational_intent', "TEXT NOT NULL DEFAULT 'unknown'");
   } },
+  { version: 33, name: '宿主与稳定服务身份的资源历史', up(database) {
+    database.exec(`CREATE TABLE IF NOT EXISTS infrastructure_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, host_id TEXT NOT NULL, container_id TEXT NOT NULL,
+      metric_type TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL, timestamp INTEGER NOT NULL,
+      sample_count INTEGER NOT NULL DEFAULT 1, value_sum REAL, value_min REAL, value_max REAL,
+      range_start INTEGER, range_end INTEGER, stats_approximate INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_infrastructure_host_resource ON infrastructure_metrics(host_id, container_id, metric_type, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_infrastructure_time ON infrastructure_metrics(timestamp);`);
+  } },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */

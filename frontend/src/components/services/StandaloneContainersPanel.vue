@@ -8,7 +8,7 @@
     <div v-if="loading && !containers.length" class="p-5 text-sm text-muted" role="status">正在扫描独立容器…</div>
     <div v-else-if="!containers.length" class="standalone-empty">当前节点没有发现独立容器。通过 Docker CLI 创建且未带 Compose 项目标记的容器会显示在这里。</div>
     <div v-else class="standalone-list">
-      <article v-for="item in containers" :key="item.id" class="standalone-row">
+      <article v-for="item in containers" :key="item.id" class="standalone-row" :data-container-id="item.id" :class="{ 'resource-focused': route?.query?.containerId === item.id }">
         <div class="standalone-identity"><Box :size="17" /><div class="min-w-0"><strong>{{ item.name }}</strong><span :title="item.image">{{ item.image }}</span><small>{{ item.ports.length ? item.ports.map(p => `${p.public}→${p.private}`).join(' · ') : '未发布端口' }}</small></div></div>
         <div class="standalone-state"><StatusBadge :status="item.state" /><span>{{ item.statusText }}</span></div>
         <div class="standalone-actions" role="group" :aria-label="`${item.name} 容器操作`">
@@ -23,13 +23,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue';
+import { onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue';
 import { Box, Play, RefreshCw, RotateCw, Square } from 'lucide-vue-next';
+import { useRoute } from 'vue-router';
 import { api } from '../../api/client.js';
 import { useToastStore } from '../../stores/toast.js';
 import StatusBadge from '../common/StatusBadge.vue';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
 
+const route = useRoute();
 const props = defineProps({ hostId: { type: String, default: 'local' } });
 const emit = defineEmits(['refresh']);
 const containers = ref([]);
@@ -40,9 +42,11 @@ const error = ref('');
 const busyId = ref('');
 const pending = ref(null);
 const toast = useToastStore();
+let loadVersion = 0;
 
 async function load() {
   if (loading.value) return;
+  const version = ++loadVersion;
   loading.value = true;
   error.value = '';
   try {
@@ -52,14 +56,16 @@ async function load() {
       // 首次进入服务页时 Docker API 可能正处于短暂重连窗口,只对网络/超时故障做一次有界重试。
       if (!/无法连接服务|fetch failed|networkerror|timeout|timed out/i.test(String(cause?.message || cause))) throw cause;
       await new Promise(resolve => setTimeout(resolve, 500));
+      if (version !== loadVersion) return;
       result = await api.getStandaloneContainers();
     }
+    if (version !== loadVersion) return;
     hostId.value = result.hostId;
     hostName.value = result.hostName;
     containers.value = result.containers || [];
   } catch (cause) {
-    error.value = `独立容器扫描失败：${cause.message}`;
-  } finally { loading.value = false; }
+    if (version === loadVersion) error.value = `独立容器扫描失败：${cause.message}`;
+  } finally { if (version === loadVersion) loading.value = false; }
 }
 function requestAction(item, action) { pending.value = { id: item.id, name: item.name, action }; }
 async function confirmAction() {
@@ -80,12 +86,21 @@ async function run(item, action) {
   } finally { busyId.value = ''; }
 }
 watch(() => props.hostId, async (next, previous) => {
-  if (next !== previous) { containers.value = []; await load(); }
+  if (next !== previous) { loadVersion++; loading.value = false; pending.value = null; containers.value = []; await load(); }
 });
+async function focusContainer() {
+  if (route?.query?.focus || !route?.query?.containerId) return;
+  await nextTick();
+  const element = [...document.querySelectorAll('.standalone-row')].find(item => item.dataset.containerId === route?.query?.containerId);
+  element?.scrollIntoView?.({ block: 'center' });
+}
+watch([() => route?.query?.containerId, containers], focusContainer);
 onMounted(load);
+onBeforeUnmount(() => { loadVersion++; });
 </script>
 
 <style scoped>
+.resource-focused { outline:1px solid var(--color-link); background:color-mix(in srgb,var(--color-link) 8%,var(--panel-surface)); }
 .standalone-panel { overflow: hidden; }
 .standalone-panel__header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid var(--line-subtle); }
 .standalone-panel__header h2 { font-size:14px; font-weight:600; }
