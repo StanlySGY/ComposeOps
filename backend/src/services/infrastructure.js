@@ -8,8 +8,10 @@ import { mapLimited, sampleContainers } from './container-sampler.js';
 import { capacityForecast, diskResource, saveInfrastructureMetrics, serviceResource } from './infrastructure-history.js';
 
 const latest = new Map(), previous = new Map(), alerts = new Map(), diskWrites = new Map();
+const hostRevisions = new Map();
 let running, timer;
 onHostsChange(id => {
+  hostRevisions.set(id, (hostRevisions.get(id) || 0) + 1);
   latest.delete(id); previous.delete(id); diskWrites.delete(id); diskWrites.delete(`${id}:host`);
   for (const key of alerts.keys()) if (key.startsWith(`${id}:`)) alerts.delete(key);
 });
@@ -46,7 +48,7 @@ export function storageAssociations(disks, containers) {
   });
 }
 
-async function readHost(host, engine) {
+async function readHost(host, engine, isCurrent = () => true) {
   let raw;
   if (host.type === 'ssh') {
     const result = await sshExec(getHost(host.id), ['sh', '-c', HOST_PROBE_COMMAND], { timeoutMs: 10000 });
@@ -64,7 +66,7 @@ async function readHost(host, engine) {
   const old = previous.get(host.id);
   let value;
   if (old?.raw.sampledAt === raw.sampledAt) value = old.value;
-  else { value = hostSnapshot(raw, old?.raw); previous.set(host.id, { raw, value }); }
+  else { value = hostSnapshot(raw, old?.raw); if (isCurrent()) previous.set(host.id, { raw, value }); }
   return { ...value, status: Date.now() - raw.sampledAt > 30000 ? 'stale' : 'ready', source: host.type === 'ssh' ? 'ssh' : 'host-agent', reason: '' };
 }
 
@@ -118,19 +120,25 @@ export async function collectInfrastructure() {
   if (running) return running;
   running = mapLimited(listHosts(), 3, async item => {
     const host = getHost(item.id);
+    const revision = hostRevisions.get(item.id) || 0;
+    const isCurrent = () => !!getHost(item.id) && revision === (hostRevisions.get(item.id) || 0);
     try {
       const sample = await sampleContainers(item.id);
+      if (!isCurrent()) return;
       let hostMetrics;
-      try { hostMetrics = await readHost(host, sample.engine); }
+      try { hostMetrics = await readHost(host, sample.engine, isCurrent); }
       catch (error) { hostMetrics = { ...(latest.get(item.id)?.host || {}), status: 'stale', reason: error.message }; }
       const containers = sample.containers.map(({ raw: _, netIO: __, blockIO: ___, ...row }) => row);
       if (hostMetrics.disks) hostMetrics.disks = storageAssociations(hostMetrics.disks, containers);
       const node = { hostId: item.id, name: item.name, sampledAt: sample.sampledAt, status: 'ready', engine: sample.engine, host: hostMetrics, containers, services: groupInfrastructureContainers(containers) };
-      if (getHost(item.id) && JSON.stringify(getHost(item.id)) === JSON.stringify(host)) {
+      if (isCurrent()) {
         recordNode(node); node.alerts = evaluateNodeAlerts(node); latest.set(item.id, node);
       }
       return node;
     } catch (error) {
+      // A failed old connection must not recreate a removed node's cache or
+      // overwrite the pending state of a node whose credentials just changed.
+      if (!isCurrent()) return;
       const old = latest.get(item.id);
       latest.set(item.id, { ...(old || { hostId: item.id, name: item.name, host: { status: 'unavailable', reason: 'Docker 节点暂不可达' }, containers: [], services: [] }), status: old ? 'stale' : 'unavailable', error: 'Docker 节点暂不可达', alerts: [] });
       for (const key of alerts.keys()) if (key.startsWith(`${item.id}:`)) alerts.delete(key);

@@ -20,7 +20,7 @@ describe('服务器驾驶舱', () => {
   });
   afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); });
   async function start(component = ServerCockpit) {
-    router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/dashboard', component }, { path: '/services', component: { template: '<div>服务</div>' } }, { path: '/settings', component: { template: '<div />' } }] });
+    router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/dashboard', component }, { path: '/services', component: { template: '<div>服务</div>' } }, { path: '/settings', component: { template: '<div />' } }, { path: '/resources', component: { template: '<div />' } }] });
     await router.push('/dashboard'); await router.isReady();
     wrapper = mount(component, { global: { plugins: [router] } }); await flushPromises();
   }
@@ -92,6 +92,38 @@ describe('服务器驾驶舱', () => {
     await router.replace('/dashboard?metric=disk&resource=service:p:db&direction=readRate'); await flushPromises();
     expect(api.getInfrastructureHistory.mock.calls.at(-1)[0].metric).toBe('readRate');
     expect(cockpitReturn('/dashboard?group=mine&scope=managed&direction=tx')).toBe('/dashboard?group=mine&scope=managed&direction=tx');
+  });
+  it('切至全部节点取消旧历史，迟到结果不能回写，返回后仍加载当前趋势', async () => {
+    let finish; api.getInfrastructureHistory.mockReturnValueOnce(new Promise(r => { finish = r; }));
+    await start(); const oldSignal = api.getInfrastructureHistory.mock.calls[0][1];
+    await router.replace('/dashboard?hostId=all'); await flushPromises();
+    expect(oldSignal.aborted).toBe(true);
+    finish({ points: [{ timestamp: Date.now(), value: 99 }], start: 0, end: Date.now(), interval: 1000 }); await flushPromises();
+    await router.replace('/dashboard?hostId=remote'); await flushPromises();
+    expect(api.getInfrastructureHistory.mock.calls.at(-1)[0].hostId).toBe('remote');
+    expect(wrapper.findComponent({ name: 'ResourceTrend' }).props('points')).toEqual([]);
+  });
+  it('磁盘预测失败不会伪装节点断线，实时磁盘读数继续更新', async () => {
+    const data = sample(); data.nodes[0].host.disks = [{ device: 'a', type: 'ext4', mountpoint: '/', percent: 50 }];
+    api.getInfrastructure.mockResolvedValue(data);
+    api.getInfrastructureStorage.mockRejectedValue(new Error('预测失败'));
+    await start(); await router.replace('/dashboard?metric=disk'); await flushPromises();
+    expect(wrapper.text()).toContain('磁盘容量预测读取失败');
+    expect(wrapper.text()).not.toContain('节点连接中断');
+    expect(wrapper.text()).toContain('50.0%');
+    data.nodes[0].host.disks[0].percent = 65;
+    api.getInfrastructure.mockResolvedValue(structuredClone(data));
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises();
+    expect(wrapper.text()).toContain('65.0%');
+  });
+  it('筛选无结果给出清除入口，已删除资源不冒用宿主指标', async () => {
+    await start(); await router.replace('/dashboard?scope=managed&group=gone&q=none&resource=service:gone:web'); await flushPromises();
+    expect(wrapper.text()).toContain('当前筛选下没有匹配');
+    expect(wrapper.get('.cockpit-detail').text()).toContain('该资源已不在当前节点采样');
+    expect(wrapper.find('.cockpit-detail dl').exists()).toBe(false);
+    await wrapper.findAll('button').find(b => b.text() === '清除筛选').trigger('click'); await flushPromises();
+    expect(router.currentRoute.value.query).toEqual({ resource: 'service:gone:web' });
+    expect(wrapper.find('.cockpit-project').exists()).toBe(true);
   });
 });
 

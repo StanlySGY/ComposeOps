@@ -181,7 +181,7 @@ export function deleteHost(id) {
   writeHosts(hosts);
   invalidateClient(id);
   if (getActiveHostId() === id) setActiveHost('local');
-  notifyHostsChange();
+  notifyHostsChange(id);
   return { ok: true };
 }
 

@@ -132,3 +132,26 @@ test('容器限额与健康元数据缓存，实时健康优先，失败不伪�
   [row] = (await sampleContainers(host.id, 0)).containers;
   assert.equal(row.detailsReady, false); assert.equal(row.configuredMemory, undefined);
 });
+
+test('节点配置变更后迟到的采样失败不能重新污染缓存，删除重建也隔离', async t => {
+  const local = getDockerForHost('local');
+  t.mock.method(local, 'listContainers', async () => []);
+  t.mock.method(local, 'info', async () => ({}));
+  const id = 'race-node';
+  const config = { id, type: 'tcp', name: 'race', host: '127.0.0.1', port: 1 };
+  upsertHost(config); t.after(() => deleteHost(id));
+  let reject, started;
+  const entered = new Promise(r => { started = r; });
+  t.mock.method(getDockerForHost(id), 'info', async () => ({}));
+  t.mock.method(getDockerForHost(id), 'listContainers', () => { started(); return new Promise((_resolve, fail) => { reject = fail; }); });
+  const work = collectInfrastructure(); await entered;
+  upsertHost({ ...config, port: 2 });
+  reject(new Error('old connection failed'));
+  await work;
+  assert.equal(infrastructureSnapshot(id).nodes[0].status, 'pending');
+  const next = getDockerForHost(id);
+  t.mock.method(next, 'listContainers', async () => []); t.mock.method(next, 'info', async () => ({}));
+  await collectInfrastructure(); assert.equal(infrastructureSnapshot(id).nodes[0].status, 'ready');
+  deleteHost(id); upsertHost(config);
+  assert.equal(infrastructureSnapshot(id).nodes[0].status, 'pending');
+});

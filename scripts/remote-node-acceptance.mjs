@@ -21,6 +21,7 @@ const { upsertHost, getHost, deleteHost, pingHost, listHosts } = await import('.
 const { sshReadFile, sshWriteFile, sshExec } = await import('../backend/src/services/remote-shell.js');
 const { scanProjects, invalidateScanCache } = await import('../backend/src/services/scanner.js');
 const { setProjectPreference } = await import('../backend/src/lib/db.js');
+const { readProjectEnv, saveProjectEnv, listProjectEnvFiles } = await import('../backend/src/services/project-env.js');
 try {
   writeFileSync(composeFile, 'services:\n  app:\n    image: alpine:3.20\n    command: [sleep, "600"]\n', { mode: 0o600 });
   compose('up','-d','--pull','never');
@@ -44,6 +45,16 @@ try {
   project=(await scanProjects(host.id,{background:true})).find(row=>row.projectName===projectName);
   assert.equal(project.mountState,'remote_ssh');assert.equal(project.editable,true);
   checks.push('remote SFTP read/write and Compose execution, scoped discovery and editable workspace');
+  await sshWriteFile(host, path.join(dir, '.env.production'), 'MODE=initial\n');
+  assert((await listProjectEnvFiles(project)).some(file => file.name === '.env.production'));
+  const initial = await readProjectEnv(project, '.env.production');
+  const saved = await saveProjectEnv(project, { raw: 'MODE=updated\n', expectedVersion: initial.version }, '.env.production');
+  assert.equal((await readProjectEnv(project, '.env.production')).version, saved.version);
+  await assert.rejects(saveProjectEnv(project, { raw: 'MODE=stale\n', expectedVersion: initial.version }, '.env.production'), { code: 'ENV_VERSION_CONFLICT' });
+  assert.equal((await sshReadFile(host, path.join(dir, saved.backup))).content, 'MODE=initial\n');
+  cli('ln', ['-s', '/etc/hostname', path.join(dir, '.env.link')]);
+  await assert.rejects(readProjectEnv(project, '.env.link'), { code: 'ENV_UNSAFE_TARGET' });
+  checks.push('SSH env suffix discovery, read-version save, private backup and conflict/symlink rejection');
   const wrong=await pingHost('_probe',{...host,hostFingerprint:'SHA256:'+Buffer.alloc(32,7).toString('base64').replace(/=+$/,'')});assert.equal(wrong.ok,false);
   assert.equal(getHost(host.id).status,'online','temporary failed probe must not modify saved node');
   checks.push('changed SSH host key refused without modifying saved connection');

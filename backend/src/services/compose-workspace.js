@@ -73,29 +73,36 @@ async function runnerImage() {
   return runnerImagePromise;
 }
 
-async function createRunner(project) {
+async function createRunner(project, readOnly) {
   const { root } = projectPaths(project);
   const container = await docker.createContainer({
     Image: await runnerImage(),
     // AutoRemove 是异常退出的兜底；正常情况下由空闲计时器提前清理。
     Cmd: ['sleep', '3600'],
     WorkingDir: root,
-    Labels: { 'composeops.helper': 'compose-workspace', 'composeops.project': project.id },
+    Labels: { 'composeops.helper': 'compose-workspace', 'composeops.project': project.id,
+      'composeops.host': project.hostId || getActiveHostId(), 'composeops.workspace-mode': readOnly ? 'read' : 'execute' },
     HostConfig: {
       AutoRemove: true,
+      ...(readOnly ? { ReadonlyRootfs: true, NetworkMode: 'none' } : {}),
       Mounts: [
-        { Type: 'bind', Source: root, Target: root, ReadOnly: false },
-        { Type: 'bind', Source: '/var/run/docker.sock', Target: '/var/run/docker.sock', ReadOnly: false },
+        { Type: 'bind', Source: root, Target: root, ReadOnly: readOnly },
+        ...(!readOnly ? [{ Type: 'bind', Source: '/var/run/docker.sock', Target: '/var/run/docker.sock', ReadOnly: false }] : []),
       ],
       SecurityOpt: ['no-new-privileges:true'],
     },
   });
-  await container.start();
+  try { await container.start(); }
+  catch (error) {
+    // AutoRemove only applies after a successful start; failed starts otherwise leak containers.
+    await container.remove({ force: true }).catch(() => {});
+    throw error;
+  }
   return container;
 }
 
-function runnerKey(project) {
-  return `${project.id}\0${projectPaths(project).root}`;
+function runnerKey(project, readOnly) {
+  return `${project.hostId || getActiveHostId()}\0${project.id}\0${projectPaths(project).root}\0${readOnly ? 'read' : 'execute'}`;
 }
 
 function retireRunner(entry) {
@@ -147,19 +154,20 @@ function trimRunnerCache() {
   }
 }
 
-function createRunnerEntry(project, key) {
+function createRunnerEntry(project, key, readOnly) {
   trimRunnerCache();
   const entry = {
     key,
     projectId: project.id,
     hostId: project.hostId || getActiveHostId(),
+    readOnly,
     root: projectPaths(project).root,
     active: 0,
     lastUsedAt: Date.now(),
     idleTimer: null,
     retired: false,
     destroyPromise: null,
-    containerPromise: createRunner(project),
+    containerPromise: createRunner(project, readOnly),
   };
   // 创建失败时立即移出缓存，下一次请求可以重新创建。
   entry.containerPromise.catch(() => retireRunner(entry));
@@ -167,12 +175,12 @@ function createRunnerEntry(project, key) {
   return entry;
 }
 
-async function acquireRunner(project) {
-  const key = runnerKey(project);
+async function acquireRunner(project, readOnly) {
+  const key = runnerKey(project, readOnly);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let entry = workspaceRunners.get(key);
     const reused = !!entry;
-    if (!entry || entry.retired) entry = createRunnerEntry(project, key);
+    if (!entry || entry.retired) entry = createRunnerEntry(project, key, readOnly);
     clearTimeout(entry.idleTimer);
     entry.active += 1;
     try {
@@ -191,7 +199,7 @@ async function acquireRunner(project) {
   throw new Error('无法创建 Compose 工作容器');
 }
 
-async function withRunner(project, callback) {
+async function withRunner(project, callback, { readOnly = false } = {}) {
   assertProjectOperationAllowed(project.id);
   assertProjectHostUnchanged(project);
   const host = getProjectHost(project);
@@ -213,7 +221,7 @@ async function withRunner(project, callback) {
   }
   let lease;
   try {
-    lease = await acquireRunner(project);
+    lease = await acquireRunner(project, readOnly);
     // Compose 文件路径属于 Docker daemon 所在主机，而不是必然属于
     // ComposeOps backend 容器的文件系统。通过 daemon 创建的 workspace
     // runner 解析真实路径，避免 backend 容器看不到宿主机目录时误报 ENOENT。
@@ -234,6 +242,11 @@ async function withRunner(project, callback) {
   } finally {
     if (lease) releaseRunner(lease.entry);
   }
+}
+
+/** File browsing must not create a writable, networked Docker execution environment. */
+export function withReadOnlyRunner(project, callback) {
+  return withRunner(project, callback, { readOnly: true });
 }
 
 /** 目录来自 Docker 宿主机而非面板容器；本地 helper 只读、无网络、无 socket。 */
@@ -375,6 +388,8 @@ export function workspaceRunnerStats() {
     maxEntries: workspaceCacheMax,
     entries: [...workspaceRunners.values()].map((entry) => ({
       projectId: entry.projectId,
+      hostId: entry.hostId,
+      mode: entry.readOnly ? 'read' : 'execute',
       active: entry.active,
       retired: entry.retired,
     })),
@@ -527,7 +542,7 @@ function selectedFile(project, fileIndex) {
 
 export async function readWorkspaceCompose(project, fileIndex = 0) {
   const { index, filePath } = selectedFile(project, fileIndex);
-  return withRunner(project, async (container) => {
+  return withReadOnlyRunner(project, async (container) => {
     const { content } = await readArchiveFile(container, filePath);
     return { fileIndex: index, path: filePath, content };
   });

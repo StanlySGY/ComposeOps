@@ -15,45 +15,71 @@ const CACHEABLE_PATHS = ['/projects', '/hosts', '/personal/preferences', '/syste
 let hostEpoch = 0;
 
 function isGet(opts) {
-  return !opts?.method || opts.method === 'GET';
+  return !opts?.method || opts.method.toUpperCase() === 'GET';
 }
 function cacheable(path, opts) {
   return isGet(opts) && (CACHEABLE_PATHS.includes(path) || opts.cacheable);
 }
-function doFetch(path, opts = {}) {
+function waitForReadRecovery(signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(new DOMException('请求已取消', 'AbortError'));
+    };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, 250);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
+async function doFetch(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   const hasBody = opts.body !== undefined && opts.body !== null && opts.body !== '';
   if (hasBody && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
     headers['Content-Type'] = 'application/json';
   }
-  return fetch(`${BASE}${path}`, {
+  const init = {
     ...Object.fromEntries(Object.entries(opts).filter(([key]) => !['readOnly', 'notify', 'force', 'cacheable', 'cacheKey'].includes(key))),
     headers,
-  }).then(async (res) => {
-    if (!res.ok) {
-      let msg = res.statusText;
-      let code;
-      try {
-        const body = await res.json();
-        msg = body.message || body.error || JSON.stringify(body);
-        code = body.code || body.error;
-      } catch {
-        // 错误响应可能不是 JSON,保留 HTTP 状态文本作为兜底。
+  };
+  const epoch = hostEpoch;
+  // One bounded recovery for transport failures only. Never replay a write or a
+  // request whose node/abort context changed while the browser was reconnecting.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      if (opts.signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
+      const res = await fetch(`${BASE}${path}`, init);
+      if (!res.ok) {
+        let msg = res.statusText;
+        let code;
+        try {
+          const body = await res.json();
+          msg = body.message || body.error || JSON.stringify(body);
+          code = body.code || body.error;
+        } catch {
+          // 错误响应可能不是 JSON,保留 HTTP 状态文本作为兜底。
+        }
+        const err = userError(msg, { status: res.status, code });
+        err.status = res.status;
+        if (res.status === 401) window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
+        throw err;
       }
-      const err = userError(msg, { status: res.status, code });
-      err.status = res.status;
-      if (res.status === 401) window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
-      throw err;
+      if (res.status === 204) return null;
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const text = await res.text();
+        try { return text ? JSON.parse(text) : null; }
+        catch { return text; }
+      }
+      return await res.text();
+    } catch (cause) {
+      const transient = cause?.name === 'TypeError' && /Failed to fetch|NetworkError|Load failed|fetch failed/i.test(cause.message);
+      if (attempt || !isGet(opts) || !transient || opts.signal?.aborted || epoch !== hostEpoch) throw userError(cause);
+      await waitForReadRecovery(opts.signal);
+      if (epoch !== hostEpoch) throw new DOMException('节点已切换', 'AbortError');
     }
-    if (res.status === 204) return null;
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-      const text = await res.text();
-      try { return text ? JSON.parse(text) : null; }
-      catch { return text; }
-    }
-    return res.text();
-  }).catch(cause => { throw userError(cause); });
+  }
 }
 function revalidate(key, path, opts) {
   const entry = swrCache.get(key);
@@ -213,7 +239,7 @@ export const api = {
   getBackup: (projectId, backupId) => request(`/projects/${projectId}/backups/${backupId}`),
   restoreBackup: (projectId, backupId) => request(`/projects/${projectId}/backups/${backupId}/restore`, { method: 'POST' }),
   getProjectEnvBackups: (projectId, file = '.env') => request('/projects/' + projectId + '/env/backups?' + new URLSearchParams({ file })),
-  restoreProjectEnvBackup: (projectId, file, backup) => request('/projects/' + projectId + '/env/backups/restore', { method: 'POST', body: JSON.stringify({ file, backup }) }),
+  restoreProjectEnvBackup: (projectId, file, backup, expectedVersion) => request('/projects/' + projectId + '/env/backups/restore', { method: 'POST', body: JSON.stringify({ file, backup, expectedVersion }) }),
   // docker hosts
   getHosts: (force = false) => request('/hosts', { force }),
   saveHost: (payload) => request('/hosts', { method: 'POST', body: JSON.stringify(payload) }),

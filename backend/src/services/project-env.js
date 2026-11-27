@@ -1,9 +1,10 @@
-import { readFile, rename, writeFile, unlink, lstat, chmod, chown } from 'fs/promises';
+import { open, rename, writeFile, unlink, lstat, chmod, chown } from 'fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { parseDotenv, serializeDotenv, validateDotenv } from '../lib/dotenv.js';
 import { spawnComposeCommand } from './compose-runner.js';
-import { withRunner, execInRunner, readArchiveFile, putArchiveFile, runWorkspaceComposeArgs } from './compose-workspace.js';
+import { withRunner, withReadOnlyRunner, execInRunner, readArchiveFile, putArchiveFile, runWorkspaceComposeArgs } from './compose-workspace.js';
 import { addOperation } from '../lib/db.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 
@@ -11,6 +12,21 @@ const ENV_FILE = '.env';
 const ENV_EXAMPLE = '.env.example';
 const MAX_ENV_BYTES = 256 * 1024;
 const envFileLocks = new Map();
+
+export function envFileVersion(raw) {
+  // Missing and empty are distinct versions. The token contains no env values.
+  return createHash('sha256').update(JSON.stringify([raw !== null, raw])).digest('hex');
+}
+
+function assertEnvVersion(raw, expectedVersion) {
+  if (expectedVersion === undefined) return;
+  if (typeof expectedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(expectedVersion)) {
+    throw Object.assign(new Error('环境变量文件版本无效，请重新读取'), { statusCode: 400, code: 'ENV_INVALID_VERSION' });
+  }
+  if (envFileVersion(raw) !== expectedVersion) {
+    throw Object.assign(new Error('环境变量文件已被其他窗口或程序修改，当前草稿已保留，请重新读取并合并后保存'), { statusCode: 409, code: 'ENV_VERSION_CONFLICT' });
+  }
+}
 
 async function withEnvFileLock(filePath, task) {
   const previous = envFileLocks.get(filePath) || Promise.resolve();
@@ -39,9 +55,11 @@ async function assertRegularEnvTarget(filePath) {
 }
 
 // Isolated filesystem transaction so failure paths can be tested deterministically.
-export async function replaceEnvFileWithBackup({ envPath, backupPath, content, existingStat, fsOps = {} }) {
+export async function replaceEnvFileWithBackup({ envPath, backupPath, content, existingStat, expectedVersion, fsOps = {} }) {
   const ops = { writeFile, rename, unlink, chmod, chown, assertTarget: assertRegularEnvTarget, ...fsOps };
-  const previous = existingStat ? await readFile(envPath, 'utf8') : '';
+  const previousRaw = existingStat ? await readHostFile(envPath) : null;
+  assertEnvVersion(previousRaw, expectedVersion);
+  const previous = previousRaw ?? '';
   const tempPath = `${envPath}.tmp.${randomBytes(8).toString('hex')}`;
   let backupAttempted = false;
   let backupCreated = false;
@@ -58,6 +76,7 @@ export async function replaceEnvFileWithBackup({ envPath, backupPath, content, e
     if (!!latest !== !!existingStat || (latest && (latest.ino !== existingStat.ino || latest.dev !== existingStat.dev))) {
       throw Object.assign(new Error('环境变量文件在保存期间发生变化，请刷新后重试'), { statusCode: 409, code: 'ENV_VERSION_CONFLICT' });
     }
+    assertEnvVersion(await readHostFile(envPath), envFileVersion(previousRaw));
     await ops.rename(tempPath, envPath);
   } catch (error) {
     await ops.unlink(tempPath).catch(() => {});
@@ -69,7 +88,7 @@ export async function replaceEnvFileWithBackup({ envPath, backupPath, content, e
 }
 
 // Workspace/SSH equivalent, with the remote filesystem operations injectable for failure tests.
-export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content, ops = {} }) {
+export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content, expectedVersion, ops = {} }) {
   const remote = {
     exec: (target, args) => execInRunner(target, args),
     read: (target, filePath) => readArchiveFile(target, filePath),
@@ -94,6 +113,7 @@ export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, 
     throw error;
   });
   const previous = previousFile?.content ?? '';
+  assertEnvVersion(previousFile?.content ?? null, expectedVersion);
   const header = previousFile?.header ?? { mode: 0o600, uid: 0, gid: 0 };
   const tempName = `.composeops-${randomBytes(8).toString('hex')}.envtmp`;
   const tempPath = path.posix.join(root, tempName);
@@ -104,6 +124,10 @@ export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, 
     await remote.put(container, root, backupName, previous, { mode: 0o600, uid: header.uid, gid: header.gid });
     backupCreated = true;
     await remote.put(container, root, tempName, content, { mode: 0o600, uid: header.uid, gid: header.gid });
+    const safeAgain = await remote.exec(container, ['test', '!', '-L', envPath]);
+    if (safeAgain.code !== 0) throw Object.assign(new Error('环境变量目标在保存期间变为符号链接，拒绝写入'), { statusCode: 409, code: 'ENV_VERSION_CONFLICT' });
+    const latest = await remote.read(container, envPath).catch(error => { if (error.statusCode === 404) return null; throw error; });
+    assertEnvVersion(latest?.content ?? null, envFileVersion(previousFile?.content ?? null));
     const moved = await remote.exec(container, ['mv', '-f', '--', tempPath, envPath]);
     if (moved.code !== 0) throw new Error(moved.stderr?.trim() || '环境变量文件原子替换失败');
     await remote.exec(container, ['chmod', (header.mode & 0o777).toString(8), envPath]).catch(() => {});
@@ -116,12 +140,13 @@ export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, 
   return { ok: true, path: envPath, backup: backupName };
 }
 // 环境变量文件族:.env / *.env / .env.example(如 multi.env、.env.production)
-const ENV_FILE_PATTERN = /^(\.env(\.example)?|[\w][\w.-]{0,63}\.env|\.[\w.-]{0,63}\.env)$/;
+const ENV_FILE_PATTERN = /^(\.env(?:\.[\w][\w.-]{0,63})?|[\w][\w.-]{0,63}\.env|\.[\w.-]{0,63}\.env)$/;
 
 /** 校验文件名属于 env 文件族且无路径穿越;非法返回 null。 */
 export function normalizeEnvFileName(file) {
   const name = String(file || '').trim();
   if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return null;
+  if (/\.backup\.\d+\.[a-f0-9]{6}$/.test(name)) return null;
   return ENV_FILE_PATTERN.test(name) ? name : null;
 }
 
@@ -129,25 +154,27 @@ export function normalizeEnvFileName(file) {
 export async function listProjectEnvFiles(project) {
   if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
   const root = projectEnvRoot(project);
-  const names = new Set([ENV_FILE]);
+  const names = new Set();
+  const files = () => [...new Set([ENV_FILE, ...names])].sort().map(name => ({ name, exists: names.has(name) }));
   if (project.mounted) {
     const { readdir } = await import('node:fs/promises');
-    const entries = await readdir(root).catch(() => []);
-    for (const entry of entries) if (ENV_FILE_PATTERN.test(entry)) names.add(entry);
+    const entries = await readdir(root);
+    for (const entry of entries) if (normalizeEnvFileName(entry)) names.add(entry);
   } else {
     if (!project.editable || !project.workspaceAvailable) {
       throw Object.assign(new Error('项目未启用 Compose 目录能力,无法读取环境变量'), { statusCode: 403 });
     }
-    return withRunner(project, async (container) => {
-      const result = await execInRunner(container, ['ls', '-1A', '--', root]).catch(() => ({ stdout: '' }));
+    return withReadOnlyRunner(project, async (container) => {
+      const result = await execInRunner(container, ['ls', '-1A', '--', root]);
+      if (result.code !== 0) throw Object.assign(new Error('读取环境变量文件列表失败，请检查目录权限'), { statusCode: 502 });
       for (const line of String(result.stdout || '').split('\n')) {
         const name = line.trim();
-        if (name && ENV_FILE_PATTERN.test(name)) names.add(name);
+        if (normalizeEnvFileName(name)) names.add(name);
       }
-      return [...names].sort().map((name) => ({ name, exists: true }));
+      return files();
     });
   }
-  return [...names].sort().map((name) => ({ name, exists: true }));
+  return files();
 }
 
 function projectEnvRoot(project) {
@@ -159,17 +186,41 @@ function projectEnvRoot(project) {
 }
 
 async function readHostFile(filePath) {
+  let handle;
   try {
-    return await readFile(filePath, 'utf8');
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const info = await handle.stat();
+    if (!info.isFile()) throw Object.assign(new Error('环境变量目标必须是普通文件'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+    if (info.size > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量文件超过 256KB'), { statusCode: 413 });
+    const buffer = Buffer.alloc(MAX_ENV_BYTES + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, size, buffer.length - size, null);
+      if (!bytesRead) break;
+      size += bytesRead;
+    }
+    if (size > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量文件超过 256KB'), { statusCode: 413 });
+    return buffer.subarray(0, size).toString('utf8');
   } catch (error) {
     if (error.code === 'ENOENT') return null;
+    if (error.code === 'ELOOP') throw Object.assign(new Error('环境变量目标是符号链接，拒绝读取'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
     throw error;
-  }
+  } finally { await handle?.close(); }
 }
 
 async function readContainerFile(container, filePath, { missingOk = false } = {}) {
   try {
+    const safe = await execInRunner(container, ['test', '!', '-L', filePath]);
+    if (safe.code !== 0) throw Object.assign(new Error('环境变量目标是符号链接，拒绝读取'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+    const exists = await execInRunner(container, ['test', '-e', filePath]);
+    if (exists.code === 1 && missingOk) return null;
+    const regular = await execInRunner(container, ['test', '-f', filePath]);
+    if (exists.code !== 0 || regular.code !== 0) throw Object.assign(new Error('环境变量目标不是可读取的普通文件'), { statusCode: 403, code: 'ENV_UNSAFE_TARGET' });
+    const size = await execInRunner(container, ['stat', '-c', '%s', '--', filePath]);
+    if (size.code !== 0 || !/^\d+$/.test(size.stdout.trim())) throw Object.assign(new Error('无法验证环境变量文件大小'), { statusCode: 403 });
+    if (Number(size.stdout.trim()) > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量文件超过 256KB'), { statusCode: 413 });
     const { content } = await readArchiveFile(container, filePath);
+    if (Buffer.byteLength(content, 'utf8') > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量文件超过 256KB'), { statusCode: 413 });
     return content;
   } catch (error) {
     if (missingOk && error.statusCode === 404) return null;
@@ -195,7 +246,7 @@ export async function readProjectEnv(project, fileName = ENV_FILE) {
   if (!project.editable || !project.workspaceAvailable) {
     throw Object.assign(new Error('项目未启用 Compose 目录能力,无法读取环境变量'), { statusCode: 403 });
   }
-  return withRunner(project, async (container) => {
+  return withReadOnlyRunner(project, async (container) => {
     const raw = await readContainerFile(container, envPath, { missingOk: true });
     const exampleRaw = readExample ? await readContainerFile(container, examplePath, { missingOk: true }) : null;
     return buildEnvPayload({ file: target, envPath, examplePath: readExample ? examplePath : null, raw, exampleRaw });
@@ -208,6 +259,7 @@ function buildEnvPayload({ file, envPath, examplePath, raw, exampleRaw }) {
     path: envPath,
     examplePath: examplePath || '',
     exists: raw != null,
+    version: envFileVersion(raw),
     raw: raw ?? '',
     exampleRaw: exampleRaw ?? '',
     entries: parseDotenv(raw ?? ''),
@@ -227,12 +279,12 @@ export function buildRawFromEntries(entries) {
  * @param {string} raw  新内容(优先)或 entries 生成
  * @param {Array} [entries]
  */
-export async function saveProjectEnv(project, { raw, entries }, fileName = ENV_FILE) {
+export async function saveProjectEnv(project, { raw, entries, expectedVersion }, fileName = ENV_FILE) {
   if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
   const target = normalizeEnvFileName(fileName);
   if (!target) throw Object.assign(new Error('环境变量文件名不合法'), { statusCode: 400 });
   const content = raw != null ? raw : buildRawFromEntries(entries || []);
-  if (typeof content !== 'string' || content.length > MAX_ENV_BYTES) {
+  if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > MAX_ENV_BYTES) {
     throw Object.assign(new Error('环境变量内容为空或超过 256KB'), { statusCode: 400 });
   }
   const validation = validateDotenv(content);
@@ -248,21 +300,21 @@ export async function saveProjectEnv(project, { raw, entries }, fileName = ENV_F
     if (project.mounted) {
       const existingStat = await assertRegularEnvTarget(envPath);
       try {
-        await replaceEnvFileWithBackup({ envPath, backupPath, content, existingStat });
+        await replaceEnvFileWithBackup({ envPath, backupPath, content, existingStat, expectedVersion });
       } catch (error) {
         throw Object.assign(error, { statusCode: error.statusCode || 500, message: error.statusCode ? error.message : `写入 ${target} 失败:${error.message}` });
       }
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
-      return { ok: true, path: envPath, backup: backupName };
+      return { ok: true, path: envPath, backup: backupName, version: envFileVersion(content) };
     }
 
     if (!project.editable || !project.workspaceAvailable) {
       throw Object.assign(new Error('项目未启用 Compose 目录能力，无法写入环境变量'), { statusCode: 403 });
     }
     return withRunner(project, async (container) => {
-      const result = await replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content });
+      const result = await replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content, expectedVersion });
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'success', detail: backupName });
-      return result;
+      return { ...result, version: envFileVersion(content) };
     });
   }));
 }

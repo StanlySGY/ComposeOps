@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, chmod, rm, symlink, stat, readdir, writeFile 
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { saveProjectEnv, readProjectEnv, replaceEnvFileWithBackup, replaceWorkspaceEnvWithBackup } from '../src/services/project-env.js';
+import { envFileVersion, listProjectEnvFiles, normalizeEnvFileName, saveProjectEnv, readProjectEnv, replaceEnvFileWithBackup, replaceWorkspaceEnvWithBackup } from '../src/services/project-env.js';
 import { lstat, writeFile as fsWriteFile } from 'node:fs/promises';
 
 async function fixture(t) {
@@ -203,4 +203,71 @@ test('project env save: backup creation failure leaves the existing env untouche
     await chmod(root, 0o700);
   }
   assert.deepEqual((await readdir(root)).filter((name) => name.startsWith('.env.backup.')), []);
+});
+
+test('env 文件族支持环境后缀，列出真实存在状态并排除历史备份', async t => {
+  const { root, project } = await fixture(t);
+  for (const name of ['.env.production', '.env.test.local', 'app.env', '.env.example']) {
+    assert.equal(normalizeEnvFileName(name), name);
+    await writeFile(path.join(root, name), 'MODE=one\n');
+  }
+  await writeFile(path.join(root, '.env.production.backup.123456.abcdef'), 'MODE=backup\n');
+  for (const invalid of ['../.env', '.env..local', '/root/.env', '.env.production.backup.123456.abcdef']) assert.equal(normalizeEnvFileName(invalid), null);
+  const files = await listProjectEnvFiles(project);
+  assert.equal(files.length, 5);
+  assert.deepEqual(files.find(f => f.name === '.env'), { name: '.env', exists: false });
+  const original = await readProjectEnv(project, '.env.production');
+  const saved = await saveProjectEnv(project, { raw: 'MODE=two\n', expectedVersion: original.version }, '.env.production');
+  assert.equal(saved.version, (await readProjectEnv(project, '.env.production')).version);
+});
+
+test('读取拒绝符号链接、目录、超大文件，空文件与缺失文件版本不同', async t => {
+  const { root, project } = await fixture(t);
+  const missing = await readProjectEnv(project);
+  await writeFile(path.join(root, '.env'), '');
+  const empty = await readProjectEnv(project);
+  assert.notEqual(missing.version, empty.version);
+  await assert.rejects(saveProjectEnv(project, { raw: 'MODE=x\n', expectedVersion: missing.version }), { code: 'ENV_VERSION_CONFLICT' });
+  await mkdir(path.join(root, '.env.dir'));
+  await symlink(path.join(root, '.env'), path.join(root, '.env.link'));
+  await writeFile(path.join(root, '.env.large'), 'MODE=' + 'x'.repeat(256 * 1024));
+  await assert.rejects(readProjectEnv(project, '.env.dir'), { code: 'ENV_UNSAFE_TARGET' });
+  await assert.rejects(readProjectEnv(project, '.env.link'), { code: 'ENV_UNSAFE_TARGET' });
+  await assert.rejects(readProjectEnv(project, '.env.large'), { statusCode: 413 });
+});
+
+test('两窗口读到同一版本只能保存一次，冲突不新增备份、不覆盖最新文件', async t => {
+  const { root, project } = await fixture(t);
+  await writeFile(path.join(root, '.env'), 'MODE=initial\n');
+  const { version } = await readProjectEnv(project);
+  const results = await Promise.allSettled(['a', 'b'].map(mode => saveProjectEnv(project, { raw: `MODE=${mode}\n`, expectedVersion: version })));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.find(r => r.status === 'rejected').reason.code, 'ENV_VERSION_CONFLICT');
+  assert.equal((await readdir(root)).filter(n => n.includes('.backup.')).length, 1);
+  assert.equal((await readProjectEnv(project)).version, results.find(r => r.status === 'fulfilled').value.version);
+});
+
+test('原位外部编辑不改变 inode，保存前仍检测内容变化并清理临时文件', async t => {
+  const { root } = await fixture(t), envPath = path.join(root, '.env'), backupPath = path.join(root, '.env.backup.fixture');
+  await writeFile(envPath, 'MODE=initial\n');
+  const existingStat = await lstat(envPath);
+  await assert.rejects(replaceEnvFileWithBackup({ envPath, backupPath, existingStat, content: 'MODE=mine\n', fsOps: {
+    writeFile: async (file, ...args) => { await fsWriteFile(file, ...args); if (file.includes('.tmp.')) await fsWriteFile(envPath, 'MODE=external\n'); },
+  } }), { code: 'ENV_VERSION_CONFLICT' });
+  assert.equal(await readFile(envPath, 'utf8'), 'MODE=external\n');
+  assert.deepEqual(await readdir(root), ['.env']);
+});
+
+test('workspace/SSH 事务也校验读取版本与上传期间的外部修改', async () => {
+  let content = 'MODE=original\n', puts = 0;
+  const args = { container: { __ssh: true }, root: '/project', envPath: '/project/.env', backupPath: '/project/.env.backup.fixture', backupName: '.env.backup.fixture', content: 'MODE=mine\n' };
+  const ops = {
+    exec: async () => ({ code: 0 }),
+    read: async () => ({ content, header: { mode: 0o600, uid: 0, gid: 0 } }),
+    put: async (_runner, _dir, name) => { puts++; if (name.endsWith('.envtmp')) content = 'MODE=external\n'; },
+  };
+  await assert.rejects(replaceWorkspaceEnvWithBackup({ ...args, ops, expectedVersion: envFileVersion('MODE=old\n') }), { code: 'ENV_VERSION_CONFLICT' });
+  assert.equal(puts, 0);
+  await assert.rejects(replaceWorkspaceEnvWithBackup({ ...args, ops, expectedVersion: envFileVersion(content) }), { code: 'ENV_VERSION_CONFLICT' });
+  assert.equal(content, 'MODE=external\n');
 });

@@ -12,7 +12,7 @@ import { normalizeHostDirectory } from '../services/host-directory-paths.js';
 import { createDeploymentJob, streamDeploymentJob } from '../services/deployment-jobs.js';
 import { harvestSecretValues, redactSecrets } from '../lib/secret-redactor.js';
 import { composeProjectCreateOptions, createCustomComposeProject, validateProjectName, validateComposeInput } from '../services/custom-compose-project.js';
-import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles, normalizeEnvFileName } from '../services/project-env.js';
+import { readProjectEnv, saveProjectEnv, applyProjectEnv, assertEnvAccess, listProjectEnvFiles } from '../services/project-env.js';
 import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/project-env-backups.js';
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
 import { readContainerStat } from '../services/stats.js';
@@ -473,6 +473,7 @@ export default async function projectRoutes(fastify) {
         properties: {
           file: { type: 'string', minLength: 1, maxLength: 128 },
           backup: { type: 'string', minLength: 1, maxLength: 160 },
+          expectedVersion: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         },
       },
     },
@@ -481,10 +482,10 @@ export default async function projectRoutes(fastify) {
     if (!project) return;
     try {
       assertEnvAccess(project);
-      return await restoreProjectEnvBackup(project, request.body.file, request.body.backup);
+      return await restoreProjectEnvBackup(project, request.body.file, request.body.backup, { expectedVersion: request.body.expectedVersion });
     } catch (error) {
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.restore', status: 'failed', detail: error.message });
-      return reply.code(error.statusCode || 500).send({ error: 'env_restore_failed', message: error.message });
+      return reply.code(error.statusCode || 500).send({ error: 'env_restore_failed', code: error.code, message: error.message });
     }
   });
 
@@ -507,7 +508,7 @@ export default async function projectRoutes(fastify) {
   }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
     if (!project) return;
-    const file = normalizeEnvFileName(request.query?.file) || '.env';
+    const file = request.query?.file ?? '.env';
     try {
       assertEnvAccess(project);
       return await readProjectEnv(project, file);
@@ -529,6 +530,7 @@ export default async function projectRoutes(fastify) {
         properties: {
           file: { type: 'string', maxLength: 128 },
           raw: { type: 'string', maxLength: CONTENT_MAX },
+          expectedVersion: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           entries: {
             type: 'array',
             maxItems: 2000,
@@ -549,13 +551,13 @@ export default async function projectRoutes(fastify) {
     if (!project) return;
     try {
       assertEnvAccess(project);
-      const { raw, entries } = request.body || {};
-      const file = normalizeEnvFileName(request.body?.file) || '.env';
-      const result = await saveProjectEnv(project, { raw, entries }, file);
+      const { raw, entries, expectedVersion } = request.body || {};
+      const file = request.body?.file ?? '.env';
+      const result = await saveProjectEnv(project, { raw, entries, expectedVersion }, file);
       return result;
     } catch (error) {
       addOperation({ projectId: project.id, projectName: project.projectName, action: 'env.save', status: 'failed', detail: error.message });
-      return reply.code(error.statusCode || 500).send({ error: 'env_save_failed', message: error.message });
+      return reply.code(error.statusCode || 500).send({ error: 'env_save_failed', code: error.code, message: error.message });
     }
   });
 

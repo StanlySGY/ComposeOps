@@ -5,6 +5,7 @@ import { at, projects, projectGroups, metrics, inspection, operations, alerts, s
 import { previewIncidentFetch } from './incidents.js';
 import { previewSreFetch } from './sre.js';
 import { previewInfrastructure } from './infrastructure.js';
+import { parseDotenv } from '../src/lib/dotenv.js';
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const unsupported = () => json({ message: '此操作未在离线预览中模拟，请在自己的部署中使用。没有执行任何真实操作。' }, 501);
@@ -24,6 +25,12 @@ const enrichCronJob = job => ({ ...job, nextRunAt: job.enabled ? nextRunTime(job
 const sessions = [];
 const histories = new Map();
 const jobs = new Map();
+const envFiles = new Map();
+function previewEnv(projectId, file) {
+  const key = `${projectId}:${file}`;
+  if (!envFiles.has(key)) envFiles.set(key, { raw: file === '.env.production' ? 'APP_MODE=production\n' : '# 示例环境变量\nTZ=Asia/Shanghai\nAPP_MODE=development\n', version: '1'.padStart(64, '0') });
+  return envFiles.get(key);
+}
 const pending = new Map();
 const deploymentReviews = new Map();
 let aiRetentionDays = 90;
@@ -104,6 +111,12 @@ export async function previewFetch(input, options = {}) {
   }
   const pid = path.split('/')[2];
   const project = projects.find(item => item.id === pid);
+  if (project && path.endsWith('/env') && method === 'PUT') {
+    const value = previewEnv(pid, body.file || '.env');
+    if (body.expectedVersion && body.expectedVersion !== value.version) return json({ message: '环境变量文件已被其他窗口修改，当前草稿已保留', code: 'ENV_VERSION_CONFLICT' }, 409);
+    value.raw = body.raw || ''; value.version = (BigInt('0x' + value.version) + 1n).toString(16).padStart(64, '0');
+    return json({ ok: true, version: value.version });
+  }
   const reads = {
     '/health': { status: 'ok', docker: 'ok', preview: true },
     '/auth/status': { authenticated: true, setupRequired: false },
@@ -210,8 +223,8 @@ export async function previewFetch(input, options = {}) {
       if (path.endsWith('/activity')) return json({ activity: [], operations: [], backups: [] });
       if (path.endsWith('/updates')) return json({ results: [], updates: [], images: [], hasUpdate: false });
       if (path.endsWith('/webui')) return json({ links: [], urls: [] });
-      if (path.endsWith('/env/files')) return json({ files: [{ name: '.env', path: project.workingDir + '/.env' }] });
-      if (path.endsWith('/env')) return json({ content: 'TZ=Asia/Shanghai\n', exists: true, file: '.env', path: project.workingDir + '/.env', variables: [] });
+      if (path.endsWith('/env/files')) return json({ files: ['.env', '.env.production'].map(name => ({ name, exists: true })) });
+      if (path.endsWith('/env')) { const file = url.searchParams.get('file') || '.env', value = previewEnv(pid, file); return json({ ...value, entries: parseDotenv(value.raw), exists: true, file, path: project.workingDir + '/' + file }); }
       if (path.endsWith('/db-dump')) return json({ targets: [] });
       if (path.endsWith('/stats/stream')) return eventStream([{ type: 'stats', containers: metrics.containers.filter(c => c.projectId === pid) }]);
     }

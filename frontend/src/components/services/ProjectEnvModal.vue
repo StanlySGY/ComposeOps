@@ -9,15 +9,28 @@
     <template #header-actions>
       <KeyRound class="h-4 w-4 shrink-0 text-status-info" />
       <span class="hidden font-mono text-[11px] text-surface-400 sm:inline">{{ data.path || '.env' }}</span>
-      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input w-auto input-sm" :value="activeFile" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}</option></select>
-      <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
+      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input w-auto input-sm" :value="activeFile" :disabled="saving || previewLoading" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}{{ item.exists ? '' : '（待创建）' }}</option></select>
+      <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" :disabled="saving || previewLoading" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
     </template>
 
     <!-- 模式切换 Tab -->
     <div class="tabs shrink-0 px-4 pt-2">
-        <button :class="{ active: mode === 'table' }" @click="mode = 'table'"><ListOrdered class="h-4 w-4" />键值表格</button>
-        <button :class="{ active: mode === 'raw' }" @click="mode = 'raw'"><FileCode2 class="h-4 w-4" />原始文本</button>
+        <button :class="{ active: mode === 'table' }" :disabled="editorDisabled" @click="switchMode('table')"><ListOrdered class="h-4 w-4" />键值表格</button>
+        <button :class="{ active: mode === 'raw' }" :disabled="editorDisabled" @click="switchMode('raw')"><FileCode2 class="h-4 w-4" />原始文本</button>
       </div>
+
+      <div v-if="loadError || saveError" class="mx-4 mt-3 rounded-lg border border-status-error/30 bg-status-error/5 p-3 text-sm" role="alert">
+        <p>{{ loadError || saveError }}</p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button v-if="loadError" class="btn-secondary btn-sm" :disabled="loading" @click="reload">重试读取</button>
+          <template v-if="versionConflict">
+            <button class="btn-secondary btn-sm" @click="copyDraft">复制当前草稿</button>
+            <button class="btn-secondary btn-sm" @click="reload">重新读取磁盘内容</button>
+          </template>
+        </div>
+      </div>
+      <p v-if="filesError" class="mx-4 mt-2 text-xs text-status-warn" role="status">{{ filesError }} <button class="underline" @click="loadEnvFiles">重试文件列表</button></p>
+      <p v-if="loading" class="px-4 pt-3 text-xs text-surface-400" role="status">正在读取 {{ activeFile }}…</p>
 
       <section class="mx-4 mt-3 shrink-0 rounded-lg border border-surface-800 bg-surface-950/40">
         <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-surface-300 hover:text-surface-100" :disabled="backupLoading" @click="backupsExpanded = !backupsExpanded">
@@ -27,13 +40,14 @@
           <RefreshCw class="ml-auto h-3.5 w-3.5" :class="{ 'animate-spin': backupLoading }" @click.stop="loadEnvBackups" />
         </button>
         <div v-if="backupsExpanded" class="max-h-36 space-y-1 overflow-auto border-t border-surface-800 p-2">
-          <p v-if="!envBackups.length && !backupLoading" class="px-2 py-3 text-center text-xs text-surface-400">当前文件暂无历史备份</p>
+          <p v-if="backupError" class="px-2 py-3 text-xs text-status-warn" role="status">{{ backupError }} <button class="underline" @click="loadEnvBackups">重试</button></p>
+          <p v-else-if="!envBackups.length && !backupLoading" class="px-2 py-3 text-center text-xs text-surface-400">当前文件暂无历史备份</p>
           <div v-for="backup in envBackups" :key="backup.name" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-900">
             <div class="min-w-0 flex-1">
               <p class="truncate font-mono text-[11px] text-surface-300">{{ backup.name }}</p>
               <p class="text-[10px] text-surface-400">{{ formatBackupDate(backup.createdAt) }}<span v-if="backup.size != null"> · {{ formatBackupSize(backup.size) }}</span></p>
             </div>
-            <button class="btn-secondary shrink-0 btn-sm" :disabled="saving || backupLoading" @click="requestRestore(backup)">恢复</button>
+            <button class="btn-secondary shrink-0 btn-sm" :disabled="editorDisabled || backupLoading" @click="requestRestore(backup)">恢复</button>
           </div>
         </div>
       </section>
@@ -47,9 +61,9 @@
       </div>
 
       <!-- 主体 -->
-      <div class="min-h-0 flex-1 overflow-auto p-4">
+      <fieldset :disabled="editorDisabled" :aria-busy="loading || saving" class="min-h-0 min-w-0 flex-1 overflow-auto p-4">
         <!-- 表格模式 -->
-        <div v-if="mode === 'table'" class="space-y-2">
+        <div v-if="loaded && mode === 'table'" class="space-y-2">
           <div v-for="(entry, index) in filteredEntries" :key="entry._uid" class="flex flex-col gap-1 rounded-lg border border-surface-800 bg-surface-950/40 p-2 sm:flex-row sm:items-center">
             <div class="grid flex-1 gap-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:gap-2">
               <input v-model="entry.key" :aria-label="entry.key ? `${entry.key} 变量名` : `第 ${index + 1} 行变量名`" class="input font-mono text-xs" placeholder="KEY" spellcheck="false" @input="refreshSecret(entry)" />
@@ -79,7 +93,7 @@
         </div>
 
         <!-- Raw 模式 -->
-        <div v-else class="flex min-h-[40vh] flex-col">
+        <div v-else-if="loaded" class="flex min-h-[40vh] flex-col">
           <textarea
             v-model="rawText"
             aria-label="环境变量原始文本"
@@ -89,15 +103,16 @@
           ></textarea>
           <p class="mt-2 text-[11px] text-surface-400">支持 `.env` 与 `docker compose` 变量语法;保存时自动做合法性校验。</p>
         </div>
-      </div>
+      </fieldset>
 
     <!-- 底部操作 -->
     <div class="shrink-0 border-t border-surface-800 px-4 py-3">
       <div class="flex flex-wrap items-center gap-2">
-        <button class="btn-secondary" @click="addRow"><Plus class="h-4 w-4" />新增变量</button>
+        <button class="btn-secondary" :disabled="editorDisabled" @click="addRow"><Plus class="h-4 w-4" />新增变量</button>
+        <span class="text-xs text-surface-400" aria-live="polite">{{ saving ? '正在保存…' : dirty ? '有未保存修改' : loaded ? '已与读取版本同步' : '' }}</span>
         <span class="ml-auto flex flex-wrap gap-2">
-          <button class="btn-ghost" :disabled="saving" @click="saveOnly"><Save class="h-4 w-4" />仅保存文件</button>
-          <button class="btn-primary" :disabled="saving" @click="saveAndApply"><Play class="h-4 w-4" />保存并应用</button>
+          <button class="btn-ghost" :disabled="editorDisabled" @click="saveOnly"><Save class="h-4 w-4" />仅保存文件</button>
+          <button class="btn-primary" :disabled="editorDisabled" @click="saveAndApply"><Play class="h-4 w-4" />保存并应用</button>
         </span>
       </div>
     </div>
@@ -116,7 +131,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileCode2, History, KeyRound, ListOrdered, Play, Plus, RefreshCw, Save, Search, Trash2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import { parseDotenv, serializeDotenv, isSecretKey } from '../../lib/dotenv.js';
@@ -146,7 +161,11 @@ const backupsExpanded = ref(false);
 const restorePending = ref(null);
 const revealed = ref(new Set());
 const confirm = ref(false);
-const pendingApply = ref(false);
+const loaded = ref(false), loadError = ref(''), saveError = ref(''), versionConflict = ref(false), filesError = ref(''), backupError = ref('');
+const tableSource = ref(''), tableBaseline = ref('');
+const editorDisabled = computed(() => !loaded.value || loading.value || saving.value || previewLoading.value);
+let alive = true, request = 0, fileRequest = 0, backupRequest = 0;
+const current = version => alive && version === request;
 const pendingConfirm = ref(null);
 let uidSeq = 0;
 
@@ -155,47 +174,58 @@ const filteredEntries = computed(() => {
   if (!kw) return entries.value;
   return entries.value.filter((entry) => entry.key.toLowerCase().includes(kw));
 });
-const dirty = computed(() => {
-  if (mode.value === 'raw') return rawText.value !== data.value.raw;
-  return JSON.stringify(entries.value.map(({ key, value, comment }) => ({ key, value, comment }))) !== JSON.stringify(parseEntries(data.value.raw));
-});
+const tableValue = () => JSON.stringify(entries.value.map(({ key, value, comment }) => ({ key, value, comment })));
+const tableChanged = computed(() => tableValue() !== tableBaseline.value);
+const dirty = computed(() => loaded.value && buildRaw() !== data.value.raw);
 
-function parseEntries(raw) {
-  return parseDotenv(raw).map(({ key, value, comment }) => ({ key, value, comment }));
+function setEditor(raw) {
+  rawText.value = raw;
+  tableSource.value = raw;
+  entries.value = parseDotenv(raw).map(entry => ({ ...entry, _uid: ++uidSeq }));
+  tableBaseline.value = tableValue();
+  revealed.value = new Set();
 }
-
+function switchMode(next) {
+  if (editorDisabled.value || next === mode.value) return;
+  if (next === 'raw') rawText.value = tableChanged.value ? serializeDotenv(entries.value) : tableSource.value;
+  else setEditor(rawText.value);
+  mode.value = next;
+}
 async function load() {
-  loading.value = true;
+  const version = ++request, projectId = props.project.id, file = activeFile.value;
+  loading.value = true; loaded.value = false; loadError.value = ''; saveError.value = ''; versionConflict.value = false;
+  envBackups.value = []; ++backupRequest; backupLoading.value = false; backupError.value = '';
   try {
-    const result = await api.getProjectEnv(props.project.id, activeFile.value);
-    data.value = result;
-    rawText.value = result.raw || '';
-    entries.value = (result.entries || []).map((entry) => ({ ...entry, _uid: ++uidSeq }));
+    const result = await api.getProjectEnv(projectId, file);
+    if (!current(version)) return;
+    data.value = { ...result, raw: result.raw || '' };
+    setEditor(data.value.raw);
+    loaded.value = true;
     if (result.file) activeFile.value = result.file;
-    await loadEnvBackups();
+    void loadEnvBackups();
   } catch (error) {
-    toast.error(`读取环境变量失败：${error.message}`);
-  } finally { loading.value = false; }
+    if (current(version)) loadError.value = `读取 ${file} 失败：${error.message}。成功读取前不能保存。`;
+  } finally { if (current(version)) loading.value = false; }
 }
-
 async function loadEnvFiles() {
+  const version = ++fileRequest, projectId = props.project.id;
   try {
-    envFiles.value = (await api.getProjectEnvFiles(props.project.id)).files || [];
-    if (!envFiles.value.some((item) => item.name === activeFile.value)) {
-      envFiles.value.unshift({ name: activeFile.value, exists: false });
-    }
-  } catch { envFiles.value = [{ name: '.env', exists: true }]; }
+    const result = await api.getProjectEnvFiles(projectId);
+    if (!alive || version !== fileRequest || projectId !== props.project.id) return;
+    envFiles.value = result.files || [];
+    filesError.value = '';
+    if (!envFiles.value.some(item => item.name === activeFile.value)) envFiles.value.unshift({ name: activeFile.value, exists: false });
+  } catch (error) { if (alive && version === fileRequest) filesError.value = '文件列表读取失败：' + error.message; }
 }
-
 async function loadEnvBackups() {
+  const version = ++backupRequest, projectId = props.project.id, file = activeFile.value;
   backupLoading.value = true;
   try {
-    const result = await api.getProjectEnvBackups(props.project.id, activeFile.value);
-    envBackups.value = result.backups || [];
+    const result = await api.getProjectEnvBackups(projectId, file);
+    if (alive && version === backupRequest) { envBackups.value = result.backups || []; backupError.value = ''; }
   } catch (error) {
-    envBackups.value = [];
-    toast.error('读取历史备份失败：' + error.message);
-  } finally { backupLoading.value = false; }
+    if (alive && version === backupRequest) { envBackups.value = []; backupError.value = '读取历史备份失败：' + error.message; }
+  } finally { if (alive && version === backupRequest) backupLoading.value = false; }
 }
 
 function formatBackupDate(timestamp) {
@@ -207,6 +237,7 @@ function formatBackupSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 function requestRestore(backup) {
+  if (editorDisabled.value) return;
   if (dirty.value) {
     toast.error('请先保存或放弃当前修改，再恢复历史备份');
     return;
@@ -216,26 +247,32 @@ function requestRestore(backup) {
 
 async function confirmRestore() {
   const backup = restorePending.value;
-  if (!backup) return;
+  if (!backup || editorDisabled.value) return;
+  const version = request;
   restorePending.value = null;
   saving.value = true;
   try {
-    const result = await api.restoreProjectEnvBackup(props.project.id, activeFile.value, backup.name);
+    const result = await api.restoreProjectEnvBackup(props.project.id, activeFile.value, backup.name, data.value.version);
+    if (!current(version)) return;
     toast.success('已恢复历史备份，并将恢复前内容另存为 ' + result.backup);
+    saving.value = false;
     await load();
-    emit('refresh');
+    if (alive) emit('refresh');
   } catch (error) {
-    toast.error('恢复失败：' + error.message);
-  } finally { saving.value = false; }
+    if (current(version)) { saveError.value = '恢复失败：' + error.message; versionConflict.value = error.code === 'ENV_VERSION_CONFLICT'; }
+  } finally { if (current(version)) saving.value = false; }
 }
 
 function switchEnvFile(name) {
+  if (saving.value || previewLoading.value || name === activeFile.value) return;
   if (dirty.value) { pendingConfirm.value = { type: 'switch', name, message: '当前有未保存修改,切换文件会丢失这些内容。继续?' }; return; }
   activeFile.value = name;
   load();
 }
-function reload() { if (dirty.value) { pendingConfirm.value = { type: 'reload', message: '当前有未保存修改,重置会丢失这些内容。继续?' }; return; } load(); }
+function reload() { if (saving.value || previewLoading.value) return; if (dirty.value) { pendingConfirm.value = { type: 'reload', message: '当前有未保存修改,重置会丢失这些内容。继续?' }; return; } load(); }
 function addRow() {
+  if (editorDisabled.value) return;
+  if (mode.value === 'raw') switchMode('table');
   entries.value.push({ key: '', value: '', comment: '', isSecret: false, _uid: ++uidSeq });
   nextTick(() => { keyword.value = ''; });
 }
@@ -262,11 +299,16 @@ async function copyValue(entry) {
   catch { toast.error('复制失败'); }
 }
 function buildRaw() {
-  if (mode.value === 'raw') return rawText.value.trim();
-  return serializeDotenv(entries.value);
+  if (mode.value === 'raw') return rawText.value;
+  return tableChanged.value ? serializeDotenv(entries.value) : tableSource.value;
 }
 
+async function copyDraft() {
+  try { await navigator.clipboard.writeText(buildRaw()); toast.success('已复制当前草稿，请妥善保管其中的敏感值'); }
+  catch { toast.error('复制失败，可切换原始文本手动复制'); }
+}
 function close() {
+  if (saving.value) return;
   if (dirty.value) { pendingConfirm.value = { type: 'close', message: '有未保存的修改,关闭会丢失这些内容。继续?' }; return; }
   emit('close');
 }
@@ -279,42 +321,52 @@ function confirmPending() {
   else if (action.type === 'close') emit('close');
 }
 async function saveOnly() { await doSave(false); }
-async function saveAndApply() { pendingApply.value = true; confirm.value = true; }
+async function saveAndApply() { if (!editorDisabled.value) confirm.value = true; }
 const showPreview = ref(false);
 const changePreview = ref(null);
 const previewLoading = ref(false);
 async function applyWithPreview() {
+  if (editorDisabled.value) return;
+  const version = request;
   confirm.value = false;
   previewLoading.value = true;
   try {
     const compose = await api.getComposeFile(props.project.id);
-    changePreview.value = await api.previewCompose(props.project.id, compose?.content ?? '');
+    if (!current(version)) return;
+    const preview = await api.previewCompose(props.project.id, compose?.content ?? '');
+    if (current(version)) changePreview.value = preview;
   } catch {
-    changePreview.value = null;
+    if (current(version)) changePreview.value = null;
   } finally {
-    previewLoading.value = false;
-    showPreview.value = true;
+    if (current(version)) { previewLoading.value = false; showPreview.value = true; }
   }
 }
 async function doSave(apply) {
-  confirm.value = false;
-  showPreview.value = false;
-  saving.value = true;
+  if (editorDisabled.value) return;
+  const version = request, project = props.project, file = activeFile.value, raw = buildRaw();
+  confirm.value = false; showPreview.value = false; saving.value = true; saveError.value = ''; versionConflict.value = false;
   try {
-    await api.saveProjectEnv(props.project.id, { file: activeFile.value, raw: buildRaw() });
+    const saved = await api.saveProjectEnv(project.id, { file, raw, expectedVersion: data.value.version });
+    if (!current(version)) return;
+    data.value = { ...data.value, raw, exists: true, version: saved.version };
+    setEditor(raw);
     toast.success('环境变量更新成功');
-    await load();
+    void loadEnvBackups(); void loadEnvFiles();
     emit('refresh');
-    if (apply) {
-      // 触发应用:SSE 流式;由父级打开 OperationOutputDrawer
-      emit('apply', { project: props.project });
-    }
+    if (apply) emit('apply', { project });
   } catch (error) {
-    toast.error(`保存失败：${error.message}`);
-  } finally { saving.value = false; pendingApply.value = false; }
+    if (current(version)) { saveError.value = `保存失败：${error.message}`; versionConflict.value = error.code === 'ENV_VERSION_CONFLICT'; }
+  } finally { if (current(version)) saving.value = false; }
 }
-
-watch(() => props.project.id, () => { if (props.project.id) { load(); loadEnvFiles(); } });
-load();
-loadEnvFiles();
+function beforeUnload(event) { if (dirty.value || saving.value) { event.preventDefault(); event.returnValue = ''; } }
+window.addEventListener('beforeunload', beforeUnload);
+onBeforeUnmount(() => { alive = false; request++; fileRequest++; backupRequest++; window.removeEventListener('beforeunload', beforeUnload); });
+watch(() => props.project.id, () => {
+  if (!props.project.id) return;
+  saving.value = false; previewLoading.value = false; confirm.value = false; showPreview.value = false;
+  restorePending.value = null; pendingConfirm.value = null; activeFile.value = '.env'; envFiles.value = []; filesError.value = '';
+  void load(); void loadEnvFiles();
+});
+void load();
+void loadEnvFiles();
 </script>

@@ -1,7 +1,7 @@
 import { readdir, lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { saveProjectEnv } from './project-env.js';
-import { withRunner, execInRunner, readArchiveFile } from './compose-workspace.js';
+import { normalizeEnvFileName, saveProjectEnv } from './project-env.js';
+import { withReadOnlyRunner, execInRunner, readArchiveFile } from './compose-workspace.js';
 import { addOperation } from '../lib/db.js';
 
 const MAX_ENV_BYTES = 256 * 1024;
@@ -12,12 +12,6 @@ function projectRoot(project) {
     throw Object.assign(new Error('项目工作目录缺失，无法定位环境变量备份'), { statusCode: 409 });
   }
   return path.posix.normalize(root);
-}
-
-function validEnvName(file) {
-  const name = String(file || '').trim();
-  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return null;
-  return /^(\.env(\.example)?|[\w][\w.-]{0,63}\.env|\.[\w.-]{0,63}\.env)$/.test(name) ? name : null;
 }
 
 function backupPattern(file) {
@@ -48,7 +42,7 @@ async function listMountedBackups(root, pattern) {
 
 export async function listProjectEnvBackups(project, fileName = '.env') {
   if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
-  const file = validEnvName(fileName);
+  const file = normalizeEnvFileName(fileName);
   if (!file) throw Object.assign(new Error('环境变量文件名不合法'), { statusCode: 400 });
   const root = projectRoot(project);
   const pattern = backupPattern(file);
@@ -56,7 +50,7 @@ export async function listProjectEnvBackups(project, fileName = '.env') {
   if (!project.editable || !project.workspaceAvailable) {
     throw Object.assign(new Error('项目未启用 Compose 目录能力，无法读取环境变量备份'), { statusCode: 403 });
   }
-  return withRunner(project, async (container) => {
+  return withReadOnlyRunner(project, async (container) => {
     const result = await execInRunner(container, ['find', root, '-maxdepth', '1', '-type', 'f', '-name', file + '.backup.*', '-print']);
     if (result.code !== 0) throw Object.assign(new Error(result.stderr?.trim() || '读取环境变量备份列表失败'), { statusCode: 502 });
     const backups = [];
@@ -73,9 +67,9 @@ export async function listProjectEnvBackups(project, fileName = '.env') {
   });
 }
 
-export async function restoreProjectEnvBackup(project, fileName, backupName) {
+export async function restoreProjectEnvBackup(project, fileName, backupName, { expectedVersion } = {}) {
   if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
-  const file = validEnvName(fileName);
+  const file = normalizeEnvFileName(fileName);
   if (!file) throw Object.assign(new Error('环境变量文件名不合法'), { statusCode: 400 });
   if (typeof backupName !== 'string' || !backupPattern(file).test(backupName)) {
     throw Object.assign(new Error('环境变量备份名称不合法'), { statusCode: 400, code: 'ENV_BACKUP_INVALID' });
@@ -99,7 +93,7 @@ export async function restoreProjectEnvBackup(project, fileName, backupName) {
     if (!project.editable || !project.workspaceAvailable) {
       throw Object.assign(new Error('项目未启用 Compose 目录能力，无法恢复环境变量备份'), { statusCode: 403 });
     }
-    content = await withRunner(project, async (container) => {
+    content = await withReadOnlyRunner(project, async (container) => {
       const remotePath = path.posix.join(root, backupName);
       const safe = await execInRunner(container, ['test', '!', '-L', remotePath]);
       const regular = await execInRunner(container, ['test', '-f', remotePath]);
@@ -116,7 +110,7 @@ export async function restoreProjectEnvBackup(project, fileName, backupName) {
   if (Buffer.byteLength(content, 'utf8') > MAX_ENV_BYTES) {
     throw Object.assign(new Error('环境变量备份超过 256KB，拒绝恢复'), { statusCode: 413 });
   }
-  const result = await saveProjectEnv(project, { raw: content }, file);
+  const result = await saveProjectEnv(project, { raw: content, expectedVersion }, file);
   addOperation({
     projectId: project.id,
     projectName: project.projectName,
