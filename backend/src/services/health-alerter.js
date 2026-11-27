@@ -1,6 +1,6 @@
 import { getActivityDocker, getProjectDocker } from './docker-hosts.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
-import { scanAllProjects as scanProjects } from './scanner.js';
+import { scanProjectInventory } from './scanner.js';
 import { recordAlertEventAndNotify } from './events.js';
 
 const DEFAULT_EVENTS = ['exit', 'oom', 'unhealthy'];
@@ -99,12 +99,13 @@ async function inspectContainer(docker, containerId) {
 async function poll() {
   const config = getNotificationConfig(false);
   if (!config.enabled) return;
-  let projects;
-  try { projects = await scanProjects(); } catch { return; }
+  let inventory;
+  try { inventory = await scanProjectInventory(); } catch { return; }
+  const projects = inventory.projects, unavailable = new Set(inventory.nodeErrors.map(node => node.hostId));
   const managedProjects = projects.filter((item) => item.managed);
   const managedIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => `${project.hostId}:${item.id}`)));
   for (const containerId of previousStates.keys()) {
-    if (!managedIds.has(containerId)) previousStates.delete(containerId);
+    if (!unavailable.has(containerId.split(':')[0]) && !managedIds.has(containerId)) previousStates.delete(containerId);
   }
   for (const project of managedProjects) {
     const docker = getProjectDocker(project);

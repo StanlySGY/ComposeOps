@@ -1,7 +1,7 @@
 <template>
   <div class="page-shell services-view">
     <div class="page-header">
-      <div><h1 class="page-title">服务总览</h1><p class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
+      <div><h1 class="page-title">服务总览</h1><p v-if="store.error && !store.projects.length" class="page-subtitle">项目清单暂不可用，请检查节点连接后刷新。</p><p v-else class="page-subtitle">自动发现 {{ store.projects.length }} 个项目 · 已纳管 {{ managedCount }} 个 · {{ containerCount }} 个容器</p></div>
       <div class="page-actions service-page-actions">
         <router-link to="/settings?tab=mounts" class="btn-secondary">纳管与分组</router-link>
         <button class="btn-secondary compose-create-button" :disabled="busy" @click="createComposeOpen = true"><Plus class="h-4 w-4" />新建 Compose</button>
@@ -9,7 +9,7 @@
     </div>
     <div class="service-refresh-toolbar"><span v-if="lastUpdated" class="text-xs text-muted">更新于 {{ lastUpdated }}</span><label class="toggle-label"><input v-model="autoRefresh" type="checkbox" />自动刷新</label><button class="btn-secondary btn-sm" :disabled="manualRefreshing || store.loading" :aria-busy="manualRefreshing" @click="manualRefresh"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': manualRefreshing || store.loading }" />{{ manualRefreshing ? '刷新中' : '刷新' }}</button><button class="icon-btn hidden md:inline-grid" title="快捷键速查表(?)" aria-label="快捷键速查表" @click="openCheatSheet"><Keyboard class="w-4 h-4" /></button></div>
     <p v-if="focusNotice" class="scope-callout" role="status">{{ focusNotice }}</p>
-    <p v-if="store.error" class="alert-error" role="alert">{{ store.error }}</p>
+    <p v-if="store.error" class="alert-error" role="alert">{{ store.error }}<span v-if="store.projects.length"> · 保留上次读取的项目，当前状态待刷新确认。</span></p>
     <button v-if="output.action && !output.open" class="operation-receipt" :data-state="output.running ? 'running' : output.failureReason || (output.exitCode != null && output.exitCode !== 0) ? 'failed' : 'done'" @click="output.open = true">
       <RefreshCw v-if="output.running" class="h-4 w-4 animate-spin" /><History v-else class="h-4 w-4" />
       <span><strong>{{ actionLabel(output.action) }} · {{ output.name }}</strong><small>{{ output.running ? '操作进行中，可重新打开查看输出' : '上次操作记录 · 查看结果与状态核对' }}</small></span><span class="receipt-open">查看输出<ChevronRight :size="14" /></span>
@@ -73,8 +73,8 @@
     <ConfirmDialog :show="batchConfirmation.show" :title="'批量' + actionLabel(batchConfirmation.action)" :message="batchConfirmationMessage" tone="warning" :confirm-text="'确认' + actionLabel(batchConfirmation.action)" :busy="batchSubmitting" @confirm="confirmBatch" @cancel="batchConfirmation.show = false" />
     <ConfirmDialog :show="!!restartTarget" title="重启项目" :message="`确认重启 ${restartTarget?.projectName || ''}?`" tone="warning" confirm-text="重启" @confirm="confirmKeyboardRestart" @cancel="restartTarget = null" />
     <Skeleton v-if="store.loading && !store.projects.length" variant="cards" :rows="4" label="服务列表加载中" class="flex-1" />
-    <EmptyState v-else-if="!store.projects.length" icon="Boxes" title="暂未发现 Compose 项目" description="可重新扫描当前节点，或从应用市场部署第一个应用。" action-label="重新扫描" @action="refresh" />
-    <EmptyState v-else-if="!visibleProjects.length" icon="Search" title="没有匹配当前条件的项目" description="调整搜索关键词或筛选条件后重试" action-label="清除筛选" class="flex-1" @action="resetFilters" />
+    <EmptyState v-else-if="!store.projects.length && !store.error" icon="Boxes" title="暂未发现 Compose 项目" description="可重新扫描当前节点，或从应用市场部署第一个应用。" action-label="重新扫描" @action="refresh" />
+    <EmptyState v-else-if="store.projects.length && !visibleProjects.length" icon="Search" title="没有匹配当前条件的项目" description="调整搜索关键词或筛选条件后重试" action-label="清除筛选" class="flex-1" @action="resetFilters" />
     <div v-else class="flex-1 space-y-4">
       <section v-for="group in groupedProjects" :key="group.id" class="service-project-group">
         <header class="service-group-heading"><button class="service-group-toggle" :aria-expanded="groupOpen(group)" @click="toggleGroup(group.id)"><ChevronDown :size="16" :class="{ '-rotate-90': !groupOpen(group) }" /><strong>{{ group.name }}</strong><span>{{ group.projects.length }} 个项目</span></button><button v-if="group.projects.some(hasAttention)" class="text-status-warn text-xs" @click="filter = 'attention'; groupFilter = group.id || 'ungrouped'">{{ group.projects.filter(hasAttention).length }} 项需关注</button></header>

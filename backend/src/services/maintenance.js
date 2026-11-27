@@ -58,8 +58,9 @@ export function flattenUpdateResults(projects = []) {
 }
 
 export async function checkImageUpdates(onProgress = () => {}) {
-  const { projects } = await checkAllUpdates();
-  const results = flattenUpdateResults(projects);
+  const { projects, nodeErrors = [] } = await checkAllUpdates();
+  const results = [...flattenUpdateResults(projects), ...nodeErrors.map(node => ({ hostId: node.hostId, projectName: node.hostName,
+    service: '节点项目扫描', image: '节点项目扫描', status: 'failed', error: node.message }))];
   for (const item of results) onProgress(`检查 ${item.image}`);
   const updated = results.filter((item) => item.status === 'updated');
   if (updated.length) {

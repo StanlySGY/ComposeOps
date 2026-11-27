@@ -1,6 +1,6 @@
 import { getDockerForHost, listHosts, getProjectDocker } from './docker-hosts.js';
-import { getSetting, setSetting } from '../lib/db.js';
-import { scanAllProjects as scanProjects } from './scanner.js';
+import { getSetting, setSetting, getProjectPreference } from '../lib/db.js';
+import { scanProjectInventory } from './scanner.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
 import { checkImageUpdates } from './maintenance.js';
 import { recordAlertEventAndNotify } from './events.js';
@@ -89,11 +89,12 @@ export function observeAgentAlertState(rule, containerId, current, threshold = r
   return false;
 }
 
-function pruneAgentAlertStates(rules, projectIds, runningContainerIds) {
+function pruneAgentAlertStates(rules, projectIds, runningContainerIds, complete = true) {
   const activeRuleIds = new Set(rules
     .filter((rule) => projectIds.has(String(rule.projectId)))
     .map((rule) => String(rule.id || '')));
   for (const [key, state] of agentRuleStates) {
+    if (!complete && rules.some(rule => String(rule.id || '') === state.ruleId) && !projectIds.has(state.projectId) && getProjectPreference(state.projectId).managed) continue;
     if (!activeRuleIds.has(state.ruleId) || !runningContainerIds.has(state.containerId)) {
       agentRuleStates.delete(key);
     }
@@ -184,16 +185,17 @@ async function poll() {
   running = true;
   try {
     const config = getNotificationConfig(false);
-    const projects = await scanProjects();
+    const inventory = await scanProjectInventory(), projects = inventory.projects;
+    const unavailable = new Set(inventory.nodeErrors.map(node => node.hostId));
     const managedProjects = projects.filter((item) => item.managed);
     const managedContainerIds = new Set(managedProjects.flatMap((project) => project.containers.map((item) => `${project.hostId}:${item.id}`)));
     const managedProjectIds = new Set(managedProjects.map((project) => String(project.id)));
     const runningContainerIds = new Set(managedProjects.flatMap((project) => project.containers
       .filter((item) => item.state === 'running')
       .map((item) => String(item.id))));
-    pruneAgentAlertStates(readAgentAlertRules(), managedProjectIds, runningContainerIds);
+    pruneAgentAlertStates(readAgentAlertRules(), managedProjectIds, runningContainerIds, inventory.complete);
     for (const containerId of previousStates.keys()) {
-      if (!managedContainerIds.has(containerId)) previousStates.delete(containerId);
+      if (!unavailable.has(containerId.split(':')[0]) && !managedContainerIds.has(containerId)) previousStates.delete(containerId);
     }
     if (config.enabled) {
       for (const project of managedProjects) {
@@ -273,6 +275,8 @@ async function poll() {
       setSetting('updates.last_check', String(Date.now()));
       await checkImageUpdates().catch(() => {});
     }
+  } catch (error) {
+    console.error('[alert-monitor] 本轮采集未完成:', error.message);
   } finally {
     // eslint-disable-next-line require-atomic-updates -- 单线程事件循环下的互斥标志
     running = false;

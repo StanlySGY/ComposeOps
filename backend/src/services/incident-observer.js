@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import db, { getSetting, setSetting, getProjectPreference } from '../lib/db.js';
 import { getDockerForHost, getHost } from './docker-hosts.js';
-import { scanAllProjects } from './scanner.js';
+import { scanProjectInventory } from './scanner.js';
 import { readContainerLogs } from '../lib/docker-exec.js';
 import { getAiConfig, callOpenAI } from './ai.js';
 import { diagnoseEvidence, renderDiagnosis, selectDiagnosisSources } from './diagnosis-protocol.js';
@@ -39,7 +39,7 @@ export async function withReadTimeout(work, timeoutMs = 8000) {
   finally { clearTimeout(timer); }
 }
 
-export function createIncidentObserver({ scan = scanAllProjects, dockerForHost = getDockerForHost, hostForId = getHost,
+export function createIncidentObserver({ scan = scanProjectInventory, dockerForHost = getDockerForHost, hostForId = getHost,
   now = () => Date.now(), pollMs = 15000, logger = console, diagnose = diagnoseIncident, probeRunner = createProbeRunner(), autoRecover = considerAutomaticRecovery } = {}) {
   let timer = null, pending = null, stopped = true, workStartedAt = null;
   let probePending = null;
@@ -48,7 +48,8 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
     const currentGeneration = generation;
     // HTTP endpoints have their own bounded queue; a slow endpoint cannot stop Docker observations.
     probePending = probeRunner.runOnce({ isCurrent: () => currentGeneration === generation }).catch(error => logger.warn?.({ error: String(safeIncidentData(error.message)) }, '应用探针采集失败'));
-    const projects = await withReadTimeout(scan(), 10000);
+    const inventory = await withReadTimeout(scan(), 11000);
+    const projects = Array.isArray(inventory) ? inventory : inventory.projects;
     if (currentGeneration !== generation) return;
     const profiles = listSreProfiles();
     const open = db.prepare('SELECT id FROM ops_incidents WHERE resolved_at IS NULL AND closed_at IS NULL').all().map(row => getIncident(row.id));
@@ -65,7 +66,7 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
         project: { id: incident.projectId, projectName: incident.projectName, hostId: incident.hostId } });
     }
     const infos = new Map();
-    let observed = 0, failures = 0;
+    let observed = 0, failures = inventory.nodeErrors?.length || 0;
     // Bound Docker pressure while ensuring one unreachable node cannot stall all others.
     const queue = [...targets.values()];
     await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
@@ -149,7 +150,7 @@ export function createIncidentObserver({ scan = scanAllProjects, dockerForHost =
       }
     }
     }));
-    const status = { observed, failures, checkedAt: new Date(now()).toISOString() };
+    const status = { observed, failures, nodeErrors: inventory.nodeErrors || [], checkedAt: new Date(now()).toISOString() };
     if (currentGeneration === generation) setSetting('sre.last_observation', JSON.stringify(status));
     return status;
   }

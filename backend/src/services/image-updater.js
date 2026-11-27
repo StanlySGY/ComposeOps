@@ -315,6 +315,7 @@ export async function getProjectUpdates(project, { force = false, signal: caller
   const data = {
     projectId: project.id,
     projectName: project.projectName,
+    hostId: project.hostId,
     checkedAt: Date.now(),
     images,
     hasUpdate: images.some((item) => item.hasUpdate),
@@ -329,8 +330,9 @@ export async function getProjectUpdates(project, { force = false, signal: caller
 /** 全局检测所有可编辑项目(并发 3)。 */
 export async function checkAllUpdates({ signal } = {}) {
   signal?.throwIfAborted();
-  const { scanAllProjects: scanProjects } = await import('./scanner.js');
-  const projects = (await scanProjects()).filter((project) => project.editable);
+  const { scanProjectInventory } = await import('./scanner.js');
+  const inventory = await scanProjectInventory({ signal });
+  const projects = inventory.projects.filter((project) => project.managed && project.editable);
   signal?.throwIfAborted();
   const results = [];
   const queue = [...projects];
@@ -346,6 +348,7 @@ export async function checkAllUpdates({ signal } = {}) {
         results.push({
           projectId: project.id,
           projectName: project.projectName,
+          hostId: project.hostId,
           checkedAt: Date.now(),
           images: [{ service: 'Compose 文件', image: '—', status: 'failed', hasUpdate: false, reachable: false, error: error.message }],
           hasUpdate: false,
@@ -357,7 +360,9 @@ export async function checkAllUpdates({ signal } = {}) {
   await Promise.all(Array.from({ length: Math.min(3, projects.length) }, () => worker()));
   signal?.throwIfAborted();
   setSetting('updates.last_radar_check', String(Date.now()));
-  return { projects: results };
+  return { projects: results, nodes: inventory.nodes, nodeErrors: inventory.nodeErrors,
+    scannedHosts: inventory.scannedHosts, totalHosts: inventory.totalHosts,
+    complete: inventory.complete && !results.some(project => project.error || project.incomplete || project.images?.some(image => ['failed', 'unknown', 'unresolved', 'needs_policy'].includes(image.status))) };
 }
 
 async function writeUpgradeBackups(project, signal) {

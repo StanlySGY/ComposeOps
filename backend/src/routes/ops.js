@@ -41,7 +41,8 @@ export default async function opsRoutes(fastify, { blueprintDeployer = deployBlu
     if (reply.raw.destroyed) controller.abort();
     try {
       const result = await checkAllUpdates({ signal: controller.signal });
-      addOperation({ action: 'images.radar', status: 'success', detail: `${result.projects.length} 个项目已检查` });
+      addOperation({ action: 'images.radar', status: result.complete ? 'success' : 'failed',
+        detail: result.complete ? `${result.projects.length} 个项目已检查` : `检查不完整：${result.projects.length} 个项目返回结果，${result.nodeErrors.length} 个节点未读取，部分项目或服务仍待确认` });
       return result;
     } catch (error) {
       if (controller.signal.aborted) return;

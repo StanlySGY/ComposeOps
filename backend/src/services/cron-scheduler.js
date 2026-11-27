@@ -233,7 +233,9 @@ async function executeJob(job) {
         let dumped = 0;
         const errors = [];
         for (const project of projects) {
-          const targets = await listProjectDbContainers(project).catch(() => []);
+          let targets;
+          try { targets = await listProjectDbContainers(project); }
+          catch (error) { errors.push(`${project.projectName}:数据库容器列表读取失败`); continue; }
           for (const target of targets) {
             try {
               const result = await runDbDump(project, target.containerId, { download: false });
@@ -261,6 +263,7 @@ async function executeJob(job) {
       }
       case 'images-check': {
         const result = await checkAllUpdates();
+        if (!result.complete) throw new Error(`镜像检查未完整完成：${result.nodeErrors.length} 个节点未读取，部分项目或服务仍待确认`);
         return `镜像更新检查完成,共 ${result.projects.length} 个项目`;
       }
       case 'volume-backup': {

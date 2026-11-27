@@ -8,6 +8,24 @@ vi.mock('vue-router', () => ({ useRoute: () => ({ name: 'settings' }), useRouter
 const updates = { hasUpdate: true, images: [{ hasUpdate: true }, { hasUpdate: false }, { hasUpdate: true }] };
 describe('统一镜像更新入口', () => {
   beforeEach(() => vi.clearAllMocks());
+  it('全局检查保留不可达节点，空结果不能宣称镜像全部最新', async () => {
+    mocks.all.mockResolvedValue({ projects: [], complete: false, nodeErrors: [{ hostId: 'remote', hostName: '公司节点', message: '项目列表读取失败' }] });
+    const panel = mount(ImageUpdatePanel);
+    await panel.get('button').trigger('click'); await flushPromises();
+    expect(panel.get('[role=alert]').text()).toContain('公司节点');
+    expect(panel.get('[role=status]').text()).toContain('不能判定镜像均为最新');
+    window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises();
+    expect(panel.find('[role=alert]').exists()).toBe(false);
+    panel.unmount();
+  });
+  it('全局结果进入服务时携带实际节点，避免在工作节点寻找远端项目', async () => {
+    mocks.all.mockResolvedValue({ projects: [{ ...updates, projectId: 'p2', hostId: 'remote', projectName: '远端项目' }] });
+    const panel = mount(ImageUpdatePanel);
+    await panel.get('button').trigger('click'); await flushPromises();
+    await panel.findAll('button')[1].trigger('click');
+    expect(mocks.push).toHaveBeenCalledWith('/services?projectId=p2&hostId=remote&upgrade=p2&from=settings');
+    panel.unmount();
+  });
   it('服务卡与全局检查显示同一升级数量，并保留来源进入确认流程', async () => {
     mocks.project.mockResolvedValue(updates);
     mocks.all.mockResolvedValue({ projects: [{ ...updates, projectId: 'p1', projectName: '项目一' }] });

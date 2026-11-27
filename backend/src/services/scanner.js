@@ -1,7 +1,7 @@
 import { access } from 'fs/promises';
 import path from 'node:path';
 import { extractHostPorts } from './project-ports.js';
-import { getActiveHostId, getHost, getDockerForHost, listHosts } from './docker-hosts.js';
+import { getActiveHostId, getHost, getDockerForHost, hostConnectionRevision, listHosts } from './docker-hosts.js';
 import { getProjectMountEnabled, getProjectPreference, getSetting, listCustomComposeProjects } from '../lib/db.js';
 import { safeProjectMountPath } from './mount-plan.js';
 import { composeProjectId } from './project-id.js';
@@ -92,32 +92,77 @@ export function invalidateScanCache() {
   scanInFlights.clear();
 }
 
-export async function scanProjects(hostId = getActiveHostId(), { background = false } = {}) {
+function readScanWithin(work, signal) {
+  if (signal.aborted) { Promise.resolve(work).catch(() => {}); return Promise.reject(signal.reason); }
+  let onAbort;
+  const cancelled = new Promise((_, reject) => { onAbort = () => reject(signal.reason); signal.addEventListener('abort', onAbort, { once: true }); });
+  return Promise.race([work, cancelled]).finally(() => signal.removeEventListener('abort', onAbort));
+}
+
+export async function scanProjects(hostId = getActiveHostId(), { background = false, signal, timeoutMs = 10000 } = {}) {
+  signal?.throwIfAborted();
   const host = getHost(hostId);
   if (!host) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
-  const client = getDockerForHost(hostId);
-  const decorate = data => projectSnapshot(data).map(project => ({
-    ...project, ...(background ? {} : { activeHostAtScan: hostId }),
-  }));
+  const client = getDockerForHost(hostId), revision = hostConnectionRevision(hostId);
+  const decorate = data => {
+    signal?.throwIfAborted();
+    if (!getHost(hostId) || hostConnectionRevision(hostId) !== revision) throw Object.assign(new Error('扫描期间节点配置已变化，请刷新后重试'), { statusCode: 409 });
+    return projectSnapshot(data).map(project => ({ ...project, ...(background ? {} : { activeHostAtScan: hostId }) }));
+  };
   const cache = scanCaches.get(hostId);
-  if (cache?.client === client && Date.now() - cache.at < SCAN_CACHE_TTL_MS) return decorate(cache.data);
+  if (cache?.client === client && cache.revision === revision && Date.now() - cache.at < SCAN_CACHE_TTL_MS) return decorate(cache.data);
   const inflight = scanInFlights.get(hostId);
-  if (inflight?.client === client) return decorate(await inflight.promise);
-  const pending = { client, promise: null };
+  if (inflight?.client === client && inflight.revision === revision) return decorate(await (signal ? readScanWithin(inflight.promise, signal) : inflight.promise));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error(`节点「${host.name}」项目扫描超时，请检查连接后重试`), { statusCode: 504 })), timeoutMs);
+  const pending = { client, revision, promise: null };
   scanInFlights.set(hostId, pending);
-  pending.promise = scanProjectsUncached(client, host).then(data => {
-    if (scanInFlights.get(hostId) === pending) scanCaches.set(hostId, { client, at: Date.now(), data });
+  pending.promise = readScanWithin(scanProjectsUncached(client, host, controller.signal), controller.signal).then(data => {
+    if (scanInFlights.get(hostId) === pending && getHost(hostId) && hostConnectionRevision(hostId) === revision) scanCaches.set(hostId, { client, revision, at: Date.now(), data });
     return data;
-  }).finally(() => { if (scanInFlights.get(hostId) === pending) scanInFlights.delete(hostId); });
-  return decorate(await pending.promise);
+  }).finally(() => { clearTimeout(timer); controller.abort(); if (scanInFlights.get(hostId) === pending) scanInFlights.delete(hostId); });
+  return decorate(await (signal ? readScanWithin(pending.promise, signal) : pending.promise));
 }
 
-export async function scanAllProjects() {
-  const results = await Promise.allSettled(listHosts().map(host => scanProjects(host.id, { background: true })));
-  return results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+/** Return coverage alongside successful nodes; unavailable is never an empty node. */
+export async function scanProjectInventory({ signal, timeoutMs = 10000 } = {}) {
+  signal?.throwIfAborted();
+  const hosts = listHosts().map(host => ({ ...host, revision: hostConnectionRevision(host.id) })), nodes = new Array(hosts.length), projectsByHost = new Array(hosts.length);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error('全节点项目扫描已到期限'), { statusCode: 504 })), timeoutMs);
+  const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  let next = 0;
+  try {
+    await Promise.all(Array.from({ length: Math.min(4, hosts.length) }, async () => {
+      while (next < hosts.length) {
+        const index = next++, host = hosts[index];
+        try {
+          const assertRevision = () => { if (!getHost(host.id) || hostConnectionRevision(host.id) !== host.revision) throw Object.assign(new Error('节点配置已变化'), { statusCode: 409 }); };
+          assertRevision();
+          projectsByHost[index] = await scanProjects(host.id, { background: true, signal: combined, timeoutMs });
+          assertRevision();
+          nodes[index] = { hostId: host.id, hostName: host.name, status: 'ready', projectCount: projectsByHost[index].length };
+        } catch (error) {
+          projectsByHost[index] = [];
+          nodes[index] = { hostId: host.id, hostName: host.name, status: 'unavailable', code: error.statusCode || 502,
+            message: error.statusCode === 409 ? '扫描期间节点配置已变化' : combined.aborted || error.statusCode === 504 ? '项目扫描超时' : '项目列表读取失败，请检查节点连接' };
+        }
+      }
+    }));
+    signal?.throwIfAborted();
+    const nodeErrors = nodes.filter(node => node.status !== 'ready');
+    return { projects: projectsByHost.flatMap(items => items || []), nodes, nodeErrors, complete: !nodeErrors.length,
+      scannedHosts: hosts.length - nodeErrors.length, totalHosts: hosts.length };
+  } finally { clearTimeout(timer); controller.abort(); }
 }
 
-async function scanProjectsUncached(activeDocker, host) {
+export async function scanAllProjects({ requireComplete = true, ...options } = {}) {
+  const inventory = await scanProjectInventory(options);
+  if (requireComplete && !inventory.complete) throw Object.assign(new Error(`项目扫描不完整：${inventory.nodeErrors.map(node => node.hostName).join('、')} 未能读取，未确认全部节点范围`), { statusCode: 503, nodeErrors: inventory.nodeErrors });
+  return inventory.projects;
+}
+
+async function scanProjectsUncached(activeDocker, host, signal) {
   const nodeType = host.type;
   let containers;
   const projects = new Map();
@@ -144,9 +189,11 @@ async function scanProjectsUncached(activeDocker, host) {
     });
   }
   try {
-    containers = await activeDocker.listContainers({ all: true });
-  } catch {
-    containers = [];
+    containers = await readScanWithin(activeDocker.listContainers({ all: true, abortSignal: signal }), signal);
+    if (!Array.isArray(containers)) throw new Error('Invalid container list');
+  } catch (cause) {
+    signal.throwIfAborted();
+    throw Object.assign(new Error(`节点「${host.name}」容器列表读取失败，请检查连接后重试`, { cause }), { statusCode: 502 });
   }
 
   // 按 compose project 分组（以 workingDir 为 key）
@@ -205,13 +252,13 @@ async function scanProjectsUncached(activeDocker, host) {
   }
 
   const hostContainers = [...projects.values()].flatMap(project => project.containers).filter(container => container.networkMode === 'host' || container.state !== 'running');
-  const metadataDeadline = AbortSignal.timeout(5000);
+  const metadataDeadline = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
   let hostIndex = 0;
   await Promise.all(Array.from({ length: Math.min(6, hostContainers.length) }, async () => {
     while (hostIndex < hostContainers.length && !metadataDeadline.aborted) {
       const container = hostContainers[hostIndex++];
       try {
-        const info = await activeDocker.getContainer(container.id).inspect({ abortSignal: metadataDeadline });
+        const info = await readScanWithin(activeDocker.getContainer(container.id).inspect({ abortSignal: metadataDeadline }), metadataDeadline);
         if (container.networkMode === 'host') container.hostPorts = extractHostPorts(info);
         container.exitCode = info.State?.ExitCode ?? container.exitCode;
         container.oomKilled = !!info.State?.OOMKilled;
@@ -223,6 +270,7 @@ async function scanProjectsUncached(activeDocker, host) {
 
   // 计算每个 project 的状态：running | stopped | partial + 可达性检查
   for (const project of projects.values()) {
+    signal.throwIfAborted();
     const runningCount = project.containers.filter(c => c.state === 'running').length;
     if (project.containers.length === 0) {
       project.status = 'stopped';
