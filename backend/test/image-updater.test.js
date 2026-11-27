@@ -143,6 +143,22 @@ test('restoreComposeBackupBatch: a later write failure compensates every file al
   assert.equal(disk.get('compose.override.yml'), 'current-override');
 });
 
+test('批次恢复遇到写入前版本冲突，只补偿本批已写文件，保留外部编辑', async () => {
+  const current = new Map([['a', 'current-a'], ['b', 'external-b']]);
+  const calls = [];
+  await assert.rejects(restoreComposeBackupBatch(
+    [{ filePath: 'a', content: 'backup-a' }, { filePath: 'b', content: 'backup-b' }],
+    [{ filePath: 'a', content: 'current-a' }, { filePath: 'b', content: 'current-b' }],
+    async (file, content, _snapshot, { compensating = false } = {}) => {
+      calls.push([file, compensating]);
+      if (file === 'b') throw Object.assign(new Error('external edit'), { writeApplied: false });
+      current.set(file, content);
+    },
+  ), error => error.statusCode === 409 && error.compensationFailures.length === 0);
+  assert.deepEqual(calls, [['a', false], ['b', false], ['a', true]]);
+  assert.equal(current.get('a'), 'current-a'); assert.equal(current.get('b'), 'external-b');
+});
+
 test('restoreComposeBackupBatch: reads must be complete and paths must match before any write', async () => {
   let writes = 0;
   const writer = async () => { writes += 1; };

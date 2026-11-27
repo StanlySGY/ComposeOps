@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
 import { readConfigArchive } from '../lib/config-file-read.js';
 import docker from './docker.js';
-import { ACTIONS, assertComposeVersion, composeProjectOptions, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
+import { ACTIONS, assertComposeVersion, assertComposeMetadata, assertComposeWriteAccess, composeProjectOptions, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
 import { assertProjectOperationAllowed, withProjectOperationLock } from './project-operation-lock.js';
 import { demuxStream } from '../lib/docker-streams.js';
 import { validateYaml } from '../lib/files.js';
@@ -553,49 +553,71 @@ export async function readWorkspaceCompose(project, fileIndex = 0) {
   });
 }
 
+/** Stage within the same project directory; a failed version check must never
+ * trigger a compensating overwrite of the external editor's new content. */
+export async function replaceWorkspaceComposeFile(container, filePath, content, previous, { validate = async () => {}, beforeReplace = async () => {} } = {}) {
+  const tempName = `.composeops-${randomBytes(8).toString('hex')}.tmp`;
+  const directory = path.posix.dirname(filePath), tempPath = path.posix.join(directory, tempName);
+  let moveStarted = false;
+  try {
+    await putArchiveFile(container, directory, tempName, content, previous.header);
+    await validate(tempPath);
+    await beforeReplace();
+    const checkCurrent = async () => {
+      const current = await readArchiveFile(container, filePath);
+      assertComposeVersion(current.content, previous.content);
+      assertComposeMetadata(current.header, previous.header);
+    };
+    await checkCurrent();
+    // SSH writes run as the SSH user. Preserve the original ownership/mode
+    // before publication; if this user cannot do that, do not replace the file.
+    if (container.__ssh) {
+      const owner = await execInRunner(container, ['chown', `${previous.header.uid}:${previous.header.gid}`, tempPath], { timeoutMs: 15000 });
+      if (owner.code !== 0) throw new Error('无法保留 Compose 文件所有者，已停止替换');
+      const mode = await execInRunner(container, ['chmod', previous.header.mode.toString(8), tempPath], { timeoutMs: 15000 });
+      if (mode.code !== 0) throw new Error('无法保留 Compose 文件权限，已停止替换');
+    }
+    await readArchiveFile(container, tempPath); // also reject a replaced staging symlink
+    await checkCurrent();
+    moveStarted = true;
+    const move = await execInRunner(container, ['mv', '-fT', '--', tempPath, filePath], { timeoutMs: 15000 });
+    if (move.code !== 0) throw new Error('Compose 配置替换失败，请核对当前文件');
+    return { content, header: previous.header };
+  } catch (error) {
+    if (!moveStarted) error.writeApplied = false;
+    throw error;
+  } finally {
+    await execInRunner(container, ['rm', '-f', '--', tempPath], { timeoutMs: 5000 }).catch(() => {});
+  }
+}
+
 export async function saveWorkspaceCompose(project, fileIndex, content, reason = 'save', expectedContent = undefined) {
+  assertComposeWriteAccess(project);
   if (typeof content !== 'string' || content.length === 0 || Buffer.byteLength(content, 'utf8') > 2 * 1024 * 1024) {
     throw Object.assign(new Error('Compose 内容为空或超过 2MB'), { statusCode: 400 });
   }
   validateYaml(content);
   const { index, filePath, files } = selectedFile(project, fileIndex);
   return withProjectOperationLock(project.id, () => withComposeFileLock(`${project.id}:${filePath}`, () => withRunner(project, async (container) => {
+    assertComposeWriteAccess(project);
     const previous = await readArchiveFile(container, filePath);
     assertComposeVersion(previous.content, expectedContent);
-    const tempName = `.composeops-${randomBytes(8).toString('hex')}.tmp`;
-    const tempPath = path.posix.join(path.posix.dirname(filePath), tempName);
-    await putArchiveFile(container, path.posix.dirname(filePath), tempName, content, previous.header);
-    try {
-      const checkFiles = [...files];
-      checkFiles[index] = tempPath;
-      const check = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, checkFiles), 'config', '--quiet']);
-      if (check.code !== 0) throw Object.assign(new Error(check.stderr.trim() || `docker compose config 退出码 ${check.code}`), { statusCode: 422 });
-      await replaceComposeWithBackup({
-        replace: async () => {
-          const move = await execInRunner(container, ['mv', '-f', '--', tempPath, filePath]);
-          if (move.code !== 0) throw new Error(move.stderr.trim() || 'Compose 文件替换失败');
-          await execInRunner(container, ['chmod', previous.header.mode.toString(8), filePath]).catch(() => {});
-          await execInRunner(container, ['chown', `${previous.header.uid}:${previous.header.gid}`, filePath]).catch(() => {});
+    await replaceComposeWithBackup({
+      replace: () => replaceWorkspaceComposeFile(container, filePath, content, previous, {
+        validate: async tempPath => {
+          const checkFiles = [...files]; checkFiles[index] = tempPath;
+          const check = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, checkFiles), 'config', '--quiet']);
+          if (check.code !== 0) throw Object.assign(new Error(check.stderr.trim() || `docker compose config 退出码 ${check.code}`), { statusCode: 422 });
         },
-        backup: () => addComposeBackup(project.id, filePath, previous.content, reason),
-        rollback: async () => {
-          const rollbackName = `.composeops-${randomBytes(8).toString('hex')}.rollback`;
-          const rollbackPath = path.posix.join(path.posix.dirname(filePath), rollbackName);
-          try {
-            await putArchiveFile(container, path.posix.dirname(filePath), rollbackName, previous.content, previous.header);
-            const restore = await execInRunner(container, ['mv', '-f', '--', rollbackPath, filePath]);
-            if (restore.code !== 0) throw new Error(restore.stderr.trim() || '恢复原 Compose 文件失败');
-            await execInRunner(container, ['chmod', previous.header.mode.toString(8), filePath]).catch(() => {});
-            await execInRunner(container, ['chown', `${previous.header.uid}:${previous.header.gid}`, filePath]).catch(() => {});
-          } finally {
-            await execInRunner(container, ['rm', '-f', '--', rollbackPath]).catch(() => {});
-          }
-        },
-      });
-    } catch (error) {
-      await execInRunner(container, ['rm', '-f', '--', tempPath]).catch(() => {});
-      throw error;
-    }
+        beforeReplace: () => assertComposeWriteAccess(project),
+      }),
+      backup: () => addComposeBackup(project.id, filePath, previous.content, reason),
+      rollback: async () => {
+        const written = await readArchiveFile(container, filePath);
+        assertComposeVersion(written.content, content);
+        await replaceWorkspaceComposeFile(container, filePath, previous.content, { ...written, header: previous.header });
+      },
+    });
     return { ok: true, path: filePath };
   })));
 }

@@ -492,27 +492,35 @@ export async function streamComposeControl(projectId, action, onFrame, path = nu
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  const maxFrameChars = 2 * 1024 * 1024;
+  let ended = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) { ended = true; break; }
       buf += decoder.decode(value, { stream: true });
-      const parts = buf.split('\n\n');
+      const parts = buf.split(/\r?\n\r?\n/);
       buf = parts.pop();
       for (const part of parts) {
+        if (part.length > maxFrameChars) throw new Error('单条控制消息超过处理上限，已中断接收；请核对实际执行状态');
         const line = part.trim();
         if (!line.startsWith('data:')) continue;
+        let frame;
         try {
-          onFrame(JSON.parse(line.slice(5).trim()));
+          frame = JSON.parse(line.slice(5).trim());
         } catch {
           // 跳过无法解析的控制流帧,让连接继续接收后续事件。
+          continue;
         }
+        onFrame(frame);
       }
+      if (buf.length > maxFrameChars) throw new Error('控制消息持续未结束，已中断接收；请核对实际执行状态');
     }
   } finally {
     // Polling during a long command can cache containers that are being replaced.
     // Clear them again on completion or interruption before callers refresh.
     invalidateSwr('/');
+    if (!ended) await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

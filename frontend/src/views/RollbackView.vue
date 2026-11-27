@@ -167,6 +167,7 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, 
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { FileCode2, GitBranch, HardDrive, History, RefreshCw, RotateCcw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
+import { appendOperationOutput, boundOperationOutput } from '../lib/operation-feedback.js';
 import { getRollbackableProjects } from '../lib/rollback-projects.js';
 import { useServicesStore } from '../stores/services.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
@@ -415,13 +416,14 @@ async function doRollbackUpgrade(project) {
     let exitCode = null;
     let streamReportedError = false, confirmed = false;
     await api.streamRollback(project.id, (frame) => {
-      if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text = (output.value.text + frame.data).slice(-65536);
+      if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text = appendOperationOutput(output.value.text, frame.data);
       else if (frame.type === 'error') { streamReportedError = true; output.value.text += `\n[错误] ${frame.data}`; }
       else if (frame.type === 'exit' && Number.isInteger(frame.data?.code)) { exitCode = frame.data.code; output.value.text += `\n[退出码 ${frame.data.code}]`; }
       else if (frame.type === 'result') {
         confirmed = frame.data?.ok === true;
         if (frame.data?.ok === false) { streamReportedError = true; output.value.text += `\n[失败] ${frame.data.message || '配置恢复未成功完成'}`; }
       }
+      output.value.text = boundOperationOutput(output.value.text);
     }, rollbackController.signal);
     if (streamReportedError || exitCode !== 0 || !confirmed) {
       output.value.status = streamReportedError || (exitCode !== null && exitCode !== 0) ? 'failed' : 'unknown';

@@ -1,6 +1,8 @@
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import tar from 'tar-stream';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 
 export const CONFIG_FILE_MAX_BYTES = 2 * 1024 * 1024;
 export const configReadError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
@@ -27,6 +29,40 @@ export function assertConfigSize(size, maxBytes = CONFIG_FILE_MAX_BYTES) {
   if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) {
     throw configReadError(`配置文件超过读取上限（${maxBytes} 字节）`, 413);
   }
+}
+
+/** Bound local reads too: O_NONBLOCK avoids FIFO opens, O_NOFOLLOW rejects a
+ * replaced final symlink, and fstat checks the opened object, not a prior path. */
+export function readHostConfigFile(filePath, { maxBytes = CONFIG_FILE_MAX_BYTES, timeoutMs } = {}) {
+  assertConfigSize(0, maxBytes);
+  return withFileReadDeadline(async signal => {
+    let handle;
+    try {
+      handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      signal.throwIfAborted();
+      const stat = await handle.stat();
+      if (!stat.isFile()) throw configReadError('配置路径必须指向普通文件', 403);
+      assertConfigSize(stat.size, maxBytes);
+      const buffer = Buffer.alloc(maxBytes + 1);
+      let size = 0;
+      while (size < buffer.length) {
+        signal.throwIfAborted();
+        const { bytesRead } = await handle.read(buffer, size, buffer.length - size, null);
+        if (!bytesRead) break;
+        size += bytesRead;
+      }
+      signal.throwIfAborted();
+      assertConfigSize(size, maxBytes);
+      const after = await handle.stat();
+      if (size !== stat.size || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) {
+        throw Object.assign(configReadError('读取期间配置文件发生变化，请重新读取', 409), { code: 'CONFIG_FILE_CHANGED' });
+      }
+      return { content: buffer.subarray(0, size).toString('utf8'), stat };
+    } catch (error) {
+      if (error.code === 'ELOOP') throw configReadError('配置路径是符号链接，拒绝读取', 403);
+      throw error;
+    } finally { await handle?.close(); }
+  }, { timeoutMs });
 }
 
 export function readConfigArchive(container, filePath, { maxBytes = CONFIG_FILE_MAX_BYTES, timeoutMs } = {}) {

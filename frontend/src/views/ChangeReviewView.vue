@@ -252,6 +252,7 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, 
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { Bot, RefreshCw, Rocket, ShieldCheck, Telescope } from 'lucide-vue-next';
 import { api, streamComposeControl } from '../api/client.js';
+import { appendOperationOutput, boundOperationOutput } from '../lib/operation-feedback.js';
 import { useServicesStore } from '../stores/services.js';
 import EmptyState from '../components/common/EmptyState.vue';
 import BaseModal from '../components/common/BaseModal.vue';
@@ -414,7 +415,7 @@ async function confirmDeploy() {
     if (!current(version, snapshot.projectId)) throw new Error('评审上下文已变化，请重新评审。');
     await streamComposeControl(snapshot.projectId, 'up', (frame) => {
       if (disposed) return;
-      if (frame.type === 'stdout' || frame.type === 'stderr') deployOutput.value.text += frame.data;
+      if (frame.type === 'stdout' || frame.type === 'stderr') deployOutput.value.text = appendOperationOutput(deployOutput.value.text, frame.data);
       else if (frame.type === 'error') {
         streamReportedError = true;
         deployOutput.value.text += `\n[错误] ${frame.data}`;
@@ -423,6 +424,7 @@ async function confirmDeploy() {
         exitCode = Number(frame.data?.code);
         deployOutput.value.text += `\n[退出码 ${frame.data.code}]`;
       }
+      deployOutput.value.text = boundOperationOutput(deployOutput.value.text);
     }, null, { action: 'up', reviewToken: snapshot.token }, deployController.signal);
     if (streamReportedError || exitCode !== 0) {
       deployOutput.value.status = exitCode === null && !streamReportedError ? 'unknown' : 'failed';

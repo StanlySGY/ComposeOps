@@ -9,6 +9,17 @@ describe('操作结果反馈', () => {
     expect(operationSucceeded(output)).toBe(false);
     expect(output.exitCode).toBeNull();
   });
+  it('持续大输出保留最新尾部和截断提示，不影响最终失败判断', () => {
+    const output = fresh();
+    for (let i = 0; i < 100; i++) applyOperationFrame(output, { type: 'stdout', data: String(i).padStart(2, '0') + 'x'.repeat(10000) });
+    applyOperationFrame(output, { type: 'stderr', data: '最终错误详情' });
+    expect(output.text.length).toBeLessThanOrEqual(65536);
+    expect(output.text).toMatch(/^\[输出已截断/);
+    expect(output.text).toContain('99'); expect(output.text).toContain('最终错误详情');
+    applyOperationFrame(output, { type: 'exit', data: { code: 1 } });
+    expect(operationSucceeded(output)).toBe(false);
+    expect(output.text.length).toBeLessThanOrEqual(65536);
+  });
   it('明确的非零退出码为失败，零退出码可确认命令完成', () => {
     for (const code of [0, 1, 137]) {
       const output = fresh(); applyOperationFrame(output, { type: 'exit', data: { code } });

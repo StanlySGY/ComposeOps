@@ -2,7 +2,7 @@
 // Real loopback OpenSSH + mutual TLS transports. Uses only a uniquely named fixture
 // project and temporary database. Does not add nodes to the production instance.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
@@ -22,6 +22,7 @@ const { sshReadFile, sshWriteFile, sshExec } = await import('../backend/src/serv
 const { scanProjects, invalidateScanCache } = await import('../backend/src/services/scanner.js');
 const { setProjectPreference } = await import('../backend/src/lib/db.js');
 const { readProjectEnv, saveProjectEnv, listProjectEnvFiles } = await import('../backend/src/services/project-env.js');
+const { withRunner, saveWorkspaceCompose, readArchiveFile, replaceWorkspaceComposeFile } = await import('../backend/src/services/compose-workspace.js');
 try {
   writeFileSync(composeFile, 'services:\n  app:\n    image: alpine:3.20\n    command: [sleep, "600"]\n', { mode: 0o600 });
   compose('up','-d','--pull','never');
@@ -45,6 +46,19 @@ try {
   project=(await scanProjects(host.id,{background:true})).find(row=>row.projectName===projectName);
   assert.equal(project.mountState,'remote_ssh');assert.equal(project.editable,true);
   checks.push('remote SFTP read/write and Compose execution, scoped discovery and editable workspace');
+  const originalCompose = readFileSync(composeFile, 'utf8'), originalStat = statSync(composeFile);
+  await saveWorkspaceCompose(project, 0, originalCompose + '# SSH save\n', 'save', originalCompose);
+  assert.equal(readFileSync(composeFile, 'utf8'), originalCompose + '# SSH save\n');
+  assert.equal(statSync(composeFile).mode & 0o777, originalStat.mode & 0o777);
+  assert.equal(statSync(composeFile).uid, originalStat.uid); assert.equal(statSync(composeFile).gid, originalStat.gid);
+  await withRunner(project, async runner => {
+    const previous = await readArchiveFile(runner, composeFile);
+    await assert.rejects(replaceWorkspaceComposeFile(runner, composeFile, originalCompose + '# stale\n', previous, {
+      beforeReplace: () => writeFileSync(composeFile, originalCompose + '# external\n'),
+    }), { code: 'COMPOSE_VERSION_CONFLICT', writeApplied: false });
+  });
+  assert.equal(readFileSync(composeFile, 'utf8'), originalCompose + '# external\n');
+  checks.push('SSH staged Compose save preserves ownership/mode and refuses external edits before replacement');
   await sshWriteFile(host, path.join(dir, '.env.production'), 'MODE=initial\n');
   assert((await listProjectEnvFiles(project)).some(file => file.name === '.env.production'));
   const initial = await readProjectEnv(project, '.env.production');

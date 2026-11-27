@@ -2,7 +2,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PassThrough, Readable } from 'node:stream';
 import tar from 'tar-stream';
-import { readConfigArchive } from '../src/lib/config-file-read.js';
+import { readConfigArchive, readHostConfigFile } from '../src/lib/config-file-read.js';
+import { mkdtemp, writeFile, symlink, rm, mkdir } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+
+test('本地配置句柄拒绝目录、符号链接和 FIFO，读取保留元数据', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'host-config-read-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'config.yml');
+  await writeFile(file, '标题=你好\n', { mode: 0o640 });
+  const read = await readHostConfigFile(file);
+  assert.equal(read.content, '标题=你好\n'); assert.equal(read.stat.mode & 0o777, 0o640);
+  await symlink(file, path.join(root, 'link'));
+  await mkdir(path.join(root, 'directory'));
+  execFileSync('mkfifo', [path.join(root, 'fifo')]);
+  for (const name of ['link', 'directory', 'fifo']) {
+    await assert.rejects(readHostConfigFile(path.join(root, name), { timeoutMs: 200 }), { statusCode: 403 });
+  }
+});
 
 function archive(entries = [{ name: 'config.yml', content: 'services: {}\n' }]) {
   const pack = tar.pack();

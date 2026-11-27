@@ -1,11 +1,10 @@
-import { readFile, writeFile } from 'fs/promises';
-import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { setSetting, addComposeBackupBatch, addOperation, COMPOSE_BACKUP_KEEP, getProjectPreference, getProjectMountEnabled } from '../lib/db.js';
-import { readCompose, spawnComposeCommand, composeProjectOptions } from './compose-runner.js';
+import { readCompose, spawnComposeCommand, composeProjectOptions, resolveProjectFile, replaceHostComposeFile } from './compose-runner.js';
+import { readHostConfigFile, assertConfigSize } from '../lib/config-file-read.js';
 import { getProjectDocker, assertProjectHostUnchanged } from './docker-hosts.js';
-import { withRunner, withReadOnlyRunner, readArchiveFile, putArchiveFile, execInRunner } from './compose-workspace.js';
+import { withRunner, withReadOnlyRunner, readArchiveFile, replaceWorkspaceComposeFile, execInRunner } from './compose-workspace.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 import { verifyImageUpgradeHealth } from './image-upgrade-health.js';
 
@@ -372,7 +371,10 @@ async function writeUpgradeBackups(project, signal) {
   const snapshots = [];
   try {
     if (project.mounted) {
-      for (const file of files) snapshots.push({ file, content: await readFile(file, 'utf8') });
+      for (let index = 0; index < files.length; index++) {
+        signal?.throwIfAborted();
+        snapshots.push({ file: files[index], content: (await readCompose(project, index)).content });
+      }
     } else if (project.workspaceAvailable) {
       await withReadOnlyRunner(project, async (container) => {
         signal?.throwIfAborted();
@@ -551,11 +553,12 @@ export async function restoreComposeBackupBatch(backups, currentContents, writeC
       await writeContent(backup.filePath, backup.content, currentByPath.get(backup.filePath));
     }
   } catch (error) {
+    if (error.writeApplied === false) attempted.pop();
     const compensationFailures = [];
     for (const filePath of attempted.reverse()) {
       try {
         const previous = currentByPath.get(filePath);
-        await writeContent(filePath, previous.content, previous);
+        await writeContent(filePath, previous.content, previous, { compensating: true });
       } catch (restoreError) {
         compensationFailures.push(filePath + '（' + restoreError.message + '）');
       }
@@ -598,6 +601,7 @@ async function rollbackProjectLocked(project, options = {}) {
     if (typeof full?.content !== 'string') {
       throw Object.assign(new Error('升级备份内容缺失：' + backup.filePath + '；未修改当前配置'), { statusCode: 409 });
     }
+    assertConfigSize(Buffer.byteLength(full.content, 'utf8'));
     backupContents.push({ filePath: backup.filePath, content: full.content });
   }
 
@@ -605,10 +609,14 @@ async function rollbackProjectLocked(project, options = {}) {
   try {
     if (project.mounted) {
       for (const backup of backupContents) {
-        currentContents.push({ filePath: backup.filePath, content: await readFile(backup.filePath, 'utf8') });
+        const resolved = await resolveProjectFile(project, files.indexOf(backup.filePath));
+        // Recovery writes target the registered path; refuse aliases instead of
+        // changing the symlink's destination or replacing its meaning.
+        if (resolved !== backup.filePath) throw new Error('恢复目标必须是项目中的真实文件，不能是符号链接');
+        currentContents.push({ filePath: backup.filePath, ...await readHostConfigFile(resolved) });
       }
     } else if (project.workspaceAvailable) {
-      await withRunner(project, async (container) => {
+      await withReadOnlyRunner(project, async (container) => {
         for (const backup of backupContents) {
           const current = await readArchiveFile(container, backup.filePath);
           currentContents.push({ filePath: backup.filePath, content: current.content, header: current.header });
@@ -623,21 +631,27 @@ async function rollbackProjectLocked(project, options = {}) {
 
   assertImageOperationAllowed(project, signal);
   if (project.mounted) {
-    await restoreComposeBackupBatch(backupContents, currentContents, (filePath, content) => writeFile(filePath, content, 'utf8'));
+    const expected = new Map(currentContents.map(snapshot => [snapshot.filePath, snapshot]));
+    await restoreComposeBackupBatch(backupContents, currentContents, async (filePath, content, _previous, { compensating = false } = {}) => {
+      if (!compensating) {
+        try { assertImageOperationAllowed(project, signal); }
+        catch (error) { error.writeApplied = false; throw error; }
+      }
+      const updated = await replaceHostComposeFile(filePath, content, expected.get(filePath));
+      expected.set(filePath, updated);
+    });
   } else {
     await withRunner(project, async (container) => {
       assertImageOperationAllowed(project, signal);
-      return restoreComposeBackupBatch(
-      backupContents,
-      currentContents,
-      (filePath, content, previous) => putArchiveFile(
-        container,
-        path.posix.dirname(filePath),
-        path.posix.basename(filePath),
-        content,
-        previous.header,
-      ),
-    );
+      const expected = new Map(currentContents.map(snapshot => [snapshot.filePath, snapshot]));
+      return restoreComposeBackupBatch(backupContents, currentContents, async (filePath, content, _previous, { compensating = false } = {}) => {
+        if (!compensating) {
+          try { assertImageOperationAllowed(project, signal); }
+          catch (error) { error.writeApplied = false; throw error; }
+        }
+        const updated = await replaceWorkspaceComposeFile(container, filePath, content, expected.get(filePath));
+        expected.set(filePath, updated);
+      });
     });
   }
   const restored = backupContents.length;

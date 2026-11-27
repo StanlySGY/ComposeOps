@@ -2,18 +2,19 @@
 // Real Docker helpers, a unique temporary directory and an isolated database.
 // No existing project is started/stopped or granted management permissions.
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, symlink, chmod, stat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 const root = await mkdtemp(path.join(tmpdir(), 'composeops-read-acceptance-'));
 process.env.DB_PATH = path.join(root, 'test.db');
 process.env.COMPOSEOPS_RUNNER_IMAGE ||= 'stanly1997/opsdash:latest';
-const { withReadOnlyRunner, withRunner, execInRunner, readWorkspaceCompose, readArchiveFile, workspaceRunnerStats, closeAllWorkspaceRunners } = await import('../backend/src/services/compose-workspace.js');
+const { withReadOnlyRunner, withRunner, execInRunner, readWorkspaceCompose, saveWorkspaceCompose, replaceWorkspaceComposeFile, readArchiveFile, workspaceRunnerStats, closeAllWorkspaceRunners } = await import('../backend/src/services/compose-workspace.js');
 const { readProjectEnv, saveProjectEnv, listProjectEnvFiles } = await import('../backend/src/services/project-env.js');
 const { getProjectUpdates } = await import('../backend/src/services/image-updater.js');
-const { default: db } = await import('../backend/src/lib/db.js');
+const { default: db, setProjectPreference } = await import('../backend/src/lib/db.js');
 const project = { id: path.basename(root), hostId: 'local', activeHostAtScan: 'local', projectName: path.basename(root).toLowerCase(), workingDir: root, composeFiles: [path.join(root, 'compose.yml')], managed: true, editable: true, workspaceAvailable: true, mounted: false };
 const checks = [];
+setProjectPreference(project.id, { managed: true, mountEnabled: true });
 try {
   await writeFile(project.composeFiles[0], 'services: {}\n');
   await writeFile(path.join(root, '.env.production'), 'MODE=first\n');
@@ -74,6 +75,28 @@ try {
     assert.equal((await execInRunner(runner, ['docker', 'version', '--format', '{{.Server.Version}}'])).code, 0);
   });
   checks.push('separate execution helper retains Compose and Docker daemon access');
+  const file = project.composeFiles[0], changed = 'services: {}\n# saved\n', external = 'services: {}\n# external editor\n';
+  await chmod(file, 0o640);
+  await saveWorkspaceCompose(project, 0, changed, 'save', 'services: {}\n');
+  assert.equal(await readFile(file, 'utf8'), changed); assert.equal((await stat(file)).mode & 0o777, 0o640);
+  await withRunner(project, async runner => {
+    const previous = await readArchiveFile(runner, file);
+    await assert.rejects(replaceWorkspaceComposeFile(runner, file, 'services: {}\n# stale\n', previous, {
+      beforeReplace: () => writeFile(file, external),
+    }), { code: 'COMPOSE_VERSION_CONFLICT', writeApplied: false });
+  });
+  assert.equal(await readFile(file, 'utf8'), external);
+  await withRunner(project, async runner => {
+    const previous = await readArchiveFile(runner, file);
+    await assert.rejects(replaceWorkspaceComposeFile(runner, file, changed, previous, {
+      beforeReplace: () => chmod(file, 0o600),
+    }), { code: 'COMPOSE_VERSION_CONFLICT', writeApplied: false });
+  });
+  assert.equal(await readFile(file, 'utf8'), external); assert.equal((await stat(file)).mode & 0o777, 0o600);
+  assert.equal((await readdir(root)).filter(name => name.startsWith('.composeops-') && name.endsWith('.tmp')).length, 0);
+  setProjectPreference(project.id, { mountEnabled: false });
+  await assert.rejects(saveWorkspaceCompose(project, 0, changed), { statusCode: 403 });
+  checks.push('workspace Compose staging preserves mode, rejects external edits, removes temporary files and enforces live authorization');
   console.log(JSON.stringify({ passed: true, checks }, null, 2));
 } finally {
   await closeAllWorkspaceRunners(); db.close(); await rm(root, { recursive: true, force: true });

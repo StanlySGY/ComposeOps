@@ -1,9 +1,11 @@
 import { spawn } from 'child_process';
-import { chmod, chown, readFile, realpath, rename, stat, unlink, writeFile } from 'fs/promises';
+import { open, realpath, rename, lstat, unlink } from 'fs/promises';
+import { constants } from 'node:fs';
 import path from 'path';
 import { randomBytes } from 'crypto';
 import { validateYaml } from '../lib/files.js';
-import { addComposeBackup } from '../lib/db.js';
+import { addComposeBackup, getProjectPreference, getProjectMountEnabled } from '../lib/db.js';
+import { CONFIG_FILE_MAX_BYTES, readHostConfigFile } from '../lib/config-file-read.js';
 import { composeEnv, getProjectHost, assertProjectHostUnchanged } from './docker-hosts.js';
 import { withProjectOperationLock } from './project-operation-lock.js';
 
@@ -30,11 +32,18 @@ export function assertComposeVersion(currentContent, expectedContent) {
   }
 }
 
+export function assertComposeMetadata(current, expected, fields = ['mode', 'uid', 'gid']) {
+  if (fields.some(key => current[key] !== expected[key])) {
+    throw Object.assign(new Error('Compose 文件身份、所有者或权限已变化，请重新读取后操作'), { statusCode: 409, code: 'COMPOSE_VERSION_CONFLICT' });
+  }
+}
+
 /** 替换文件与备份目录协调:失败时恢复原内容,避免留下误导性的备份记录。 */
 export async function replaceComposeWithBackup({ replace, backup, rollback }) {
   try {
     await replace();
   } catch (replaceError) {
+    if (replaceError.writeApplied === false) throw replaceError;
     await restoreOrThrow(rollback, replaceError, 'Compose 替换失败且原文件恢复失败');
     throw replaceError;
   }
@@ -167,50 +176,82 @@ export function runConfigCheck(project, files, { timeoutMs = COMPOSE_OPERATION_T
 
 export async function readCompose(project, fileIndex = 0) {
   const filePath = await resolveProjectFile(project, fileIndex);
-  return { fileIndex: Number(fileIndex), path: filePath, content: await readFile(filePath, 'utf8') };
+  return { fileIndex: Number(fileIndex), path: filePath, content: (await readHostConfigFile(filePath)).content };
+}
+
+export function assertComposeWriteAccess(project) {
+  assertProjectHostUnchanged(project);
+  if (!project?.managed || !project.editable || !getProjectPreference(project.id).managed || !getProjectMountEnabled(project.id)) {
+    throw Object.assign(new Error('该项目的纳管或 Compose 目录授权已失效，请重新确认权限'), { statusCode: 403 });
+  }
+}
+
+// Stage privately and recheck immediately before rename. This catches edits
+// during validation; it does not claim a cross-process filesystem CAS.
+export async function replaceHostComposeFile(filePath, content, previous, { validate = async () => {}, beforeReplace = async () => {} } = {}) {
+  const tempPath = path.join(path.dirname(filePath), `.composeops-${randomBytes(8).toString('hex')}.tmp`);
+  let handle, published = false;
+  try {
+    handle = await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    const identity = await handle.stat();
+    await handle.writeFile(content, 'utf8');
+    await validate(tempPath);
+    await handle.chown(previous.stat.uid, previous.stat.gid);
+    await handle.chmod(previous.stat.mode & 0o7777);
+    await handle.sync();
+    await beforeReplace();
+    const current = await readHostConfigFile(filePath);
+    assertComposeVersion(current.content, previous.content);
+    assertComposeMetadata(current.stat, previous.stat, ['dev', 'ino', 'mode', 'uid', 'gid']);
+    const staged = await lstat(tempPath);
+    if (!staged.isFile() || staged.dev !== identity.dev || staged.ino !== identity.ino) {
+      throw Object.assign(new Error('临时配置文件已被替换，已中止保存'), { statusCode: 409 });
+    }
+    await rename(tempPath, filePath);
+    published = true;
+    return { content, stat: await handle.stat() };
+  } catch (error) {
+    error.writeApplied = published;
+    throw error;
+  } finally {
+    await handle?.close();
+    if (!published) await unlink(tempPath).catch(() => {});
+  }
 }
 
 export async function saveCompose(project, fileIndex, content, reason = 'save', expectedContent = undefined) {
-  if (typeof content !== 'string' || content.length === 0 || content.length > 2 * 1024 * 1024) {
-    throw Object.assign(new Error('Compose 内容为空或超过 2MB'), { statusCode: 400 });
-  }
+  assertComposeWriteAccess(project);
+  if (typeof content !== 'string' || !content.length) throw Object.assign(new Error('Compose 内容为空'), { statusCode: 400 });
+  if (Buffer.byteLength(content, 'utf8') > CONFIG_FILE_MAX_BYTES) throw Object.assign(new Error('Compose 内容超过 2MiB'), { statusCode: 413 });
   validateYaml(content);
-  const filePath = await resolveProjectFile(project, fileIndex);
-  return withProjectOperationLock(project.id, () => withComposeFileLock(filePath, async () => {
-    const previous = await readFile(filePath, 'utf8');
-    assertComposeVersion(previous, expectedContent);
-    const currentStat = await stat(filePath);
-    const tempPath = path.join(path.dirname(filePath), `.composeops-${randomBytes(8).toString('hex')}.tmp`);
-    await writeFile(tempPath, content, { encoding: 'utf8', mode: currentStat.mode });
-    try {
-      const checkFiles = [...project.composeFiles];
-      checkFiles[Number(fileIndex)] = tempPath;
-      await runConfigCheck(project, checkFiles);
-      await chown(tempPath, currentStat.uid, currentStat.gid).catch(() => {});
+  return withProjectOperationLock(project.id, async () => {
+    assertComposeWriteAccess(project);
+    const filePath = await resolveProjectFile(project, fileIndex);
+    return withComposeFileLock(filePath, async () => {
+      const previous = await readHostConfigFile(filePath);
+      assertComposeVersion(previous.content, expectedContent);
       await replaceComposeWithBackup({
-        replace: async () => {
-          await rename(tempPath, filePath);
-          await chmod(filePath, currentStat.mode);
-        },
-        backup: () => addComposeBackup(project.id, filePath, previous, reason),
+        replace: () => replaceHostComposeFile(filePath, content, previous, {
+          validate: tempPath => {
+            const checkFiles = [...project.composeFiles];
+            checkFiles[Number(fileIndex)] = tempPath;
+            return runConfigCheck(project, checkFiles);
+          },
+          beforeReplace: async () => {
+            assertComposeWriteAccess(project);
+            if (await resolveProjectFile(project, fileIndex) !== filePath) throw Object.assign(new Error('Compose 文件路径已变化，请重新读取'), { statusCode: 409, code: 'COMPOSE_VERSION_CONFLICT' });
+          },
+        }),
+        backup: () => addComposeBackup(project.id, filePath, previous.content, reason),
         rollback: async () => {
-          const rollbackPath = path.join(path.dirname(filePath), `.composeops-${randomBytes(8).toString('hex')}.rollback`);
-          try {
-            await writeFile(rollbackPath, previous, { encoding: 'utf8', mode: currentStat.mode });
-            await chown(rollbackPath, currentStat.uid, currentStat.gid).catch(() => {});
-            await rename(rollbackPath, filePath);
-            await chmod(filePath, currentStat.mode);
-          } finally {
-            await unlink(rollbackPath).catch(() => {});
-          }
+          const written = await readHostConfigFile(filePath);
+          assertComposeVersion(written.content, content);
+          await replaceHostComposeFile(filePath, previous.content, { ...written, stat: { ...written.stat, uid: previous.stat.uid, gid: previous.stat.gid, mode: previous.stat.mode } });
         },
       });
-    } catch (error) {
-      await unlink(tempPath).catch(() => {});
-      throw error;
-    }
-    return { ok: true, path: filePath };
-  }));
+      return { ok: true, path: filePath };
+    });
+  });
 }
 
 export { ACTIONS };
