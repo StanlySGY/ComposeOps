@@ -48,7 +48,7 @@ export function registerMaintenanceTools(agent) {
       execute: async params => runServerDiagnostic(params.command),
     })
     .registerTool('alert.create', {
-      description: '创建容器资源告警规则(CPU/内存/重启次数阈值)',
+      description: '创建固定容器资源告警。自动处置须确认：7天授权、项目级10分钟冷却、滚动24小时最多3次；未知结果暂停。扩容最多5副本，仅无挂载/固定端口且镜像固定摘要的服务。',
       category: 'maintenance',
       requiredPermission: 'managed',
       confirmationRequired: true,
@@ -61,6 +61,7 @@ export function registerMaintenanceTools(agent) {
           metric: { type: 'string', enum: ['cpu', 'memory', 'restart_count'], description: '指标' },
           threshold: { type: 'number', description: '阈值' },
           action: { type: 'string', enum: ['notify', 'auto_restart', 'scale'], description: '触发动作' },
+          confirmAutomatic: { type: 'boolean', description: '用户明确接受自动处置期限与预算后才为true，不能由模型自行默认为true' },
         },
         required: ['projectId', 'service', 'metric', 'threshold', 'action'],
       },
@@ -71,8 +72,9 @@ export function registerMaintenanceTools(agent) {
           metric: params.metric,
           threshold: Number(params.threshold),
           action: params.action,
-        });
-        return { ok: true, ruleId: rule.id, rule, note: '规则已保存,由告警引擎按轮询周期评估(内置 10 分钟冷却)' };
+          confirmAutomatic: params.confirmAutomatic,
+        }, { actor: 'agent' });
+        return { ok: true, ruleId: rule.id, rule, note: '连续两个有效超限样本触发；自动授权7天，项目级10分钟冷却、24小时最多3次，结果未知需人工核对。关闭通知渠道不会撤销单独授权的自动动作。' };
       },
       undo: async (params, result) => {
         const outcome = await deleteAlertRule(result?.rule?.id);
@@ -147,7 +149,7 @@ export function registerMaintenanceTools(agent) {
       execute: async (params) => queryContainerMetrics(params.container, params.metric || 'cpu', params.period || '5m'),
     })
     .registerTool('alert.configure', {
-      description: '按容器配置资源告警规则(cpu/内存百分比或重启次数阈值,超限触发通知、自动重启或扩容;规则进入统一告警引擎)',
+      description: '按精确容器配置资源告警。自动处置须确认7天授权、项目级10分钟冷却与24小时3次预算；未知结果暂停。扩容限固定摘要、无挂载/固定端口服务，最多5副本。',
       category: 'maintenance',
       requiredPermission: 'admin',
       confirmationRequired: true,
@@ -159,6 +161,7 @@ export function registerMaintenanceTools(agent) {
           metric: { type: 'string', enum: ['cpu', 'memory', 'restart_count'], description: '监控指标' },
           threshold: { type: 'number', description: '阈值(cpu/内存为 0-100 百分比,重启次数为次数)' },
           action: { type: 'string', enum: ['notify', 'auto_restart', 'scale'], description: '触发动作(默认 notify)' },
+          confirmAutomatic: { type: 'boolean', description: '用户明确确认自动处置的期限和预算后传true' },
         },
         required: ['container', 'metric', 'threshold'],
       },
@@ -168,8 +171,9 @@ export function registerMaintenanceTools(agent) {
           metric: params.metric,
           threshold: Number(params.threshold),
           action: params.action || 'notify',
-        });
-        return { ok: true, ruleId: rule.id, rule, note: '规则已保存,由告警引擎按轮询周期评估(内置 10 分钟冷却)' };
+          confirmAutomatic: params.confirmAutomatic,
+        }, { actor: 'agent' });
+        return { ok: true, ruleId: rule.id, rule, note: '连续两个有效超限样本触发；自动授权7天，项目级10分钟冷却、24小时最多3次，结果未知需人工核对。关闭通知渠道不会撤销单独授权的自动动作。' };
       },
     })
     .registerTool('alert.list', {

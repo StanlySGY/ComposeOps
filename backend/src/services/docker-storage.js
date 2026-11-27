@@ -2,7 +2,7 @@ import { getActiveHostId, getDockerForHost } from './docker-hosts.js';
 import { readDockerDiskUsage, invalidateDiskUsage } from './docker-disk-usage.js';
 import { summarizeDockerDiskUsage } from '../lib/docker-storage-summary.js';
 import { storageHostScope, assertStorageHostScope } from './storage-host-scope.js';
-import { assertScheduledPruneHost } from './scheduled-host-scope.js';
+import { assertScheduledPruneHost, captureScheduledHost, assertScheduledHost } from './scheduled-host-scope.js';
 
 function emptyDf() {
   return {
@@ -225,11 +225,11 @@ function sum(items, key) {
 }
 
 /** Same node-scoped Engine snapshot as maintenance/cost; unavailable is an error. */
-export async function getSystemStorageDf(hostId = getActiveHostId()) {
-  const scope = storageHostScope(hostId);
+export async function getSystemStorageDf(hostId = getActiveHostId(), { background = false } = {}) {
+  const scope = background ? captureScheduledHost(hostId) : storageHostScope(hostId);
   try {
     const snapshot = await readDockerDiskUsage(hostId);
-    assertStorageHostScope(scope);
+    if (background) assertScheduledHost(scope); else assertStorageHostScope(scope);
     return { ...summarizeDockerDiskUsage(snapshot), ...scope, disk: null, checkedAt: Date.now() };
   } catch (error) {
     if (error.statusCode) throw error;

@@ -138,6 +138,7 @@ test('agent threshold alerts isolate containers and ignore invalid samples', () 
   const rule = { id: 'threshold-debounce-2', projectId: 'project-a', threshold: 5 };
   assert.equal(observeAgentAlertState(rule, 'container-a', 10), false);
   assert.equal(observeAgentAlertState(rule, 'container-a', Number.NaN), false, 'invalid readings do not count');
+  assert.equal(observeAgentAlertState(rule, 'container-a', 10), false, 'unknown readings break the consecutive sample streak');
   assert.equal(observeAgentAlertState(rule, 'container-a', 10), true);
   assert.equal(observeAgentAlertState(rule, 'container-b', 10), false);
   assert.equal(observeAgentAlertState(rule, 'container-b', 10), true, 'containers have independent incident state');

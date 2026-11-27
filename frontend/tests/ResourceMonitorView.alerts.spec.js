@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
-const { api, metricsApi } = vi.hoisted(() => ({ api: { getProjects: vi.fn() }, metricsApi: Object.fromEntries(['getAlerts', 'getContainerMetrics', 'getHistoricalMetrics', 'detectAnomalies', 'createAlert', 'deleteAlert'].map(name => [name, vi.fn()])) }));
+const { api, metricsApi } = vi.hoisted(() => ({ api: { getProjects: vi.fn() }, metricsApi: Object.fromEntries(['getAlerts', 'getContainerMetrics', 'getHistoricalMetrics', 'detectAnomalies', 'createAlert', 'deleteAlert', 'acknowledgeAlert'].map(name => [name, vi.fn()])) }));
 vi.mock('../src/api/client.js', () => ({ api, metricsApi }));
 import ResourceMonitorView from '../src/views/ResourceMonitorView.vue';
 const project = { id: 'p1', projectName: 'stack', managed: true, containers: [{ id: 'c1', name: 'api', state: 'running' }, { id: 'c2', name: 'worker', state: 'running' }] };
@@ -175,5 +175,60 @@ describe('历史指标中的告警操作闭环', () => {
     request.resolve({ rule }); await flushPromises();
     expect(metricsApi.getAlerts).toHaveBeenCalledTimes(reads);
     expect(dialog()).toBeNull(); expect(document.body.style.overflow).toBe('');
+  });
+});
+
+
+describe('资源自动处置的明确授权与结果核对', () => {
+  it('自动动作必须勾选期限与预算，改变动作会撤销勾选', async () => {
+    await open(); await configure();
+    const select = document.querySelector('#resource-alert-action');
+    select.value = 'auto_restart'; select.dispatchEvent(new Event('change', { bubbles: true })); await flushPromises();
+    expect(button('创建规则').disabled).toBe(true);
+    expect(document.querySelector('#resource-alert-threshold').getAttribute('aria-invalid')).toBe('false');
+    expect(dialog().textContent).toContain('最近 24 小时 3 次预算');
+    const confirm = document.querySelector('#resource-alert-confirm'); confirm.click(); await flushPromises();
+    expect(button('创建规则').disabled).toBe(false);
+    select.value = 'scale'; select.dispatchEvent(new Event('change', { bubbles: true })); await flushPromises();
+    expect(button('创建规则').disabled).toBe(true); expect(confirm.checked).toBe(false);
+    expect(dialog().textContent).toContain('固定镜像摘要');
+  });
+  it('明确确认后请求携带确认字段，单纯通知不增加自动授权', async () => {
+    await open(); await configure();
+    const select = document.querySelector('#resource-alert-action'); select.value = 'auto_restart'; select.dispatchEvent(new Event('change', { bubbles: true })); await flushPromises();
+    document.querySelector('#resource-alert-confirm').click(); await flushPromises(); await click('创建规则');
+    expect(metricsApi.createAlert).toHaveBeenCalledExactlyOnceWith({ container: 'c1', metric: 'cpu', threshold: 80, action: 'auto_restart', confirmAutomatic: true });
+  });
+  it('旧规则或到期授权必须显示暂停原因，不能冒充有效自动动作', async () => {
+    metricsApi.getAlerts.mockResolvedValue({ alerts: [{ ...rule, action: 'auto_restart', actionState: { status: 'expired', message: '7 天自动授权已到期；规则继续通知' } }, { ...rule, id: 'old', action: 'scale' }] });
+    await open(); expect(wrapper.text()).toContain('自动授权已到期'); expect(wrapper.text()).toContain('旧自动规则仅通知');
+  });
+  it('旧容器被替换后，仍可在同项目查看和删除原容器的失效规则', async () => {
+    metricsApi.getAlerts.mockResolvedValue({ alerts: [{ ...rule, containerId: 'gone', containerName: 'old-api', action: 'auto_restart', actionState: { status: 'paused', message: '固定容器已消失' } }] });
+    await open(); expect(wrapper.text()).toContain('固定容器已消失'); expect(wrapper.text()).toContain('old-api'); expect(button('删除')).toBeTruthy();
+  });
+  it('未知结果先人工确认，失败保留确认门且不自动重试', async () => {
+    metricsApi.getAlerts.mockResolvedValue({ alerts: [{ ...rule, action: 'auto_restart', actionState: { status: 'unknown', message: '结果未知，请人工核对', executionId: 'exec-1' } }] });
+    metricsApi.acknowledgeAlert.mockRejectedValueOnce(new Error('记录暂不可用'));
+    await open(); await click('人工核对结果');
+    expect(metricsApi.acknowledgeAlert).not.toHaveBeenCalled(); expect(dialog().textContent).toContain('不会重试原动作');
+    await click('已核对，解除暂停'); expect(dialog().textContent).toContain('记录暂不可用');
+    metricsApi.acknowledgeAlert.mockResolvedValueOnce({ actionState: { status: 'cooldown', message: '10 分钟冷却期' } });
+    metricsApi.getAlerts.mockRejectedValueOnce(new Error('列表暂不可用'));
+    await click('已核对，解除暂停');
+    expect(metricsApi.acknowledgeAlert).toHaveBeenLastCalledWith('rule1', 'exec-1');
+    expect(dialog()).toBeNull(); expect(wrapper.text()).toContain('原动作不会自动重试'); expect(wrapper.text()).toContain('10 分钟冷却期');
+  });
+  it('切换目标后迟到核对响应不能污染新页面', async () => {
+    const request = deferred(); metricsApi.acknowledgeAlert.mockReturnValueOnce(request.promise);
+    metricsApi.getAlerts.mockResolvedValue({ alerts: [{ ...rule, action: 'auto_restart', actionState: { status: 'unknown', executionId: 'exec-1' } }] });
+    await open(); await click('人工核对结果'); await click('已核对，解除暂停');
+    await wrapper.get('#resource-monitor-container').setValue('c2');
+    request.resolve({ actionState: { status: 'cooldown' } }); await flushPromises();
+    expect(dialog()).toBeNull(); expect(wrapper.text()).not.toContain('已记录人工核对');
+  });
+  it('后台采样部分失败明确展示，缺失不能显示成正常', async () => {
+    metricsApi.getAlerts.mockResolvedValue({ alerts: [rule], monitor: { complete: false, failed: 2, pending: 3 } });
+    await open(); expect(wrapper.text()).toContain('2 项失败、3 项未完成'); expect(wrapper.text()).toContain('缺失数据不会当作恢复正常');
   });
 });

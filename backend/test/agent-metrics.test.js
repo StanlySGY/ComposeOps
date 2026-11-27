@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -10,6 +10,9 @@ process.env.DB_PATH = join(tempDir, 'test.db');
 const { parseContainerStats } = await import('../src/services/agent-metrics.js');
 const { createAlertRule, deleteAlertRule, readAlertRules } = await import('../src/services/alert-rules.js');
 const { parseContainerMetrics } = await import('../src/services/metrics-collector.js');
+const { getDockerForHost } = await import('../src/services/docker-hosts.js');
+const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
+const { setProjectPreference } = await import('../src/lib/db.js');
 
 test.after(() => rmSync(tempDir, { recursive: true, force: true }));
 
@@ -100,10 +103,17 @@ test('alert-rules: 阈值、指标与动作在任何外部依赖前完成校验'
   );
 });
 
-test('alert-rules: 创建规则落 agent.alert_rules,旧 restart 动作归一化,可删除', async () => {
-  const rule = await createAlertRule({ projectId: 'proj-1', service: 'web', metric: 'cpu', threshold: 85, action: 'restart' });
+test('alert-rules: 已纳管目标确认后落 agent.alert_rules,旧 restart 动作归一化,可删除', async t => {
+  const file = join(tempDir, 'compose.yml'); writeFileSync(file, 'services: {}\n');
+  t.mock.method(getDockerForHost('local'), 'info', async () => ({ ID: 'fixture-engine' }));
+  t.mock.method(getDockerForHost('local'), 'listContainers', async () => [{ Id: 'web-id', Names: ['/web'], State: 'running', Labels: {
+    'com.docker.compose.project': 'fixture', 'com.docker.compose.service': 'web', 'com.docker.compose.project.working_dir': tempDir, 'com.docker.compose.project.config_files': file,
+  } }]);
+  invalidateScanCache(); const [project] = await scanProjects('local');
+  setProjectPreference(project.id, { managed: true });
+  const rule = await createAlertRule({ projectId: project.id, service: 'web', metric: 'cpu', threshold: 85, action: 'restart', confirmAutomatic: true });
   assert.equal(rule.action, 'auto_restart');
-  assert.equal(rule.projectId, 'proj-1');
+  assert.equal(rule.projectId, project.id);
   assert.equal(rule.service, 'web');
   const stored = readAlertRules();
   assert.equal(stored.length, 1);

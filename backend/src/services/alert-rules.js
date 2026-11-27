@@ -5,25 +5,17 @@
  * `agent.alert_rules`,导致"创建了规则却永不触发"。这里收敛为单一存储、单一规则形状,
  * 与 alert-monitor 的 evaluateAgentRules 消费格式(projectId + service + metric/action)对齐。
  */
-import { getSetting, setSetting } from '../lib/db.js';
+import db from '../lib/db.js';
 import { scanProjects } from './scanner.js';
 import { resolveManagedContainer } from './agent-metrics.js';
+import { getActiveHostId } from './docker-hosts.js';
+import { readAlertRules, writeAlertRules, alertMatchesContainer } from './alert-rule-store.js';
+import { captureAlertAuthorization, alertActionState } from './resource-alert-actions.js';
+import { recordAgentAuditEvent } from './agent/policy-store.js';
+export { readAlertRules, writeAlertRules } from './alert-rule-store.js';
 
 export const ALERT_METRICS = new Set(['cpu', 'memory', 'restart_count']);
 export const ALERT_ACTIONS = new Set(['notify', 'auto_restart', 'scale']);
-
-export function readAlertRules() {
-  try {
-    const parsed = JSON.parse(getSetting('agent.alert_rules', '[]'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function writeAlertRules(rules) {
-  setSetting('agent.alert_rules', JSON.stringify(rules));
-}
 
 function newRuleId() {
   return `rule-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -31,11 +23,12 @@ function newRuleId() {
 
 /**
  * 创建告警规则。定位方式二选一:
- * - projectId + service:Agent 的 alert.create 传入(不触 Docker)。
+ * - projectId + service:Agent 的 alert.create 传入,必须解析真实纳管目标。
  * - container:容器名/ID,REST 与 alert.configure 传入,解析到纳管项目 + 容器。
  * 校验全部发生在任何外部依赖之前,便于纯单测覆盖。
  */
-export async function createAlertRule(input = {}) {
+export async function createAlertRule(input = {}, { actor = 'admin' } = {}) {
+  const hostId = getActiveHostId();
   const { projectId, service, container, metric, threshold, action = 'notify' } = input;
   const numericThreshold = Number(threshold);
   if (!ALERT_METRICS.has(metric)) {
@@ -66,30 +59,38 @@ export async function createAlertRule(input = {}) {
     action: normalizedAction,
     createdAt: new Date().toISOString(),
   };
+  let project;
   if (container) {
-    const { project, container: managedContainer } = await resolveManagedContainer(container);
+    const resolved = await resolveManagedContainer(container), managedContainer = resolved.container;
+    project = resolved.project;
     rule.projectId = project.id;
-    rule.service = managedContainer.name;
+    rule.service = managedContainer.service || managedContainer.name;
     rule.containerId = managedContainer.id;
   } else {
     if (!projectId || !service) {
       throw Object.assign(new Error('需要提供 projectId + service 或 container 之一'), { statusCode: 400 });
     }
-    rule.projectId = String(projectId);
-    rule.service = String(service);
+    project = (await scanProjects(hostId)).find(item => item.id === String(projectId));
+    if (!project?.managed) throw Object.assign(new Error('项目不存在或尚未纳管'), { statusCode: 403 });
+    rule.projectId = project.id;
+    rule.service = String(service).trim();
+    const matched = project.containers.filter(item => alertMatchesContainer(rule, item));
+    if (!matched.length) throw Object.assign(new Error('未找到精确服务名或容器名，请刷新项目后重试'), { statusCode: 404 });
+    rule.containerIds = matched.map(item => item.id);
+    if (matched.length === 1) rule.containerId = matched[0].id;
   }
-
-  const rules = readAlertRules();
-  rules.push(rule);
-  writeAlertRules(rules);
-  return rule;
-}
-
-/** 服务名与容器名的匹配(与 alert-monitor 的评估口径一致,支持服务名前缀)。 */
-function containerMatchesService(container, service) {
-  const name = String(container.name || '').toLowerCase();
-  const wanted = String(service || '').toLowerCase();
-  return name === wanted || name.startsWith(`${wanted}.`) || name.startsWith(`${wanted}-`) || name.includes(wanted);
+  rule.hostId = project.hostId;
+  const authorization = await captureAlertAuthorization(rule, project, input);
+  const savedRule = { ...rule, ...(authorization ? { authorization: { ...authorization, actor } } : {}) };
+  if (getActiveHostId() !== hostId) throw Object.assign(new Error('创建期间节点已切换，请刷新目标后重试'), { statusCode: 409 });
+  db.transaction(() => {
+    const rules = readAlertRules();
+    if (rules.length >= 200) throw Object.assign(new Error('告警规则已达 200 条上限，请先整理旧规则'), { statusCode: 409 });
+    rules.push(savedRule); writeAlertRules(rules);
+    if (authorization) recordAgentAuditEvent({ executionId: rule.id, eventType: 'resource_alert_authorized', actor, toolName: 'alert.configure', decision: 'allow_bounded',
+      details: { ruleId: rule.id, projectId: rule.projectId, action: rule.action, target: rule.target, authorization: savedRule.authorization } });
+  })();
+  return { ...savedRule, actionState: alertActionState(savedRule) };
 }
 
 /**
@@ -103,11 +104,12 @@ export async function listAlertRules({ container } = {}) {
     .filter((rule) => byId.has(rule.projectId))
     .map((rule) => {
       const project = byId.get(rule.projectId);
-      const matched = rule.containerId
-        ? project.containers.find((item) => item.id === rule.containerId)
-        : project.containers.find((item) => containerMatchesService(item, rule.service));
+      const matched = project.containers.find(item => alertMatchesContainer(rule, item));
+      const actionState = alertActionState(rule);
+      if (!matched && actionState.status === 'ready') Object.assign(actionState, { status: 'paused', message: '固定容器已消失；请为新容器重新配置规则' });
       return {
         ...rule,
+        actionState,
         projectName: project.projectName || rule.projectId,
         containerName: matched?.name || rule.service,
         containerId: matched?.id || rule.containerId,
@@ -115,16 +117,19 @@ export async function listAlertRules({ container } = {}) {
     });
   if (container) {
     const { container: managedContainer } = await resolveManagedContainer(container);
-    rules = rules.filter((rule) => rule.containerId === managedContainer.id);
+    rules = rules.filter((rule) => alertMatchesContainer(rule, managedContainer));
   }
   return rules;
 }
 
 /** 删除规则,返回 { deleted } 与旧 REST 契约一致(0 或 1)。 */
 export async function deleteAlertRule(ruleId) {
-  const rules = readAlertRules();
-  const next = rules.filter((item) => item.id !== ruleId);
-  if (next.length === rules.length) return { deleted: 0 };
-  writeAlertRules(next);
-  return { deleted: rules.length - next.length };
+  return db.transaction(() => {
+    const rules = readAlertRules(), rule = rules.find(item => item.id === ruleId);
+    if (rule?.target && alertActionState(rule).status === 'unknown') throw Object.assign(new Error('该项目有结果待核对的自动操作，请先人工核对后再删除规则'), { statusCode: 409 });
+    const next = rules.filter(item => item.id !== ruleId);
+    if (next.length === rules.length) return { deleted: 0 };
+    writeAlertRules(next);
+    return { deleted: rules.length - next.length };
+  })();
 }

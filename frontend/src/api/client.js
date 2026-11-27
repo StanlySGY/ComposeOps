@@ -624,6 +624,7 @@ export const metricsApi = {
     request('/metrics/alerts', { method: 'POST', body: JSON.stringify(config) }),
   deleteAlert: (ruleId) => 
     request(`/metrics/alerts/${ruleId}`, { method: 'DELETE' }),
+  acknowledgeAlert: (ruleId, executionId) => request(`/metrics/alerts/${ruleId}/acknowledge`, { method: 'POST', body: JSON.stringify({ confirm: 'CHECKED_RESOURCE_ACTION', executionId }) }),
   
   // Phase 1: 新增的指标 API
   getHistoricalMetrics: ({ containerId, metricType, startTime, endTime, aggregation = 'auto' }) => {

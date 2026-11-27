@@ -105,6 +105,7 @@
       </header>
       <div v-if="alertFeedback" ref="alertFeedbackElement" class="alert-success mt-3" role="status" tabindex="-1"><CheckCircle2 class="h-4 w-4 shrink-0" /><span>{{ alertFeedback }}</span></div>
       <div v-if="alertsError" class="alert-error mt-3" role="alert"><span class="min-w-0 flex-1">{{ alertsError }}</span><button class="text-link shrink-0" :disabled="alertsLoading" @click="loadAlerts">重新读取规则</button></div>
+      <p v-if="monitorStatus && !monitorStatus.complete" class="mt-3 text-xs text-status-warning" role="status">最近一轮后台采样不完整：{{ monitorStatus.failed }} 项失败、{{ monitorStatus.pending }} 项未完成。缺失数据不会当作恢复正常。</p>
       <div v-if="alertsLoading && !alertsLoaded" class="flex items-center gap-2 py-8 text-sm text-surface-400" role="status"><Loader2 class="h-4 w-4 animate-spin" />正在读取告警规则…</div>
       <EmptyState v-else-if="alertsLoaded && !containerAlerts.length && !alertsError" compact icon="Bell" title="暂无告警规则" description="为 CPU、内存或重启次数设定阈值，建议先从仅通知开始。" />
       <ul v-if="containerAlerts.length" class="mt-4 grid gap-2" aria-label="当前容器告警规则">
@@ -115,23 +116,31 @@
           </div>
           <span class="alert-action-label" :class="{ 'is-automatic': alert.action && alert.action !== 'notify' }"><Bell v-if="!alert.action || alert.action === 'notify'" class="h-3 w-3" /><Zap v-else class="h-3 w-3" />{{ actionLabel(alert.action) }}</span>
           <button class="btn-ghost btn-sm text-status-error" :disabled="alertBusy" :aria-label="`删除${alertMetricTypes.find(m => m.key === alert.metric)?.label || alert.metric}告警规则`" @click="selectDeleteAlert(alert)">删除</button>
+          <div v-if="alert.action && alert.action !== 'notify'" class="alert-rule-details">
+            <p class="mb-1 text-surface-400">固定目标：{{ alert.containerName || alert.service }}</p>
+            <p :class="alert.actionState?.status === 'ready' ? 'text-surface-400' : 'text-status-warning'">{{ alert.actionState?.message || '旧自动规则仅通知；请删除并重新确认授权' }}</p>
+            <p v-if="alert.actionState?.expiresAt" class="mt-1 text-surface-500">授权至 {{ new Date(alert.actionState.expiresAt).toLocaleString('zh-CN', { hour12: false }) }} · 项目共用最近 24 小时 3 次预算</p>
+            <button v-if="alert.actionState?.status === 'unknown'" class="btn-secondary btn-sm mt-2" :disabled="alertBusy" @click="selectAcknowledgeAlert(alert)">人工核对结果</button>
+          </div>
         </li>
       </ul>
-      <p class="mt-3 text-xs leading-relaxed text-surface-500">规则由后台持续检查。通知投递使用设置中的已启用渠道。</p>
+      <p class="mt-3 text-xs leading-relaxed text-surface-500">连续两个有效超限样本触发。通知使用已启用渠道；关闭通知渠道不会撤销单独授权的自动动作。维护或计划停机时暂停自动动作。</p>
     </section>
 
     <BaseModal :show="showAlertModal" title="配置告警规则" size-class="sm:max-w-md" body-class="p-4 space-y-4" :close-disabled="alertCreating" @close="closeAlertModal">
       <div class="alert-target-context"><span class="text-xs text-surface-400">应用到容器</span><strong class="mt-1 block break-all text-sm text-surface-100">{{ alertTarget?.containerName }}</strong><span class="mt-1 block break-all text-xs text-surface-400">{{ alertTarget?.projectName }}</span></div>
       <fieldset :disabled="alertCreating" class="space-y-4">
         <div><label for="resource-alert-metric" class="mb-1.5 block text-xs font-medium text-surface-300">指标类型</label><select id="resource-alert-metric" v-model="alertForm.metric" class="input"><option v-for="m in alertMetricTypes" :key="m.key" :value="m.key">{{ m.label }}</option></select></div>
-        <div><label for="resource-alert-threshold" class="mb-1.5 block text-xs font-medium text-surface-300">阈值{{ alertForm.metric === 'restart_count' ? '（次）' : '（%）' }}</label><input id="resource-alert-threshold" v-model.number="alertForm.threshold" type="number" min="0" :max="alertForm.metric === 'restart_count' ? undefined : 100" step="any" class="input" placeholder="例如：80" aria-describedby="resource-alert-threshold-help" :aria-invalid="!validAlertForm" /><p id="resource-alert-threshold-help" class="mt-1.5 text-xs text-surface-400">{{ alertForm.metric === 'restart_count' ? '填写大于或等于 0 的重启次数。' : '填写 0–100 之间的百分比。' }}</p></div>
+        <div><label for="resource-alert-threshold" class="mb-1.5 block text-xs font-medium text-surface-300">阈值{{ alertForm.metric === 'restart_count' ? '（次）' : '（%）' }}</label><input id="resource-alert-threshold" v-model.number="alertForm.threshold" type="number" min="0" :max="alertForm.metric === 'restart_count' ? undefined : 100" step="any" class="input" placeholder="例如：80" aria-describedby="resource-alert-threshold-help" :aria-invalid="!validAlertThreshold" /><p id="resource-alert-threshold-help" class="mt-1.5 text-xs text-surface-400">{{ alertForm.metric === 'restart_count' ? '填写大于或等于 0 的重启次数。' : '填写 0–100 之间的百分比。' }}</p></div>
         <div><label for="resource-alert-action" class="mb-1.5 block text-xs font-medium text-surface-300">触发后执行</label><select id="resource-alert-action" v-model="alertForm.action" class="input"><option v-for="a in alertActionOptions" :key="a.key" :value="a.key">{{ a.label }}</option></select></div>
       </fieldset>
-      <p class="alert-action-preview" :class="{ 'is-automatic': alertForm.action !== 'notify' }"><component :is="alertForm.action === 'notify' ? Bell : AlertTriangle" class="h-4 w-4 shrink-0" /><span>{{ alertForm.action === 'notify' ? '触发时记录告警并通过已启用渠道发送通知。' : alertForm.action === 'auto_restart' ? '触发时会自动重启匹配容器，可能短暂中断服务。' : '触发时会自动增加该服务的副本数，需要项目支持 Compose 编辑。' }}</span></p>
+      <p class="alert-action-preview" :class="{ 'is-automatic': alertForm.action !== 'notify' }"><component :is="alertForm.action === 'notify' ? Bell : AlertTriangle" class="h-4 w-4 shrink-0" /><span>{{ alertForm.action === 'notify' ? '触发时记录告警并通过已启用渠道发送通知。' : alertForm.action === 'auto_restart' ? '触发时仅重启当前固定容器，可能短暂中断服务；容器重建后需要重新授权。' : '每次仅为指定服务增加 1 个副本，最多 5 个。需要固定镜像摘要、无挂载和固定宿主端口；配置变化后暂停。' }}</span></p>
+      <label v-if="alertForm.action !== 'notify'" class="flex items-start gap-2 text-xs leading-relaxed text-surface-300"><input id="resource-alert-confirm" v-model="automaticConfirmed" type="checkbox" class="mt-1 shrink-0" :disabled="alertCreating" />我确认授权 7 天：整个项目共用 10 分钟冷却和最近 24 小时 3 次预算。结果不明时暂停并由我人工核对；容器健康不代表业务恢复。</label>
       <p v-if="alertCreateError" class="alert-error" role="alert">{{ alertCreateError }}</p>
       <template #footer><button class="btn-secondary" :disabled="alertCreating" @click="closeAlertModal">取消</button><button class="btn-primary" :disabled="alertCreating || !validAlertForm" :aria-busy="alertCreating" @click="createAlertRule"><Loader2 v-if="alertCreating" class="h-4 w-4 animate-spin" /><Plus v-else class="h-4 w-4" />创建规则</button></template>
     </BaseModal>
     <ConfirmDialog :show="!!deleteTarget" title="删除告警规则" :message="`确认删除 ${deleteTarget?.containerName || '当前容器'} 的${alertMetricTypes.find(m => m.key === deleteTarget?.metric)?.label || ''}规则？删除后该规则将停止检查。`" tone="danger" confirm-text="确认删除" :busy="alertDeleting" @cancel="closeDeleteAlert" @confirm="deleteAlertRule"><p v-if="alertDeleteError" class="text-status-error" role="alert">{{ alertDeleteError }}</p></ConfirmDialog>
+    <ConfirmDialog :show="!!acknowledgeTarget" title="核对自动操作结果" message="请先检查项目容器和业务结果，并确认没有仍在运行的远端操作。这里只记录人工核对并解除结果未知的暂停，不会重试原动作，也不会清空次数预算。" confirm-text="已核对，解除暂停" :busy="alertAcknowledging" @cancel="closeAcknowledgeAlert" @confirm="acknowledgeAlertRule"><p v-if="alertAcknowledgeError" class="text-status-error" role="alert">{{ alertAcknowledgeError }}</p></ConfirmDialog>
   </div>
 </template>
 
@@ -161,7 +170,12 @@ const alertTarget = ref(null);
 const deleteTarget = ref(null);
 const alertCreating = ref(false);
 const alertDeleting = ref(false);
-const alertBusy = computed(() => alertCreating.value || alertDeleting.value);
+const alertAcknowledging = ref(false);
+const acknowledgeTarget = ref(null);
+const alertAcknowledgeError = ref('');
+const automaticConfirmed = ref(false);
+const monitorStatus = ref(null);
+const alertBusy = computed(() => alertCreating.value || alertDeleting.value || alertAcknowledging.value);
 const alertCreateError = ref('');
 const alertDeleteError = ref('');
 const alertsLoading = ref(false);
@@ -171,6 +185,7 @@ const alertFeedbackElement = ref(null);
 let alertContextVersion = 0;
 let createRequestId = 0;
 let deleteRequestId = 0;
+let acknowledgeRequestId = 0;
 const loading = ref(false);
 const error = ref('');
 const alertsError = ref('');
@@ -201,15 +216,16 @@ const alertActionOptions = [
   { key: 'scale', label: '自动扩容 (+1 副本)' }
 ];
 
-const validAlertForm = computed(() => {
-  const { metric, threshold, action } = alertForm.value;
-  const value = Number(threshold);
-  return alertMetricTypes.some(item => item.key === metric) && alertActionOptions.some(item => item.key === action)
-    && threshold !== null && String(threshold).trim() !== '' && Number.isFinite(value) && value >= 0
-    && (metric === 'restart_count' || value <= 100);
+const validAlertThreshold = computed(() => {
+  const { metric, threshold } = alertForm.value, value = Number(threshold);
+  return threshold !== null && String(threshold).trim() !== '' && Number.isFinite(value) && value >= 0 && (metric === 'restart_count' || value <= 100);
 });
+const validAlertForm = computed(() => alertMetricTypes.some(item => item.key === alertForm.value.metric)
+  && alertActionOptions.some(item => item.key === alertForm.value.action) && validAlertThreshold.value
+  && (alertForm.value.action === 'notify' || automaticConfirmed.value));
+
 function actionLabel(action) {
-  return alertActionOptions.find(item => item.key === (action === 'restart' ? 'auto_restart' : action))?.label || '仅通知';
+  return alertActionOptions.find(item => item.key === (action === 'restart' ? 'auto_restart' : action))?.label || '未知动作';
 }
 function alertContext() {
   return { version: alertContextVersion, projectId: projectId.value, containerId: containerId.value,
@@ -223,11 +239,16 @@ function invalidateAlertActions() {
   alertContextVersion += 1;
   createRequestId += 1;
   deleteRequestId += 1;
+  acknowledgeRequestId += 1;
   showAlertModal.value = false;
   alertTarget.value = null;
   deleteTarget.value = null;
   alertCreating.value = false;
   alertDeleting.value = false;
+  alertAcknowledging.value = false;
+  acknowledgeTarget.value = null;
+  alertAcknowledgeError.value = '';
+  automaticConfirmed.value = false;
   alertCreateError.value = '';
   alertDeleteError.value = '';
   alertFeedback.value = '';
@@ -236,6 +257,7 @@ function openAlertModal() {
   if (!currentContainer.value || alertBusy.value) return;
   alertTarget.value = alertContext();
   alertForm.value = { metric: 'cpu', threshold: 80, action: 'notify' };
+  automaticConfirmed.value = false;
   alertCreateError.value = '';
   showAlertModal.value = true;
 }
@@ -250,6 +272,12 @@ function selectDeleteAlert(rule) {
 function closeDeleteAlert() {
   if (!alertDeleting.value) deleteTarget.value = null;
 }
+function selectAcknowledgeAlert(rule) {
+  if (alertBusy.value) return;
+  acknowledgeTarget.value = { ...rule, ...alertContext() };
+  alertAcknowledgeError.value = '';
+}
+function closeAcknowledgeAlert() { if (!alertAcknowledging.value) acknowledgeTarget.value = null; }
 async function showAlertFeedback(message, context) {
   if (!isAlertContextCurrent(context)) return;
   alertFeedback.value = message;
@@ -277,7 +305,8 @@ const periods = [
 const containers = computed(() => projects.value.find(p => p.id === projectId.value)?.containers || []);
 const currentContainer = computed(() => containers.value.find(c => c.id === containerId.value));
 
-const containerAlerts = computed(() => alerts.value.filter(a => a.containerId === containerId.value));
+const containerAlerts = computed(() => alerts.value.filter(a => a.containerId === containerId.value || a.containerIds?.includes(containerId.value) ||
+  (a.projectId === projectId.value && !containers.value.some(c => c.id === a.containerId || a.containerIds?.includes(c.id)))));
 
 const chartData = computed(() => {
   return historySeries.value;
@@ -429,6 +458,7 @@ async function loadAlerts() {
     const res = await metricsApi.getAlerts();
     if (disposed || requestId !== alertsRequestId) return;
     alerts.value = res.alerts || [];
+    monitorStatus.value = res.monitor || null;
     alertsLoaded.value = true;
   } catch (err) {
     if (!disposed && requestId === alertsRequestId) alertsError.value = `加载告警失败：${err.message}`;
@@ -448,6 +478,7 @@ async function createAlertRule() {
   if (alertCreating.value || !validAlertForm.value || !isAlertContextCurrent(context)) return;
   const requestId = ++createRequestId;
   const payload = { container: context.containerId, ...alertForm.value };
+  if (payload.action !== 'notify') payload.confirmAutomatic = automaticConfirmed.value;
   alertCreating.value = true;
   alertCreateError.value = '';
   try {
@@ -494,6 +525,24 @@ async function deleteAlertRule() {
   }
 }
 
+async function acknowledgeAlertRule() {
+  const context = acknowledgeTarget.value;
+  if (alertAcknowledging.value || !context || !isAlertContextCurrent(context)) return;
+  const requestId = ++acknowledgeRequestId;
+  alertAcknowledging.value = true; alertAcknowledgeError.value = '';
+  try {
+    const result = await metricsApi.acknowledgeAlert(context.id, context.actionState.executionId);
+    if (requestId !== acknowledgeRequestId || !isAlertContextCurrent(context)) return;
+    alertsRequestId += 1;
+    alerts.value = alerts.value.map(item => item.id === context.id ? { ...item, actionState: result.actionState } : item);
+    acknowledgeTarget.value = null;
+    await showAlertFeedback('已记录人工核对；原动作不会自动重试，次数预算保持。', context);
+    if (requestId === acknowledgeRequestId && isAlertContextCurrent(context)) void loadAlerts();
+  } catch (error) {
+    if (requestId === acknowledgeRequestId && isAlertContextCurrent(context)) alertAcknowledgeError.value = `核对记录未保存：${error.message}`;
+  } finally { if (requestId === acknowledgeRequestId) alertAcknowledging.value = false; }
+}
+
 // 只作为实时监控的「历史指标」tab 嵌入;父页面只在「实时」tab 响应,两者不重复发请求。
 usePullRefresh(async () => {
   await loadProjects();
@@ -518,6 +567,7 @@ function onHostChanged() {
   containerId.value = '';
   projects.value = [];
   alerts.value = [];
+  monitorStatus.value = null;
   alertsError.value = '';
   error.value = '';
   void loadProjects();
@@ -534,6 +584,7 @@ onBeforeUnmount(() => {
 });
 
 watch([projectId, containerId], invalidateAlertActions, { flush: 'sync' });
+watch(() => alertForm.value.action, () => { automaticConfirmed.value = false; }, { flush: 'sync' });
 watch(selectedMetric, () => { if (containerId.value) void loadMetrics(); });
 </script>
 
@@ -576,6 +627,7 @@ watch(selectedMetric, () => { if (containerId.value) void loadMetrics(); });
 .alert-section-icon { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; flex-shrink: 0; border: 1px solid rgb(52 211 153 / 20%); border-radius: .75rem; color: var(--color-accent); background: rgb(16 185 129 / 8%); }
 .alert-rule-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--color-surface-800); border-radius: .75rem; background: color-mix(in srgb, var(--color-surface-950) 80%, transparent); transition: border-color .18s, background .18s; }
 .alert-rule-card:hover, .alert-rule-card:focus-within { border-color: var(--color-surface-600); background: var(--color-surface-900); }
+.alert-rule-details { grid-column: 1 / -1; min-width: 0; font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; border-top: 1px solid var(--color-surface-800); padding-top: .6rem; }
 .alert-action-label { display: inline-flex; align-items: center; gap: .35rem; font-size: .7rem; color: var(--color-surface-400); }
 .alert-action-label.is-automatic { color: var(--color-status-warn); }
 .alert-target-context { border-left: 2px solid var(--color-accent); padding: .5rem .75rem; background: rgb(16 185 129 / 5%); border-radius: 0 .5rem .5rem 0; }

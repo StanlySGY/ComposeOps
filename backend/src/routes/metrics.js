@@ -1,5 +1,7 @@
 import { queryContainerMetrics, resolveManagedContainer } from '../services/agent-metrics.js';
 import { createAlertRule, listAlertRules, deleteAlertRule, ALERT_METRICS, ALERT_ACTIONS } from '../services/alert-rules.js';
+import { acknowledgeAlertAction } from '../services/resource-alert-actions.js';
+import { getSetting } from '../lib/db.js';
 import {
   queryHistoricalMetrics,
   getMetricsStats,
@@ -56,7 +58,8 @@ export default async function metricsRoutes(fastify) {
             container: { type: 'string', description: '容器 ID 或名称' },
             metric: { type: 'string', enum: [...ALERT_METRICS] },
             threshold: { type: 'number', description: '阈值(CPU/内存为百分比,重启次数为次数)' },
-            action: { type: 'string', enum: [...ALERT_ACTIONS, 'restart'], default: 'notify', description: 'restart 会归一化为 auto_restart' }
+            action: { type: 'string', enum: [...ALERT_ACTIONS, 'restart'], default: 'notify', description: 'restart 会归一化为 auto_restart' },
+            confirmAutomatic: { type: 'boolean' }
           }
         }
       }
@@ -83,9 +86,15 @@ export default async function metricsRoutes(fastify) {
     async (request) => {
       const { container } = request.query;
       const alerts = await listAlertRules({ container });
-      return { alerts };
+      let monitor = null;
+      try { monitor = JSON.parse(getSetting('agent.alert_monitor_status', 'null')); } catch { /* unknown */ }
+      return { alerts, monitor };
     }
   );
+
+  fastify.post('/alerts/:ruleId/acknowledge', {
+    schema: { body: { type: 'object', required: ['confirm', 'executionId'], properties: { confirm: { type: 'string', const: 'CHECKED_RESOURCE_ACTION' }, executionId: { type: 'string', minLength: 1 } } } },
+  }, request => acknowledgeAlertAction(request.params.ruleId, request.body));
 
   // 删除告警规则
   fastify.delete(

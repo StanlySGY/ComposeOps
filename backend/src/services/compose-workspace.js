@@ -628,7 +628,7 @@ export async function runWorkspaceComposeArgs(project, args, onOutput = () => {}
   if (!Array.isArray(args) || !args.length) throw Object.assign(new Error('无效的 Compose 参数'), { statusCode: 400 });
   return withRunner(project, async (container) => {
     options.signal?.throwIfAborted();
-    options.beforeExecute?.();
+    await options.beforeExecute?.();
     const result = await execInRunner(container, ['docker', 'compose', ...composeProjectOptions(project, files), ...args], { onOutput, onExec: options.onExec, timeoutMs: options.timeoutMs, signal: options.signal });
     return result.code;
   });

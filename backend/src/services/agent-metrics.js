@@ -15,14 +15,15 @@ export async function resolveManagedContainer(containerIdOrName) {
   const needle = String(containerIdOrName || '');
   if (!needle) throw Object.assign(new Error('容器标识不能为空'), { statusCode: 400 });
   const projects = await scanProjects();
-  const matches = [];
+  const exact = [], prefixes = [];
   for (const project of projects) {
     if (!project.managed) continue;
-    const container = project.containers.find((item) =>
-      item.id === needle || item.id.startsWith(needle) || item.name === needle
-    );
-    if (container) matches.push({ project, container });
+    for (const container of project.containers) {
+      if (container.id === needle || container.name === needle) exact.push({ project, container });
+      else if (container.id.startsWith(needle)) prefixes.push({ project, container });
+    }
   }
+  const matches = exact.length ? exact : prefixes;
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) throw Object.assign(new Error('容器标识不唯一，请使用完整容器 ID 或名称'), { statusCode: 400 });
   throw Object.assign(new Error('容器不属于当前节点的纳管项目'), { statusCode: 403 });
