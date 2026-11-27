@@ -616,8 +616,8 @@ export function wsUrl(path) {
 
 // Metrics API
 export const metricsApi = {
-  getContainerMetrics: (containerId, metric = 'cpu', period = '5m') => 
-    request(`/metrics/container/${containerId}?metric=${metric}&period=${period}`),
+  getContainerMetrics: (containerId, metric = 'cpu', period = '5m', options = {}) =>
+    request(`/metrics/container/${containerId}?metric=${metric}&period=${period}`, options),
   getAlerts: (containerFilter = null) => 
     request(`/metrics/alerts${containerFilter ? `?container=${containerFilter}` : ''}`),
   createAlert: (config) => 
@@ -627,20 +627,20 @@ export const metricsApi = {
   acknowledgeAlert: (ruleId, executionId) => request(`/metrics/alerts/${ruleId}/acknowledge`, { method: 'POST', body: JSON.stringify({ confirm: 'CHECKED_RESOURCE_ACTION', executionId }) }),
   
   // Phase 1: 新增的指标 API
-  getHistoricalMetrics: ({ containerId, metricType, startTime, endTime, aggregation = 'auto' }) => {
+  getHistoricalMetrics: ({ containerId, metricType, startTime, endTime, aggregation = 'auto', signal }) => {
     const params = new URLSearchParams();
     if (containerId) params.append('containerId', containerId);
     if (metricType) params.append('metricType', metricType);
     if (startTime) params.append('startTime', startTime);
     if (endTime) params.append('endTime', endTime);
     if (aggregation) params.append('aggregation', aggregation);
-    return request(`/metrics/historical?${params.toString()}`);
+    return request(`/metrics/historical?${params.toString()}`, { signal });
   },
   
   
-  detectAnomalies: ({ containerId, metricType, hours = 24, startTime, endTime, algorithms = ['z_score', 'moving_average', 'trend'] }) =>
+  detectAnomalies: ({ containerId, metricType, hours = 24, startTime, endTime, algorithms = ['z_score', 'moving_average', 'trend'], signal }) =>
     request('/metrics/anomalies', { readOnly: true,
-      method: 'POST', 
+      method: 'POST', signal,
       body: JSON.stringify({ containerId, metricType, hours, startTime, endTime, algorithms })
     }),
   

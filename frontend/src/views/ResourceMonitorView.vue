@@ -46,13 +46,14 @@
           <component :is="m.icon" :class="['h-5 w-5 shrink-0', m.color]" />
           <span class="min-w-0 flex-1">
             <span class="block text-xs font-medium text-surface-400">{{ m.label }}</span>
-            <strong class="mt-1 block truncate text-lg font-semibold tabular-nums text-surface-100">{{ formatMetricValue(metricsData[m.key]) }}</strong>
+            <strong class="mt-1 block break-words font-semibold tabular-nums text-surface-100" :class="['network', 'disk'].includes(m.key) ? 'text-base leading-6' : 'text-lg'">{{ formatMetricValue(metricsData[m.key]) }}</strong>
             <span class="mt-1 flex items-center gap-1 text-xs">
               <TrendingUp v-if="metricsData[m.key]?.trend === 'increasing'" class="h-3 w-3 text-status-error" />
               <TrendingDown v-else-if="metricsData[m.key]?.trend === 'decreasing'" class="h-3 w-3 text-status-ok" />
               <Minus v-else class="h-3 w-3 text-surface-400" />
-              <span :class="trendColor(metricsData[m.key]?.trend)">{{ metricsData[m.key]?.trend === 'stable' ? '稳定' : metricsData[m.key]?.trend === 'increasing' ? '上升' : '下降' }}</span>
+              <span :class="trendColor(metricsData[m.key]?.trend)">{{ ['network', 'disk'].includes(m.key) ? '累计计数' : trendLabel(metricsData[m.key]?.trend) }}</span>
             </span>
+            <span v-if="metricsData[m.key]?.reason" class="mt-1 block text-xs leading-relaxed text-surface-400">{{ metricsData[m.key].reason }}</span>
           </span>
         </button>
       </div>
@@ -62,7 +63,8 @@
         <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
             <h2 class="section-title">{{ metricTypes.find(m => m.key === selectedMetric)?.label }}趋势</h2>
-            <p class="mt-1 text-muted">{{ currentContainer?.name || '当前容器' }} · {{ periods.find(p => p.key === period)?.label }} · 异常点以阴影标记</p>
+            <p class="mt-1 text-muted">{{ currentContainer?.name || '当前容器' }} · {{ periods.find(p => p.key === period)?.label }}<template v-if="!['network', 'disk'].includes(selectedMetric)"> · 异常点以阴影标记</template></p>
+            <p v-if="['network', 'disk'].includes(selectedMetric)" class="mt-1 text-xs text-surface-400">展示容器累计计数，重启可能归零；每秒速率请查看实时总览。</p>
           </div>
           <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="历史指标时间范围">
             <button v-for="p in periods" :key="p.key"
@@ -74,7 +76,8 @@
             </button>
           </div>
         </div>
-        <EmptyState v-if="!loading && !chartData.length" compact icon="History" title="当前时间范围暂无历史数据" description="缩短时间范围或等待下一轮指标采集后再查看趋势。" />
+        <div v-if="historyError" class="alert-error flex flex-wrap items-center justify-between gap-3" role="alert"><span class="min-w-0 break-words">{{ historyError }}</span><button class="btn-secondary btn-sm shrink-0" :disabled="loading" @click="loadMetrics">重试历史</button></div>
+        <EmptyState v-else-if="!loading && !chartData.length" compact icon="History" title="当前时间范围暂无历史数据" description="缩短时间范围或等待下一轮指标采集后再查看趋势。" />
         <div v-else class="history-chart-frame min-w-0 w-full">
           <InteractiveChart :data="chartData"
             :aria-label="`${currentContainer?.name || '当前容器'} 的${metricTypes.find(m => m.key === selectedMetric)?.label || ''}历史指标`"
@@ -104,7 +107,7 @@
         </div>
       </header>
       <div v-if="alertFeedback" ref="alertFeedbackElement" class="alert-success mt-3" role="status" tabindex="-1"><CheckCircle2 class="h-4 w-4 shrink-0" /><span>{{ alertFeedback }}</span></div>
-      <div v-if="alertsError" class="alert-error mt-3" role="alert"><span class="min-w-0 flex-1">{{ alertsError }}</span><button class="text-link shrink-0" :disabled="alertsLoading" @click="loadAlerts">重新读取规则</button></div>
+      <div v-if="alertsError" class="alert-error mt-3 flex flex-wrap items-center justify-between gap-3" role="alert"><span class="min-w-0 flex-1">{{ alertsError }}</span><button class="btn-secondary btn-sm shrink-0" :disabled="alertsLoading" @click="loadAlerts">重新读取规则</button></div>
       <p v-if="monitorStatus && !monitorStatus.complete" class="mt-3 text-xs text-status-warning" role="status">最近一轮后台采样不完整：{{ monitorStatus.failed }} 项失败、{{ monitorStatus.pending }} 项未完成。缺失数据不会当作恢复正常。</p>
       <div v-if="alertsLoading && !alertsLoaded" class="flex items-center gap-2 py-8 text-sm text-surface-400" role="status"><Loader2 class="h-4 w-4 animate-spin" />正在读取告警规则…</div>
       <EmptyState v-else-if="alertsLoaded && !containerAlerts.length && !alertsError" compact icon="Bell" title="暂无告警规则" description="为 CPU、内存或重启次数设定阈值，建议先从仅通知开始。" />
@@ -190,8 +193,11 @@ const loading = ref(false);
 const error = ref('');
 const alertsError = ref('');
 const historySeries = ref([]);
+const historyError = ref('');
 const anomalies = ref([]);
 let metricsRequestId = 0;
+let metricsController = null;
+let metricDataContainerId = '';
 let projectsRequestId = 0;
 let alertsRequestId = 0;
 let disposed = false;
@@ -324,18 +330,20 @@ const chartAnomalies = computed(() => {
 });
 
 function formatMetricValue(metric) {
-  if (!metric) return '-';
-  if (typeof metric.current === 'number') {
+  if (!metric || metric.current == null) return '—';
+  if (typeof metric.current === 'number' && Number.isFinite(metric.current)) {
     return `${metric.current.toFixed(1)}${metric.unit}`;
   }
   if (metric.current?.rx !== undefined) {
-    return `收 ${metric.current.rx} · 发 ${metric.current.tx}`;
+    return `收 ${metric.current.rx ?? '—'} · 发 ${metric.current.tx ?? '—'}`;
   }
   if (metric.current?.read !== undefined) {
-    return `读 ${metric.current.read} · 写 ${metric.current.write}`;
+    return `读 ${metric.current.read ?? '—'} · 写 ${metric.current.write ?? '—'}`;
   }
-  return '-';
+  return '—';
 }
+
+function trendLabel(trend) { return { stable: '稳定', increasing: '上升', decreasing: '下降' }[trend] || '趋势待采样'; }
 
 function backendMetric(metric) {
   if (metric === 'network') return 'network_rx';
@@ -366,10 +374,13 @@ function getAlertColor(metric) {
 }
 
 function invalidateMetrics() {
+  metricsController?.abort(); metricsController = null;
   metricsRequestId += 1;
   loading.value = false;
   metricsData.value = null;
+  metricDataContainerId = '';
   historySeries.value = [];
+  historyError.value = '';
   anomalies.value = [];
 }
 
@@ -419,26 +430,43 @@ async function loadMetrics() {
   }
   const requestId = ++metricsRequestId;
   const context = { containerId: containerId.value, metric: selectedMetric.value, period: period.value };
+  metricsController?.abort();
+  const controller = new AbortController(); metricsController = controller;
+  if (metricDataContainerId !== context.containerId) metricsData.value = null;
+  historySeries.value = []; anomalies.value = []; historyError.value = '';
   loading.value = true;
   error.value = '';
   try {
     const endTime = Date.now();
     const startTime = endTime - periodMs(context.period);
-    const results = await Promise.all(
-      metricTypes.map(m => metricsApi.getContainerMetrics(context.containerId, m.key, context.period))
-    );
-    if (disposed || requestId !== metricsRequestId || containerId.value !== context.containerId || selectedMetric.value !== context.metric || period.value !== context.period) return;
-    const [seriesResult, anomalyResult] = await Promise.all([
-      metricsApi.getHistoricalMetrics({ containerId: context.containerId, metricType: backendMetric(context.metric), startTime, endTime, aggregation: 'auto' }),
-      metricsApi.detectAnomalies({ containerId: context.containerId, metricType: backendMetric(context.metric), startTime, endTime }),
+    const results = await Promise.allSettled([
+      ...metricTypes.map(m => metricsApi.getContainerMetrics(context.containerId, m.key, context.period, { signal: controller.signal })),
+      metricsApi.getHistoricalMetrics({ containerId: context.containerId, metricType: backendMetric(context.metric), startTime, endTime, aggregation: 'auto', signal: controller.signal }),
+      ['cpu', 'memory'].includes(context.metric)
+        ? metricsApi.detectAnomalies({ containerId: context.containerId, metricType: backendMetric(context.metric), startTime, endTime, signal: controller.signal })
+        : Promise.resolve({ anomalies: [] }),
     ]);
     if (disposed || requestId !== metricsRequestId || containerId.value !== context.containerId || selectedMetric.value !== context.metric || period.value !== context.period) return;
     metricsData.value = {};
+    metricDataContainerId = context.containerId;
+    const failures = [];
     metricTypes.forEach((m, i) => {
-      metricsData.value[m.key] = results[i].data;
+      const result = results[i];
+      if (result.status === 'fulfilled' && result.value?.data) metricsData.value[m.key] = result.value.data;
+      else {
+        const reason = result.reason?.message || '指标响应无效';
+        metricsData.value[m.key] = { current: null, trend: 'unknown', reason };
+        failures.push(`${m.label}：${reason}`);
+      }
     });
-    historySeries.value = (seriesResult.metrics || []).map((item) => ({ ...item, timestamp: Number(item.timestamp), value: Number(item.value) })).filter((item) => Number.isFinite(item.timestamp) && Number.isFinite(item.value));
-    anomalies.value = anomalyResult.anomalies || [];
+    const seriesResult = results[4], anomalyResult = results[5];
+    if (seriesResult.status === 'fulfilled' && Array.isArray(seriesResult.value?.metrics)) {
+      historySeries.value = seriesResult.value.metrics.filter(item => [item.timestamp, item.value].every(value => ['number', 'string'].includes(typeof value) && String(value).trim() !== ''))
+        .map(item => ({ ...item, timestamp: Number(item.timestamp), value: Number(item.value) })).filter(item => Number.isFinite(item.timestamp) && Number.isFinite(item.value));
+    } else { historyError.value = '历史趋势读取失败：' + (seriesResult.reason?.message || '响应无效'); failures.push(historyError.value); }
+    if (anomalyResult.status === 'fulfilled' && Array.isArray(anomalyResult.value?.anomalies)) anomalies.value = anomalyResult.value.anomalies;
+    else failures.push('异常检测：' + (anomalyResult.reason?.message || '响应无效'));
+    if (failures.length) error.value = '部分指标暂不可用；成功读取的结果已保留。' + failures.join('；');
   } catch (err) {
     if (!disposed && requestId === metricsRequestId) {
       historySeries.value = [];
@@ -447,6 +475,7 @@ async function loadMetrics() {
     }
   } finally {
     if (!disposed && requestId === metricsRequestId) loading.value = false;
+    if (metricsController === controller) metricsController = null;
   }
 }
 

@@ -10,7 +10,7 @@ import { spawnComposeCommand } from './compose-runner.js';
 import { runWorkspaceComposeArgs } from './compose-workspace.js';
 import { evaluateAgentPolicy, recordAgentAuditEvent } from './agent/policy-store.js';
 import { readAlertRules, alertMatchesContainer } from './alert-rule-store.js';
-import { parseContainerStat } from './stats.js';
+import { containerMetricValues } from '../lib/container-metric-values.js';
 
 export const RESOURCE_ALERT_LIMITS = Object.freeze({ durationMs: 7 * 86400000, cooldownMs: 600000, maxDaily: 3, maxReplicas: 5 });
 const fail = (message, statusCode = 409) => { throw Object.assign(new Error(message), { statusCode }); };
@@ -194,9 +194,8 @@ export async function executeResourceAlertAction(rule, containerId, options = {}
         (item.service && before.Config?.Labels?.['com.docker.compose.service'] !== item.service)) fail('容器身份或状态不符合已确认目标');
     let current = before.RestartCount;
     if (rule.metric !== 'restart_count') {
-      const stats = await boundedAlertCall(signal => container.stats({ stream: false, abortSignal: signal })), parsed = parseContainerStat(stats);
-      current = rule.metric === 'cpu' ? (parsed.cpuReady ? parsed.cpuPercent : null)
-        : parsed.memLimit > 0 && Number.isFinite(stats?.memory_stats?.usage) ? parsed.memPercent : null;
+      const stats = await boundedAlertCall(signal => container.stats({ stream: false, abortSignal: signal }));
+      current = containerMetricValues(stats)[rule.metric];
     }
     if (!Number.isFinite(current) || current < rule.threshold) fail('最新指标未知或已经恢复，取消本次自动动作');
     let replicaTarget, existingIds;

@@ -4,7 +4,7 @@ import { scanProjectInventory } from './scanner.js';
 import { getNotificationConfig, sendNotification } from './notifications.js';
 import { checkImageUpdates } from './maintenance.js';
 import { recordAlertEventAndNotify } from './events.js';
-import { parseContainerStat } from './stats.js';
+import { containerMetricValues } from '../lib/container-metric-values.js';
 import { readAlertRules, alertMatchesContainer } from './alert-rule-store.js';
 import { executeResourceAlertAction, boundedAlertCall, alertActionState } from './resource-alert-actions.js';
 import { getSystemStorageDf } from './docker-storage.js';
@@ -138,7 +138,7 @@ async function applyAgentAlertAction(rule, project, container, current, isCurren
 export async function evaluateAgentRules(project, container, stats, { isCurrent = () => true, apply = applyAgentAlertAction } = {}) {
   const rules = readAgentAlertRules().filter(rule => rule.projectId === project.id && (!rule.hostId || rule.hostId === project.hostId) && alertMatchesContainer(rule, container));
   if (!rules.length) return;
-  const parsed = parseContainerStat(stats);
+  const parsed = containerMetricValues(stats);
   let restartCount = null;
   if (rules.some(rule => rule.metric === 'restart_count')) {
     try {
@@ -150,8 +150,8 @@ export async function evaluateAgentRules(project, container, stats, { isCurrent 
   for (const rule of rules) {
     if (!isCurrent()) return;
     let current = null;
-    if (rule.metric === 'cpu' && parsed.cpuReady) current = parsed.cpuPercent;
-    else if (rule.metric === 'memory' && parsed.memLimit > 0 && Number.isFinite(stats?.memory_stats?.usage)) current = parsed.memPercent;
+    if (rule.metric === 'cpu') current = parsed.cpu;
+    else if (rule.metric === 'memory') current = parsed.memory;
     else if (rule.metric === 'restart_count') current = restartCount;
     if (!observeAgentAlertState(rule, container.id, current, rule.threshold, { maxGapMs: Math.max(120000, (Number(getNotificationConfig(false).intervalSeconds) || 30) * 2000) })) continue;
     await apply(rule, project, container, Math.round(current * 10) / 10, isCurrent);
@@ -194,17 +194,17 @@ async function poll(expectedGeneration) {
           observed++;
           await evaluateAgentRules(project, item, stats, { isCurrent });
           if (!config.enabled || !isCurrent()) continue;
-          const parsed = parseContainerStat(stats);
+          const parsed = containerMetricValues(stats);
           // Unknown memory readings preserve the incident; they cannot resolve it.
-          if (!(parsed.memLimit > 0) || !Number.isFinite(stats?.memory_stats?.usage)) continue;
-          const nextMemHigh = parsed.memPercent >= config.memoryThreshold;
+          if (parsed.memory === null) continue;
+          const nextMemHigh = parsed.memory >= config.memoryThreshold;
           if (nextMemHigh && !memHigh) {
             recordAlertEventAndNotify({
               key: `${project.hostId}:${item.id}:memory`, title: 'ComposeOps:容器内存告警',
-              detail: `${project.projectName} / ${item.name}: ${parsed.memPercent.toFixed(1)}%`, priority: 'warning',
+              detail: `${project.projectName} / ${item.name}: ${parsed.memory.toFixed(1)}%`, priority: 'warning',
               to: '/logs?' + new URLSearchParams({ projectId: project.id, containerId: item.id, hostId: project.hostId || 'local', from: 'events' }),
             });
-            await boundedAlertCall(() => sendNotification('ComposeOps：容器内存告警', `${project.projectName} / ${item.name}: ${parsed.memPercent.toFixed(1)}%`), 10000)
+            await boundedAlertCall(() => sendNotification('ComposeOps：容器内存告警', `${project.projectName} / ${item.name}: ${parsed.memory.toFixed(1)}%`), 10000)
               .catch(error => console.warn('[alert-monitor] 通知投递未完成:', error.message));
           }
           if (isCurrent()) previousStates.set(key, { memHigh: nextMemHigh });

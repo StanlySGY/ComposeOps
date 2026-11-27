@@ -213,11 +213,11 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
   });
 
   it('节点切换后，旧容器指标请求的迟到结果不会回填到新节点', async () => {
-    let resolveOldMetrics;
+    const oldMetricRequests = [];
     api.getProjects
       .mockResolvedValueOnce({ projects: [{ id: 'old-project', projectName: 'old-stack', managed: true, containers: [{ id: 'old-container', name: 'old-api', state: 'running', health: 'healthy' }] }] })
       .mockResolvedValueOnce({ projects: [{ id: 'new-project', projectName: 'new-stack', managed: true, containers: [{ id: 'new-container', name: 'new-api', state: 'running', health: 'healthy' }] }] });
-    metricsApi.getContainerMetrics.mockImplementation(() => new Promise((resolve) => { resolveOldMetrics = resolve; }));
+    metricsApi.getContainerMetrics.mockImplementation(() => new Promise(resolve => { oldMetricRequests.push(resolve); }));
     await mountView();
     const selects = [...document.querySelectorAll('select')];
     selects[1].value = 'old-container';
@@ -226,13 +226,14 @@ describe('资源监控告警配置弹窗的键盘可访问性', () => {
 
     window.dispatchEvent(new Event('composeops:host-changed'));
     await flushPromises();
-    resolveOldMetrics?.({ data: { current: 99, unit: '%' } });
+    for (const resolve of oldMetricRequests) resolve({ data: { current: 99, unit: '%' } });
     await flushPromises();
 
     expect(wrapper.text()).toContain('new-stack');
     expect(wrapper.text()).not.toContain('99.0%');
     expect(wrapper.find('.history-chart-panel').exists()).toBe(false);
-    expect(metricsApi.getHistoricalMetrics).not.toHaveBeenCalled();
+    expect(metricsApi.getHistoricalMetrics).toHaveBeenCalledTimes(1);
+    expect(metricsApi.getHistoricalMetrics.mock.calls[0][0].signal.aborted).toBe(true);
   });
 });
 
@@ -245,5 +246,54 @@ it('从实时容器进入历史自动定位同一项目和容器', async () => {
   await mountView({ embedded: true, initialProjectId: '', initialContainerId: 'c2' });
   expect(wrapper.get('#resource-monitor-project').element.value).toBe('p2');
   expect(wrapper.get('#resource-monitor-container').element.value).toBe('c2');
-  expect(metricsApi.getContainerMetrics).toHaveBeenCalledWith('c2', 'cpu', '5m');
+  expect(metricsApi.getContainerMetrics).toHaveBeenCalledWith('c2', 'cpu', '5m', expect.objectContaining({ signal: expect.anything() }));
+});
+
+describe('指标有效性与部分读取', () => {
+  it('未知指标显示占位与原因，真实零保留0，缺少趋势不伪装下降', async () => {
+    metricsApi.getContainerMetrics.mockImplementation(async (_id, metric) => ({ data: { current: metric === 'memory' ? 0 : null, trend: 'unknown', unit: '%', reason: metric === 'cpu' ? '等待有效 CPU 差分采样' : '' } }));
+    await mountView();
+    expect(wrapper.get('[aria-label="选择CPU指标"]').text()).toContain('—');
+    expect(wrapper.get('[aria-label="选择CPU指标"]').text()).toContain('等待有效 CPU 差分采样');
+    expect(wrapper.get('[aria-label="选择CPU指标"]').text()).toContain('趋势待采样');
+    expect(wrapper.get('[aria-label="选择CPU指标"]').text()).not.toContain('下降');
+    expect(wrapper.get('[aria-label="选择内存指标"]').text()).toContain('0.0%');
+  });
+  it('单个指标失败不丢掉其它指标与有效历史', async () => {
+    metricsApi.getContainerMetrics.mockImplementation(async (_id, metric) => { if (metric === 'cpu') throw new Error('CPU 源暂不可用'); return { data: { current: 25, unit: '%', trend: 'stable' } }; });
+    metricsApi.getHistoricalMetrics.mockResolvedValue({ metrics: [{ timestamp: 1000, value: 42 }] });
+    await mountView();
+    expect(wrapper.get('[aria-label="选择内存指标"]').text()).toContain('25.0%');
+    expect(wrapper.get('[aria-label="选择CPU指标"]').text()).toContain('CPU 源暂不可用');
+    expect(wrapper.text()).toContain('成功读取的结果已保留');
+    expect(wrapper.findComponent({ name: 'InteractiveChart' }).props('data')).toEqual([{ timestamp: 1000, value: 42 }]);
+  });
+  it('历史读取失败时仍显示有效当前指标，并明确缺失历史', async () => {
+    metricsApi.getHistoricalMetrics.mockRejectedValue(new Error('历史源暂不可用'));
+    await mountView();
+    expect(wrapper.get('[aria-label="选择内存指标"]').text()).toContain('25.0%');
+    expect(wrapper.text()).toContain('历史源暂不可用');
+    expect(wrapper.findComponent({ name: 'InteractiveChart' }).exists()).toBe(false);
+  });
+  it('历史里的null与布尔值不能在图中变成0，合法0保留', async () => {
+    metricsApi.getHistoricalMetrics.mockResolvedValue({ metrics: [{ timestamp: 1000, value: null }, { timestamp: 2000, value: false }, { timestamp: 3000, value: 0 }] });
+    await mountView();
+    expect(wrapper.findComponent({ name: 'InteractiveChart' }).props('data')).toEqual([{ timestamp: 3000, value: 0 }]);
+  });
+  it('切换指标与离开页面会取消先前请求', async () => {
+    const signals = [];
+    metricsApi.getContainerMetrics.mockImplementation((_id, _metric, _period, options) => { signals.push(options.signal); return new Promise(() => {}); });
+    await mountView();
+    expect(signals.length).toBe(4); expect(signals.every(signal => !signal.aborted)).toBe(true);
+    wrapper.unmount(); wrapper = null;
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+  });
+  it('网络和磁盘明确是累计计数，缺少一个方向显示占位', async () => {
+    metricsApi.getContainerMetrics.mockImplementation(async (_id, metric) => ({ data: metric === 'network' ? { current: { rx: '1 MB', tx: null }, kind: 'counter', trend: 'unknown' } : { current: 25, unit: '%' } }));
+    await mountView();
+    const network = wrapper.get('[aria-label="选择网络指标"]');
+    expect(network.text()).toContain('收 1 MB · 发 —'); expect(network.text()).toContain('累计计数');
+    await network.trigger('click'); await flushPromises();
+    expect(wrapper.text()).toContain('每秒速率请查看实时总览');
+  });
 });

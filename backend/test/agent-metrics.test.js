@@ -41,11 +41,11 @@ test('agent-metrics: Docker stats 正常计算 CPU、内存、网络和磁盘数
   assert.equal(parsedDisk.writeBytes, 128);
 });
 
-test('agent-metrics: 缺失或无效 Docker stats 返回有限零值', () => {
+test('agent-metrics: 缺失或无效 Docker stats 保留未知', () => {
   for (const metric of ['cpu', 'memory', 'network', 'disk']) {
     const parsed = parseContainerStats({}, metric);
-    assert.equal(Number.isFinite(parsed.numeric), true, metric);
-    assert.equal(parsed.numeric, 0, metric);
+    assert.equal(parsed.available, false, metric);
+    assert.equal(parsed.numeric, null, metric);
   }
 });
 
@@ -68,10 +68,10 @@ test('metrics-collector: 缺失、大小写差异和无效字段不会写出 NaN
   }, 123);
 
   assert.equal(metrics.some((metric) => !Number.isFinite(metric.value)), false);
-  assert.equal(metrics.find((metric) => metric.metric_type === 'network_rx').value, 0);
-  assert.equal(metrics.find((metric) => metric.metric_type === 'network_tx').value, 0);
+  assert.equal(metrics.some(metric => metric.metric_type === 'network_rx'), false);
+  assert.equal(metrics.some(metric => metric.metric_type === 'network_tx'), false);
   assert.equal(metrics.find((metric) => metric.metric_type === 'disk_read').value, 768);
-  assert.equal(metrics.find((metric) => metric.metric_type === 'disk_write').value, 0);
+  assert.equal(metrics.some(metric => metric.metric_type === 'disk_write'), false);
   assert.equal(metrics.some((metric) => metric.metric_type === 'memory'), false);
 });
 
