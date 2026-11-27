@@ -14,11 +14,13 @@ import { recordEvent } from './event-center.js';
  *   tool : 可选的 Agent 工具名,前端据此给出一键"交给 Agent 处理"入口
  */
 
-import os from 'node:os';
-import { statfs } from 'node:fs/promises';
 import { scanProjects } from './scanner.js';
-import { getActivityDocker } from './docker-hosts.js';
-import { getSystemStorageDf } from './docker-storage.js';
+import { getActiveHostId, getDockerForHost, getHost, hostConnectionRevision } from './docker-hosts.js';
+import { inspectServer } from './server-diagnostics.js';
+import { readDockerDiskUsage } from './docker-disk-usage.js';
+import { summarizeDockerDiskUsage } from '../lib/docker-storage-summary.js';
+import { mapLimited } from './container-sampler.js';
+import { captureScheduledHost, assertScheduledHost, listScheduledHosts } from './scheduled-host-scope.js';
 import { getNotificationConfig } from './notifications.js';
 import { listVolumeBackups, listInspections, listDiskSamples, addInspection, getSetting, setSetting } from '../lib/db.js';
 
@@ -42,24 +44,18 @@ export const GRADE_LABELS = {
   attention: '需关注',
   degraded: '需处理',
   critical: '严重',
+  incomplete: '信息不完整',
 };
 
 function finding(level, title, detail, extra = {}) {
   return { level, title, detail, advice: extra.advice || '', target: extra.target || '', tool: extra.tool || '', id: extra.id || `${level}:${title}` };
 }
 
-/** 读取宿主根分区使用率。fileSystem 不可用时返回 null(远程节点场景)。 */
-async function readRootDisk() {
-  try {
-    const stats = await statfs('/');
-    const total = Number(stats.blocks) * Number(stats.bsize);
-    const free = Number(stats.bavail) * Number(stats.bsize);
-    const used = total - free;
-    if (!total) return null;
-    return { total, free, used, percent: used / total * 100 };
-  } catch {
-    return null;
-  }
+function readWithin(read, signal) {
+  let onAbort;
+  const cancelled = new Promise((_, reject) => { onAbort = () => reject(signal.reason); signal.addEventListener('abort', onAbort, { once: true }); });
+  return Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return read(); }), cancelled])
+    .finally(() => signal.removeEventListener('abort', onAbort));
 }
 
 /**
@@ -68,7 +64,7 @@ async function readRootDisk() {
  * 容器列表来自 scanner(只有 Status 文本),重启次数与 OOMKilled 必须 inspect 才能拿到;
  * 为控制耗时,只在容器数量可控时逐个 inspect(上限 80),超出部分仅按 scanner 事实巡检。
  */
-async function inspectContainers(projects) {
+async function inspectContainers(projects, docker, signal) {
   const findings = [];
   let running = 0;
   let total = 0;
@@ -90,24 +86,16 @@ async function inspectContainers(projects) {
 
   const facts = new Map();
   if (ids.length) {
-    let docker = null;
-    try { docker = getActivityDocker(); } catch { docker = null; }
-    if (docker) {
-      await Promise.all(ids.map(async ({ container }) => {
-        try {
-          const info = await docker.getContainer(container.id).inspect();
-          facts.set(container.id, {
-            restarts: Number(info?.RestartCount || 0),
-            oomKilled: !!info?.State?.OOMKilled,
-            exitCode: info?.State?.ExitCode ?? null,
-            startedAt: info?.State?.StartedAt || null,
-          });
-        } catch {
-          // 单个容器 inspect 失败不进入事实表,后续按 scanner 事实判断。
-        }
-      }));
-    }
+    await mapLimited(ids, 6, async ({ container }) => {
+      try {
+        const abortSignal = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+        const info = await readWithin(() => docker.getContainer(container.id).inspect({ abortSignal }), abortSignal);
+        facts.set(container.id, { restarts: Number(info?.RestartCount || 0), oomKilled: !!info?.State?.OOMKilled,
+          exitCode: info?.State?.ExitCode ?? null });
+      } catch { /* Missing details are reported as incomplete coverage below. */ }
+    });
   }
+  if (facts.size < total) findings.push(finding('info', '部分容器详情未完成', `共 ${total} 个容器，已核对 ${facts.size} 个重启/OOM详情；其余未判为健康。`, { id: 'containers:partial' }));
 
   for (const { project, container } of ids) {
     const fact = facts.get(container.id);
@@ -170,7 +158,7 @@ async function inspectContainers(projects) {
 /** 磁盘巡检:宿主分区 + Docker 可回收空间。 */
 function inspectStorage(disk, df) {
   const findings = [];
-  const stats = {};
+  const stats = { disk: null };
   if (disk) {
     stats.disk = { percent: Number(disk.percent.toFixed(1)), used: disk.used, total: disk.total, free: disk.free };
     if (disk.percent >= 90) {
@@ -193,7 +181,7 @@ function inspectStorage(disk, df) {
     if (reclaimableGb >= 10) {
       findings.push(finding('info', `可回收 ${reclaimableGb.toFixed(1)} GB`, `悬空镜像 ${(( df.images?.reclaimable || 0) / GB).toFixed(1)} GB、构建缓存 ${((df.buildCache?.reclaimable || 0) / GB).toFixed(1)} GB、孤儿卷 ${((df.volumes?.reclaimable || 0) / GB).toFixed(1)} GB。`, {
         id: 'docker:reclaimable',
-        advice: '执行安全清理即可回收,不影响运行中的服务。',
+        advice: '先预览目标节点和清理范围；可回收量是估计值，安全清理保留容器和数据卷。',
         tool: 'maintenance.clean',
       }));
     }
@@ -210,13 +198,14 @@ function inspectStorage(disk, df) {
 }
 
 /** 备份与巡检时效:最近一次卷备份 / 上次巡检距今多久。 */
-function inspectBackups() {
+function inspectBackups(projects, hostId) {
   const findings = [];
-  const backups = listVolumeBackups();
+  const projectIds = new Set(projects.filter(project => project.managed).map(project => project.id));
+  const backups = listVolumeBackups().filter(backup => projectIds.has(backup.projectId));
   const lastBackup = backups[0] || null;
-  const stats = { backups: { count: backups.length, lastAt: lastBackup?.createdAt || null } };
+  const stats = { backups: { hostId, scope: 'managed-project-records', count: backups.length, lastAt: lastBackup?.createdAt || null } };
   if (!backups.length) {
-    findings.push(finding('warning', '尚无数据卷备份', '命名卷内的数据库/上传文件目前没有可恢复的备份点。', {
+    findings.push(finding('warning', '暂无本节点纳管项目的卷备份记录', '本次仅核对本节点纳管项目的归档记录；记录存在不代表数据库一致性或业务恢复已经验收。', {
       id: 'backup:none',
       advice: '在定时任务里创建「数据卷备份」任务(例如每天凌晨),或对本项目卷手动备份一次。',
     }));
@@ -265,28 +254,21 @@ function inspectProjects(projects) {
 }
 
 /** 系统资源巡检:内存压力、CPU 负载。 */
-function inspectHost() {
+function inspectHost(observation) {
   const findings = [];
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-  const usedPercent = totalMem ? (totalMem - freeMem) / totalMem * 100 : 0;
-  const cores = Math.max(1, os.cpus()?.length || 1);
-  const load1 = os.loadavg()[0] || 0;
-  const loadPerCore = load1 / cores;
-  const stats = {
-    host: {
-      memoryPercent: Number(usedPercent.toFixed(1)),
-      memoryUsed: totalMem - freeMem,
-      memoryTotal: totalMem,
-      load1: Number(load1.toFixed(2)),
-      cores,
-      loadPerCore: Number(loadPerCore.toFixed(2)),
-      uptime: os.uptime(),
-      hostname: os.hostname(),
-    },
-  };
+  const totalMem = observation?.memory?.totalBytes ?? null;
+  const memoryUsed = observation?.memory?.usedBytes ?? null;
+  const usedPercent = observation?.memory?.usedPercent ?? null;
+  const cores = observation?.cpu?.cores ?? null;
+  const load1 = observation?.cpu?.loadAverage?.[0] ?? null;
+  const loadPerCore = load1 !== null && cores > 0 ? load1 / cores : null;
+  const stats = { host: { memoryPercent: usedPercent, memoryUsed, memoryTotal: totalMem,
+    load1, cores, loadPerCore, uptime: observation?.uptimeSeconds ?? null, hostname: observation?.hostname ?? null,
+    status: observation?.hostMetrics?.status || 'unavailable', sampledAt: observation?.hostMetrics?.sampledAt || null,
+    source: observation?.hostMetrics?.source || null } };
+  if (stats.host.status !== 'ready') findings.push(finding('info', '宿主实时采样不可用', '内存使用量、CPU负载和磁盘水位保持未知；未读取面板本机数据。', { id: 'host:unavailable' }));
   if (usedPercent >= 92) {
-    findings.push(finding('critical', `内存使用率 ${usedPercent.toFixed(0)}%`, `宿主内存 ${((totalMem - freeMem) / GB).toFixed(1)} GB / ${(totalMem / GB).toFixed(1)} GB。`, {
+    findings.push(finding('critical', `内存使用率 ${usedPercent.toFixed(0)}%`, `宿主内存 ${(memoryUsed / GB).toFixed(1)} GB / ${(totalMem / GB).toFixed(1)} GB。`, {
       id: 'host:memory',
       advice: '找出占用最高的容器,评估调整其 mem_limit;内存不足也会引发 OOMKilled 与容器重启。',
       tool: 'server.inspect',
@@ -309,7 +291,7 @@ function inspectHost() {
  * 样本不足(少于 3 个点或跨度 < 6 小时)时明确返回 unknown,不硬编一个数字。
  */
 export function predictCapacity(samples, currentDisk) {
-  const data = (samples || []).filter((item) => item.diskUsed > 0 && item.diskTotal > 0);
+  const data = (samples || []).filter((item) => item.diskUsed > 0 && item.diskTotal > 0 && (!currentDisk || item.diskTotal === currentDisk.total));
   if (currentDisk) {
     data.push({ createdAt: new Date().toISOString(), diskUsed: currentDisk.used, diskTotal: currentDisk.total });
   }
@@ -382,7 +364,7 @@ export function summarize(findings, stats) {
   const parts = [head];
   if (containers.total) parts.push(`容器 ${containers.running}/${containers.total} 运行中`);
   if (stats.disk) parts.push(`磁盘 ${stats.disk.percent}%`);
-  if (stats.host) parts.push(`内存 ${stats.host.memoryPercent}%`);
+  if (stats.host?.memoryPercent != null) parts.push(`内存 ${stats.host.memoryPercent.toFixed(1)}%`);
   return `${parts.join(' · ')}。`;
 }
 
@@ -391,107 +373,108 @@ export function summarize(findings, stats) {
  * @param {{ source?: string, persist?: boolean }} options
  * @returns {Promise<object>} 巡检报告
  */
-export async function runInspection({ source = 'manual', persist = true } = {}) {
-  const started = Date.now();
-  const findings = [];
-  const stats = {};
-
-  let projects = [];
-  try {
-    projects = await scanProjects();
-  } catch (error) {
-    findings.push(finding('warning', '项目扫描失败', `无法枚举 Compose 项目:${error.message}`, { id: 'scan:failed' }));
-  }
-
-  const containerResult = await inspectContainers(projects);
-  findings.push(...containerResult.findings);
-  Object.assign(stats, containerResult.stats);
-
-  const disk = await readRootDisk();
-  let df;
-  try {
-    df = await getSystemStorageDf();
-  } catch {
-    df = null;
-  }
-  const storageResult = inspectStorage(disk, df);
-  findings.push(...storageResult.findings);
-  Object.assign(stats, storageResult.stats);
-
-  const projectResult = inspectProjects(projects);
-  findings.push(...projectResult.findings);
-  Object.assign(stats, projectResult.stats);
-
-  const hostResult = inspectHost();
-  findings.push(...hostResult.findings);
-  Object.assign(stats, hostResult.stats);
-
-  const backupResult = inspectBackups();
-  findings.push(...backupResult.findings);
-  Object.assign(stats, backupResult.stats);
-
-  // 评分:每个 critical/warning 扣分,下限 0;info 不扣分只提示。
-  const deduction = findings.reduce((sum, item) => sum + (LEVEL_WEIGHT[item.level] || 0), 0);
-  const score = clampScore(100 - deduction);
-  const grade = gradeOf(score);
-
-  let predictions;
-  try {
-    predictions = predictCapacity(listDiskSamples(30), disk);
-  } catch {
-    predictions = fallbackPrediction(disk);
-  }
-  for (const prediction of predictions) {
-    if (prediction.metric === 'disk' && prediction.status === 'warning') {
-      findings.push(finding('warning', `磁盘预计 ${Math.round(prediction.daysToFull)} 天后写满`, prediction.detail, {
-        id: 'disk:forecast',
-        advice: '提前清理并评估是否需要扩容磁盘;若为日志增长,可考虑调整日志驱动与轮转策略。',
-        tool: 'maintenance.clean',
-      }));
-    }
-  }
-
-  const summary = summarize(findings, stats);
-  const report = {
-    source,
-    score,
-    grade,
-    summary,
-    findings: findings.sort((a, b) => (LEVEL_WEIGHT[b.level] || 0) - (LEVEL_WEIGHT[a.level] || 0)),
-    predictions,
-    stats,
-    durationMs: Date.now() - started,
-    createdAt: new Date().toISOString(),
+export async function runInspection({ source = 'manual', persist = true, hostId = getActiveHostId(), timeoutMs = 20000 } = {}) {
+  const started = Date.now(), host = getHost(hostId);
+  if (!host) throw Object.assign(new Error('巡检目标节点不存在'), { statusCode: 404 });
+  const connectionRevision = hostConnectionRevision(hostId), docker = getDockerForHost(hostId);
+  const assertTarget = () => {
+    if (!getHost(hostId) || hostConnectionRevision(hostId) !== connectionRevision) throw Object.assign(new Error('巡检目标连接已变化，请重新执行'), { statusCode: 409 });
   };
-
-  if (persist) {
-    try {
-      report.id = addInspection({ source, score, grade, findings: report.findings, predictions, summary, stats, diskUsed: disk?.used ?? null, diskTotal: disk?.total ?? null, durationMs: report.durationMs });
-      // 手动与自动巡检共用同一个"最近一次"时间戳,调度器据此判断是否到期。
-      setSetting('inspection.last_run', String(Date.now()));
-      recordEvent({ eventType: 'inspection', source, title: `巡检完成 · ${score} 分`, detail: summary, severity: grade === 'critical' ? 'danger' : grade === 'healthy' ? 'info' : 'warning', status: grade === 'healthy' ? 'resolved' : 'open', payload: { reportId: report.id, to: `/inspection?report=${report.id}&from=ops-center` } });
-    } catch {
-      // 落库失败不影响本次结果返回
+  const controller = new AbortController(), signal = controller.signal;
+  const timer = setTimeout(() => controller.abort(new Error('巡检采集期限已到')), timeoutMs);
+  const findings = [], stats = { scope: { hostId, hostName: host.name, connectionRevision, engineId: null, diskKey: null }, coverage: {} };
+  try {
+    const [projectsRead, hostRead, storageRead] = await Promise.allSettled([
+      readWithin(() => scanProjects(hostId, { background: true }), signal),
+      readWithin(() => inspectServer(hostId, { followActive: false, timeoutMs }), signal),
+      readWithin(() => readDockerDiskUsage(hostId, { timeoutMs }), signal),
+    ]);
+    assertTarget();
+    const projects = projectsRead.status === 'fulfilled' ? projectsRead.value : [];
+    stats.coverage.projects = projectsRead.status === 'fulfilled';
+    if (!stats.coverage.projects) findings.push(finding('warning', '项目扫描失败', '目标节点项目列表不可用，本次没有把缺失项目当作零个项目。', { id: 'scan:failed' }));
+    const observation = hostRead.status === 'fulfilled' ? hostRead.value : null;
+    stats.scope.engineId = observation?.docker?.engineId || null;
+    const containerResult = await inspectContainers(projects, docker, signal);
+    findings.push(...containerResult.findings); Object.assign(stats, containerResult.stats);
+    stats.coverage.containerDetails = stats.coverage.projects && stats.containers.inspected === stats.containers.total;
+    const disk = observation?.disks?.find(item => item.mountpoint === '/' || item.aliases?.includes('/')) || null;
+    stats.scope.diskKey = disk ? JSON.stringify([disk.device, disk.type, disk.mountpoint]) : null;
+    const df = storageRead.status === 'fulfilled' ? summarizeDockerDiskUsage(storageRead.value) : null;
+    const storageResult = inspectStorage(disk, df);
+    findings.push(...storageResult.findings); Object.assign(stats, storageResult.stats);
+    stats.coverage.storage = !!df; stats.coverage.host = observation?.hostMetrics?.status === 'ready'
+      && Number.isFinite(observation.memory.usedPercent) && Number.isFinite(observation.cpu.loadAverage?.[0]) && observation.cpu.cores > 0;
+    stats.coverage.disk = !!disk;
+    for (const result of [inspectProjects(projects), inspectHost(observation), inspectBackups(projects, hostId)]) {
+      findings.push(...result.findings); Object.assign(stats, result.stats);
     }
-  }
-  return report;
+    let predictions;
+    try { predictions = disk ? predictCapacity(listDiskSamples(30, stats.scope), disk) : fallbackPrediction(null); }
+    catch { predictions = fallbackPrediction(disk); }
+    for (const prediction of predictions) if (prediction.metric === 'disk' && prediction.status === 'warning' && Number.isFinite(prediction.daysToFull)) {
+      findings.push(finding('warning', `磁盘预计 ${Math.round(prediction.daysToFull)} 天后写满`, prediction.detail,
+        { id: 'disk:forecast', advice: '结合实际增长来源评估清理或扩容，并确认目标节点。', tool: 'maintenance.clean' }));
+    }
+    const assessedScore = clampScore(100 - findings.reduce((sum, item) => sum + (LEVEL_WEIGHT[item.level] || 0), 0));
+    const complete = Object.values(stats.coverage).every(value => value === true);
+    stats.assessment = { complete, assessedScore };
+    const score = complete ? assessedScore : null;
+    const grade = findings.some(item => item.level === 'critical') ? 'critical' : complete ? gradeOf(assessedScore) : 'incomplete';
+    const summary = `${host.name} · ${complete ? '' : '部分检查，未给出整体健康评分。'}${summarize(findings, stats)}`;
+    const report = { source, score, grade, summary, hostId, hostName: host.name,
+      findings: findings.sort((a, b) => (LEVEL_WEIGHT[b.level] || 0) - (LEVEL_WEIGHT[a.level] || 0)), predictions, stats,
+      durationMs: Date.now() - started, createdAt: new Date().toISOString() };
+    assertTarget();
+    if (persist) {
+      report.id = addInspection({ source, score: assessedScore, grade, findings: report.findings, predictions, summary, stats,
+        diskUsed: disk?.used ?? null, diskTotal: disk?.total ?? null, durationMs: report.durationMs });
+      setSetting('inspection.last_run', String(Date.now()));
+      if (source === 'schedule') setSetting('inspection.auto_last_run', String(Date.now()));
+      recordEvent({ eventType: 'inspection', source, title: `巡检完成 · ${host.name} · ${score == null ? '部分检查' : `${score} 分`}`,
+        detail: summary, severity: grade === 'critical' ? 'danger' : grade === 'healthy' ? 'info' : 'warning',
+        status: grade === 'healthy' ? 'resolved' : 'open', payload: { reportId: report.id, hostId, to: `/inspection?report=${report.id}&from=ops-center` } });
+    }
+    return report;
+  } finally { clearTimeout(timer); controller.abort(); }
 }
 
 /** 巡检调度开关与间隔(setting 持久化,默认关闭,避免未经允许就周期性调用 Docker API)。 */
 export function getInspectionSchedule() {
-  const enabled = getSetting('inspection.auto_enabled', '0') === '1';
+  const configured = getSetting('inspection.auto_enabled', '0') === '1';
+  let target = null, targetError = '';
+  try { target = JSON.parse(getSetting('inspection.auto_target', 'null')); if (target || configured) assertScheduledHost(target); }
+  catch (error) { targetError = error.statusCode ? error.message : '巡检目标配置不完整，请重新选择节点'; }
   const intervalHours = Math.max(1, Math.min(Number(getSetting('inspection.interval_hours', '24')) || 24, 168));
-  const lastRunAt = Number(getSetting('inspection.last_run', '0')) || 0;
-  return { enabled, intervalHours, lastRunAt };
+  const lastRunAt = Number(getSetting('inspection.auto_last_run', '0')) || 0;
+  const scheduleFromAt = Number(getSetting('inspection.auto_scheduled_from', '0')) || 0;
+  return { enabled: configured && !targetError, configured, intervalHours, lastRunAt, scheduleFromAt, target, targetError };
+}
+
+export function saveInspectionSchedule(input) {
+  const current = getInspectionSchedule();
+  const enabled = input.enabled ?? current.configured;
+  let target = current.target;
+  if (input.hostId !== undefined) target = captureScheduledHost(input.hostId, input.connectionRevision);
+  if (enabled) assertScheduledHost(target);
+  if (input.intervalHours !== undefined) setSetting('inspection.interval_hours', String(Math.max(1, Math.min(Math.round(input.intervalHours), 168))));
+  if (input.enabled !== undefined) setSetting('inspection.auto_enabled', enabled ? '1' : '0');
+  if (target) setSetting('inspection.auto_target', JSON.stringify(target));
+  if (enabled && (!current.enabled || target?.hostId !== current.target?.hostId || target?.connectionRevision !== current.target?.connectionRevision)) {
+    setSetting('inspection.auto_scheduled_from', String(Date.now()));
+  }
+  return getInspectionSchedule();
 }
 
 /** 巡检时效:给首页/巡检页用的一句话状态。 */
 export function getInspectionOverview(limit = 20) {
   const reports = listInspections(limit);
   return {
+    currentTarget: captureScheduledHost(),
+    targets: listScheduledHosts(),
     schedule: getInspectionSchedule(),
     latest: reports[0] ? { ...reports[0], counts: countLevels(reports[0].findings) } : null,
-    reports: reports.map((item) => ({ id: item.id, source: item.source, score: item.score, grade: item.grade, summary: item.summary, createdAt: item.createdAt, durationMs: item.durationMs, counts: countLevels(item.findings) })),
+    reports: reports.map((item) => ({ id: item.id, source: item.source, score: item.score, hostId: item.hostId, hostName: item.hostName, grade: item.grade, summary: item.summary, createdAt: item.createdAt, durationMs: item.durationMs, counts: countLevels(item.findings) })),
   };
 }
 
@@ -514,13 +497,13 @@ let lastRunDay = '';
 export function startInspectionScheduler() {
   if (timer || process.env.DISABLE_BACKGROUND_JOBS === '1') return;
   timer = setInterval(() => {
-    const { enabled, intervalHours, lastRunAt } = getInspectionSchedule();
+    const { enabled, intervalHours, lastRunAt, scheduleFromAt, target } = getInspectionSchedule();
     if (!enabled) return;
-    if (Date.now() - lastRunAt < intervalHours * 3600000) return;
+    if (Date.now() - Math.max(lastRunAt, scheduleFromAt) < intervalHours * 3600000) return;
     const today = new Date().toISOString().slice(0, 10);
     if (lastRunDay === today) return;
     lastRunDay = today;
-    void runInspection({ source: 'schedule' })
+    void runInspection({ source: 'schedule', hostId: target.hostId })
       .then(() => { /* 时间戳由路由/服务写入,这里失败不阻塞 */ })
       .catch((error) => console.error('[inspection] 自动巡检失败:', error.message));
   }, 3600000);

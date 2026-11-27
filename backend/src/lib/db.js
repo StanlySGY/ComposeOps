@@ -2144,15 +2144,21 @@ export function listInspections(limit = 20) {
 }
 
 /** 供容量预测使用的磁盘采样点(按时间正序)。 */
-export function listDiskSamples(days = 30) {
+export function listDiskSamples(days = 30, scope = null) {
   const safeDays = Math.max(1, Math.min(Number(days) || 30, 365));
   const cutoff = new Date(Date.now() - safeDays * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   return db.prepare(`
     SELECT created_at AS createdAt, disk_used AS diskUsed, disk_total AS diskTotal
     FROM inspections
     WHERE created_at >= ? AND disk_used IS NOT NULL AND disk_total IS NOT NULL
+      AND (? IS NULL OR (json_valid(stats_json) AND
+        CASE WHEN json_valid(stats_json) THEN json_extract(stats_json, '$.scope.hostId') END = ? AND
+        CASE WHEN json_valid(stats_json) THEN json_extract(stats_json, '$.scope.connectionRevision') END = ? AND
+        CASE WHEN json_valid(stats_json) THEN json_extract(stats_json, '$.scope.engineId') END = ? AND
+        CASE WHEN json_valid(stats_json) THEN json_extract(stats_json, '$.scope.diskKey') END = ?))
     ORDER BY id ASC
-  `).all(cutoff).map((row) => ({ createdAt: row.createdAt, diskUsed: Number(row.diskUsed) || 0, diskTotal: Number(row.diskTotal) || 0 }));
+  `).all(cutoff, scope?.hostId ?? null, scope?.hostId ?? null, scope?.connectionRevision ?? null, scope?.engineId ?? null, scope?.diskKey ?? null)
+    .map((row) => ({ createdAt: row.createdAt, diskUsed: Number(row.diskUsed) || 0, diskTotal: Number(row.diskTotal) || 0 }));
 }
 
 /** 清理超过保留期的巡检报告,返回删除行数。 */
@@ -2165,15 +2171,18 @@ function mapInspectionRow(row) {
   const parse = (value, fallback) => {
     try { const parsed = JSON.parse(value); return parsed ?? fallback; } catch { return fallback; }
   };
+  const stats = parse(row.stats_json, {});
   return {
     id: Number(row.id),
     source: row.source,
-    score: Number(row.score) || 0,
+    score: stats.assessment?.complete === false ? null : Number(row.score) || 0,
+    hostId: stats.scope?.hostId || null,
+    hostName: stats.scope?.hostName || null,
     grade: row.grade,
     findings: parse(row.findings_json, []),
     predictions: parse(row.predictions_json, []),
     summary: row.summary,
-    stats: parse(row.stats_json, {}),
+    stats,
     durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
     createdAt: row.created_at,
   };

@@ -5,8 +5,8 @@
  * 巡检本身不执行任何变更 —— 报告里的每条建议都带 tool 字段,
  * 由用户决定是否交给 Agent 去执行(走 Agent 的确认门)。
  */
-import { runInspection, getInspectionOverview, GRADE_LABELS } from '../services/inspection.js';
-import { getInspection, listInspections, pruneInspections, getSetting, setSetting } from '../lib/db.js';
+import { runInspection, getInspectionOverview, saveInspectionSchedule, GRADE_LABELS } from '../services/inspection.js';
+import { getInspection, listInspections, pruneInspections } from '../lib/db.js';
 import { limitField, numericId } from '../lib/schemas.js';
 
 export default async function inspectionRoutes(fastify) {
@@ -36,10 +36,10 @@ export default async function inspectionRoutes(fastify) {
 
   // POST /api/v1/ops/inspection/run —— 立即巡检(只读,不需要确认门)
   fastify.post('/inspection/run', {
-    schema: { body: { type: 'object', additionalProperties: false, properties: { persist: { type: 'boolean' } } } },
+    schema: { body: { type: 'object', additionalProperties: false, properties: { persist: { type: 'boolean' }, hostId: { type: 'string', minLength: 1, maxLength: 100 } } } },
   }, async (request, reply) => {
     try {
-      const report = await runInspection({ source: 'manual', persist: request.body?.persist !== false });
+      const report = await runInspection({ source: 'manual', persist: request.body?.persist !== false, hostId: request.body?.hostId });
       return { report };
     } catch (error) {
       return reply.code(error.statusCode || 502).send({ error: 'inspection_failed', message: error.message });
@@ -52,20 +52,12 @@ export default async function inspectionRoutes(fastify) {
       body: {
         type: 'object',
         additionalProperties: false,
-        properties: { enabled: { type: 'boolean' }, intervalHours: { type: 'number', minimum: 1, maximum: 100000 } },
+        properties: { enabled: { type: 'boolean' }, intervalHours: { type: 'number', minimum: 1, maximum: 100000 },
+          hostId: { type: 'string', minLength: 1, maxLength: 100 }, connectionRevision: { type: 'string', minLength: 1, maxLength: 100 } },
       },
     },
   }, async (request) => {
-    const { enabled, intervalHours } = request.body || {};
-    if (enabled !== undefined) setSetting('inspection.auto_enabled', enabled ? '1' : '0');
-    if (intervalHours !== undefined) setSetting('inspection.interval_hours', String(Math.max(1, Math.min(Math.round(intervalHours), 168))));
-    return {
-      schedule: {
-        enabled: getSetting('inspection.auto_enabled', '0') === '1',
-        intervalHours: Math.max(1, Math.min(Number(getSetting('inspection.interval_hours', '24')) || 24, 168)),
-        lastRunAt: Number(getSetting('inspection.last_run', '0')) || 0,
-      },
-    };
+    return { schedule: saveInspectionSchedule(request.body || {}) };
   });
 
   // POST /api/v1/ops/inspection/prune —— 清理历史报告(days 越界由处理函数 clamp)

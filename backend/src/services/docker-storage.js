@@ -2,6 +2,7 @@ import { getActiveHostId, getDockerForHost } from './docker-hosts.js';
 import { readDockerDiskUsage, invalidateDiskUsage } from './docker-disk-usage.js';
 import { summarizeDockerDiskUsage } from '../lib/docker-storage-summary.js';
 import { storageHostScope, assertStorageHostScope } from './storage-host-scope.js';
+import { assertScheduledPruneHost } from './scheduled-host-scope.js';
 
 function emptyDf() {
   return {
@@ -271,31 +272,44 @@ export async function pruneStorageResources(selection, { expectedHostId, hostRev
   if (!expectedHostId || !hostRevision) throw Object.assign(new Error('请先读取目标节点空间统计，再确认清理'), { statusCode: 409 });
   const scope = { ...storageHostScope(expectedHostId), hostRevision };
   assertStorageHostScope(scope);
+  return performPrune(selection, scope, mode, () => assertStorageHostScope(scope));
+}
+
+/** Internal scheduler entry: the durable target is validated independently of
+ * the interactive active-node selection. Containers and all volumes are kept. */
+export async function pruneScheduledStorage(type, target) {
+  if (!['prune-safe', 'prune-all'].includes(type)) throw Object.assign(new Error('不支持的定时清理类型'), { statusCode: 400 });
+  await assertScheduledPruneHost(target);
+  return performPrune({ images: true, buildCache: true, allBuildCache: type === 'prune-all' }, target, type, () => assertScheduledPruneHost(target));
+}
+
+async function performPrune(selection, scope, mode, verifyScope) {
   if (pruningHosts.has(scope.hostId)) throw Object.assign(new Error('该节点已有清理正在执行，请等待结果后重新读取'), { statusCode: 409 });
   const docker = getDockerForHost(scope.hostId);
   const reclaimed = { images: 0, containers: 0, volumes: 0, buildCache: 0, networks: 0 };
   pruningHosts.add(scope.hostId);
   try {
     if (selection.volumes) await requireAnonymousVolumePrune(docker);
-    assertStorageHostScope(scope);
+    await verifyScope();
     if (selection.images) {
       const images = await docker.pruneImages({ filters: { dangling: ['true'] } });
       reclaimed.images = sumBytes(images?.SpaceReclaimed);
     }
     if (selection.buildCache) {
-      assertStorageHostScope(scope);
+      await verifyScope();
       const builder = await pruneBuildCache(docker, !!selection.allBuildCache);
       reclaimed.buildCache = sumBytes(builder?.SpaceReclaimed);
     }
     if (selection.volumes) {
-      assertStorageHostScope(scope);
+      await verifyScope();
       const volumes = await docker.pruneVolumes({ filters: { all: ['false'] } });
       reclaimed.volumes = sumBytes(volumes?.SpaceReclaimed);
     }
     if (selection.networks) {
-      assertStorageHostScope(scope);
+      await verifyScope();
       await docker.pruneNetworks();
     }
+    await verifyScope();
     const total = Object.values(reclaimed).reduce((sum, value) => sum + value, 0);
     return { ...scope, mode, reclaimedMB: Math.round(total / 1024 / 1024 * 10) / 10, reclaimed };
   } catch (error) {

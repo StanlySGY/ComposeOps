@@ -1,4 +1,4 @@
-import { getActiveHostId, getDockerForHost, getHost } from './docker-hosts.js';
+import { getActiveHostId, getDockerForHost, getHost, hostConnectionRevision } from './docker-hosts.js';
 import { storageHostScope } from './storage-host-scope.js';
 import { infrastructureSnapshot } from './infrastructure.js';
 import { getSystemStorageDf } from './docker-storage.js';
@@ -18,8 +18,9 @@ function readWithSignal(read, signal) {
 
 /** Engine capacity and verified host observations have different scopes. Missing
  * host telemetry stays unknown; never substitute the panel's OS namespace. */
-export async function inspectServer(hostId = getActiveHostId(), { timeoutMs = 15000, snapshot = infrastructureSnapshot } = {}) {
+export async function inspectServer(hostId = getActiveHostId(), { timeoutMs = 15000, snapshot = infrastructureSnapshot, followActive = true } = {}) {
   const scope = storageHostScope(hostId), host = getHost(hostId), docker = getDockerForHost(hostId);
+  const connectionRevision = hostConnectionRevision(hostId);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(failure('节点诊断读取超时，请检查连接后重试')), timeoutMs);
   try {
@@ -27,7 +28,7 @@ export async function inspectServer(hostId = getActiveHostId(), { timeoutMs = 15
       readWithSignal(abortSignal => docker.info({ abortSignal }), controller.signal),
       readWithSignal(abortSignal => docker.listContainers({ all: true, abortSignal }), controller.signal),
     ]);
-    if (!getHost(hostId) || storageHostScope(hostId).hostRevision !== scope.hostRevision) {
+    if (!getHost(hostId) || hostConnectionRevision(hostId) !== connectionRevision || (followActive && storageHostScope(hostId).hostRevision !== scope.hostRevision)) {
       throw failure('节点或连接配置发生变化，请重新读取诊断数据', 409);
     }
     if (engineRead.status !== 'fulfilled' || !engineRead.value?.Name) throw failure('目标节点 Docker 信息暂不可用，请检查连接后重试');
@@ -44,7 +45,7 @@ export async function inspectServer(hostId = getActiveHostId(), { timeoutMs = 15
     const observedMemoryTotal = number(metrics?.memory?.total);
     const memoryTotal = observedMemoryTotal ?? number(info.MemTotal);
     return {
-      hostId, hostName: scope.hostName, checkedAt: Date.now(), scope: 'docker-host',
+      hostId, hostName: scope.hostName, connectionRevision, checkedAt: Date.now(), scope: 'docker-host',
       hostname: info.Name, platform: [info.OSType, info.KernelVersion].filter(Boolean).join(' ') || null,
       hostMetrics: { status: fresh ? 'ready' : (observed && Date.now() - observed.sampledAt > 30000) || observed?.status === 'stale' ? 'stale' : 'unavailable', source: observed?.source || null,
         sampledAt: observed?.sampledAt || null, reason: fresh ? '' : observed?.reason || (host.type === 'tcp' ? '仅接入 Docker API，宿主使用量需要 SSH 采集' : '等待身份匹配的宿主采样；当前使用量未知') },

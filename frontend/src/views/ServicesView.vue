@@ -17,19 +17,19 @@
     <div v-if="store.projects.length" class="service-overview-strip">
       <span class="service-live-count"><span class="status-dot bg-status-ok"></span>{{ runningContainerCount }} / {{ containerCount }} 容器运行中</span>
       <button :aria-expanded="!metricsCollapsed" @click="toggleMetricsCollapsed"><Gauge :size="14" />项目指标<ChevronDown :size="13" :class="{ 'rotate-180': !metricsCollapsed }" /></button>
-      <button v-if="inspection?.latest" :aria-expanded="!inspectionCollapsed" :title="`最近巡检发现 ${inspectionIssueTotal} 项异常`" @click="toggleInspectionCollapsed"><ShieldCheck :size="14" />AI 巡检结论<span :class="inspectionGradeBadge">{{ inspection.latest.score }} · {{ inspectionGradeLabel }}</span><ChevronDown :size="13" :class="{ 'rotate-180': !inspectionCollapsed }" /></button>
+      <button v-if="inspection?.latest" :aria-expanded="!inspectionCollapsed" :title="`最近巡检发现 ${inspectionIssueTotal} 项异常`" @click="toggleInspectionCollapsed"><ShieldCheck :size="14" />AI 巡检结论<span :class="inspectionGradeBadge">{{ inspection.latest.score ?? '—' }} · {{ inspectionGradeLabel }}</span><ChevronDown :size="13" :class="{ 'rotate-180': !inspectionCollapsed }" /></button>
     </div>
     <!-- AI 巡检结论卡:可折叠;折叠时保留一行概要(分数 + 异常项计数) -->
     <section v-if="inspection?.latest && !inspectionCollapsed" class="card p-4">
       <div class="flex items-center gap-3">
-        <h2 class="min-w-0 flex-1 text-sm font-medium">最近一次巡检</h2>
+        <h2 class="min-w-0 flex-1 text-sm font-medium">最近一次巡检 · {{ inspection.latest.hostName || '历史报告未记录节点' }}</h2>
         <template v-if="!inspectionCollapsed">
           <button class="btn-secondary shrink-0 btn-sm" @click="askAgentReviewInspection"><Bot class="h-3.5 w-3.5" />让 Agent 分析</button>
           <button class="btn-primary shrink-0 btn-sm" @click="router.push('/inspection')">查看巡检</button>
         </template>
       </div>
       <button v-if="!inspectionCollapsed" class="mt-3 flex w-full min-w-0 items-start gap-3 text-left" @click="router.push('/inspection')" title="查看完整巡检报告">
-        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border font-mono text-lg font-semibold" :class="inspectionTileClass">{{ inspection.latest.score }}</span>
+        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border font-mono text-lg font-semibold" :class="inspectionTileClass">{{ inspection.latest.score ?? '—' }}</span>
         <span class="min-w-0 flex-1">
           <span class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium text-surface-100">AI 巡检:{{ inspectionGradeLabel }}</span>
@@ -151,8 +151,8 @@ const selectedIds = ref([]); const updateSettings = ref({ lastResults: [] }); co
 const inspection = ref(null); const inspectionLoading = ref(false);
 const batchTasks = ref([]); const activityProject = ref(null); const envProject = ref(null); const diagnosis = ref(null); const upgradeProject = ref(null); const dbDumpProject = ref(null); const runningAction = ref({ id: '', action: '' }); const kbFocusId = ref(''); const restartTarget = ref(null);
 const GP = { healthy: 90, attention: 75, degraded: 55, critical: 0 };
-const GRADE_LABELS = { healthy: '健康', attention: '需关注', degraded: '需处理', critical: '严重' };
-const inspectionGradeLabel = computed(() => GRADE_LABELS[inspection.value?.latest?.grade] || '健康');
+const GRADE_LABELS = { healthy: '健康', attention: '需关注', degraded: '需处理', critical: '严重', incomplete: '信息不完整' };
+const inspectionGradeLabel = computed(() => GRADE_LABELS[inspection.value?.latest?.grade] || '状态未知');
 // 巡检异常项计数:latest.findings 存在时直接统计,否则退化为 reports[0].counts
 const inspectionIssueCounts = computed(() => {
   const latest = inspection.value?.latest;
@@ -217,7 +217,7 @@ function askAgentReviewInspection() {
   const latest = inspection.value?.latest;
   updateAgentContext({ page: '服务总览', mode: 'inspection-review', summary: '请分析最近一次 AI 巡检结论' });
   openAgent();
-  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: `请分析最近一次 AI 巡检结论并给出处置建议:\n\n${latest ? `评分 ${latest.score}/${GRADE_LABELS[latest.grade]}:${latest.summary}` : '暂无巡检报告'}` } }));
+  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: `请分析最近一次 AI 巡检结论并给出处置建议:\n\n${latest ? `节点 ${latest.hostName || '历史报告未记录节点'}（${latest.hostId || '未知'}） · ${latest.createdAt || '时间未知'} · 评分 ${latest.score ?? '未知'}/${GRADE_LABELS[latest.grade] || '状态未知'}:${latest.summary}` : '暂无巡检报告'}` } }));
 }
 let jobPollTimer; let activeJobId = ''; let jobPollInFlight = false;
 let controlController = null;

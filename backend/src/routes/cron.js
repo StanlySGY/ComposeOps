@@ -9,6 +9,7 @@ import {
 } from '../services/cron-scheduler.js';
 import { previewSchedule } from '../lib/cron-expression.js';
 import { addOperation } from '../lib/db.js';
+import { captureScheduledHost, listScheduledHosts } from '../services/scheduled-host-scope.js';
 
 /**
  * 字段约束与 cron-scheduler.js 的校验保持一致:
@@ -19,6 +20,8 @@ const jobFields = {
   cron: { type: 'string', minLength: 1, maxLength: 120 },
   type: { type: 'string', enum: Object.keys(JOB_TYPES) },
   enabled: { type: 'boolean' },
+  hostId: { type: 'string', minLength: 1, maxLength: 100 },
+  connectionRevision: { type: 'string', minLength: 1, maxLength: 100 },
 };
 
 const idParams = {
@@ -35,7 +38,7 @@ export default async function cronRoutes(fastify) {
     catch (error) { return reply.code(400).send({ error: 'invalid_cron', message: error.message }); }
   });
 
-  fastify.get('/', async () => ({ jobs: await listJobs(), types: JOB_TYPES }));
+  fastify.get('/', async () => ({ jobs: await listJobs(), types: JOB_TYPES, targets: listScheduledHosts(), currentTarget: captureScheduledHost() }));
 
   fastify.post('/', {
     schema: {

@@ -144,9 +144,9 @@
       <p v-else-if="loadErrors.inspection" class="alert-error" role="alert">{{ loadErrors.inspection }}</p>
       <div v-else-if="latestInspection" class="rounded-xl border border-surface-800 bg-surface-950/40 p-4">
         <div class="flex flex-wrap items-center gap-3">
-          <span class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border font-mono text-lg font-semibold" :class="inspectionTileClass">{{ latestInspection.score }}</span>
+          <span class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border font-mono text-lg font-semibold" :class="inspectionTileClass">{{ latestInspection.score ?? '—' }}</span>
           <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium text-surface-100">最近巡检:{{ inspectionGradeLabel }}</p>
+            <p class="text-sm font-medium text-surface-100">{{ latestInspection.hostName || '历史报告未记录节点' }} · 最近巡检:{{ inspectionGradeLabel }}</p>
             <p class="mt-0.5 text-sm text-surface-300">{{ latestInspection.summary }}</p>
             <p class="mt-0.5 text-xs text-surface-400">{{ formatTime(latestInspection.createdAt) }}</p>
           </div>
@@ -246,7 +246,7 @@ function formatTime(value) {
 
 const inspectionGradeLabel = computed(() => {
   const grade = latestInspection.value?.grade;
-  return { healthy: '健康', attention: '需关注', degraded: '需处理', critical: '严重' }[grade] || '健康';
+  return { healthy: '健康', attention: '需关注', degraded: '需处理', critical: '严重', incomplete: '信息不完整' }[grade] || '状态未知';
 });
 const inspectionTileClass = computed(() => {
   const score = latestInspection.value?.score;

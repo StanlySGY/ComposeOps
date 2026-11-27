@@ -104,6 +104,8 @@ export const RISK_LEVELS = {
  * @returns {string} 动态评估后的风险等级
  */
 export function assessRisk(toolName, params, context) {
+  // Scheduling cleanup grants unattended future deletion authority as well.
+  if (toolName === 'cron.create' && ['prune-safe', 'prune-all'].includes(params?.type)) return 'critical';
   // 未知工具必须拒绝信任：它可能是新加但尚未完成风险定级的写操作。
   const baseRisk = Object.prototype.hasOwnProperty.call(RISK_LEVELS, toolName)
     ? RISK_LEVELS[toolName]

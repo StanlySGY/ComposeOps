@@ -321,6 +321,15 @@ test('mcp: confirm 不进入工具参数(不会污染 schema 校验)', async () 
   }
 });
 
+test('mcp: 定时清理同样是critical，不能通过创建计划绕过删除确认边界', async () => {
+  for (const type of ['prune-safe', 'prune-all']) {
+    const response = await app.inject({ method: 'POST', url: '/mcp', headers: { authorization: `Bearer ${token}` },
+      payload: { jsonrpc: '2.0', id: 140, method: 'tools/call', params: { name: 'cron.create', arguments: { name: '不得创建', type, cron: '0 0 * * *', confirm: true } } } });
+    assert.equal(response.statusCode, 200); assert.equal(response.json().result.isError, true);
+    assert.match(response.json().result.content.map(item => item.text || '').join('\n'), /critical.*fail-closed/);
+  }
+});
+
 test('mcp: 只读工具真实执行并回 structuredContent + 脱敏', async () => {
   const response = await app.inject({
     method: 'POST', url: '/mcp',

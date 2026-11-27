@@ -322,7 +322,7 @@ export const api = {
   // AI 巡检
   getInspectionOverview: (limit = 20) => request(`/ops/inspection/overview?limit=${limit}`),
   getInspectionReport: (id) => request(`/ops/inspection/reports/${id}`),
-  runInspection: () => request('/ops/inspection/run', { method: 'POST', body: JSON.stringify({}) }),
+  runInspection: (hostId) => request('/ops/inspection/run', { method: 'POST', body: JSON.stringify({ hostId }) }),
   saveInspectionSchedule: (payload) => request('/ops/inspection/schedule', { method: 'PUT', body: JSON.stringify(payload) }),
   pruneInspections: (days = 180) => request('/ops/inspection/prune', { method: 'POST', body: JSON.stringify({ days }) }),
   // ai

@@ -13,7 +13,7 @@
       <MetricTile title="已连接节点" :value="String(hosts.length)" sub="按生产、测试与边缘环境分组" />
       <MetricTile title="在线节点" :value="String(onlineCount)" :sub="`${offlineCount} 离线 · ${unknownCount} 待确认`" tone="text-status-ok" />
       <MetricTile title="运行容器" :value="knownHosts.length ? String(totalRunning) : '—'" :sub="knownHosts.length ? `共 ${totalContainers} 个 · ${knownHosts.length}/${hosts.length} 节点已统计` : '等待节点探测'" />
-      <MetricTile title="最近巡检" :value="inspectionScore ?? '—'" :sub="inspectionScore != null ? '全局最近报告 · 未按节点筛选' : '尚无巡检报告'" tone="text-status-info" />
+      <MetricTile title="最近巡检" :value="inspectionScore ?? '—'" :sub="inspectionSummary" tone="text-status-info" />
     </div>
     <section class="section-panel node-toolbar" aria-label="节点筛选与操作">
       <label class="search-field"><Search class="h-4 w-4" /><input :value="searchQuery" type="search" aria-label="搜索节点" placeholder="搜索节点名称或地址" @input="setFilter('q', $event.target.value)" /></label>
@@ -39,7 +39,7 @@
       </div>
     </section>
     <section v-if="hosts.length" class="section-panel node-current-actions" aria-label="维护与检查">
-      <div><h2 class="section-title">维护与检查</h2><p class="text-muted mt-1">巡检：{{ activeHost?.name || '当前节点' }} 与面板环境 · 镜像检查：全部可编辑项目</p></div>
+      <div><h2 class="section-title">维护与检查</h2><p class="text-muted mt-1">巡检：{{ activeHost?.name || '当前节点' }}；缺少宿主采样时显示未知 · 镜像检查：全部可编辑项目</p></div>
       <button class="btn-secondary btn-sm" :disabled="!!batchBusy || !!switchingHost" @click="runBatchInspection"><ShieldCheck class="h-4 w-4" />{{ batchBusy === 'inspection' ? '巡检中…' : '运行巡检' }}</button><ImageUpdatePanel />
       <router-link to="/inspection?from=node-groups" class="text-link">查看巡检报告<ArrowUpRight class="h-3.5 w-3.5" /></router-link>
     </section>
@@ -66,7 +66,9 @@ const loading = ref(false);
 const error = ref('');
 const batchBusy = ref('');
 const switchingHost = ref('');
-const inspectionScore = ref(null);
+const inspectionReport = ref(null);
+const inspectionScore = computed(() => inspectionReport.value?.score ?? null);
+const inspectionSummary = computed(() => inspectionReport.value ? `全局最近报告 · ${inspectionReport.value.hostName || '历史报告未记录节点'}${inspectionScore.value == null ? ' · 信息不完整' : ''}` : '尚无巡检报告');
 const probing = ref(new Set());
 const assigning = ref(new Set());
 let disposed = false;
@@ -137,8 +139,8 @@ async function pingAll() {
 async function loadOverview() {
   const request = ++overviewRequest;
   const hostId = hostsStore.activeHostId;
-  inspectionScore.value = null;
-  try { const result = await api.getInspectionOverview(1); if (!disposed && request === overviewRequest && hostId === hostsStore.activeHostId) inspectionScore.value = result?.latest?.score ?? null; }
+  inspectionReport.value = null;
+  try { const result = await api.getInspectionOverview(1); if (!disposed && request === overviewRequest && hostId === hostsStore.activeHostId) inspectionReport.value = result?.latest || null; }
   catch { /* 巡检缺失不妨碍节点导航。 */ }
 }
 async function runBatchInspection() {
@@ -146,9 +148,9 @@ async function runBatchInspection() {
   batchBusy.value = 'inspection';
   const hostId = hostsStore.activeHostId;
   try {
-    const report = await api.runInspection();
+    const { report } = await api.runInspection(hostId);
     if (disposed || hostId !== hostsStore.activeHostId) return;
-    inspectionScore.value = report?.score ?? null;
+    inspectionReport.value = report || null;
     toast.success(`巡检完成：评分 ${report?.score ?? '—'}，可查看巡检报告`);
   } catch (cause) { if (!disposed) toast.error(cause); }
   finally { batchBusy.value = ''; }

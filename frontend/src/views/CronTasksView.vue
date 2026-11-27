@@ -53,8 +53,10 @@
             <h3 :id="`cron-title-${job.id}`" class="cron-job-title">{{ job.name }}</h3>
             <span class="count-badge">{{ job.typeLabel }}</span>
             <span class="count-badge font-mono text-xs">{{ job.cron }}</span>
-            <span class="cron-enabled" :class="{ 'is-enabled': job.enabled }"><span></span>{{ job.enabled ? '启用' : '停用' }}</span>
+            <span class="cron-enabled" :class="{ 'is-enabled': job.enabled }"><span></span>{{ job.targetError ? '等待确认目标' : job.enabled ? '启用' : '停用' }}</span>
           </div>
+          <p class="mt-2 text-xs text-muted">执行范围：{{ jobScopeLabel(job) }}</p>
+          <p v-if="job.targetError" class="text-xs text-status-warn mt-2">{{ job.targetError }}，请通过编辑重新确认。</p>
           <div class="cron-timing">
             <span><Clock3 class="h-3.5 w-3.5" />下次执行：{{ job.enabled ? formatTimestamp(job.nextRunAt) : '已停用' }}</span>
             <template v-if="job.lastRunAt">
@@ -67,8 +69,8 @@
         </div>
         <div class="cron-job-actions">
           <button class="btn-ghost" :disabled="pendingJobs.has(job.id) || runningId === job.id" :aria-label="`编辑定时任务 ${job.name}`" @click="openEdit(job)"><Pencil class="h-3.5 w-3.5" />编辑</button>
-          <button class="btn-secondary" :disabled="!!runningId || pendingJobs.has(job.id)" @click="runNow(job)"><Loader2 v-if="runningId === job.id" class="w-4 h-4 animate-spin" /><Play v-else class="w-4 h-4" />{{ runningId === job.id ? '执行中' : '立即执行' }}</button>
-          <label class="toggle-label" :title="job.enabled ? '点击停用' : '点击启用'"><input type="checkbox" :checked="job.enabled" :disabled="pendingJobs.has(job.id) || runningId === job.id" :aria-label="job.enabled ? `停用定时任务 ${job.name}` : `启用定时任务 ${job.name}`" @change="toggleEnabled(job, $event)" /></label>
+          <button class="btn-secondary" :disabled="!!runningId || pendingJobs.has(job.id) || !!job.targetError" @click="runNow(job)"><Loader2 v-if="runningId === job.id" class="w-4 h-4 animate-spin" /><Play v-else class="w-4 h-4" />{{ runningId === job.id ? '执行中' : '立即执行' }}</button>
+          <label class="toggle-label" :title="job.enabled ? '点击停用' : '点击启用'"><input type="checkbox" :checked="job.enabled" :disabled="pendingJobs.has(job.id) || runningId === job.id || (!!job.targetError && !job.enabled)" :aria-label="job.enabled ? `停用定时任务 ${job.name}` : `启用定时任务 ${job.name}`" @change="toggleEnabled(job, $event)" /></label>
           <button class="icon-btn" :disabled="pendingJobs.has(job.id) || runningId === job.id" title="删除任务" :aria-label="`删除定时任务 ${job.name}`" @click="removeJob(job)"><Trash2 class="w-4 h-4 text-status-error" /></button>
         </div>
       </article>
@@ -83,7 +85,7 @@
         <div v-if="filteredHistory.length" class="table-wrap"><table class="data-table"><thead><tr>
           <th v-for="option in sortOptions" :key="option.key" :aria-sort="ariaSort(option.key)"><button class="inline-flex items-center gap-1 py-1" @click="sortBy(option.key)">{{ option.label }}<span v-if="sortKey === option.key" aria-hidden="true">{{ descending ? '↓' : '↑' }}</span></button></th><th>说明</th>
         </tr></thead><tbody><tr v-for="item in pagedRows" :key="item.id">
-          <td data-label="执行时间" class="whitespace-nowrap">{{ formatTimestamp(item.at) }}</td><td data-label="任务名称">{{ item.jobName }}</td><td data-label="状态"><StatusBadge :status="item.status" /></td><td data-label="耗时">{{ item.durationMs ?? '—' }} ms</td><td data-label="说明" class="cron-history-detail"><details v-if="item.error"><summary class="cursor-pointer text-status-error">查看错误</summary><p class="whitespace-pre-wrap text-xs">{{ item.error }}</p></details><span v-else class="text-muted">—</span></td>
+          <td data-label="执行时间" class="whitespace-nowrap">{{ formatTimestamp(item.at) }}</td><td data-label="任务名称">{{ item.jobName }}<p class="text-xs text-muted">{{ item.hostName || (item.scope === 'all' ? '全部节点' : '历史记录未保存范围') }}</p></td><td data-label="状态"><StatusBadge :status="item.status" /></td><td data-label="耗时">{{ item.durationMs ?? '—' }} ms</td><td data-label="说明" class="cron-history-detail"><details v-if="item.error"><summary class="cursor-pointer text-status-error">查看错误</summary><p class="whitespace-pre-wrap text-xs">{{ item.error }}</p></details><span v-else class="text-muted">—</span></td>
         </tr></tbody></table></div>
         <EmptyState v-else-if="!historyLoading && !historyError" compact icon="History" title="暂无执行记录" description="任务按计划或手动执行后，结果会出现在这里。" action-label="刷新记录" @action="loadHistory" />
       </section>
@@ -97,6 +99,12 @@
         <div class="cron-field"><label for="cron-name">任务名称</label><input id="cron-name" v-model="editor.name" class="input" placeholder="例如：每日数据库备份" maxlength="60" /></div>
         <div class="cron-field"><label for="cron-type">任务类型</label><select id="cron-type" v-model="editor.type" class="input"><option v-for="(info, key) in types" :key="key" :value="key">{{ info.label }}</option></select></div>
         <p class="cron-type-note">{{ types[editor.type]?.description || '任务类型尚未加载，请返回后刷新重试。' }}</p>
+        <template v-if="isNodeJob(editor.type)">
+          <div class="cron-field"><label for="cron-host">固定执行节点</label><select id="cron-host" v-model="editor.hostId" class="input" @change="confirmEditorTarget"><option disabled value="">请选择节点</option><option v-for="target in targets" :key="target.hostId" :value="target.hostId">{{ target.hostName }}</option></select></div>
+          <p class="cron-type-note">保存后固定此节点，不跟随工作节点切换。连接或服务器身份变化后需要重新确认。<span v-if="editor.type.startsWith('prune-')">清理覆盖此节点的未纳管资源，保留全部容器与数据卷。</span></p>
+          <p v-if="editorTargetChanged" class="text-xs text-status-warn" role="status">目标尚未确认或配置已变化。<button type="button" class="underline" :disabled="!selectedEditorTarget" @click="confirmEditorTarget">重新确认所选节点</button></p>
+        </template>
+        <p v-else class="scope-callout">执行范围：全部已配置节点的纳管项目。工作节点切换不会缩小范围；各项目仍需通过运行时授权检查。</p>
         <div class="cron-field"><label for="cron-schedule">执行周期</label><select id="cron-schedule" :value="manualCron ? 'custom' : editor.cron" class="input" @change="onCronTemplateChange"><option v-for="preset in scheduleOptions" :key="preset.value" :value="preset.value">{{ preset.label }}</option><option value="custom">自定义表达式…</option></select></div>
         <div v-if="manualCron" class="cron-field"><label for="cron-expression">Cron 表达式</label><input id="cron-expression" v-model="editor.cron" class="input font-mono" placeholder="分 时 日 月 周，如 0 3 * * *" aria-describedby="cron-expression-help" /><span id="cron-expression-help" class="text-xs text-muted">支持 *、范围、列表和步长；日期与星期条件需同时满足。</span></div>
         <section class="cron-preview" aria-label="执行时间预览" :aria-busy="previewLoading">
@@ -113,7 +121,7 @@
       </fieldset>
       <template #footer>
         <button class="btn-secondary" :disabled="saving" @click="closeEditor()">取消</button>
-        <button class="btn-primary" :disabled="saving || previewLoading || !schedulePreview || !types[editor?.type]" @click="saveEditor"><Loader2 v-if="saving" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" />{{ editingId ? '保存修改' : '创建任务' }}</button>
+        <button class="btn-primary" :disabled="saving || previewLoading || !schedulePreview || !types[editor?.type] || (isNodeJob(editor?.type) && editorTargetChanged)" @click="saveEditor"><Loader2 v-if="saving" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" />{{ editingId ? '保存修改' : '创建任务' }}</button>
       </template>
     </BaseModal>
     <ConfirmDialog
@@ -152,6 +160,9 @@ const toast = useToastStore();
 const { openAgent, updateAgentContext, resetAgentContext } = useAgentConsole();
 const jobs = ref([]);
 const types = ref({});
+const targets = ref([]), currentTarget = ref(null);
+function isNodeJob(type) { return ['prune-safe', 'prune-all', 'inspection'].includes(type); }
+function jobScopeLabel(job) { return isNodeJob(job.type) ? (job.target?.hostName || job.hostName || '待确认节点') : '全部节点的纳管项目'; }
 const history = ref([]);
 const jobsLoading = ref(false);
 const historyLoading = ref(false);
@@ -168,6 +179,9 @@ const message = ref('');
 const feedbackEl = ref(null);
 const editor = ref(null);
 const editingId = ref('');
+const selectedEditorTarget = computed(() => targets.value.find(target => target.hostId === editor.value?.hostId));
+const editorTargetChanged = computed(() => !selectedEditorTarget.value || selectedEditorTarget.value.connectionRevision !== editor.value?.connectionRevision);
+function confirmEditorTarget() { if (editor.value && selectedEditorTarget.value) editor.value.connectionRevision = selectedEditorTarget.value.connectionRevision; }
 const editorError = ref('');
 const saving = ref(false);
 const manualCron = ref(false);
@@ -181,7 +195,7 @@ const nextJob = computed(() => jobs.value.filter(job => job.enabled && parseTime
 
 const presets = [
   { name: '每天 03:00 自动备份数据库', description: '对所有数据库容器执行 Dump 并留存本地', icon: DatabaseBackup, type: 'db-backup', cron: '0 3 * * *' },
-  { name: '每周日 04:00 清理 Docker 悬空镜像', description: '安全清理悬空镜像、退出容器与未使用缓存', icon: Sparkles, type: 'prune-safe', cron: '0 4 * * 0' },
+  { name: '每周日 04:00 清理 Docker 悬空镜像', description: '清理悬空镜像与默认可清理缓存，保留全部容器和数据卷', icon: Sparkles, type: 'prune-safe', cron: '0 4 * * 0' },
   { name: '每天 02:00 检查镜像更新', description: '全局检测纳管项目镜像是否有远程更新', icon: RefreshCw, type: 'images-check', cron: '0 2 * * *' },
 ];
 
@@ -244,6 +258,7 @@ async function loadJobs() {
     if (id !== loadId || disposed) return;
     jobs.value = data.jobs || [];
     types.value = data.types || {};
+    targets.value = data.targets || []; currentTarget.value = data.currentTarget || null;
   } catch (e) {
     if (id === loadId && !disposed) error.value = e.message;
   } finally {
@@ -275,13 +290,14 @@ function openCreate(preset) {
   editor.value = preset
     ? { name: preset.name, type: preset.type, cron: preset.cron, enabled: true }
     : { name: '', type: 'db-backup', cron: '0 3 * * *', enabled: true };
+  editor.value.hostId = currentTarget.value?.hostId || ''; editor.value.connectionRevision = currentTarget.value?.connectionRevision || '';
   editorError.value = '';
 }
 function openEdit(job) {
   if (pendingJobs.value.has(job.id) || runningId.value === job.id) return;
   resetAgentContext();
   editingId.value = job.id;
-  editor.value = { name: job.name, type: job.type, cron: job.cron, enabled: job.enabled };
+  editor.value = { name: job.name, type: job.type, cron: job.cron, enabled: job.enabled, hostId: job.target?.hostId || currentTarget.value?.hostId || '', connectionRevision: job.target?.connectionRevision || '' };
   manualCron.value = !scheduleOptions.some(option => option.value === job.cron);
   editorError.value = '';
 }
@@ -305,8 +321,10 @@ async function saveEditor() {
     if (editor.value.cron === 'custom') editor.value.cron = '';
     if (!editor.value.name.trim()) throw new Error('请填写任务名称');
     if (!editor.value.cron.trim()) throw new Error('请填写 Cron 表达式(5 段)');
-    const id = editingId.value;
-    const job = id ? await api.updateCronJob(id, { ...editor.value }) : await api.createCronJob({ ...editor.value });
+    const id = editingId.value, payload = { ...editor.value };
+    if (isNodeJob(payload.type)) { if (editorTargetChanged.value) throw new Error('请重新确认执行节点'); }
+    else { delete payload.hostId; delete payload.connectionRevision; }
+    const job = id ? await api.updateCronJob(id, payload) : await api.createCronJob(payload);
     if (disposed) return;
     applyConfirmedJob(job);
     message.value = `「${job?.name || editor.value.name}」${id ? '已保存修改' : '已创建'}。`;

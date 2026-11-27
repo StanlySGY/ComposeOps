@@ -42,6 +42,14 @@ function mountView() {
 }
 
 describe('运维任务中心的加载失败与部分创建反馈', () => {
+  it('不完整巡检保留未知评分和实际报告节点，不回退为健康', async () => {
+    getInspectionOverview.mockResolvedValue({ latest: { score: null, grade: 'incomplete', hostName: '远端公司节点', summary: '宿主采样不可用' }, schedule: { enabled: false } });
+    wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('远端公司节点 · 最近巡检:信息不完整');
+    expect(wrapper.text()).not.toContain('最近巡检:健康');
+    expect(wrapper.get('.h-12.w-12').text()).toBe('—');
+  });
   it('定时任务列表读取失败时显示错误，不伪装成暂无任务', async () => {
     listCronJobs.mockRejectedValueOnce(new Error('cron database offline'));
     wrapper = mountView();

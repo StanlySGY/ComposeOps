@@ -18,6 +18,7 @@
       </div>
     </div>
 
+    <p class="scope-callout mb-3">当前巡检节点：{{ overview?.currentTarget?.hostName || '当前工作节点' }} · 报告与容量预测保留实际采集范围</p>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载巡检数据</p>
     <p v-else-if="running" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在执行只读巡检</p>
@@ -27,7 +28,7 @@
       <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex items-center gap-4">
           <span class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border font-mono text-xl font-semibold" :class="tileClass(latest.score)">
-            {{ latest.score }}
+            {{ latest.score ?? '—' }}
           </span>
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
@@ -36,7 +37,7 @@
             </div>
             <p class="mt-1 text-sm text-surface-300">{{ latest.summary }}</p>
             <p class="mt-1 text-xs text-muted">
-              {{ formatTime(latest.createdAt) }} · {{ sourceLabel(latest.source) }} · 耗时 {{ latest.durationMs != null ? `${latest.durationMs}ms` : '—' }}
+              {{ latest.hostName || '历史报告未记录节点' }} · {{ formatTime(latest.createdAt) }} · {{ sourceLabel(latest.source) }} · 耗时 {{ latest.durationMs != null ? `${latest.durationMs}ms` : '—' }}
             </p>
           </div>
         </div>
@@ -72,14 +73,17 @@
         </div>
         <p class="mt-1 text-xs text-muted">
           按间隔自动执行只读巡检并留存报告;默认关闭,开启后每天最多执行一次。
+          <span v-if="schedule.target">固定节点：{{ schedule.target.hostName }}。</span>
+          <span v-if="schedule.targetError" class="text-status-warn">{{ schedule.targetError }}</span>
           <template v-if="schedule.lastRunAt">上次执行:{{ formatTime(schedule.lastRunAt) }}</template>
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-3">
-        <select v-model="intervalHours" class="input w-40 input-sm" :disabled="!schedule.enabled" aria-label="自动巡检间隔" title="自动巡检间隔">
+<select v-if="overview?.targets?.length" v-model="scheduleTargetId" class="input w-40 input-sm" aria-label="自动巡检节点" :disabled="scheduleSaving" @change="saveScheduleTarget"><option v-for="target in overview.targets" :key="target.hostId" :value="target.hostId">{{ target.hostName }}</option></select>
+        <select v-model="intervalHours" class="input w-40 input-sm" :disabled="!schedule.enabled || scheduleSaving" aria-label="自动巡检间隔" title="自动巡检间隔" @change="saveScheduleTarget">
           <option v-for="option in intervalOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
-        <label class="toggle-label"><input type="checkbox" :checked="schedule.enabled" @change="toggleSchedule" /><span>{{ schedule.enabled ? '关闭自动巡检' : '开启自动巡检' }}</span></label>
+        <label class="toggle-label"><input type="checkbox" :checked="schedule.enabled" :disabled="scheduleSaving" @change="toggleSchedule" /><span>{{ schedule.enabled ? '关闭自动巡检' : '开启自动巡检' }}</span></label>
       </div>
     </div>
 
@@ -90,11 +94,11 @@
         <button v-if="reports.length" class="btn-ghost btn-sm" @click="pruneReports"><Trash2 class="h-3.5 w-3.5" />清理 180 天前</button>
       </div>
       <div v-if="reports.length" class="table-wrap">
-        <table class="data-table">
+        <table class="data-table inspection-report-table">
           <thead>
             <tr>
               <th>时间</th>
-              <th>来源</th>
+              <th>节点 / 来源</th>
               <th>评分</th>
               <th>结论</th>
               <th>明细</th>
@@ -102,20 +106,20 @@
           </thead>
           <tbody>
             <tr v-for="report in reports" :key="report.id" class="cursor-pointer" @click="openDetail(report.id)">
-              <td class="whitespace-nowrap">
+              <td data-label="时间" class="whitespace-nowrap">
                 <button type="button" class="text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" :aria-label="`查看巡检报告：${formatTime(report.createdAt)}，来源：${sourceLabel(report.source)}`" @click.stop="openDetail(report.id)">
                   {{ formatTime(report.createdAt) }}
                 </button>
               </td>
-              <td><span class="count-badge">{{ sourceLabel(report.source) }}</span></td>
-              <td>
+              <td data-label="节点 / 来源"><p class="text-xs mb-1">{{ report.hostName || '历史报告未记录节点' }}</p><span class="count-badge">{{ sourceLabel(report.source) }}</span></td>
+              <td data-label="评分">
                 <span class="inline-flex items-center gap-1.5">
-                  <span class="font-mono font-semibold" :class="scoreTextClass(report.score)">{{ report.score }}</span>
+                  <span class="font-mono font-semibold" :class="scoreTextClass(report.score)">{{ report.score ?? '—' }}</span>
                   <span class="text-xs" :class="gradeBadgeClass(report.grade)">{{ GRADE_LABELS[report.grade] }}</span>
                 </span>
               </td>
-              <td class="max-w-[380px] truncate text-surface-400">{{ report.summary }}</td>
-              <td class="whitespace-nowrap">
+              <td data-label="结论" class="max-w-[380px] truncate text-surface-400">{{ report.summary }}</td>
+              <td data-label="明细" class="whitespace-nowrap">
                 <span class="text-status-error">{{ report.counts?.critical || 0 }} 严重</span>
                 <span class="mx-0.5 text-surface-400">/</span>
                 <span class="text-status-warn">{{ report.counts?.warning || 0 }} 关注</span>
@@ -136,6 +140,7 @@
       </template>
       <p v-if="detailLoading" class="text-sm text-muted" role="status" aria-live="polite" aria-atomic="true">正在加载巡检报告明细…</p>
       <template v-else-if="detail?.report">
+        <p class="text-xs text-muted mb-3">目标节点：{{ detail.report.hostName || '历史报告未记录节点' }}<span v-if="detail.report.stats?.assessment?.complete === false"> · 采集不完整，未给出整体健康评分；已发现的问题仍需处理。</span></p>
         <p class="mb-4 rounded-lg border border-surface-800 bg-surface-950/50 px-3 py-2 text-sm text-surface-300">{{ detail.report.summary }}</p>
 
         <div v-if="detail.report.predictions?.length" class="mb-5">
@@ -185,7 +190,7 @@ import { useAgentConsole } from '../composables/useAgentConsole.js';
 import { useToastStore } from '../stores/toast.js';
 import BaseModal from '../components/common/BaseModal.vue';
 
-const GRADE_LABELS = { healthy: '健康', attention: '需关注', degraded: '需处理', critical: '严重' };
+const GRADE_LABELS = { healthy: '健康', attention: '需关注', degraded: '需处理', critical: '严重', incomplete: '信息不完整' };
 // 与后端 inspection.js 的阈值一致:90 / 75 / 55
 const GRADE_SCORE = { healthy: 90, attention: 75, degraded: 55, critical: 0 };
 
@@ -202,6 +207,9 @@ const schedule = ref({ enabled: false, intervalHours: 24, lastRunAt: 0 });
 const intervalHours = ref(24);
 const detail = ref(null);
 const detailLoading = ref(false);
+const scheduleTargetId = ref('');
+const scheduleSaving = ref(false);
+let loadVersion = 0, detailVersion = 0, runVersion = 0, disposed = false;
 
 const intervalOptions = [
   { value: 6, label: '每 6 小时' },
@@ -220,6 +228,7 @@ function gradeBadgeClass(grade) {
   }[grade] || 'text-surface-400';
 }
 function scoreTextClass(score) {
+  if (score == null) return 'text-surface-400';
   return score >= GRADE_SCORE.healthy ? 'text-status-ok' : score >= GRADE_SCORE.attention ? 'text-status-warn' : 'text-status-error';
 }
 function tileClass(score) {
@@ -275,49 +284,60 @@ function formatTime(value) {
 }
 
 async function load() {
-  loading.value = true;
-  error.value = '';
+  const version = ++loadVersion;
+  loading.value = true; error.value = '';
   try {
-    const data = await api.getInspectionOverview(20);
-    overview.value = data;
-    latest.value = data.latest;
-    reports.value = (await api.listInspectionReports(100)).reports || [];
+    const [data, list] = await Promise.all([api.getInspectionOverview(20), api.listInspectionReports(100)]);
+    if (disposed || version !== loadVersion) return;
+    overview.value = data; latest.value = data.latest; reports.value = list.reports || [];
     schedule.value = { ...(data.schedule || { enabled: false, intervalHours: 24, lastRunAt: 0 }) };
     intervalHours.value = schedule.value.intervalHours || 24;
+    scheduleTargetId.value = schedule.value.target?.hostId || data.currentTarget?.hostId || '';
   } catch (loadError) {
-    error.value = `加载巡检数据失败:${loadError.message}`;
-  } finally {
-    loading.value = false;
-  }
+    if (!disposed && version === loadVersion) error.value = `加载巡检数据失败:${loadError.message}`;
+  } finally { if (!disposed && version === loadVersion) loading.value = false; }
 }
 
 async function runNow() {
   if (running.value) return;
+  const version = ++runVersion;
   running.value = true;
   error.value = '';
   try {
-    const data = await api.runInspection();
+    const data = await api.runInspection(overview.value?.currentTarget?.hostId);
+    if (disposed || version !== runVersion) return;
     toast.success(`巡检完成：${data.report?.summary || '请查看报告'}`);
     await load();
   } catch (runError) {
+    if (disposed || version !== runVersion) return;
     error.value = `巡检失败:${runError.message}`;
     toast.error('巡检执行失败');
   } finally {
-    running.value = false;
+    if (!disposed && version === runVersion) running.value = false;
   }
 }
 
-async function toggleSchedule(event) {
-  const next = event.target.checked;
+async function saveSchedule(enabled) {
+  if (scheduleSaving.value) return false;
+  scheduleSaving.value = true;
   try {
-    const data = await api.saveInspectionSchedule({ enabled: next, intervalHours: Number(intervalHours.value) || 24 });
+    const target = overview.value?.targets?.find(item => item.hostId === scheduleTargetId.value);
+    const data = await api.saveInspectionSchedule({ enabled, intervalHours: Number(intervalHours.value) || 24,
+      ...(enabled && target ? { hostId: target.hostId, connectionRevision: target.connectionRevision } : {}) });
+    if (disposed) return false;
     schedule.value = { ...(data.schedule || {}) };
-    toast.success(next ? `已开启自动巡检(每 ${schedule.value.intervalHours} 小时一次)` : '已关闭自动巡检');
+    toast.success(enabled ? `已固定到「${schedule.value.target?.hostName || '所选节点'}」自动巡检` : '已关闭自动巡检');
+    return true;
   } catch (scheduleError) {
-    event.target.checked = !next;
-    error.value = `保存失败:${scheduleError.message}`;
-  }
+    if (!disposed) error.value = `保存失败:${scheduleError.message}`;
+    return false;
+  } finally { scheduleSaving.value = false; }
 }
+async function toggleSchedule(event) {
+  event.target.checked = schedule.value.enabled;
+  await saveSchedule(!schedule.value.enabled);
+}
+async function saveScheduleTarget() { if (schedule.value.enabled) await saveSchedule(true); }
 
 async function pruneReports() {
   try {
@@ -330,26 +350,27 @@ async function pruneReports() {
 }
 
 async function openDetail(id) {
-  detailLoading.value = true;
-  detail.value = { id, report: null };
+  const version = ++detailVersion;
+  detailLoading.value = true; detail.value = { id, report: null };
   try {
     const data = await api.getInspectionReport(id);
+    if (disposed || version !== detailVersion) return;
     detail.value = data.report ? { id, report: data.report } : detail.value;
   } catch (detailError) {
-    toast.error(`读取报告失败：${detailError.message}`);
-    detail.value = null;
-  } finally {
-    detailLoading.value = false;
-  }
+    if (disposed || version !== detailVersion) return;
+    toast.error(`读取报告失败：${detailError.message}`); detail.value = null;
+  } finally { if (!disposed && version === detailVersion) detailLoading.value = false; }
 }
-function closeDetail() { detail.value = null; }
+function closeDetail() { detailVersion++; detail.value = null; detailLoading.value = false; }
+function reportContext() { return detail.value?.report || latest.value; }
+function reportScopeText(report = reportContext()) { return `报告目标：${report?.hostName || '历史报告未记录节点'}（hostId=${report?.hostId || '未知'}），采集时间：${report?.createdAt || '未知'}。请先核对目标节点和项目身份，缺失项保持未知。`; }
 
 function buildAgentPrompt(item) {
   const summaryText = item?.detail ? `${item.title}\n${item.detail}` : (latest.value?.summary || '最近一次巡检');
-  return `请基于最新一次 AI 巡检的结论进行分析并给出处置建议:\n\n${summaryText}\n\n${item?.advice ? `系统建议:${item.advice}\n\n` : ''}请先做必要的只读诊断(如检查容器状态、日志、磁盘)确认后,再给出明确建议;需要执行变更时先列出计划并等我确认。`;
+  return `${reportScopeText()}\n请基于这份 AI 巡检的结论进行分析并给出处置建议:\n\n${summaryText}\n\n${item?.advice ? `系统建议:${item.advice}\n\n` : ''}请先做必要的只读诊断(如检查容器状态、日志、磁盘)确认后,再给出明确建议;需要执行变更时先列出计划并等我确认。`;
 }
 function handoffToAgent(item) {
-  updateAgentContext({ page: 'AI 巡检中心', mode: 'inspection-fix', summary: '来自巡检报告的一条建议,请分析并给出处置', state: JSON.stringify({ title: item.title, detail: item.detail, advice: item.advice, tool: item.tool }) });
+  updateAgentContext({ page: 'AI 巡检中心', mode: 'inspection-fix', summary: '来自巡检报告的一条建议,请分析并给出处置', state: JSON.stringify({ hostId: reportContext()?.hostId, hostName: reportContext()?.hostName, reportId: reportContext()?.id, targetProjectId: item.target, title: item.title, detail: item.detail, advice: item.advice, tool: item.tool }) });
   openAgent();
   window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: buildAgentPrompt(item) + (item.tool === 'volume.backup' ? '\n请先生成 type=volume-backup 的每日定时备份 cron 草案，说明作用范围与执行时间，经我确认后调用 cron.create；不要现在执行备份。' : '') } }));
 }
@@ -363,18 +384,30 @@ function askAgentForReport() {
   const summaryText = report ? `#${detail.value.id} ${report.summary}${report.findings?.length ? `\n\n发现 ${report.findings.filter((item) => item.level === 'critical').length} 项严重、${report.findings.filter((item) => item.level === 'warning').length} 项需关注。` : ''}` : (latest.value?.summary || '最近一次巡检');
   updateAgentContext({ page: 'AI 巡检中心', mode: 'inspection-review', summary: '请分析这份巡检报告' });
   openAgent();
-  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: `请分析这份巡检报告并给出处置建议:\n\n${summaryText}` } }));
+  window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: `${reportScopeText(report)}\n请分析这份巡检报告并给出处置建议:\n\n${summaryText}` } }));
 }
 
-function handleHostChanged() { void load(); }
+function handleHostChanged() { closeDetail(); runVersion++; running.value = false; void load(); }
 
 usePullRefresh(load);
 onMounted(() => {
-  void load().then(() => { if (route.query.report) void openDetail(route.query.report); });
+  void load().then(() => { if (!disposed && route.query.report) void openDetail(route.query.report); });
   window.addEventListener('composeops:host-changed', handleHostChanged);
 });
 onBeforeUnmount(() => {
+  disposed = true; loadVersion++; detailVersion++; runVersion++;
   window.removeEventListener('composeops:host-changed', handleHostChanged);
   resetAgentContext();
 });
 </script>
+
+<style scoped>
+@media (max-width: 640px) {
+  .inspection-report-table, .inspection-report-table tbody { display: block; width: 100%; }
+  .inspection-report-table thead { display: none; }
+  .inspection-report-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 8px; border-bottom: 1px solid var(--line-subtle); }
+  .inspection-report-table td { display: block; min-width: 0; max-width: none; border: 0; white-space: normal; overflow: visible; padding: 8px; }
+  .inspection-report-table td::before { content: attr(data-label); display: block; margin-bottom: 5px; font-size: 11px; color: var(--text-soft); }
+  .inspection-report-table td:nth-child(1), .inspection-report-table td:nth-child(4), .inspection-report-table td:nth-child(5) { grid-column: 1 / -1; }
+}
+</style>

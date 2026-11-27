@@ -15,6 +15,7 @@ const empty = { Images: [], Containers: [], Volumes: [], BuildCache: [], LayersS
 const scope = () => { const s = storageHostScope(); return { expectedHostId: s.hostId, hostRevision: s.hostRevision }; };
 function fake(t, client = docker) {
   const calls = [];
+  t.mock.method(client, 'info', async () => ({ ID: 'storage-test-engine', Name: 'storage-test-engine' }));
   for (const name of ['pruneImages', 'pruneContainers', 'pruneVolumes']) {
     t.mock.method(client, name, async options => { calls.push({ name, options }); return { SpaceReclaimed: 1048576 }; });
   }

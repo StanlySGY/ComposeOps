@@ -57,6 +57,7 @@ function mountView() {
     global: {
       stubs: {
         BaseModal: {
+          name: 'BaseModal',
           props: ['show', 'title', 'sizeClass', 'bodyClass'],
           template: '<div v-if="show" role="dialog" :data-title="title"><slot name="header-actions"/><slot/><slot name="footer"/></div>',
         },
@@ -134,5 +135,43 @@ describe('AI 巡检报告列表键盘可访问性', () => {
 
     expect(wrapper.get('[role="dialog"]').attributes('data-title')).toContain('评分 92 / 健康');
     expect(wrapper.get('[role="dialog"]').attributes('data-title')).not.toContain('undefined');
+  });
+
+  it('不完整报告明确显示目标与未知评分，不显示为0分或健康', async () => {
+    const partial = { ...report, score: null, grade: 'incomplete', summary: '部分检查', hostId: 'remote', hostName: '公司研发节点', stats: { assessment: { complete: false } } };
+    api.getInspectionOverview.mockResolvedValue({ latest: partial, schedule: { enabled: false } });
+    api.listInspectionReports.mockResolvedValue({ reports: [partial] }); api.getInspectionReport.mockResolvedValue({ report: partial });
+    wrapper = mountView(); await flushPromises();
+    expect(wrapper.text()).toContain('信息不完整'); expect(wrapper.text()).toContain('公司研发节点');
+    expect(wrapper.text()).not.toContain('无需处理');
+    await wrapper.get('tbody button').trigger('click'); await flushPromises();
+    expect(wrapper.get('[role=dialog]').attributes('data-title')).toContain('评分 — / 信息不完整');
+    expect(wrapper.get('[role=dialog]').text()).toContain('未给出整体健康评分');
+  });
+
+  it('明细关闭后迟到响应不重新打开；快速切换报告保留最后选择', async () => {
+    let release;
+    api.getInspectionReport.mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+    wrapper = mountView(); await flushPromises(); await wrapper.get('tbody button').trigger('click');
+    wrapper.findComponent({ name: 'BaseModal' }).vm.$emit('close'); await flushPromises();
+    release({ report }); await flushPromises(); expect(wrapper.find('[role=dialog]').exists()).toBe(false);
+    let old;
+    api.getInspectionReport.mockReturnValueOnce(new Promise(resolve => { old = resolve; }));
+    await wrapper.get('tbody button').trigger('click');
+    api.getInspectionReport.mockResolvedValueOnce({ report: { ...report, summary: '最新响应' } });
+    await wrapper.get('tbody button').trigger('click'); await flushPromises();
+    old({ report: { ...report, summary: '不能复活的旧响应' } }); await flushPromises();
+    expect(wrapper.get('[role=dialog]').text()).toContain('最新响应'); expect(wrapper.text()).not.toContain('不能复活的旧响应');
+  });
+
+  it('自动巡检保存明确目标与修订，调整间隔会立即保存', async () => {
+    const target = { hostId: 'remote', hostName: '公司节点', connectionRevision: 'revision' };
+    api.getInspectionOverview.mockResolvedValue({ latest: null, currentTarget: target, targets: [target], schedule: { enabled: false, intervalHours: 24 } });
+    api.saveInspectionSchedule.mockResolvedValue({ schedule: { enabled: true, intervalHours: 24, target } });
+    wrapper = mountView(); await flushPromises();
+    await wrapper.get('input[type=checkbox]').setValue(true); await flushPromises();
+    expect(api.saveInspectionSchedule).toHaveBeenLastCalledWith({ enabled: true, intervalHours: 24, hostId: 'remote', connectionRevision: 'revision' });
+    await wrapper.get('select[aria-label="自动巡检间隔"]').setValue('6'); await flushPromises();
+    expect(api.saveInspectionSchedule).toHaveBeenLastCalledWith({ enabled: true, intervalHours: 6, hostId: 'remote', connectionRevision: 'revision' });
   });
 });

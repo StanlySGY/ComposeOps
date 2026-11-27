@@ -1,5 +1,5 @@
 import Docker from 'dockerode';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getSetting, setSetting } from '../lib/db.js';
 import { createSshHostVerifier, normalizeSshFingerprint } from '../lib/ssh-fingerprint.js';
 import localDocker from './docker.js';
@@ -91,6 +91,17 @@ export function getHost(id) {
   return readHosts().find((host) => host.id === id) || null;
 }
 
+/** Durable connection identity, independent of the currently selected node.
+ * Legacy rows use non-secret configuration; every subsequent edit gets a UUID. */
+export function hostConnectionRevision(id) {
+  const host = getHost(id);
+  if (!host) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
+  return host.connectionRevision || createHash('sha256').update(JSON.stringify([
+    host.id, host.type, host.host, host.port, host.username, host.hostFingerprint, host.updatedAt,
+    host.id === 'local' ? localDocker.modem.socketPath : null,
+  ])).digest('hex');
+}
+
 export function getActiveHostId() {
   return getSetting(ACTIVE_KEY, 'local') || 'local';
 }
@@ -134,6 +145,7 @@ export function upsertHost(input = {}) {
     tls: normalizeTls(existing, input.tls),
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    connectionRevision: randomUUID(),
   };
   if (existing) {
     if (connectionIdentity(existing) !== connectionIdentity(entry)) {

@@ -2,7 +2,7 @@ import { createPinia } from 'pinia';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
-const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getHosts', 'pingHost', 'getInspectionOverview', 'setHostGroup'].map(k => [k, vi.fn()])) }));
+const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getHosts', 'pingHost', 'getInspectionOverview', 'setHostGroup', 'runInspection'].map(k => [k, vi.fn()])) }));
 vi.mock('../src/api/client.js', () => ({ api }));
 import NodeGroupView from '../src/views/NodeGroupView.vue';
 let wrapper; let router;
@@ -38,4 +38,16 @@ it('筛选写入 URL，分组保存失败恢复原值', async () => {
   await select.setValue('edge'); await flushPromises();
   expect(select.element.value).toBe('production');
   expect(wrapper.get('.node-group-heading').text()).toContain('生产组');
+});
+it('部分巡检仍是已有报告，运行时固定节点并读取实际报告响应', async () => {
+  api.getInspectionOverview.mockResolvedValue({ latest: { score: null, grade: 'incomplete', hostName: '远端公司节点' } });
+  api.runInspection.mockResolvedValue({ report: { score: 82, grade: 'attention', hostName: '本机' } });
+  await start();
+  expect(wrapper.text()).toContain('全局最近报告 · 远端公司节点 · 信息不完整');
+  expect(wrapper.text()).not.toContain('尚无巡检报告');
+  await wrapper.findAll('button').find(button => button.text().includes('运行巡检')).trigger('click');
+  await flushPromises();
+  expect(api.runInspection).toHaveBeenCalledWith('local');
+  expect(wrapper.text()).toContain('全局最近报告 · 本机');
+  expect(wrapper.text()).toContain('82');
 });

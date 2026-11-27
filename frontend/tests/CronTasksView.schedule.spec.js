@@ -93,4 +93,35 @@ describe('定时计划创建与回看', () => {
     expect(wrapper.get('[role=alert]').text()).toContain('服务暂不可用');
     expect(wrapper.find('.cron-empty').exists()).toBe(false);
   });
+
+  it('清理计划固定选择节点与连接修订，切换工作节点不静默改写表单目标', async () => {
+    const types = { 'prune-safe': { label: '安全清理', scope: 'host' }, 'db-backup': { label: '数据库备份', scope: 'all' } };
+    const targets = [{ hostId: 'a', hostName: '公司A', connectionRevision: 'a-v1' }, { hostId: 'b', hostName: '公司B', connectionRevision: 'b-v1' }];
+    mocks.api.listCronJobs.mockResolvedValue({ jobs: [], types, targets, currentTarget: targets[0] });
+    mocks.api.createCronJob.mockResolvedValue({ id: 'saved', name: '固定清理', type: 'prune-safe', target: targets[0] });
+    await start(); await button('新建定时任务').trigger('click');
+    await wrapper.get('#cron-type').setValue('prune-safe'); await wrapper.get('#cron-name').setValue('固定清理');
+    expect(wrapper.get('#cron-host').element.value).toBe('a');
+    expect(wrapper.text()).toContain('未纳管资源');
+    expect(wrapper.text()).toContain('保留全部容器与数据卷');
+    mocks.api.listCronJobs.mockResolvedValue({ jobs: [], types, targets, currentTarget: targets[1] });
+    window.dispatchEvent(new CustomEvent('composeops:host-changed')); await flushPromises();
+    expect(wrapper.get('#cron-host').element.value).toBe('a');
+    await vi.waitFor(() => expect(wrapper.findAll('.cron-preview time')).toHaveLength(3));
+    await button('创建任务').trigger('click'); await flushPromises();
+    expect(mocks.api.createCronJob).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'a', connectionRevision: 'a-v1' }));
+  });
+
+  it('旧计划缺少目标不能执行或直接启用，编辑时必须重新确认', async () => {
+    const target = { hostId: 'a', hostName: '公司A', connectionRevision: 'a-v2' };
+    mocks.api.listCronJobs.mockResolvedValue({ jobs: [{ id: 'old', name: '旧清理', type: 'prune-safe', cron: '0 0 * * *', enabled: false, targetError: '旧计划未绑定目标' }],
+      types: { 'prune-safe': { label: '安全清理', scope: 'host' } }, targets: [target], currentTarget: target });
+    await start(); expect(button('立即执行').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('input[aria-label="启用定时任务 旧清理"]').attributes('disabled')).toBeDefined();
+    await wrapper.get('button[aria-label="编辑定时任务 旧清理"]').trigger('click');
+    await vi.waitFor(() => expect(wrapper.findAll('.cron-preview time')).toHaveLength(3));
+    expect(button('保存修改').attributes('disabled')).toBeDefined();
+    await button('重新确认所选节点').trigger('click');
+    expect(button('保存修改').attributes('disabled')).toBeUndefined();
+  });
 });

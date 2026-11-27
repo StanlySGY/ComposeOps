@@ -86,7 +86,8 @@ test('inspection: 执行巡检并写入报告(移除前保持数据最小)', asy
   assert.equal(run.statusCode, 200);
   const report = run.json().report;
   assert.ok(report && typeof report === 'object');
-  assert.ok('score' in report && report.score >= 0 && report.score <= 100);
+  if (report.stats.assessment.complete) assert.ok(Number.isFinite(report.score) && report.score >= 0 && report.score <= 100);
+  else assert.equal(report.score, null);
   assert.ok(Array.isArray(report.findings));
   assert.ok(report.id >= 0 || report.id != null);
 
@@ -115,11 +116,15 @@ test('inspection: 执行巡检并写入报告(移除前保持数据最小)', asy
 
 test('inspection: 调度配置可读写且被 clamp', async () => {
   const cookie = await login();
+  const missingTarget = await app.inject({ method: 'PUT', url: '/api/v1/ops/inspection/schedule', headers: { ...authHeaders, ...auth(cookie) }, payload: { enabled: true } });
+  assert.equal(missingTarget.statusCode, 409);
+  const scope = await app.inject({ method: 'GET', url: '/api/v1/ops/inspection/overview', headers: auth(cookie) });
+  const target = scope.json().currentTarget;
   const put = await app.inject({
     method: 'PUT',
     url: '/api/v1/ops/inspection/schedule',
     headers: { ...authHeaders, ...auth(cookie) },
-    payload: { enabled: true, intervalHours: 48 },
+    payload: { enabled: true, intervalHours: 48, hostId: target.hostId, connectionRevision: target.connectionRevision },
   });
   assert.equal(put.statusCode, 200);
   assert.equal(put.json().schedule.enabled, true);
