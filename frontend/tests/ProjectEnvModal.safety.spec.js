@@ -101,4 +101,31 @@ describe('环境变量草稿与版本保护', () => {
     wrapper.unmount(); wrapper = null;
     const after = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(after); expect(after.defaultPrevented).toBe(false);
   });
+  it('修改单个变量不重写其它变量的单引号与注释', async () => {
+    const raw = "# preserved\nSECRET='literal$VALUE' # fixed\nMODE=before\n\n";
+    api.getProjectEnv.mockResolvedValue(payload(raw));
+    await start(); await wrapper.get('[aria-label="MODE 变量值"]').setValue('after');
+    await button('仅保存文件').trigger('click'); await flushPromises();
+    expect(api.saveProjectEnv.mock.calls[0][1].raw).toBe(raw.replace('MODE=before', 'MODE=after'));
+  });
+  it('多行值自动使用原始文本，切换表格不会丢行，保存仍可用', async () => {
+    const raw = "SECRET='first\nsecond'\nMODE=before\n";
+    api.getProjectEnv.mockResolvedValue(payload(raw));
+    await start();
+    expect(wrapper.get('textarea').element.value).toBe(raw);
+    await button('键值表格').trigger('click');
+    expect(wrapper.get('textarea').element.value).toBe(raw);
+    expect(wrapper.text()).toContain('多行值');
+    await button('仅保存文件').trigger('click'); await flushPromises();
+    expect(api.saveProjectEnv.mock.calls[0][1].raw).toBe(raw);
+  });
+  it('非法原文阻止提交，只显示行号提示', async () => {
+    await start(); await button('原始文本').trigger('click');
+    await wrapper.get('textarea').setValue("SECRET='private-sentinel");
+    await button('仅保存文件').trigger('click'); await flushPromises();
+    expect(api.saveProjectEnv).not.toHaveBeenCalled();
+    expect(wrapper.get('[role="alert"]').text()).toContain('引号未闭合');
+    expect(wrapper.get('[role="alert"]').text()).not.toContain('private-sentinel');
+  });
+
 });

@@ -55,6 +55,10 @@ try {
   cli('ln', ['-s', '/etc/hostname', path.join(dir, '.env.link')]);
   await assert.rejects(readProjectEnv(project, '.env.link'), { code: 'ENV_UNSAFE_TARGET' });
   checks.push('SSH env suffix discovery, read-version save, private backup and conflict/symlink rejection');
+  await assert.rejects(sshReadFile(host, path.join(dir, '.env.link')), { statusCode: 403 });
+  await assert.rejects(sshReadFile(host, dir), { statusCode: 403 });
+  await assert.rejects(sshReadFile(host, file, { maxBytes: 4 }), { statusCode: 413 });
+  checks.push('bounded SFTP reads reject oversize content, directories and symlinks');
   const wrong=await pingHost('_probe',{...host,hostFingerprint:'SHA256:'+Buffer.alloc(32,7).toString('base64').replace(/=+$/,'')});assert.equal(wrong.ok,false);
   assert.equal(getHost(host.id).status,'online','temporary failed probe must not modify saved node');
   checks.push('changed SSH host key refused without modifying saved connection');

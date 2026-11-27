@@ -91,7 +91,7 @@ export async function replaceEnvFileWithBackup({ envPath, backupPath, content, e
 export async function replaceWorkspaceEnvWithBackup({ container, root, envPath, backupPath, backupName, content, expectedVersion, ops = {} }) {
   const remote = {
     exec: (target, args) => execInRunner(target, args),
-    read: (target, filePath) => readArchiveFile(target, filePath),
+    read: (target, filePath) => readArchiveFile(target, filePath, { maxBytes: MAX_ENV_BYTES }),
     put: (target, directory, name, data, options) => putArchiveFile(target, directory, name, data, options),
     ...ops,
   };
@@ -185,7 +185,7 @@ function projectEnvRoot(project) {
   return path.posix.normalize(root);
 }
 
-async function readHostFile(filePath) {
+export async function readHostFile(filePath) {
   let handle;
   try {
     handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -219,7 +219,7 @@ async function readContainerFile(container, filePath, { missingOk = false } = {}
     const size = await execInRunner(container, ['stat', '-c', '%s', '--', filePath]);
     if (size.code !== 0 || !/^\d+$/.test(size.stdout.trim())) throw Object.assign(new Error('无法验证环境变量文件大小'), { statusCode: 403 });
     if (Number(size.stdout.trim()) > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量文件超过 256KB'), { statusCode: 413 });
-    const { content } = await readArchiveFile(container, filePath);
+    const { content } = await readArchiveFile(container, filePath, { maxBytes: MAX_ENV_BYTES });
     if (Buffer.byteLength(content, 'utf8') > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量文件超过 256KB'), { statusCode: 413 });
     return content;
   } catch (error) {

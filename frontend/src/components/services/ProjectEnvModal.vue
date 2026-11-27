@@ -9,8 +9,8 @@
     <template #header-actions>
       <KeyRound class="h-4 w-4 shrink-0 text-status-info" />
       <span class="hidden font-mono text-[11px] text-surface-400 sm:inline">{{ data.path || '.env' }}</span>
-      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input w-auto input-sm" :value="activeFile" :disabled="saving || previewLoading" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}{{ item.exists ? '' : '（待创建）' }}</option></select>
-      <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" :disabled="saving || previewLoading" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
+      <select v-if="envFiles.length > 1 || activeFile !== '.env'" aria-label="选择环境变量文件" class="input w-auto input-sm" :value="activeFile" :disabled="saving" @change="switchEnvFile($event.target.value)"><option v-for="item in envFiles" :key="item.name" :value="item.name">{{ item.name }}{{ item.exists ? '' : '（待创建）' }}</option></select>
+      <button class="icon-btn" title="重置为磁盘当前内容" aria-label="重置" :disabled="saving" @click="reload"><RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" /></button>
     </template>
 
     <!-- 模式切换 Tab -->
@@ -30,6 +30,7 @@
         </div>
       </div>
       <p v-if="filesError" class="mx-4 mt-2 text-xs text-status-warn" role="status">{{ filesError }} <button class="underline" @click="loadEnvFiles">重试文件列表</button></p>
+      <p v-if="tableNotice" class="mx-4 mt-2 text-xs text-status-info" role="status">{{ tableNotice }}</p>
       <p v-if="loading" class="px-4 pt-3 text-xs text-surface-400" role="status">正在读取 {{ activeFile }}…</p>
 
       <section class="mx-4 mt-3 shrink-0 rounded-lg border border-surface-800 bg-surface-950/40">
@@ -51,6 +52,8 @@
           </div>
         </div>
       </section>
+
+      <p v-if="loaded && mode === 'table'" class="px-4 pt-2 text-[11px] text-surface-400">保留已有变量的引号及替换规则；新增含 $ 的值按字面值保存。需要变量替换时请编辑原始文本。</p>
 
       <!-- 搜索栏(仅表格模式) -->
       <div v-if="mode === 'table'" class="shrink-0 px-4 py-2">
@@ -84,8 +87,8 @@
               <input v-model="entry.comment" :aria-label="entry.key ? `${entry.key} 说明注释` : `第 ${index + 1} 行说明注释`" class="input text-xs" placeholder="说明注释(可选)" />
             </div>
             <div class="flex shrink-0 items-center gap-1 self-end sm:self-center">
-              <button class="icon-btn icon-btn-sm" title="上移" aria-label="上移" :disabled="index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
-              <button class="icon-btn icon-btn-sm" title="下移" aria-label="下移" :disabled="index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn icon-btn-sm" title="上移" aria-label="上移" :disabled="!!keyword.trim() || index === 0" @click="move(entry._uid, -1)"><ChevronUp class="h-3.5 w-3.5" /></button>
+              <button class="icon-btn icon-btn-sm" title="下移" aria-label="下移" :disabled="!!keyword.trim() || index === filteredEntries.length - 1" @click="move(entry._uid, 1)"><ChevronDown class="h-3.5 w-3.5" /></button>
               <button class="icon-btn hover:text-status-error icon-btn-sm" title="删除" aria-label="删除变量" @click="remove(entry._uid)"><Trash2 class="h-3.5 w-3.5" /></button>
             </div>
           </div>
@@ -101,7 +104,7 @@
             spellcheck="false"
             placeholder="# KEY=value&#10;SECRET_TOKEN=••••••••"
           ></textarea>
-          <p class="mt-2 text-[11px] text-surface-400">支持 `.env` 与 `docker compose` 变量语法;保存时自动做合法性校验。</p>
+          <p class="mt-2 text-[11px] text-surface-400">保留引号、注释与换行；保存前检查基本语法，最终变量替换由 Compose 处理。</p>
         </div>
       </fieldset>
 
@@ -117,14 +120,12 @@
       </div>
     </div>
 
-    <p v-if="previewLoading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在生成环境变量变更预览</p>
-    <!-- 保存选项确认弹窗 -->
-    <BaseModal :show="confirm" title="保存环境变量" size-class="max-w-[calc(100vw-1.5rem)] sm:max-w-md" body-class="space-y-2 p-4" @close="confirm = false">
-      <p class="text-sm text-surface-300">请选择应用方式:</p>
+    <BaseModal :show="confirm" title="保存文件并重建项目" size-class="max-w-[calc(100vw-1.5rem)] sm:max-w-md" body-class="space-y-3 p-4" @close="confirm = false">
+      <p class="text-sm text-surface-300">将先保存 <strong class="font-mono">{{ activeFile }}</strong>，再按项目现有 Compose 配置重建服务。重建可能短暂中断服务。</p>
+      <p class="text-sm text-status-warn" role="status">当前草稿尚未经过 Compose 生效预览。文件不会自动作为 --env-file 加入启动命令；只有被项目配置引用的变量才可能生效，具体取决于 Compose 的环境变量优先级。</p>
       <button class="btn-secondary w-full justify-start" @click="doSave(false)"><Save class="h-4 w-4" />仅保存文件(不重启容器)</button>
-      <button class="btn-primary w-full justify-start" :disabled="previewLoading" @click="applyWithPreview"><Play class="h-4 w-4" />保存并平滑重建容器(推荐)<span v-if="previewLoading" class="text-xs opacity-70">正在生成变更预览…</span></button>
+      <button class="btn-primary w-full justify-start" @click="doSave(true)"><Play class="h-4 w-4" />确认保存并重建</button>
     </BaseModal>
-    <ChangePreviewModal :show="showPreview" :preview="changePreview" title="应用环境变量 · 变更预览" confirm-text="保存并重建" fallback-message="无法获取变更预览,继续将保存文件并平滑重建容器。" @confirm="doSave(true)" @cancel="showPreview = false" />
     <ConfirmDialog :show="!!restorePending" title="恢复历史环境变量" :message="restorePending ? '确定将 ' + activeFile + ' 恢复为 ' + restorePending.name + '？当前文件会先自动备份，选中的历史备份不会被删除。' : ''" tone="warning" confirm-text="确认恢复" @confirm="confirmRestore" @cancel="restorePending = null" />
     <ConfirmDialog :show="!!pendingConfirm" title="未保存的修改" :message="pendingConfirm?.message || ''" tone="warning" confirm-text="继续" @confirm="confirmPending" @cancel="pendingConfirm = null" />
   </BaseModal>
@@ -134,10 +135,9 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileCode2, History, KeyRound, ListOrdered, Play, Plus, RefreshCw, Save, Search, Trash2 } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
-import { parseDotenv, serializeDotenv, isSecretKey } from '../../lib/dotenv.js';
+import { parseDotenvDocument, editDotenvDocument, validateDotenv, isSecretKey } from '../../lib/dotenv.js';
 import { useToastStore } from '../../stores/toast.js';
 import BaseModal from '../common/BaseModal.vue';
-import ChangePreviewModal from '../common/ChangePreviewModal.vue';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
 
 const props = defineProps({
@@ -163,7 +163,9 @@ const revealed = ref(new Set());
 const confirm = ref(false);
 const loaded = ref(false), loadError = ref(''), saveError = ref(''), versionConflict = ref(false), filesError = ref(''), backupError = ref('');
 const tableSource = ref(''), tableBaseline = ref('');
-const editorDisabled = computed(() => !loaded.value || loading.value || saving.value || previewLoading.value);
+const tableDocument = ref(parseDotenvDocument(''));
+const tableNotice = computed(() => tableDocument.value.tableSafe ? '' : '此文件包含多行值、转义或复杂语法，请使用原始文本编辑以保留原意。');
+const editorDisabled = computed(() => !loaded.value || loading.value || saving.value);
 let alive = true, request = 0, fileRequest = 0, backupRequest = 0;
 const current = version => alive && version === request;
 const pendingConfirm = ref(null);
@@ -181,14 +183,19 @@ const dirty = computed(() => loaded.value && buildRaw() !== data.value.raw);
 function setEditor(raw) {
   rawText.value = raw;
   tableSource.value = raw;
-  entries.value = parseDotenv(raw).map(entry => ({ ...entry, _uid: ++uidSeq }));
+  tableDocument.value = parseDotenvDocument(raw);
+  entries.value = tableDocument.value.nodes.map(entry => ({ ...entry, _uid: ++uidSeq }));
+  if (!tableDocument.value.tableSafe) mode.value = 'raw';
   tableBaseline.value = tableValue();
   revealed.value = new Set();
 }
 function switchMode(next) {
   if (editorDisabled.value || next === mode.value) return;
-  if (next === 'raw') rawText.value = tableChanged.value ? serializeDotenv(entries.value) : tableSource.value;
-  else setEditor(rawText.value);
+  if (next === 'raw') rawText.value = buildRaw();
+  else {
+    setEditor(rawText.value);
+    if (!tableDocument.value.tableSafe) return;
+  }
   mode.value = next;
 }
 async function load() {
@@ -264,15 +271,16 @@ async function confirmRestore() {
 }
 
 function switchEnvFile(name) {
-  if (saving.value || previewLoading.value || name === activeFile.value) return;
+  if (saving.value || name === activeFile.value) return;
   if (dirty.value) { pendingConfirm.value = { type: 'switch', name, message: '当前有未保存修改,切换文件会丢失这些内容。继续?' }; return; }
   activeFile.value = name;
   load();
 }
-function reload() { if (saving.value || previewLoading.value) return; if (dirty.value) { pendingConfirm.value = { type: 'reload', message: '当前有未保存修改,重置会丢失这些内容。继续?' }; return; } load(); }
+function reload() { if (saving.value) return; if (dirty.value) { pendingConfirm.value = { type: 'reload', message: '当前有未保存修改,重置会丢失这些内容。继续?' }; return; } load(); }
 function addRow() {
   if (editorDisabled.value) return;
   if (mode.value === 'raw') switchMode('table');
+  if (mode.value !== 'table') return;
   entries.value.push({ key: '', value: '', comment: '', isSecret: false, _uid: ++uidSeq });
   nextTick(() => { keyword.value = ''; });
 }
@@ -300,7 +308,7 @@ async function copyValue(entry) {
 }
 function buildRaw() {
   if (mode.value === 'raw') return rawText.value;
-  return tableChanged.value ? serializeDotenv(entries.value) : tableSource.value;
+  return tableChanged.value ? editDotenvDocument(tableDocument.value, entries.value) : tableSource.value;
 }
 
 async function copyDraft() {
@@ -322,29 +330,12 @@ function confirmPending() {
 }
 async function saveOnly() { await doSave(false); }
 async function saveAndApply() { if (!editorDisabled.value) confirm.value = true; }
-const showPreview = ref(false);
-const changePreview = ref(null);
-const previewLoading = ref(false);
-async function applyWithPreview() {
-  if (editorDisabled.value) return;
-  const version = request;
-  confirm.value = false;
-  previewLoading.value = true;
-  try {
-    const compose = await api.getComposeFile(props.project.id);
-    if (!current(version)) return;
-    const preview = await api.previewCompose(props.project.id, compose?.content ?? '');
-    if (current(version)) changePreview.value = preview;
-  } catch {
-    if (current(version)) changePreview.value = null;
-  } finally {
-    if (current(version)) { previewLoading.value = false; showPreview.value = true; }
-  }
-}
 async function doSave(apply) {
   if (editorDisabled.value) return;
   const version = request, project = props.project, file = activeFile.value, raw = buildRaw();
-  confirm.value = false; showPreview.value = false; saving.value = true; saveError.value = ''; versionConflict.value = false;
+  const validation = validateDotenv(raw);
+  if (!validation.ok) { confirm.value = false; saveError.value = validation.errors.join('；'); return; }
+  confirm.value = false; saving.value = true; saveError.value = ''; versionConflict.value = false;
   try {
     const saved = await api.saveProjectEnv(project.id, { file, raw, expectedVersion: data.value.version });
     if (!current(version)) return;
@@ -363,7 +354,7 @@ window.addEventListener('beforeunload', beforeUnload);
 onBeforeUnmount(() => { alive = false; request++; fileRequest++; backupRequest++; window.removeEventListener('beforeunload', beforeUnload); });
 watch(() => props.project.id, () => {
   if (!props.project.id) return;
-  saving.value = false; previewLoading.value = false; confirm.value = false; showPreview.value = false;
+  saving.value = false; confirm.value = false;
   restorePending.value = null; pendingConfirm.value = null; activeFile.value = '.env'; envFiles.value = []; filesError.value = '';
   void load(); void loadEnvFiles();
 });

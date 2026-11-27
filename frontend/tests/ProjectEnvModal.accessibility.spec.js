@@ -72,37 +72,24 @@ describe('环境变量编辑器可访问名称', () => {
     expect(emptyKey?.attributes('aria-label')).toBe('第 3 行变量名');
   });
 
-  it('确认弹窗关闭后，预览加载状态仍会播报，直到预览完成', async () => {
+  it('重建确认明确文件范围与可能中断，不以旧 Compose 预览冒充草稿结果', async () => {
     const { api } = await import('../src/api/client.js');
-    let finishPreview;
-    api.getComposeFile.mockResolvedValue({ content: 'services: {}' });
-    api.previewCompose.mockImplementation(() => new Promise((resolve) => { finishPreview = resolve; }));
-
+    api.previewCompose.mockClear();
     wrapper = mount(ProjectEnvModal, {
-      attachTo: document.body,
-      props: { project: { id: 'project-preview', projectName: '预览测试项目' } },
-      global: {
-        stubs: {
-          BaseModal: { template: '<div v-if="show" class="modal"><slot name="header-actions"/><slot/><slot name="footer"/></div>', props: ['show', 'title', 'sizeClass', 'bodyClass'] },
-          ChangePreviewModal: true,
-          ConfirmDialog: true,
-        },
-      },
+      props: { project: { id: 'project-preview', projectName: '测试项目' } },
+      global: { stubs: {
+        BaseModal: { template: '<div v-if="show" class="modal"><slot name="header-actions"/><slot/></div>', props: ['show'] },
+        ConfirmDialog: true,
+      } },
     });
     await flushPromises();
-
-    const saveAndApply = wrapper.findAll('button').find((button) => button.text().includes('保存并应用'));
-    await saveAndApply.trigger('click');
-    await flushPromises();
-    const confirmApply = wrapper.findAll('button').find((button) => button.text().includes('保存并平滑重建容器'));
-    await confirmApply.trigger('click');
-
-    await vi.waitFor(() => expect(api.previewCompose).toHaveBeenCalledWith('project-preview', 'services: {}'));
-    expect(wrapper.findAll('.modal')).toHaveLength(1);
-    expect(wrapper.get('.modal [role="status"][aria-live="polite"]').text()).toBe('正在生成环境变量变更预览');
-
-    finishPreview({ added: [], changed: [], restarted: [], removed: [], portConflicts: [] });
-    await flushPromises();
-    expect(wrapper.find('.modal [role="status"][aria-live="polite"]').exists()).toBe(false);
+    await wrapper.findAll('button').find(button => button.text() === '保存并应用').trigger('click');
+    expect(wrapper.findAll('.modal')).toHaveLength(2);
+    const confirmation = wrapper.findAll('.modal')[1];
+    expect(confirmation.text()).toContain('.env.example');
+    expect(confirmation.text()).toContain('可能短暂中断');
+    expect(confirmation.get('[role="status"]').text()).toContain('尚未经过 Compose 生效预览');
+    expect(confirmation.text()).toContain('不会自动作为 --env-file');
+    expect(api.previewCompose).not.toHaveBeenCalled();
   });
 });

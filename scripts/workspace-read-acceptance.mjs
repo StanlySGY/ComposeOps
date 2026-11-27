@@ -8,7 +8,7 @@ import path from 'node:path';
 const root = await mkdtemp(path.join(tmpdir(), 'composeops-read-acceptance-'));
 process.env.DB_PATH = path.join(root, 'test.db');
 process.env.COMPOSEOPS_RUNNER_IMAGE ||= 'stanly1997/opsdash:latest';
-const { withReadOnlyRunner, withRunner, execInRunner, readWorkspaceCompose, closeAllWorkspaceRunners } = await import('../backend/src/services/compose-workspace.js');
+const { withReadOnlyRunner, withRunner, execInRunner, readWorkspaceCompose, readArchiveFile, closeAllWorkspaceRunners } = await import('../backend/src/services/compose-workspace.js');
 const { readProjectEnv, saveProjectEnv, listProjectEnvFiles } = await import('../backend/src/services/project-env.js');
 const { default: db } = await import('../backend/src/lib/db.js');
 const project = { id: path.basename(root), hostId: 'local', activeHostAtScan: 'local', projectName: path.basename(root), workingDir: root, composeFiles: [path.join(root, 'compose.yml')], managed: true, editable: true, workspaceAvailable: true, mounted: false };
@@ -33,6 +33,14 @@ try {
     await withReadOnlyRunner(project, runner => assert.equal(runner.id, original));
   }
   checks.push('repeated Compose reads reuse only the read helper');
+  await writeFile(path.join(root, 'large.yml'), 'x'.repeat(2 * 1024 * 1024 + 1));
+  await symlink('/etc/hostname', path.join(root, 'config-link'));
+  await withReadOnlyRunner(project, async runner => {
+    await assert.rejects(readArchiveFile(runner, path.join(root, 'large.yml')), { statusCode: 413 });
+    await assert.rejects(readArchiveFile(runner, root), { statusCode: 403 });
+    await assert.rejects(readArchiveFile(runner, path.join(root, 'config-link')), { statusCode: 403 });
+  });
+  checks.push('real Docker archives reject oversize files, directory paths and symlinks');
   const files = await listProjectEnvFiles(project);
   assert(files.some(f => f.name === '.env.production' && f.exists));
   assert(files.some(f => f.name === '.env' && !f.exists));

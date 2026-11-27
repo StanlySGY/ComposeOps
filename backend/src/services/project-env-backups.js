@@ -1,6 +1,6 @@
-import { readdir, lstat, readFile } from 'node:fs/promises';
+import { readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeEnvFileName, saveProjectEnv } from './project-env.js';
+import { normalizeEnvFileName, saveProjectEnv, readHostFile } from './project-env.js';
 import { withReadOnlyRunner, execInRunner, readArchiveFile } from './compose-workspace.js';
 import { addOperation } from '../lib/db.js';
 
@@ -88,7 +88,9 @@ export async function restoreProjectEnvBackup(project, fileName, backupName, { e
       throw Object.assign(new Error('备份必须是普通文件，拒绝读取符号链接或特殊文件'), { statusCode: 403, code: 'ENV_UNSAFE_BACKUP' });
     }
     if (info.size > MAX_ENV_BYTES) throw Object.assign(new Error('环境变量备份超过 256KB，拒绝恢复'), { statusCode: 413 });
-    content = await readFile(backupPath, 'utf8');
+    try { content = await readHostFile(backupPath); }
+    catch (error) { if (error.code === 'ENV_UNSAFE_TARGET') error.code = 'ENV_UNSAFE_BACKUP'; throw error; }
+    if (content === null) throw Object.assign(new Error('所选环境变量备份不存在'), { statusCode: 404, code: 'ENV_BACKUP_NOT_FOUND' });
   } else {
     if (!project.editable || !project.workspaceAvailable) {
       throw Object.assign(new Error('项目未启用 Compose 目录能力，无法恢复环境变量备份'), { statusCode: 403 });
@@ -100,7 +102,7 @@ export async function restoreProjectEnvBackup(project, fileName, backupName, { e
       if (safe.code !== 0 || regular.code !== 0) {
         throw Object.assign(new Error('备份不存在或不是安全的普通文件'), { statusCode: 403, code: 'ENV_UNSAFE_BACKUP' });
       }
-      const archive = await readArchiveFile(container, remotePath);
+      const archive = await readArchiveFile(container, remotePath, { maxBytes: MAX_ENV_BYTES });
       if (Buffer.byteLength(archive.content, 'utf8') > MAX_ENV_BYTES) {
         throw Object.assign(new Error('环境变量备份超过 256KB，拒绝恢复'), { statusCode: 413 });
       }

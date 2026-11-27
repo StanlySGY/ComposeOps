@@ -2,6 +2,7 @@ import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import tar from 'tar-stream';
+import { readConfigArchive } from '../lib/config-file-read.js';
 import docker from './docker.js';
 import { ACTIONS, assertComposeVersion, composeProjectOptions, replaceComposeWithBackup, withComposeFileLock } from './compose-runner.js';
 import { assertProjectOperationAllowed, withProjectOperationLock } from './project-operation-lock.js';
@@ -479,32 +480,9 @@ async function execInRunner(container, cmd, { input, onOutput = () => {}, onExec
   }
 }
 
-async function readArchiveFile(container, filePath) {
-  if (container?.__ssh) return sshReadFile(container.host, filePath);
-  const archive = await container.getArchive({ path: filePath });
-  const extract = tar.extract();
-  return new Promise((resolve, reject) => {
-    let result = null;
-    extract.on('entry', (header, stream, next) => {
-      const chunks = [];
-      stream.on('data', (chunk) => chunks.push(chunk));
-      stream.on('end', () => {
-        if (!result && header.type === 'file') {
-          result = { content: Buffer.concat(chunks).toString('utf8'), header };
-        }
-        next();
-      });
-      stream.on('error', reject);
-      stream.resume();
-    });
-    extract.on('finish', () => {
-      if (result) resolve(result);
-      else reject(Object.assign(new Error('Compose 文件不存在'), { statusCode: 404 }));
-    });
-    extract.on('error', reject);
-    archive.on('error', reject);
-    archive.pipe(extract);
-  });
+async function readArchiveFile(container, filePath, options = {}) {
+  if (container?.__ssh) return sshReadFile(container.host, filePath, options);
+  return readConfigArchive(container, filePath, options);
 }
 
 async function putArchiveFile(container, directory, name, content, header) {
@@ -549,7 +527,7 @@ export async function readWorkspaceCompose(project, fileIndex = 0) {
 }
 
 export async function saveWorkspaceCompose(project, fileIndex, content, reason = 'save', expectedContent = undefined) {
-  if (typeof content !== 'string' || content.length === 0 || content.length > 2 * 1024 * 1024) {
+  if (typeof content !== 'string' || content.length === 0 || Buffer.byteLength(content, 'utf8') > 2 * 1024 * 1024) {
     throw Object.assign(new Error('Compose 内容为空或超过 2MB'), { statusCode: 400 });
   }
   validateYaml(content);

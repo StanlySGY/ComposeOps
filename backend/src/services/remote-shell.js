@@ -1,5 +1,6 @@
 import ssh2 from 'ssh2';
 import path from 'node:path';
+import { CONFIG_FILE_MAX_BYTES, assertConfigSize, configReadError, withFileReadDeadline } from '../lib/config-file-read.js';
 import { normalizeHostDirectory } from './host-directory-paths.js';
 import { createSshHostVerifier } from '../lib/ssh-fingerprint.js';
 import { assertSshPrivateKey } from '../lib/ssh-private-key.js';
@@ -139,28 +140,53 @@ export function sshExec(host, args, { onOutput = () => {}, onExec = null, timeou
   }));
 }
 
-export function sshReadFile(host, filePath) {
+export function sshReadFile(host, filePath, { maxBytes = CONFIG_FILE_MAX_BYTES, timeoutMs } = {}) {
   assertAbsolute(filePath);
-  return withSsh(host, async (conn) => {
-    const sftp = await openSftp(conn);
-    const content = await new Promise((resolve, reject) => {
-      sftp.readFile(filePath, (error, data) => {
-        if (error) {
-          if (error.code === 2 || error.code === 'ENOENT') {
-            reject(Object.assign(new Error('Compose 文件不存在'), { statusCode: 404 }));
-            return;
-          }
-          reject(error);
-          return;
-        }
-        resolve(data.toString('utf8'));
+  assertConfigSize(0, maxBytes);
+  return withSsh(host, conn => withFileReadDeadline(async signal => {
+    // Closing the connection cancels even SFTP setup/stat/open calls that stall.
+    const abort = () => conn.destroy();
+    signal.addEventListener('abort', abort, { once: true });
+    let stream;
+    try {
+      const sftp = await openSftp(conn);
+      signal.throwIfAborted();
+      const call = (method, ...args) => new Promise((resolve, reject) => {
+        sftp[method](...args, (error, value) => error ? reject(error) : resolve(value));
       });
-    });
-    const mode = await new Promise((resolve) => {
-      sftp.stat(filePath, (error, stats) => resolve(error ? 0o644 : (stats.mode & 0o777)));
-    });
-    return { content, header: { mode, uid: 0, gid: 0 } };
-  });
+      const check = stats => {
+        if (!stats.isFile()) throw configReadError('配置路径必须指向普通文件，不能是符号链接或目录', 403);
+        assertConfigSize(stats.size, maxBytes);
+      };
+      check(await call('lstat', filePath));
+      const handle = await call('open', filePath, 'r');
+      // Verify the opened object too; path metadata alone may have changed.
+      const stats = await call('fstat', handle);
+      check(stats);
+      signal.throwIfAborted();
+      stream = sftp.createReadStream(filePath, { handle, autoClose: false, start: 0, end: maxBytes });
+      // ssh2 can emit a final CLOSE error after an iterator has already ended.
+      stream.on('error', () => {});
+      const chunks = [];
+      let bytes = 0;
+      for await (const chunk of stream) {
+        bytes += chunk.length;
+        assertConfigSize(bytes, maxBytes);
+        chunks.push(chunk);
+      }
+      if (bytes !== stats.size) throw configReadError('配置文件在读取期间发生变化，请重新读取', 409);
+      await new Promise((resolve, reject) => {
+        stream.once('close', resolve); stream.once('error', reject); stream.destroy();
+      });
+      return { content: Buffer.concat(chunks, bytes).toString('utf8'), header: { mode: stats.mode & 0o777, uid: stats.uid, gid: stats.gid } };
+    } catch (error) {
+      if (error.code === 2 || error.code === 'ENOENT') throw configReadError('配置文件不存在', 404);
+      throw error;
+    } finally {
+      stream?.destroy();
+      signal.removeEventListener('abort', abort);
+    }
+  }, { timeoutMs }));
 }
 
 export function sshWriteFile(host, filePath, content, header = {}) {

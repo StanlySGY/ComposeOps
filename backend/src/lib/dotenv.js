@@ -18,63 +18,12 @@ export function isSecretKey(key) {
 }
 
 /**
- * 解析 .env 文本为结构化条目数组(reversible)。
+ * 解析 .env 文本为条目；保留转义文本，不执行变量替换。
  * @param {string} text
  * @returns {Array<{key:string, value:string, comment?:string, isSecret:boolean}>}
  */
 export function parseDotenv(text) {
-  const entries = [];
-  if (!text) return entries;
-  const lines = String(text).split(/\r?\n/);
-  let pendingComment = null;
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    if (!line.trim()) continue; // 空行跳过(不保留位置语义,raw 编辑下无损)
-    if (/^\s*#/.test(line)) {
-      pendingComment = line.trim().replace(/^#\s*/, '');
-      continue;
-    }
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line.trim());
-    if (!match) continue; // 语法不合法行跳过(保存时回退 raw)
-    const key = match[1];
-    let value = match[2].trim();
-    let comment;
-    // 注释:行尾 ` #...`(仅在非引号内)
-    const after = extractTrailingComment(value);
-    if (after) {
-      value = after.value;
-      comment = after.comment;
-    }
-    // 去引号
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    // 行内注释优先;否则使用行前独立注释
-    const resolvedComment = comment ?? pendingComment ?? undefined;
-    entries.push({
-      key,
-      value,
-      comment: resolvedComment,
-      isSecret: isSecretKey(key),
-    });
-    pendingComment = null;
-  }
-  return entries;
-}
-
-/** 从值中提取行尾 `# comment`(不处理引号内 #)。 */
-function extractTrailingComment(value) {
-  let inSingle = false;
-  let inDouble = false;
-  for (let i = 0; i < value.length; i += 1) {
-    const ch = value[i];
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-    else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    else if (ch === '#' && !inSingle && !inDouble && (i === 0 || /\s/.test(value[i - 1]))) {
-      return { value: value.slice(0, i).trimEnd(), comment: value.slice(i + 1).trim() };
-    }
-  }
-  return null;
+  return parseDotenvDocument(text).nodes.map(({ key, value, comment, isSecret }) => ({ key, value, comment, isSecret }));
 }
 
 /**
@@ -87,10 +36,8 @@ export function serializeDotenv(entries) {
       if (!key) return '';
       const lines = [];
       if (entry.comment) lines.push(`# ${entry.comment}`);
-      // 含空格/引号/特殊字符时用双引号包裹
       const value = String(entry.value ?? '');
-      const needsQuote = /[\s"'#=]/.test(value);
-      lines.push(`${key}=${needsQuote ? `"${value.replaceAll('"', '\\"')}"` : value}`);
+      lines.push(`${key}=${encodeEditedValue(value, value.includes('$') ? "'" : '')}`);
       return lines.join('\n');
     })
     .filter(Boolean)
@@ -101,15 +48,99 @@ export function serializeDotenv(entries) {
  * 校验 .env 语法:不允许格式错误的行静默写入。返回 { ok, errors }。
  */
 export function validateDotenv(text) {
-  const errors = [];
-  if (text == null) return { ok: true, errors };
-  const lines = String(text).split(/\r?\n/);
-  lines.forEach((rawLine, index) => {
-    const line = rawLine.trim();
-    if (!line || /^\s*#/.test(line) || /^export\s+[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) return;
-    if (!/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) {
-      errors.push(`第 ${index + 1} 行不是合法的 KEY=VALUE 格式:${rawLine.trim().slice(0, 60)}`);
-    }
-  });
+  const { errors } = parseDotenvDocument(text);
   return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Lexical document used for validation and lossless table edits. This does not
+ * evaluate substitutions: Compose remains responsible for interpolation.
+ */
+export function parseDotenvDocument(text) {
+  const raw = String(text ?? '');
+  const lines = raw.match(/[^\n]*\n|[^\n]+$/g) || [];
+  const nodes = [], errors = [];
+  let leading = [], tableSafe = true;
+  for (let index = 0; index < lines.length; index++) {
+    const startLine = index + 1;
+    const line = lines[index].replace(/\r?\n$/, '');
+    if (!line.trim() || /^\s*#/.test(line)) { leading.push(lines[index]); continue; }
+    const match = /^([ \t]*(?:export[ \t]+)?)([A-Za-z_][A-Za-z0-9_]*)([ \t]*=[ \t]*)(.*)$/.exec(line);
+    if (!match) { errors.push(`第 ${startLine} 行不是合法的 KEY=VALUE 格式`); leading.push(lines[index]); tableSafe = false; continue; }
+    let rest = match[4], source = lines[index], suffix, token, value, quote = '';
+    if (/^["']/.test(rest)) {
+      quote = rest[0];
+      let end = -1;
+      for (let offset = 1; ; offset++) {
+        if (offset >= rest.length) {
+          if (++index >= lines.length) break;
+          rest += '\n' + lines[index].replace(/\r?\n$/, '');
+          source += lines[index];
+        }
+        if (rest[offset] === '\\') { offset++; continue; }
+        if (rest[offset] === quote) { end = offset; break; }
+      }
+      if (end < 0) { errors.push(`第 ${startLine} 行的引号未闭合`); tableSafe = false; leading.push(source); continue; }
+      token = rest.slice(0, end + 1); value = token.slice(1, -1); suffix = rest.slice(end + 1);
+      if (!/^[ \t]*(?:#.*)?$/.test(suffix)) errors.push(`第 ${startLine} 行引号后存在无效内容`);
+    } else {
+      const comment = /(^|[ \t])#/.exec(rest);
+      const commentAt = comment ? comment.index + comment[1].length : rest.length;
+      token = rest.slice(0, commentAt).trimEnd(); value = token;
+      suffix = rest.slice(token.length);
+    }
+    // Multiline and escaped forms stay in raw mode; never flatten them.
+    if (/[\r\n\\]/.test(value)) tableSafe = false;
+    const inlineComment = suffix.indexOf('#');
+    let leadingCommentIndex = -1;
+    leading.forEach((part, i) => { if (/^\s*#/.test(part)) leadingCommentIndex = i; });
+    const comment = inlineComment >= 0 ? suffix.slice(inlineComment + 1).trim()
+      : leadingCommentIndex >= 0 ? leading[leadingCommentIndex].trim().replace(/^#\s*/, '') : undefined;
+    nodes.push({ key: match[2], value, comment, quote, token, suffix, prefix: match[1], separator: match[3], leading, leadingCommentIndex, inlineComment,
+      source, eol: /\r?\n$/.exec(source)?.[0] || '', isSecret: isSecretKey(match[2]), _sourceId: nodes.length });
+    leading = [];
+  }
+  return { raw, nodes, trailing: leading.join(''), errors, tableSafe: tableSafe && !errors.length };
+}
+
+function encodeEditedValue(value, quote = '') {
+  const literal = quote === "'";
+  if (literal && !/[\\\r\n]/.test(value)) return `'${value.replaceAll("'", "\\'")}'`;
+  if (literal) quote = '"';
+  if (quote === '"' || /[\s"'#\\]/.test(value)) {
+    return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\r', '\\r').replaceAll('\n', '\\n').replaceAll('\t', '\\t').replaceAll('$', literal ? '\\$' : '$')}"`;
+  }
+  return value;
+}
+
+/** Preserve every untouched token, comment, blank line and line ending. */
+export function editDotenvDocument(document, entries) {
+  if (!document.tableSafe) return document.raw;
+  const eol = document.raw.includes('\r\n') ? '\r\n' : '\n';
+  const blocks = (entries || []).map(entry => {
+    const key = String(entry.key || '').trim();
+    if (!key) return '';
+    const value = String(entry.value ?? ''), comment = String(entry.comment ?? '').replace(/[\r\n]+/g, ' ');
+    const original = document.nodes[entry._sourceId];
+    if (!original) {
+      // New values are literal when they contain a dollar; existing quote style
+      // continues to control whether existing values use interpolation.
+      const quote = value.includes('$') ? "'" : '';
+      return `${key}=${encodeEditedValue(value, quote)}${comment ? ` # ${comment}` : ''}${eol}`;
+    }
+    if (key === original.key && value === original.value && comment === (original.comment ?? '')) return original.leading.join('') + original.source;
+    const leading = [...original.leading];
+    let suffix = original.suffix;
+    if (comment !== (original.comment ?? '')) {
+      if (original.inlineComment >= 0) suffix = suffix.slice(0, original.inlineComment) + (comment ? `# ${comment}` : '');
+      else if (original.leadingCommentIndex >= 0) {
+        const i = original.leadingCommentIndex;
+        const ending = /\r?\n$/.exec(leading[i])?.[0] || eol;
+        leading[i] = comment ? `${/^[ \t]*#[ \t]*/.exec(leading[i])?.[0] || '# '}${comment}${ending}` : ending;
+      } else if (comment) suffix += ` # ${comment}`;
+    }
+    const token = value === original.value ? original.token : encodeEditedValue(value, original.quote);
+    return `${leading.join('')}${original.prefix}${key}${original.separator}${token}${suffix}${original.eol}`;
+  }).filter(Boolean);
+  return blocks.reduce((result, block) => result + (result && !result.endsWith('\n') ? eol : '') + block, '') + document.trailing;
 }
