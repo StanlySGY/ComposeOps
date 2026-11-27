@@ -90,7 +90,7 @@ export default async function personalRoutes(fastify) {
   }, async (request, reply) => {
     try { return await getDockerUsage(request.query?.hostId); }
     catch (error) {
-      if (error.code === 'HOST_UNAVAILABLE') return reply.code(503).send({ error: 'host_unavailable', message: '所选节点的 Docker 存储暂不可用，请稍后重试或检查节点连接。' });
+      if (error.code === 'HOST_UNAVAILABLE') return reply.code(503).send({ error: 'host_unavailable', message: error.message + '。请稍后重试或检查节点连接。', failures: error.failures });
       throw error;
     }
   });

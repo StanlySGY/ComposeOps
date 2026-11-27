@@ -1,5 +1,5 @@
 import { getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
-import { readDockerDiskUsage } from './docker-disk-usage.js';
+import { readDockerDiskUsage, diskUsageFailure } from './docker-disk-usage.js';
 import { sendNotification } from './notifications.js';
 import { setSetting } from '../lib/db.js';
 import db, { pruneAiData, pruneOperationHistory, COMPOSE_BACKUP_KEEP } from '../lib/db.js';
@@ -22,15 +22,16 @@ export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 6
   const snapshots = await Promise.all(selected.map(async ({ id, scope }) => {
     try {
       const data = await readDockerDiskUsage(id, { timeoutMs });
-      if (storageHostScope(id).hostRevision !== scope.hostRevision) throw new Error('节点配置已变化');
+      if (storageHostScope(id).hostRevision !== scope.hostRevision) throw Object.assign(new Error('节点配置已变化'), { code: 'DISK_SCAN_SCOPE_CHANGED' });
       return { id, data: summarizeDockerDiskUsage(data), scope };
     } catch (error) {
       return { id, data: null, error };
     }
   }));
   const unavailable = snapshots.filter(item => !item.data).map(item => item.id);
+  const failures = snapshots.filter(item => !item.data).map(item => ({ hostId: item.id, ...diskUsageFailure(item.error) }));
   const data = snapshots.filter(item => item.data).map(item => item.data);
-  if (!data.length) throw Object.assign(new Error(`节点存储暂不可达：${unavailable.join('、')}`), { code: 'HOST_UNAVAILABLE', statusCode: 503 });
+  if (!data.length) throw Object.assign(new Error(`节点存储暂不可用：${failures.map(item => `${item.hostId}（${item.message}）`).join('、')}`), { code: 'HOST_UNAVAILABLE', statusCode: 503, failures });
   const sections = data;
   const result = {};
   for (const key of ['images', 'containers', 'buildCache', 'volumes']) {
@@ -39,7 +40,7 @@ export async function getDockerUsage(hostId = getActiveHostId(), { timeoutMs = 6
   }
   return { ...result, total: sum(sections, 'total'), reclaimable: sum(sections, 'reclaimable'),
     estimated: sections.some(section => section.estimated), hostId,
-    ...(hostId === 'all' ? {} : snapshots.find(item => item.data).scope), unavailableHosts: unavailable };
+    ...(hostId === 'all' ? {} : snapshots.find(item => item.data).scope), unavailableHosts: unavailable, failures };
 
 }
 

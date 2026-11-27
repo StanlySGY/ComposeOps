@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import test from 'node:test';
 import './helpers/isolated-db.js';
 import { upsertHost, deleteHost, getHost } from '../src/services/docker-hosts.js';
-import { readDockerDiskUsage, invalidateDiskUsage } from '../src/services/docker-disk-usage.js';
+import { readDockerDiskUsage, invalidateDiskUsage, diskUsageFailure } from '../src/services/docker-disk-usage.js';
 import { getDockerUsage } from '../src/services/maintenance.js';
 import { getStorageStats } from '../src/services/cost-analysis.js';
 
@@ -80,4 +80,57 @@ test('a hung scan times out, closes its connection and is not reused', async t =
   await assert.rejects(readDockerDiskUsage(host.id, { timeoutMs: 80 }));
   await disconnected;
   assert.equal((await readDockerDiskUsage(host.id, { timeoutMs: 80 })).LayersSize, 2);
+});
+
+test('different caller deadlines still share one node scan', async t => {
+  let calls = 0, release, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const host = node(t, await endpoint(t, (_req, res) => {
+    calls++; release = () => res.end(JSON.stringify(snapshot(20))); started();
+  }));
+  const short = readDockerDiskUsage(host.id, { timeoutMs: 100 });
+  const shortRejected = assert.rejects(short, { statusCode: 503 });
+  await ready;
+  const long = readDockerDiskUsage(host.id, { timeoutMs: 1000 });
+  long.catch(() => {}); // Keep an expected failing implementation from leaking past the assertion.
+  await shortRejected;
+  assert.equal(calls, 1);
+  release(); assert.equal((await long).LayersSize, 20);
+  assert.equal((await readDockerDiskUsage(host.id, { timeoutMs: 500 })).LayersSize, 20);
+  assert.equal(calls, 1);
+});
+
+test('invalid Engine response is not cached as a zero-sized node', async t => {
+  let calls = 0;
+  const host = node(t, await endpoint(t, (_req, res) => { calls++; res.end(JSON.stringify(calls === 1 ? { message: 'not disk usage' } : snapshot(8))); }));
+  await assert.rejects(readDockerDiskUsage(host.id), { statusCode: 502 });
+  assert.equal((await readDockerDiskUsage(host.id)).LayersSize, 8);
+});
+
+test('one caller cancellation does not abort another caller and empty Engine arrays remain valid', async t => {
+  let calls = 0, release, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const host = node(t, await endpoint(t, (_req, res) => { calls++; release = () => res.end(JSON.stringify({ LayersSize: 0, Images: null, Containers: null, Volumes: null, BuildCache: null })); started(); }));
+  const controller = new AbortController();
+  const first = readDockerDiskUsage(host.id, { signal: controller.signal });
+  const rejected = assert.rejects(first, { name: 'AbortError' });
+  await ready; const second = readDockerDiskUsage(host.id); controller.abort(); await rejected;
+  release(); assert.equal((await second).LayersSize, 0); assert.equal(calls, 1);
+});
+
+test('invalid wait budgets are rejected without making a request', async t => {
+  let calls = 0;
+  const host = node(t, await endpoint(t, (_req, res) => { calls++; res.end(JSON.stringify(snapshot(1))); }));
+  for (const timeoutMs of [0, -1, 60001, Infinity, '100']) assert.throws(() => readDockerDiskUsage(host.id, { timeoutMs }), { statusCode: 400 });
+  assert.equal(calls, 0);
+});
+
+test('maintenance preserves safe failure categories without upstream body disclosure', async t => {
+  const host = node(t, await endpoint(t, (_req, res) => { res.statusCode = 500; res.end('{"message":"upstream credential=do-not-expose"}'); }));
+  await assert.rejects(getDockerUsage(host.id), error => {
+    assert.equal(error.statusCode, 503); assert.equal(error.failures[0].code, 'engine_error');
+    assert.equal(error.failures[0].upstreamStatus, 500); assert.ok(!JSON.stringify(error).includes('do-not-expose')); return true;
+  });
+  assert.equal(diskUsageFailure({ code: 'DISK_SCAN_TIMEOUT' }).code, 'scan_timeout');
+  assert.equal(diskUsageFailure({ code: 'ECONNRESET' }).code, 'connection_error');
 });
