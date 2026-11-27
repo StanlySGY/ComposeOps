@@ -37,7 +37,7 @@
           <button :disabled="!project.managed || locked" @click="trigger('restart')"><RotateCw :size="15" />重启项目</button>
           <button :disabled="!project.editable || locked" @click="trigger('pull')"><Download :size="15" />拉取镜像</button>
           <button :disabled="!project.editable || locked" @click="trigger('source-deploy')"><GitBranch :size="15" />拉取源码并重建</button>
-          <button v-if="updateInfo?.hasUpdate" :disabled="!project.editable || locked" @click="$emit('upgrade')"><Sparkles :size="15" />平滑升级</button>
+          <button v-if="updateInfo?.hasUpdate" :disabled="!project.editable || locked" @click="$emit('upgrade')"><Sparkles :size="15" />升级镜像</button>
           <button :disabled="!project.managed || locked" @click="trigger('ps')"><ListTree :size="15" />查看详细状态</button>
           <button v-if="dbContainers.length" :disabled="!project.managed || locked" @click="$emit('db-dump')"><Database :size="15" />备份数据库</button>
           <button @click="webuiService = ''; webuiOpen = true"><Globe :size="15" />访问入口</button>

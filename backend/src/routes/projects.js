@@ -851,11 +851,17 @@ export default async function projectRoutes(fastify) {
   }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
     if (!project) return;
+    const controller = new AbortController();
+    const disconnect = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    if (!requireEditable(project, reply)) return;
+    reply.raw.once('close', disconnect);
+    if (reply.raw.destroyed) controller.abort();
     try {
-      return await getProjectUpdates(project, { force: request.query.force === '1' });
+      return await getProjectUpdates(project, { force: request.query.force === '1', signal: controller.signal });
     } catch (error) {
+      if (controller.signal.aborted) return;
       return reply.code(error.statusCode || 502).send({ error: 'updates_check_failed', message: error.message });
-    }
+    } finally { reply.raw.off('close', disconnect); }
   });
 
   fastify.post('/:id/upgrade', {

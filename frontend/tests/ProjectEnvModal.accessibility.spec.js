@@ -35,7 +35,6 @@ describe('环境变量编辑器可访问名称', () => {
       global: {
         stubs: {
           BaseModal: { template: '<div v-if="show" class="modal"><slot name="header-actions"/><slot/><slot name="footer"/></div>', props: ['show', 'title', 'sizeClass', 'bodyClass'] },
-          ChangePreviewModal: true,
           ConfirmDialog: true,
         },
       },
@@ -59,7 +58,6 @@ describe('环境变量编辑器可访问名称', () => {
       global: {
         stubs: {
           BaseModal: { template: '<div v-if="show" class="modal"><slot name="header-actions"/><slot/><slot name="footer"/></div>', props: ['show', 'title', 'sizeClass', 'bodyClass'] },
-          ChangePreviewModal: true,
           ConfirmDialog: true,
         },
       },

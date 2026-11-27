@@ -111,9 +111,9 @@ describe('跨页面表单可访问性契约', () => {
     expect(nodes.some(n => n.tag === 'select' && hasAttr(n, 'aria-label'))).toBe(true);
   });
 
-  it('升级预览生成期间通过独立 polite status 播报进度', () => {
+  it('重新检查镜像期间通过独立 polite status 播报进度', () => {
     for (const [file, label] of [
-      ['../src/components/services/ProjectUpgradeModal.vue', '正在生成升级变更预览'],
+      ['../src/components/services/ProjectUpgradeModal.vue', '正在重新检查镜像更新'],
     ]) {
       const nodes = templateNodes(file);
       expect(nodes.some(node => node.tag === 'p'

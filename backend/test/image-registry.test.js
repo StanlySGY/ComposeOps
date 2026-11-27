@@ -54,6 +54,60 @@ test('清单摘要错误和当前平台缺失不能误报已是最新', async ()
   const noPlatform = createRegistryClient(async () => response({ manifests: [] }), AbortSignal.timeout(1000));
   await assert.rejects(noPlatform.describe({ registry: 'ghcr.io', image: 'a/b', tag: 'latest' }, { os: 'linux', architecture: 'amd64' }), /未提供当前平台/);
 });
+
+test('仓库流超过上限立即取消，无 Content-Length 也不能无界读取', async () => {
+  for (const token of [false, true]) {
+    let cancelled = false, chunks = 0;
+    const stream = new ReadableStream({
+      pull(controller) { chunks++; controller.enqueue(new Uint8Array(64 * 1024)); },
+      cancel() { cancelled = true; },
+    });
+    const client = createRegistryClient(async url => {
+      if (token && !String(url).includes('/token')) return new Response('', { status: 401, headers: { 'www-authenticate': 'Bearer realm="https://registry.example.com/token"' } });
+      return new Response(stream);
+    }, AbortSignal.timeout(1000));
+    await assert.rejects(client.document({ registry: 'registry.example.com', image: 'app' }, 'latest'), /超过读取限制/);
+    assert.equal(cancelled, true);
+    assert.ok(chunks <= (token ? 4 : 130), 'reading must stop at the byte limit plus one queued chunk');
+  }
+});
+
+test('超大 Content-Length 不消费正文，虚假小长度仍按实际字节限制', async () => {
+  for (const declared of [String(9 * 1024 * 1024), '1']) {
+    let reads = 0, cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) { reads++; controller.enqueue(new Uint8Array(1024 * 1024)); },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const client = createRegistryClient(async () => new Response(stream, { headers: { 'content-length': declared } }), AbortSignal.timeout(1000));
+    await assert.rejects(client.document({ registry: 'registry.example.com', image: 'app' }, 'latest'), /超过读取限制/);
+    assert.equal(cancelled, true);
+    assert.equal(reads, declared === '1' ? 9 : 0);
+  }
+});
+
+test('仓库正文停滞时取消读取，即使流取消自身未完成也及时退出', async () => {
+  const controller = new AbortController(); let cancelled = false;
+  const stream = new ReadableStream({ cancel() { cancelled = true; return new Promise(() => {}); } });
+  const client = createRegistryClient(async () => new Response(stream), controller.signal);
+  const result = client.document({ registry: 'registry.example.com', image: 'app' }, 'latest');
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(result, { name: 'AbortError' });
+  assert.equal(cancelled, true);
+});
+
+test('非法授权 JSON 的错误不能回显令牌或正文片段', async () => {
+  const secret = 'private-registry-response-secret';
+  const client = createRegistryClient(async url => String(url).includes('/token')
+    ? new Response(secret)
+    : new Response('', { status: 401, headers: { 'www-authenticate': 'Bearer realm="https://registry.example.com/token"' } }), AbortSignal.timeout(1000));
+  await assert.rejects(client.document({ registry: 'registry.example.com', image: 'app' }, 'latest'), error => {
+    assert.match(error.message, /不是有效的 JSON/);
+    assert.equal(error.message.includes(secret), false);
+    return true;
+  });
+});
 test('本地构建仍要求明确拉取策略，不能因只读检测改变升级边界', () => {
   assert.equal(classifyImageService({ service: 'web', image: 'web:latest', build: true }).status, 'needs_policy');
   assert.equal(classifyImageService({ service: 'web', image: 'web:latest', build: true, pullPolicy: 'always' }).status, 'remote');
@@ -119,14 +173,14 @@ test('Compose 变量展开后按容器实际镜像 ID 比较，不能误用已�
   docker.getImage = (id) => { calls.push(id); return { inspect: async () => ({ Id: imageId, Os: 'linux', Architecture: 'amd64' }) }; };
   globalThis.fetch = async () => response({ schemaVersion: 2, config: { digest: imageId } });
   try {
-    const result = await getProjectUpdates({ id: 'interpolated-proof', projectName: 'app', workingDir: root, mounted: true, composeFiles: [file] }, { force: true });
+    const result = await getProjectUpdates({ id: 'interpolated-proof', projectName: 'app', workingDir: root, managed: true, editable: true, mounted: true, composeFiles: [file] }, { force: true });
     assert.equal(result.images[0].image, 'registry.example.com/app/web:latest');
     assert.equal(result.images[0].status, 'current');
     assert.deepEqual(calls, [imageId]);
     const remoteId = 'sha256:' + 'b'.repeat(64);
     docker.getImage = id => { calls.push(id); return { inspect: async () => ({ Id: id === imageId ? imageId : remoteId, Os: 'linux', Architecture: 'amd64' }) }; };
     globalThis.fetch = async () => response({ schemaVersion: 2, config: { digest: remoteId } });
-    const updated = await getProjectUpdates({ id: 'interpolated-proof', projectName: 'app', workingDir: root, mounted: true, composeFiles: [file] }, { force: true });
+    const updated = await getProjectUpdates({ id: 'interpolated-proof', projectName: 'app', workingDir: root, managed: true, editable: true, mounted: true, composeFiles: [file] }, { force: true });
     assert.equal(updated.images[0].status, 'updated');
     assert.equal(updated.images[0].hasUpdate, true);
     assert.deepEqual(calls, [imageId, imageId]);

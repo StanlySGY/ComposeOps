@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { defineComponent, KeepAlive, ref } from 'vue';
 import ImageUpdatePanel from '../src/components/services/ImageUpdatePanel.vue';
 const mocks = vi.hoisted(() => ({ project: vi.fn(), all: vi.fn(), push: vi.fn() }));
 vi.mock('../src/api/client.js', () => ({ api: { getProjectUpdates: mocks.project, checkAllUpdates: mocks.all } }));
@@ -29,6 +30,58 @@ describe('统一镜像更新入口', () => {
     await panel.setProps({ project: { id: 'p2', managed: true } }); await flushPromises();
     finishOld(updates); await flushPromises();
     expect(panel.text()).not.toContain('可升级');
+    panel.unmount();
+  });
+  it('失败或部分确认结果保留详情入口，不用空白掩盖检查失败', async () => {
+    mocks.project.mockResolvedValue({ hasUpdate: false, images: [{ status: 'failed', error: 'timeout' }] });
+    const panel = mount(ImageUpdatePanel, { props: { project: { id: 'p1', managed: true }, compact: true } });
+    await flushPromises();
+    expect(panel.get('button').text()).toContain('镜像检查待确认');
+    await panel.get('button').trigger('click');
+    expect(panel.emitted('open')).toHaveLength(1);
+    panel.unmount();
+  });
+  it('取消纳管后不再检查，旧请求不能恢复升级入口', async () => {
+    let finish;
+    mocks.project.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const panel = mount(ImageUpdatePanel, { props: { project: { id: 'p1', managed: true }, compact: true } });
+    const signal = mocks.project.mock.calls[0][2].signal;
+    await panel.setProps({ project: { id: 'p1', managed: false } });
+    expect(signal.aborted).toBe(true);
+    finish(updates); await flushPromises();
+    expect(panel.find('button').exists()).toBe(false);
+    expect(mocks.project).toHaveBeenCalledTimes(1);
+    panel.unmount();
+  });
+  it('切节点取消全局检查并忽略迟到结果', async () => {
+    let finish;
+    mocks.all.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const panel = mount(ImageUpdatePanel);
+    await panel.get('button').trigger('click');
+    const signal = mocks.all.mock.calls[0][0].signal;
+    window.dispatchEvent(new Event('composeops:host-changed'));
+    expect(signal.aborted).toBe(true);
+    finish({ projects: [{ ...updates, projectId: 'old', projectName: '旧节点项目' }] }); await flushPromises();
+    expect(panel.text()).not.toContain('旧节点项目');
+    panel.unmount();
+  });
+  it('缓存失活取消读取，返回恢复未完成检查，不重复已完成请求', async () => {
+    const show = ref(true);
+    const project = { id: 'p1', managed: true };
+    const Host = defineComponent({ components: { KeepAlive, ImageUpdatePanel }, setup: () => ({ show, project }), template: '<KeepAlive><ImageUpdatePanel v-if="show" :project="project" compact/></KeepAlive>' });
+    let finish;
+    mocks.project.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(updates);
+    const panel = mount(Host);
+    const signal = mocks.project.mock.calls[0][2].signal;
+    show.value = false; await flushPromises();
+    expect(signal.aborted).toBe(true);
+    finish(updates); await flushPromises();
+    show.value = true; await flushPromises();
+    expect(mocks.project).toHaveBeenCalledTimes(2);
+    expect(panel.text()).toContain('可升级 2 项');
+    show.value = false; await flushPromises();
+    show.value = true; await flushPromises();
+    expect(mocks.project).toHaveBeenCalledTimes(2);
     panel.unmount();
   });
 });

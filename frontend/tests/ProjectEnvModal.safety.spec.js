@@ -11,7 +11,7 @@ const button = label => wrapper.findAll('button').find(b => b.text() === label);
 async function start() {
   wrapper = mount(ProjectEnvModal, { props: { project: { id: 'p', projectName: '项目' } }, global: { stubs: {
     BaseModal: { props: ['show'], template: '<div v-if="show"><slot name="header-actions"/><slot/></div>' },
-    ChangePreviewModal: true, ConfirmDialog: true,
+    ConfirmDialog: true,
   } } });
   await flushPromises();
 }

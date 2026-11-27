@@ -60,6 +60,49 @@ function registryBase(registry) {
 }
 async function discard(response) { await response.body?.cancel().catch(() => {}); }
 
+async function readRegistryBody(response, signal, maxBytes, label) {
+  const tooLarge = () => new Error(`${label}超过读取限制`);
+  if (signal.aborted || Number(response.headers.get('content-length')) > maxBytes) {
+    void discard(response);
+    signal.throwIfAborted();
+    throw tooLarge();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks = [];
+  let bytes = 0, abort;
+  const cancelled = new Promise((_, reject) => {
+    abort = () => { reject(signal.reason); void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const { done, value } = await Promise.race([reader.read(), cancelled]);
+      signal.throwIfAborted();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw tooLarge();
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, bytes);
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', abort);
+    reader.releaseLock();
+  }
+}
+
+function parseRegistryJson(raw, label) {
+  try {
+    const data = JSON.parse(raw.toString('utf8'));
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error();
+    return data;
+  } catch { throw new Error(`${label}不是有效的 JSON 对象`); }
+}
+
 /** Standard Registry v2 anonymous Bearer handshake, including GHCR and mirrors. */
 export function createRegistryClient(request, signal) {
   const tokens = new Map();
@@ -71,8 +114,9 @@ export function createRegistryClient(request, signal) {
     if (tokens.has(key)) headers.Authorization = 'Bearer ' + tokens.get(key);
     let response = await request(endpoint, { headers, signal, redirect: 'error' });
     if (response.status === 401) {
-      const challenge = parseBearerChallenge(response.headers.get('www-authenticate') || '');
-      await discard(response);
+      let challenge;
+      try { challenge = parseBearerChallenge(response.headers.get('www-authenticate') || ''); }
+      finally { await discard(response); }
       if (!challenge) throw statusError(401);
       const tokenUrl = new URL(challenge.realm);
       if (challenge.service) tokenUrl.searchParams.set('service', challenge.service);
@@ -80,20 +124,19 @@ export function createRegistryClient(request, signal) {
       tokenUrl.searchParams.set('scope', `repository:${parsed.image}:pull`);
       const auth = await request(tokenUrl, { signal, redirect: 'error' });
       if (!auth.ok) { await discard(auth); throw statusError(auth.status); }
-      const body = await auth.json();
+      const body = parseRegistryJson(await readRegistryBody(auth, signal, 128 * 1024, '仓库授权响应'), '仓库授权响应');
       const token = body.token || body.access_token;
       if (typeof token !== 'string' || !token || token.length > 65536) throw new Error('仓库授权未返回有效令牌');
       tokens.set(key, token);
       response = await request(endpoint, { headers: { ...headers, Authorization: 'Bearer ' + token }, signal, redirect: 'error' });
     }
     if (!response.ok) { await discard(response); throw statusError(response.status); }
-    const raw = Buffer.from(await response.arrayBuffer());
-    if (raw.length > 8 * 1024 * 1024) throw new Error('镜像清单超过读取限制');
+    const raw = await readRegistryBody(response, signal, 8 * 1024 * 1024, '镜像清单');
     const digest = 'sha256:' + createHash('sha256').update(raw).digest('hex');
     const declared = response.headers.get('docker-content-digest');
     if (declared && (!DIGEST.test(declared) || declared.toLowerCase() !== digest)) throw new Error('仓库镜像清单摘要校验失败');
     if (reference.startsWith('sha256:') && reference !== digest) throw new Error('平台镜像清单与声明摘要不一致');
-    return { digest, data: JSON.parse(raw.toString('utf8')) };
+    return { digest, data: parseRegistryJson(raw, '镜像清单') };
   }
   return {
     document,

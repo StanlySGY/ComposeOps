@@ -35,13 +35,18 @@ const alertEventBody = {
 export default async function opsRoutes(fastify, { blueprintDeployer = deployBlueprint } = {}) {
   // ---- 镜像更新雷达:全局检测 ----
   fastify.post('/updates/check-all', async (request, reply) => {
+    const controller = new AbortController();
+    const disconnect = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    reply.raw.once('close', disconnect);
+    if (reply.raw.destroyed) controller.abort();
     try {
-      const result = await checkAllUpdates();
+      const result = await checkAllUpdates({ signal: controller.signal });
       addOperation({ action: 'images.radar', status: 'success', detail: `${result.projects.length} 个项目已检查` });
       return result;
     } catch (error) {
+      if (controller.signal.aborted) return;
       return reply.code(502).send({ error: 'updates_radar_failed', message: error.message });
-    }
+    } finally { reply.raw.off('close', disconnect); }
   });
 
   // ---- Docker 磁盘空间可视化与安全清理 ----

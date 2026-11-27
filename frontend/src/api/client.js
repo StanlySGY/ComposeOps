@@ -293,7 +293,7 @@ export const api = {
     }),
   streamUpgrade: (projectId, services, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/upgrade`, { services }, signal),
   streamRollback: (projectId, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/rollback`, {}, signal),
-  checkAllUpdates: () => request('/ops/updates/check-all', { method: 'POST' }),
+  checkAllUpdates: (options = {}) => request('/ops/updates/check-all', { method: 'POST', readOnly: true, signal: options.signal }),
   // docker storage
   getStorageDf: async () => normalizeStorageDf(await request('/ops/storage/df')),
   pruneStorage: (mode, confirm) => request('/ops/storage/prune', { method: 'POST', body: JSON.stringify({ mode, confirm }) }),

@@ -99,10 +99,24 @@ export function extractImageRefs(composeContent = '') {
     .map((item) => item.parsed.original))];
 }
 
-async function localImageInfo(docker, image) {
+// Bound waiting even if a Docker transport ignores its abort signal. The work is
+// read-only; a late result must never resume the check or replace cached data.
+async function waitForCheck(task, signal) {
+  signal.throwIfAborted();
+  let abort;
+  const cancelled = new Promise((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try { return await Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return task(); }), cancelled]); }
+  finally { signal.removeEventListener('abort', abort); }
+}
+
+async function localImageInfo(docker, image, signal) {
   try {
-    return await docker.getImage(image).inspect();
+    return await waitForCheck(() => docker.getImage(image).inspect({ abortSignal: signal }), signal);
   } catch {
+    signal.throwIfAborted();
     return null;
   }
 }
@@ -180,10 +194,18 @@ async function resolvedImageServices(project, containers, signal) {
     });
   } else {
     output = await withReadOnlyRunner(project, async (container) => {
-      const result = await execInRunner(container,
-        ['docker', 'compose', ...composeProjectOptions(project), ...args], { timeoutMs: 10_000 });
-      if (result.code !== 0) throw new Error('Compose 镜像变量展开失败');
-      return result.stdout;
+      signal.throwIfAborted();
+      let cancel;
+      try {
+        const result = await execInRunner(container,
+          ['docker', 'compose', ...composeProjectOptions(project), ...args], { timeoutMs: 10_000, onExec: handle => {
+            cancel = () => handle.kill();
+            signal.addEventListener('abort', cancel, { once: true });
+            if (signal.aborted) cancel();
+          } });
+        if (result.code !== 0) throw new Error('Compose 镜像变量展开失败');
+        return result.stdout;
+      } finally { if (cancel) signal.removeEventListener('abort', cancel); }
     });
   }
   signal.throwIfAborted();
@@ -211,18 +233,20 @@ async function readProjectComposeContents(project) {
 }
 
 /** 单项目镜像更新检测(带 1h 缓存)。 */
-export async function getProjectUpdates(project, { force = false, signal } = {}) {
-  signal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]);
+export async function getProjectUpdates(project, { force = false, signal: callerSignal, timeoutMs = 30_000 } = {}) {
+  if (!project?.managed || !project.editable) throw Object.assign(new Error('镜像检查需要已纳管并启用 Compose 目录能力的项目'), { statusCode: 403 });
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) throw new TypeError('镜像检查期限必须为 1–30000 毫秒');
+  const signal = AbortSignal.any([...(callerSignal ? [callerSignal] : []), AbortSignal.timeout(timeoutMs)]);
   signal?.throwIfAborted();
   const docker = getProjectDocker(project);
-  const containers = (await docker.listContainers({ all: true })).filter((c) =>
+  const containers = (await waitForCheck(() => docker.listContainers({ all: true, abortSignal: signal }), signal)).filter((c) =>
     !c.Labels?.['composeops.helper'] && c.Labels?.['com.docker.compose.project'] === project.projectName &&
     c.Labels?.['com.docker.compose.project.working_dir'] === project.workingDir);
   let services;
-  try { services = await resolvedImageServices(project, containers, signal); }
+  try { services = await waitForCheck(() => resolvedImageServices(project, containers, signal), signal); }
   catch {
     signal.throwIfAborted();
-    services = extractImageServices(await readProjectComposeContents(project));
+    services = extractImageServices(await waitForCheck(() => readProjectComposeContents(project), signal));
   }
   signal?.throwIfAborted();
   const { proxyUrl } = imageCheckSettings();
@@ -231,15 +255,14 @@ export async function getProjectUpdates(project, { force = false, signal } = {})
   })).digest('hex');
   const cached = cache.get(project.id);
   if (!force && cached?.fingerprint === fingerprint && Date.now() - cached.ts < cached.ttl) return cached.data;
-  const images = [];
   const remoteDigests = new Map();
-  for (const service of services) {
-    signal?.throwIfAborted();
+  const localImages = new Map();
+  async function checkService(service) {
+    callerSignal?.throwIfAborted();
     const item = { service: service.service, image: service.image || '', status: service.status, hasUpdate: false, localDigest: null, remoteDigest: null, reachable: false, canUpgrade: service.canUpgrade !== false, reason: service.reason || '' };
     if (service.status !== 'remote') {
       item.reachable = service.status === 'local_build' || service.status === 'pinned';
-      images.push(item);
-      continue;
+      return item;
     }
     const { parsed } = service;
     item.registry = parsed.registry;
@@ -249,55 +272,76 @@ export async function getProjectUpdates(project, { force = false, signal } = {})
       if (!members.length) {
         item.status = 'not_deployed';
         item.reason = '服务尚未创建容器，没有正在使用的镜像可比较';
-        images.push(item);
-        continue;
+        return item;
       }
+      signal.throwIfAborted();
       const results = [];
       for (const container of members) {
         // Inspect by immutable ID: the tag may already point to a newer, unused image.
-        const local = await localImageInfo(docker, container.ImageID || (await docker.getContainer(container.Id).inspect()).Image);
+        signal.throwIfAborted();
+        const imageId = container.ImageID || (await waitForCheck(() => docker.getContainer(container.Id).inspect({ abortSignal: signal }), signal)).Image;
+        if (!localImages.has(imageId)) localImages.set(imageId, localImageInfo(docker, imageId, signal));
+        const local = await localImages.get(imageId);
         const platform = { os: local?.Os || 'linux', architecture: local?.Architecture || 'amd64', variant: local?.Variant || '' };
         const key = parsed.original + JSON.stringify(platform);
-        if (!remoteDigests.has(key)) remoteDigests.set(key, fetchRemoteDescription(parsed, { signal, proxyUrl, platform }));
+        if (!remoteDigests.has(key)) remoteDigests.set(key, waitForCheck(() => fetchRemoteDescription(parsed, { signal, proxyUrl, platform }), signal));
         const remote = await remoteDigests.get(key);
         results.push({ containerId: container.Id, ...compareRunningImage(local, remote, parsed) });
       }
       const representative = results.find((r) => r.hasUpdate) || results.find((r) => r.status === 'unknown') || results[0];
       Object.assign(item, representative, { containers: results, reachable: true, reason: [service.reason, representative.reason].filter(Boolean).join('；') });
     } catch (error) {
-      signal?.throwIfAborted();
+      // A caller cancellation aborts the whole request. Our own deadline keeps
+      // completed results and marks all unfinished services explicitly failed.
+      callerSignal?.throwIfAborted();
       item.status = service.build && [401, 403, 404].includes(error.registryStatus) ? 'local_build' : 'failed';
-      item.error = item.status === 'local_build' ? '' : registryError(error);
+      item.error = item.status === 'local_build' ? '' : signal.aborted
+        ? '本次检查已到期限，该服务未完成比较；请稍后重新检查'
+        : registryError(error);
       if (item.status === 'local_build') item.reason = '本地构建镜像的远端标签不可匿名读取；更新需按项目源码构建';
       item.reachable = false;
     }
-    images.push(item);
+    return item;
   }
+  const images = new Array(services.length);
+  let next = 0;
+  async function worker() {
+    while (next < services.length) {
+      const index = next++;
+      images[index] = await checkService(services[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, services.length) }, worker));
   const data = {
     projectId: project.id,
     projectName: project.projectName,
     checkedAt: Date.now(),
     images,
     hasUpdate: images.some((item) => item.hasUpdate),
+    incomplete: images.some((item) => item.status === 'failed'),
   };
-  signal?.throwIfAborted();
+  callerSignal?.throwIfAborted();
   if (imageCheckSettings().proxyUrl === proxyUrl)
     cache.set(project.id, { ts: Date.now(), data, fingerprint, ttl: images.some((i) => i.status === 'failed') ? 30_000 : CACHE_TTL_MS });
   return data;
 }
 
 /** 全局检测所有可编辑项目(并发 3)。 */
-export async function checkAllUpdates() {
+export async function checkAllUpdates({ signal } = {}) {
+  signal?.throwIfAborted();
   const { scanAllProjects: scanProjects } = await import('./scanner.js');
   const projects = (await scanProjects()).filter((project) => project.editable);
+  signal?.throwIfAborted();
   const results = [];
   const queue = [...projects];
   async function worker() {
     while (queue.length) {
+      signal?.throwIfAborted();
       const project = queue.shift();
       try {
-        results.push(await getProjectUpdates(project, { force: true }));
+        results.push(await getProjectUpdates(project, { force: true, signal }));
       } catch (error) {
+        signal?.throwIfAborted();
         // 全局巡检不能把读取 Compose / YAML 解析失败的项目静默当成“无更新”。
         results.push({
           projectId: project.id,
@@ -311,6 +355,7 @@ export async function checkAllUpdates() {
     }
   }
   await Promise.all(Array.from({ length: Math.min(3, projects.length) }, () => worker()));
+  signal?.throwIfAborted();
   setSetting('updates.last_radar_check', String(Date.now()));
   return { projects: results };
 }
