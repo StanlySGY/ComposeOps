@@ -47,6 +47,7 @@ test('failed scans retry; invalidation discards completed data', async t => {
     else res.end(JSON.stringify(snapshot(calls)));
   }));
   await assert.rejects(readDockerDiskUsage(host.id));
+  assert.equal(calls, 1, 'unrelated Engine errors must not be automatically retried');
   assert.equal((await readDockerDiskUsage(host.id)).LayersSize, 2);
   invalidateDiskUsage(host.id);
   assert.equal((await readDockerDiskUsage(host.id)).LayersSize, 3);
@@ -133,4 +134,77 @@ test('maintenance preserves safe failure categories without upstream body disclo
   });
   assert.equal(diskUsageFailure({ code: 'DISK_SCAN_TIMEOUT' }).code, 'scan_timeout');
   assert.equal(diskUsageFailure({ code: 'ECONNRESET' }).code, 'connection_error');
+});
+
+test('client renewal after 30 seconds must not cancel an unchanged remote scan', async t => {
+  let calls = 0, started; const replies = [];
+  const ready = new Promise(resolve => { started = resolve; });
+  const host = node(t, await endpoint(t, (_req, res) => { calls++; replies.push(res); started(); }));
+  let now = Date.now(); t.mock.method(Date, 'now', () => now);
+  const first = readDockerDiskUsage(host.id); first.catch(() => {}); await ready;
+  now += 31000;
+  const second = readDockerDiskUsage(host.id); second.catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  for (const reply of replies) reply.end(JSON.stringify(snapshot(12)));
+  const result = await Promise.allSettled([first, second]);
+  assert.equal(calls, 1); assert.ok(result.every(item => item.status === 'fulfilled' && item.value.LayersSize === 12));
+});
+
+const snapshotFailure = 'failed to retrieve container list: rw layer snapshot not found for container ' + 'a'.repeat(64);
+
+test('one missing container snapshot gets one shared read retry', async t => {
+  let calls = 0;
+  const host = node(t, await endpoint(t, (_req, res) => {
+    calls++;
+    if (calls === 1) { res.statusCode = 500; res.end(JSON.stringify({ message: snapshotFailure })); }
+    else res.end(JSON.stringify(snapshot(42)));
+  }));
+  const results = await Promise.all([readDockerDiskUsage(host.id), readDockerDiskUsage(host.id)]);
+  assert.ok(results.every(data => data.LayersSize === 42));
+  assert.equal(calls, 2);
+  assert.equal((await readDockerDiskUsage(host.id)).LayersSize, 42);
+  assert.equal(calls, 2);
+});
+
+test('persistent missing snapshots stop after two reads and preserve a safe failure category', async t => {
+  let calls = 0;
+  const host = node(t, await endpoint(t, (_req, res) => {
+    calls++; res.statusCode = 500; res.end(JSON.stringify({ message: snapshotFailure }));
+  }));
+  await assert.rejects(getDockerUsage(host.id), error => {
+    assert.equal(error.statusCode, 503);
+    assert.deepEqual(error.failures[0].code, 'engine_snapshot_unavailable');
+    assert.ok(!JSON.stringify(error).includes('a'.repeat(64)));
+    return true;
+  });
+  assert.equal(calls, 2);
+  await assert.rejects(readDockerDiskUsage(host.id));
+  assert.equal(calls, 4, 'persistent failures are not cached as successful data');
+});
+
+test('last caller timeout cancels the retry delay without sending a second request', async t => {
+  let calls = 0;
+  const host = node(t, await endpoint(t, (_req, res) => {
+    calls++; res.statusCode = 500; res.end(JSON.stringify({ message: snapshotFailure }));
+  }));
+  await assert.rejects(readDockerDiskUsage(host.id, { timeoutMs: 100 }), { code: 'DISK_SCAN_TIMEOUT' });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(calls, 1);
+});
+
+test('node revision change cancels the old snapshot retry and reads only the new node', async t => {
+  let oldCalls = 0, newCalls = 0, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const host = node(t, await endpoint(t, (_req, res) => {
+    oldCalls++; res.statusCode = 500; res.end(JSON.stringify({ message: snapshotFailure })); started();
+  }));
+  const pending = readDockerDiskUsage(host.id);
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  await ready; await new Promise(resolve => setTimeout(resolve, 30));
+  const port = await endpoint(t, (_req, res) => { newCalls++; res.end(JSON.stringify(snapshot(99))); });
+  upsertHost({ ...host, port });
+  await rejected;
+  assert.equal((await readDockerDiskUsage(host.id)).LayersSize, 99);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(oldCalls, 1); assert.equal(newCalls, 1);
 });
