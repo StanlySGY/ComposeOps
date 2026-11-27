@@ -46,11 +46,12 @@ export async function precompressAssets(dir) {
   const targets = collectCompressibleFiles(dir);
   if (!targets.length) return null;
 
-  const brotliOptions = {
+  // Node reads Brotli settings from `params`; numeric keys on the options
+  // object are ignored. MODE_TEXT is a value, not a parameter identifier.
+  const brotliOptions = { params: {
     [zlib.constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY,
-    [zlib.constants.BROTLI_PARAM_LARGE_WINDOW]: 1,
-    [zlib.constants.BROTLI_MODE_TEXT]: 1,
-  };
+    [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
+  } };
   const gzipOptions = { level: 9 };
   const totals = { files: targets.length, raw: 0, br: 0, gz: 0 };
   const queue = targets.map((target) => async () => {

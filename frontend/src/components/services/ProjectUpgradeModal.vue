@@ -116,7 +116,7 @@ function hostChanged() { cancel(); data.value = null; selectedServices.value = [
 function formatTime(ts) { return ts ? new Date(ts).toLocaleString() : ''; }
 function shortDigest(digest) { return digest ? `${String(digest).slice(7, 17)}…${String(digest).slice(-8)}` : '未知'; }
 function imageStatusLabel(status) { return ({ current: '最新', failed: '检查失败', not_deployed: '尚未部署', not_downloaded: '本地未下载', local_build: '本地构建', local_only: '仅用本地镜像', needs_policy: '需明确策略', pinned: '固定 digest', unresolved: '变量未解析', unknown: '无法比较', unsupported: '不支持检查' })[status] || status; }
-watch(() => [props.project.id, props.project.hostId, props.project.managed, props.project.editable, props.open], () => { cancel(); data.value = null; error.value = ''; selectedServices.value = []; upgrading.value = false; void load(); }, { immediate: true });
+watch([() => props.project.id, () => props.project.hostId, () => props.project.managed, () => props.project.editable, () => props.open], () => { cancel(); data.value = null; error.value = ''; selectedServices.value = []; upgrading.value = false; void load(); }, { immediate: true });
 onMounted(() => window.addEventListener('composeops:host-changed', hostChanged));
 onDeactivated(() => { active.value = false; cancel(); });
 onActivated(() => { if (active.value) return; active.value = true; if (!data.value && !error.value) void load(); });

@@ -32,6 +32,21 @@ describe('统一镜像更新入口', () => {
     expect(panel.text()).not.toContain('可升级');
     panel.unmount();
   });
+  it('轮询更新相同项目对象不能取消慢检查或重复请求', async () => {
+    let finish;
+    mocks.project.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const project = { id: 'p1', hostId: 'local', managed: true, editable: true };
+    const panel = mount(ImageUpdatePanel, { props: { project, compact: true } });
+    const signal = mocks.project.mock.calls[0][2].signal;
+    for (let version = 0; version < 3; version++) await panel.setProps({ project: { ...project, containers: [{ version }] } });
+    expect(signal.aborted).toBe(false);
+    expect(mocks.project).toHaveBeenCalledTimes(1);
+    finish(updates); await flushPromises();
+    await panel.setProps({ project: { ...project, containers: [] } });
+    expect(mocks.project).toHaveBeenCalledTimes(1);
+    expect(panel.text()).toContain('可升级 2 项');
+    panel.unmount();
+  });
   it('失败或部分确认结果保留详情入口，不用空白掩盖检查失败', async () => {
     mocks.project.mockResolvedValue({ hasUpdate: false, images: [{ status: 'failed', error: 'timeout' }] });
     const panel = mount(ImageUpdatePanel, { props: { project: { id: 'p1', managed: true }, compact: true } });

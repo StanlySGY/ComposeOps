@@ -44,7 +44,7 @@ function cancel() { requestId++; controller?.abort(); controller = null; busy.va
 function reset() { cancel(); error.value = ''; result.value = null; projects.value = []; checked.value = false; emit('result', null); }
 function hostChanged() { reset(); }
 onMounted(() => { window.addEventListener('composeops:host-changed', hostChanged); if (props.project) void check(false); });
-watch(() => [props.project?.id, props.project?.hostId, props.project?.managed, props.project?.editable], () => { reset(); if (props.project) void check(false); });
+watch([() => props.project?.id, () => props.project?.hostId, () => props.project?.managed, () => props.project?.editable], () => { reset(); if (props.project) void check(false); });
 onDeactivated(() => { active = false; cancel(); });
 onActivated(() => { if (active) return; active = true; if (props.project && !result.value) void check(false); });
 onBeforeUnmount(() => { active = false; cancel(); window.removeEventListener('composeops:host-changed', hostChanged); });

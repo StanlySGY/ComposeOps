@@ -139,6 +139,16 @@ describe('镜像更新弹窗按 Compose 服务选择升级', () => {
     expect(latest.aborted).toBe(true);
   });
 
+  it('项目状态轮询不能清空选择或撤销正在查看的升级确认', async () => {
+    wrapper = mountModal(); await flushPromises();
+    await wrapper.get('input[aria-label="选择升级服务 web"]').setValue(false);
+    await wrapper.get('button.btn-primary').trigger('click');
+    await wrapper.setProps({ project: { ...project, containers: [{ state: 'running' }] } }); await flushPromises();
+    expect(mocks.getProjectUpdates).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('input[aria-label="选择升级服务 web"]').element.checked).toBe(false);
+    expect(wrapper.get('[data-testid="upgrade-confirm"]').text()).toContain('中的这些服务：api');
+  });
+
   it('缓存失活撤销升级确认，返回不会恢复旧确认或重复已完成的检查', async () => {
     const show = ref(true);
     const Host = defineComponent({ components: { KeepAlive, ProjectUpgradeModal }, setup: () => ({ show, project }), template: '<KeepAlive><ProjectUpgradeModal v-if="show" :project="project"/></KeepAlive>' });
