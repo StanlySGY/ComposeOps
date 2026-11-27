@@ -55,6 +55,23 @@ afterEach(() => {
 });
 
 describe('自定义 Compose 项目创建', () => {
+  it('实时指出禁用原因，只有用户明确选择才转换大写名称', async () => {
+    await mountModal();
+    await field('项目名称').setValue('My-Web');
+    await field('Compose YAML').setValue(compose);
+    expect(field('项目名称').attributes('aria-invalid')).toBe('true');
+    expect(wrapper.get('footer').text()).toContain('小写');
+    expect(field('项目名称').element.value).toBe('My-Web');
+    await button('改为 my-web').trigger('click');
+    expect(field('项目名称').attributes('aria-invalid')).toBe('false');
+    expect(button('创建并部署').element.disabled).toBe(false);
+    await field('Compose YAML').setValue('');
+    await field('Compose YAML').trigger('blur');
+    expect(field('Compose YAML').attributes('aria-invalid')).toBe('true');
+    expect(wrapper.get('footer').text()).toContain('请填写 Compose YAML');
+    expect(mocks.api.streamCustomComposeProjectDeploy).not.toHaveBeenCalled();
+  });
+
   it('加载管理员允许的根目录并显示最终项目路径', async () => {
     await mountModal();
     expect(mocks.api.getComposeProjectCreateOptions).toHaveBeenCalledTimes(1);

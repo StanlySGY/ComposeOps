@@ -169,3 +169,50 @@ test('项目操作完成后立即读取真实容器状态', async t => {
   assert.equal(await prepared.run(), 0);
   assert.equal((await scanProjects())[0].status, 'running');
 });
+
+test('运行意图即时读取，失败证据保留且其它偏好更新不覆盖意图', async t => {
+  t.mock.method(local, 'listContainers', async () => [{ ...row('intent'), State: 'exited', Status: 'Exited (137) 1 hour ago' }]);
+  t.mock.method(local, 'getContainer', () => ({ inspect: async () => ({ State: { ExitCode: 137, OOMKilled: true } }) }));
+  const [project] = await scanProjects();
+  assert.equal(project.operationalIntent, 'unknown');
+  assert.equal(project.containers[0].oomKilled, true);
+  assert.equal(project.containers[0].exitCode, 137);
+  setProjectPreference(project.id, { operationalIntent: 'maintenance' });
+  setProjectPreference(project.id, { favorite: true });
+  assert.equal((await scanProjects())[0].operationalIntent, 'maintenance');
+  assert.throws(() => setProjectPreference(project.id, { operationalIntent: 'invalid' }));
+});
+
+test('整体启停成功才更新运行意图，维护标记由用户明确解除', async t => {
+  let state = 'running'; let fail = false;
+  t.mock.method(local, 'listContainers', async () => [{ ...row('intent-action'), State: state }]);
+  t.mock.method(local, 'getContainer', () => ({
+    inspect: async () => ({ State: { Status: state } }),
+    stop: async () => { if (fail) throw new Error('stop failed'); state = 'exited'; },
+    start: async () => { state = 'running'; },
+  }));
+  const [project] = await scanProjects();
+  const target = { ...project, managed: true, mountEnabled: false };
+  assert.equal(await (await prepareProjectAction(target, 'stop')).run(), 0);
+  assert.equal((await scanProjects())[0].operationalIntent, 'stopped');
+  assert.equal(await (await prepareProjectAction(target, 'up')).run(), 0);
+  assert.equal((await scanProjects())[0].operationalIntent, 'running');
+  fail = true;
+  const failed = await (await prepareProjectAction(target, 'stop')).run();
+  assert.notEqual(failed, 0);
+  assert.equal((await scanProjects())[0].operationalIntent, 'running');
+  fail = false;
+  setProjectPreference(project.id, { operationalIntent: 'maintenance' });
+  await (await prepareProjectAction(target, 'stop')).run();
+  assert.equal((await scanProjects())[0].operationalIntent, 'maintenance');
+});
+
+test('容器详情读取失败仍保留列表中的非零退出码，并给请求设置取消期限', async t => {
+  t.mock.method(local, 'listContainers', async () => [{ ...row('inspect-failure'), State: 'exited', Status: 'Exited (42) 1 hour ago' }]);
+  t.mock.method(local, 'getContainer', () => ({ inspect: async options => {
+    assert.ok(options.abortSignal instanceof AbortSignal);
+    throw new Error('unavailable');
+  } }));
+  const [project] = await scanProjects();
+  assert.equal(project.containers[0].exitCode, 42);
+});

@@ -159,7 +159,7 @@ export async function createCustomComposeProject(input = {}, options = {}) {
         assertCurrent();
         await writeArchiveFile(container, workingDir, COMPOSE_FILE, input.composeContent, { mode: 0o600, uid: 0, gid: 0 });
         registerProject({ projectId, hostId, projectName, workingDir, composeFile, owner: project.owner });
-        saveProjectPreference(projectId, { managed: true, mountEnabled: true });
+        saveProjectPreference(projectId, { managed: true, mountEnabled: true, operationalIntent: 'running' });
         await writeArchiveFile(container, workingDir, '.env', envContent, { mode: 0o600, uid: 0, gid: 0 });
         filesCreated = true;
       });

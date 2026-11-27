@@ -960,6 +960,9 @@ const MIGRATIONS = [
       )`);
     },
   },
+  { version: 32, name: '项目运行意图', up(database) {
+    addColumn(database, 'project_preferences', 'operational_intent', "TEXT NOT NULL DEFAULT 'unknown'");
+  } },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1606,32 +1609,35 @@ export function clearSessions() {
 
 export function getProjectPreference(projectId) {
   return db.prepare(
-    'SELECT managed, favorite, note FROM project_preferences WHERE project_id = ?'
-  ).get(projectId) || { managed: 0, favorite: 0, note: '' };
+    'SELECT managed, favorite, note, operational_intent AS operationalIntent FROM project_preferences WHERE project_id = ?'
+  ).get(projectId) || { managed: 0, favorite: 0, note: '', operationalIntent: 'unknown' };
 }
 
 export function getProjectMountEnabled(projectId) {
   return !!db.prepare('SELECT mount_enabled FROM project_preferences WHERE project_id = ?').get(projectId)?.mount_enabled;
 }
 
-export function setProjectPreference(projectId, { managed, mountEnabled, favorite, note }) {
+export function setProjectPreference(projectId, { managed, mountEnabled, favorite, note, operationalIntent }) {
+  if (operationalIntent !== undefined && !['unknown', 'running', 'stopped', 'maintenance'].includes(operationalIntent)) throw new Error('无效的项目运行意图');
   const current = getProjectPreference(projectId);
   const currentMountEnabled = getProjectMountEnabled(projectId);
   const nextManaged = typeof managed === 'boolean' ? Number(managed) : current.managed;
   const nextMountEnabled = typeof mountEnabled === 'boolean' ? Number(mountEnabled) : Number(currentMountEnabled);
   const nextFavorite = typeof favorite === 'boolean' ? Number(favorite) : current.favorite;
+  const nextIntent = operationalIntent ?? current.operationalIntent;
   const nextNote = typeof note === 'string' ? note.slice(0, 500) : current.note;
   db.prepare(`
-    INSERT INTO project_preferences(project_id, managed, mount_enabled, favorite, note, updated_at)
-    VALUES(?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO project_preferences(project_id, managed, mount_enabled, favorite, note, operational_intent, updated_at)
+    VALUES(?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(project_id) DO UPDATE SET
       managed = excluded.managed,
       mount_enabled = excluded.mount_enabled,
       favorite = excluded.favorite,
       note = excluded.note,
+      operational_intent = excluded.operational_intent,
       updated_at = excluded.updated_at
-  `).run(projectId, nextManaged, nextMountEnabled, nextFavorite, nextNote);
-  return { managed: !!nextManaged, favorite: !!nextFavorite, note: nextNote };
+  `).run(projectId, nextManaged, nextMountEnabled, nextFavorite, nextNote, nextIntent);
+  return { managed: !!nextManaged, favorite: !!nextFavorite, note: nextNote, operationalIntent: nextIntent };
 }
 
 /** Register new projects before their first container exists so failed deployments remain editable. */
@@ -1961,7 +1967,7 @@ export function exportUserData() {
     exportedAt: new Date().toISOString(),
     settings,
     projectPreferences: db.prepare(
-      'SELECT project_id AS projectId, managed, mount_enabled AS mountEnabled, favorite, note, updated_at AS updatedAt FROM project_preferences'
+      'SELECT project_id AS projectId, managed, mount_enabled AS mountEnabled, favorite, note, operational_intent AS operationalIntent, updated_at AS updatedAt FROM project_preferences'
     ).all(),
     operations: listOperations(500),
     cron: JSON.parse(db.prepare('SELECT payload FROM cron_state WHERE id = 1').get()?.payload || '{"jobs":[],"history":[]}'),
@@ -1985,6 +1991,7 @@ export function importUserData(payload) {
         mountEnabled: !!preference.mountEnabled,
         favorite: !!preference.favorite,
         note: typeof preference.note === 'string' ? preference.note : '',
+        ...(['unknown', 'running', 'stopped', 'maintenance'].includes(preference.operationalIntent) ? { operationalIntent: preference.operationalIntent } : {}),
       });
     }
   });

@@ -66,56 +66,10 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
+import { primaryItems, navGroups } from '../lib/page-navigation.js';
 import { useRoute } from 'vue-router';
 import { useEscapeKey } from '../composables/useEscapeKey.js';
-import { ChevronDown, CircleHelp, Boxes, FileCode2, ScrollText, TerminalSquare, Bot, ChartNoAxesCombined, HardDrive, Settings, Store, Activity, GitBranch, DollarSign, Menu, ShieldCheck, Network, FileSearch, ClipboardList, ServerCog, Database, BellRing, History, Search } from 'lucide-vue-next';
-const primaryItems = [
-  { to: '/dashboard', icon: Activity, label: '总览' },
-  { to: '/services', icon: Boxes, label: '服务' },
-  { to: '/compose', icon: FileCode2, label: '配置' },
-  { to: '/logs', icon: ScrollText, label: '日志' },
-  { to: '/agent', icon: Bot, label: 'AI 助手' },
-];
-const navGroups = [
-  {
-    label: '观测',
-    items: [
-      { to: '/oncall', icon: ShieldCheck, label: 'AI 值守' },
-      { to: '/reliability', icon: Activity, label: '应用可靠性' },
-      { to: '/topology', icon: Network, label: '拓扑' },
-      { to: '/monitor', icon: ChartNoAxesCombined, label: '实时监控' },
-      { to: '/events', icon: BellRing, label: '事件中心' },
-      { to: '/inspection', icon: ShieldCheck, label: 'AI 巡检' },
-      { to: '/agent/history', icon: History, label: 'Agent 执行历史' },
-    ],
-  },
-  {
-    label: '自动化',
-    items: [
-      { to: '/ops-center', icon: ClipboardList, label: '任务中心' },
-      { to: '/gitops', icon: GitBranch, label: 'GitOps' },
-      { to: '/review', icon: FileSearch, label: '变更与回滚' },
-    ],
-  },
-  {
-    label: '资源',
-    items: [
-      { to: '/cmdb', icon: Database, label: '资产中心' },
-      { to: '/node-groups', icon: ServerCog, label: '节点组' },
-      { to: '/marketplace', icon: Store, label: '应用市场' },
-      { to: '/maintenance', icon: HardDrive, label: '完整备份' },
-      { to: '/resources', icon: HardDrive, label: '存储清理' },
-      { to: '/cost', icon: DollarSign, label: '成本分析' },
-    ],
-  },
-  {
-    label: '系统',
-    items: [
-      { to: '/shell', icon: TerminalSquare, label: '终端' },
-      { to: '/settings', icon: Settings, label: '设置' },
-    ],
-  },
-];
+import { ChevronDown, CircleHelp, Menu, Search } from 'lucide-vue-next';
 const desktopGroups = navGroups;
 const route = useRoute();
 const expandedGroups = ref({ '观测': true, '自动化': true, '资源': true, '系统': true });
@@ -137,10 +91,9 @@ const mobileItems = [primaryItems[0], primaryItems[1], primaryItems[3], primaryI
 const mobileGroups = [{ label: '运行', items: primaryItems.filter(item => !mobileItems.includes(item)) }, ...navGroups];
 const moreActive = computed(() => !mobileItems.some(item => item.to === route.path));
 const navigationQuery = ref('');
-const searchAliases = { '/compose': 'compose yaml 编辑', '/resources': '备份 数据卷 镜像 磁盘', '/shell': 'shell 命令', '/agent/history': '执行 记录', '/settings': 'ai 模型 密钥 节点' };
 const filteredMobileGroups = computed(() => {
   const query = navigationQuery.value.trim().toLocaleLowerCase();
-  return mobileGroups.map(group => ({ ...group, items: group.items.filter(item => `${group.label} ${item.label} ${item.to} ${searchAliases[item.to] || ''}`.toLocaleLowerCase().includes(query)) })).filter(group => group.items.length);
+  return mobileGroups.map(group => ({ ...group, items: group.items.filter(item => `${group.label} ${item.label} ${item.to} ${item.category} ${item.description}`.toLocaleLowerCase().includes(query)) })).filter(group => group.items.length);
 });
 const moreTriggerRef = ref(null);
 const moreDialogRef = ref(null);

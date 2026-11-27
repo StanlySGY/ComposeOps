@@ -31,7 +31,7 @@
         <div class="overview-primary">
           <section class="section-panel overview-attention" :class="{ 'has-attention': attentionProjects }" aria-labelledby="attention-heading">
             <div class="overview-section-heading">
-              <div><h2 id="attention-heading"><span class="overview-section-icon" :class="attentionProjects ? 'text-status-warn' : 'text-status-ok'"><component :is="attentionProjects ? AlertTriangle : CircleCheckBig" class="h-4 w-4" /></span>需要处理<span class="count-badge">{{ attentionProjects }}</span></h2><p>停止、部分运行或健康检查异常的项目</p></div>
+              <div><h2 id="attention-heading"><span class="overview-section-icon" :class="attentionProjects ? 'text-status-warn' : 'text-status-ok'"><component :is="attentionProjects ? AlertTriangle : CircleCheckBig" class="h-4 w-4" /></span>需要处理<span class="count-badge">{{ attentionProjects }}</span></h2><p>存在故障或与运行意图不符的项目</p></div>
               <router-link to="/services?filter=attention&from=dashboard" class="overview-text-link">查看全部<ArrowRight class="h-3.5 w-3.5" /></router-link>
             </div>
             <div v-if="attentionProjectList.length" class="overview-attention-list">
@@ -48,7 +48,7 @@
               </article>
             </div>
             <div v-else-if="loadError" class="overview-calm-state"><AlertTriangle class="h-6 w-6 text-status-warn" /><div><strong>状态待确认</strong><p>部分数据未能加载，请重试后查看完整状态。</p></div></div>
-            <div v-else-if="projectCount" class="overview-calm-state"><CircleCheckBig class="h-7 w-7 text-status-ok" /><div><strong>当前项目状态正常</strong><p>未发现停止或健康检查异常的项目。</p></div></div>
+            <div v-else-if="projectCount" class="overview-calm-state"><CircleCheckBig class="h-7 w-7 text-status-ok" /><div><strong>当前没有需要处理的异常</strong><p>停机和维护项目单独展示，不计入健康运行。</p></div></div>
             <div v-else class="overview-empty"><EmptyState compact icon="Boxes" title="暂未发现 Compose 项目" description="扫描已有项目，或从应用市场开始部署。" /><router-link to="/services?from=dashboard" class="btn-secondary">查看服务</router-link><router-link to="/marketplace?from=dashboard" class="btn-primary ml-2">浏览应用市场</router-link></div>
           </section>
 
@@ -97,7 +97,7 @@ import MetricTile from '../components/common/MetricTile.vue';
 import EnvironmentBrief from '../components/dashboard/EnvironmentBrief.vue';
 import { monitorTrends, pushMonitorTrend } from '../lib/monitor-trends.js';
 
-import { projectAttention, projectLogTarget } from '../lib/project-health.js';
+import { projectAttention, projectLogTarget, needsAttention, isHealthyProject } from '../lib/project-health.js';
 import OnCallSummary from '../components/OnCallSummary.vue';
 
 const quickActions = [
@@ -129,10 +129,10 @@ let disposed = false;
 const projectCount = computed(() => store.projects.length);
 const containerCount = computed(() => store.projects.reduce((n, p) => n + (p.containers?.length || 0), 0));
 const runningContainers = computed(() => store.projects.reduce((n, p) => n + (p.containers || []).filter(c => c.state === 'running').length, 0));
-const attentionProjects = computed(() => store.projects.filter(p => p.status !== 'running' || (p.containers || []).some(c => c.health === 'unhealthy')).length);
-const healthyProjects = computed(() => projectCount.value - attentionProjects.value);
+const attentionProjects = computed(() => store.projects.filter(needsAttention).length);
+const healthyProjects = computed(() => store.projects.filter(isHealthyProject).length);
 const attentionProjectList = computed(() => [...store.projects]
-  .filter((project) => project.status !== 'running' || (project.containers || []).some((container) => container.health === 'unhealthy'))
+  .filter(needsAttention)
   .sort((a, b) => Number(b.status !== 'running') - Number(a.status !== 'running') || a.projectName.localeCompare(b.projectName))
   .slice(0, 5));
 

@@ -110,7 +110,7 @@ test('完整创建流程：创建目录、写入受限文件、校验、拉镜�
   assert.equal(state.registered[0].workingDir, '/projects/my-web');
   assert.deepEqual(state.preferences[0], {
     projectId: 'custom-project-id',
-    preference: { managed: true, mountEnabled: true },
+    preference: { managed: true, mountEnabled: true, operationalIntent: 'running' },
   });
   assert.deepEqual(phases, ['checking', 'preparing', 'validating', 'pulling', 'starting']);
   assert.equal(state.operations[0].status, 'success');

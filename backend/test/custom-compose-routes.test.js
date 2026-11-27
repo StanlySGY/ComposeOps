@@ -44,3 +44,28 @@ test('指标读取传递取消信号，页面关闭可终止 Docker 请求', asy
   await assert.rejects(result, /aborted/);
   assert.equal(received, controller.signal);
 });
+
+test('项目运行意图 API 严格校验、读取即时生效且保持其它偏好', async t => {
+  const { getActivityDocker } = await import('../src/services/docker-hosts.js');
+  const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
+  t.mock.method(getActivityDocker(), 'listContainers', async () => [{ Id: 'intent-api', Names: ['/intent-api'], State: 'running', Labels: {
+    'com.docker.compose.project': 'intent-api', 'com.docker.compose.project.working_dir': '/synthetic-intent-api',
+  } }]);
+  invalidateScanCache();
+  const [project] = await scanProjects();
+  const url = '/' + project.id + '/preferences';
+  for (const operationalIntent of [true, null, 1, {}, 'invalid']) {
+    const response = await app.inject({ method: 'PATCH', url, payload: { operationalIntent } });
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(response.json().error, 'invalid_operational_intent');
+  }
+  const saved = await app.inject({ method: 'PATCH', url, payload: { operationalIntent: 'maintenance', note: 'keep', favorite: true } });
+  assert.equal(saved.statusCode, 200);
+  assert.equal((await scanProjects())[0].operationalIntent, 'maintenance');
+  await app.inject({ method: 'PATCH', url, payload: { note: 'changed' } });
+  const updated = (await scanProjects())[0];
+  assert.equal(updated.operationalIntent, 'maintenance');
+  assert.equal(updated.favorite, true);
+  assert.equal(updated.note, 'changed');
+  invalidateScanCache();
+});

@@ -68,6 +68,43 @@ async function mountSettings() {
   await flushPromises();
 }
 
+describe('设置草稿与刷新保护', () => {
+  const unloadPrevented = () => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; };
+  const click = async label => { await wrapper.findAll('button').find(button => button.text().trim() === label).trigger('click'); await flushPromises(); };
+  it('偏好编辑、切换分类、撤销和保存的状态一致', async () => {
+    await mountSettings();
+    expect(unloadPrevented()).toBe(false);
+    await wrapper.get('input[aria-label="自动刷新间隔（秒）"]').setValue(17);
+    expect(wrapper.text()).toContain('有未保存修改：');
+    expect(unloadPrevented()).toBe(true);
+    await click('通知'); await click('偏好');
+    expect(wrapper.get('input[aria-label="自动刷新间隔（秒）"]').element.value).toBe('17');
+    await click('撤销修改');
+    expect(wrapper.get('input[aria-label="自动刷新间隔（秒）"]').element.value).toBe('5');
+    expect(unloadPrevented()).toBe(false);
+    await wrapper.get('input[aria-label="自动刷新间隔（秒）"]').setValue(19);
+    await click('保存偏好');
+    expect(unloadPrevented()).toBe(false);
+  });
+  it('保存失败保留草稿，通用 AI 保存不清除渠道草稿，卸载清理监听', async () => {
+    mocks.api.savePreferences.mockRejectedValueOnce(new Error('网络中断'));
+    await mountSettings();
+    await wrapper.get('input[aria-label="自动刷新间隔（秒）"]').setValue(17);
+    await click('保存偏好');
+    expect(unloadPrevented()).toBe(true);
+    await click('撤销修改'); await click('AI');
+    wrapper.findComponent({ name: 'AiChannelsPanel' }).vm.$emit('update:channels', [{ id: 'draft', saved: false, dirty: true, apiKey: 'secret-test-value' }]);
+    await flushPromises();
+    await wrapper.get('#ai-system-prompt').setValue('draft prompt');
+    await click('保存通用设置');
+    expect(wrapper.text()).toContain('AI 渠道');
+    expect(unloadPrevented()).toBe(true);
+    expect(JSON.stringify(localStorage)).not.toContain('secret-test-value');
+    wrapper.unmount(); wrapper = null;
+    expect(unloadPrevented()).toBe(false);
+  });
+});
+
 describe('设置页面表单可访问性', () => {
   it('偏好读取完成前不能保存默认值，其他面板慢加载不阻塞偏好', async () => {
     let finishPreferences;
@@ -145,7 +182,7 @@ describe('设置页面表单可访问性', () => {
     await wrapper.get('[data-settings-load="mcp"] button').trigger('click');
     await flushPromises();
     expect(wrapper.get('input[aria-label="启用 MCP 服务"]').element.checked).toBe(true);
-    expect(wrapper.get('select').element.value).toBe('all');
+    expect(wrapper.get('select[aria-label="MCP 工具模式"]').element.value).toBe('all');
   });
 
   it('复制 MCP Token 被浏览器拒绝时不会显示成功', async () => {
@@ -175,7 +212,7 @@ describe('设置页面表单可访问性', () => {
     await flushPromises();
     expect(enabled.element.checked).toBe(true);
     expect(enabled.element.matches(':disabled')).toBe(false);
-    expect(wrapper.get('select').element.value).toBe('all');
+    expect(wrapper.get('select[aria-label="MCP 工具模式"]').element.value).toBe('all');
     expect(wrapper.get('[role="alert"]').text()).toContain('保存未完成');
   });
 

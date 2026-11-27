@@ -10,7 +10,7 @@ const project = (id, status = 'running', health = 'healthy') => ({ id, projectNa
 describe('环境简报的项目入口', () => {
   it('异常优先且不修改源数组，超过四项仍保留全部入口和真实汇总', () => {
     const projects = Array.from({ length: 38 }, (_, index) => project(`healthy-${index}`));
-    projects.push(project('unhealthy', 'running', 'unhealthy'), project('stopped', 'stopped'));
+    projects.push(project('unhealthy', 'running', 'unhealthy'), { ...project('stopped', 'stopped'), operationalIntent: 'running' });
     const wrapper = render({ projects });
     const links = wrapper.findAll('.brief-project');
     expect(links).toHaveLength(4);

@@ -13,10 +13,11 @@
       <div class="brief-distribution-heading"><span>{{ incomplete ? '上次项目记录' : '项目运行概况' }}</span><router-link :to="deepLink('/services', { from: 'dashboard' })">全部 {{ projects.length }} 个<ArrowUpRight :size="12" aria-hidden="true" /></router-link></div>
       <div class="brief-state-track" aria-hidden="true">
         <span v-if="healthy" :style="{ flex: healthy }" data-status="healthy"></span>
+        <span v-if="neutral" :style="{ flex: neutral }" data-status="neutral"></span>
         <span v-if="attention.length" :style="{ flex: attention.length }" data-status="attention"></span>
       </div>
       <nav class="brief-projects" aria-label="快速定位项目">
-        <router-link v-for="project in featuredProjects" :key="project.id" :to="deepLink('/services', { focus: project.id, from: 'dashboard' })" class="brief-project" :data-status="needsAttention(project) ? 'attention' : 'healthy'" :aria-label="`定位项目 ${project.projectName || project.id}：${incomplete ? '上次记录，' : ''}${projectAttention(project).label}`" :title="project.projectName || project.id">
+        <router-link v-for="project in featuredProjects" :key="project.id" :to="deepLink('/services', { focus: project.id, from: 'dashboard' })" class="brief-project" :data-status="needsAttention(project) ? 'attention' : isHealthyProject(project) ? 'healthy' : 'neutral'" :aria-label="`定位项目 ${project.projectName || project.id}：${incomplete ? '上次记录，' : ''}${projectAttention(project).label}`" :title="project.projectName || project.id">
           <span class="brief-project-name">{{ project.projectName || project.id }}</span>
           <span class="brief-project-state"><i aria-hidden="true"></i>{{ projectAttention(project).label }}</span>
           <ArrowUpRight class="brief-project-arrow" :size="13" aria-hidden="true" />
@@ -26,6 +27,7 @@
         <router-link :to="deepLink('/services', { filter: 'running', from: 'dashboard' })"><span class="brief-count-value">{{ healthy }}</span><span><i class="is-healthy"></i>{{ incomplete ? '已知运行' : '运行正常' }}<ArrowUpRight :size="12" /></span></router-link>
         <router-link :to="deepLink('/services', { filter: 'attention', from: 'dashboard' })"><span class="brief-count-value" :class="{ 'text-status-warn': attention.length }">{{ attention.length }}</span><span><i class="is-attention"></i>需要关注<ArrowUpRight :size="12" /></span></router-link>
       </div>
+      <p v-if="neutral" class="brief-footnote">{{ neutral }} 个项目处于停机或维护状态，未计入健康运行。<router-link :to="deepLink('/services', { from: 'dashboard' })">查看运行意图</router-link></p>
       <p class="brief-footnote">{{ incomplete ? '部分信息未更新，请先刷新确认。' : '基于当前容器状态 · 业务可用性需单独确认' }}</p>
     </div>
     <ol v-else class="brief-onboarding" aria-label="开始使用">
@@ -40,16 +42,16 @@
 import { computed } from 'vue';
 import { ArrowRight, ArrowUpRight } from 'lucide-vue-next';
 import { deepLink } from '../../lib/deep-links.js';
-import { projectAttention, projectLogTarget } from '../../lib/project-health.js';
+import { projectAttention, projectLogTarget, needsAttention, isHealthyProject } from '../../lib/project-health.js';
 
 const props = defineProps({ projects: { type: Array, default: () => [] }, incomplete: Boolean });
-const needsAttention = project => project.status !== 'running' || (project.containers || []).some(container => container.health === 'unhealthy');
 const attention = computed(() => props.projects.filter(needsAttention).sort((a, b) => Number(b.status !== 'running') - Number(a.status !== 'running') || String(a.projectName || a.id).localeCompare(String(b.projectName || b.id))));
-const healthy = computed(() => props.projects.length - attention.value.length);
+const healthy = computed(() => props.projects.filter(isHealthyProject).length);
+const neutral = computed(() => props.projects.length - attention.value.length - healthy.value);
 const featuredProjects = computed(() => [...attention.value, ...props.projects.filter(project => !needsAttention(project))].slice(0, 4));
 const tone = computed(() => props.incomplete ? 'unknown' : attention.value.length ? 'attention' : props.projects.length ? 'healthy' : 'empty');
 const title = computed(() => props.incomplete ? '先确认环境的最新状态' : attention.value.length ? `${attention.value.length} 个项目需要你关注` : props.projects.length ? '服务运行有序，继续你的工作' : '从第一个项目，开始清晰运维');
-const description = computed(() => props.incomplete ? '部分数据暂不可用。保留已有信息，刷新后再判断下一步。' : attention.value.length ? '从异常日志开始定位问题，带着上下文处理，再核对运行结果。' : props.projects.length ? '当前未发现停止或健康检查异常的项目。可以查看巡检建议，提前处理潜在问题。' : '把状态、配置和操作结果连在一起，让每一次变更都有据可查。');
+const description = computed(() => props.incomplete ? '部分数据暂不可用。保留已有信息，刷新后再判断下一步。' : attention.value.length ? '从异常日志开始定位问题，带着上下文处理，再核对运行结果。' : props.projects.length ? '当前未发现需要关注的故障。停机和维护项目单独展示，可在项目中标注运行意图。' : '把状态、配置和操作结果连在一起，让每一次变更都有据可查。');
 const primaryLabel = computed(() => props.incomplete ? '查看项目状态' : attention.value.length ? (attention.value[0].managed ? '查看首个异常日志' : '查看待处理项目') : props.projects.length ? '进入服务工作区' : '浏览应用市场');
 const primaryTarget = computed(() => {
   if (props.incomplete) return deepLink('/services', { from: 'dashboard' });
@@ -77,6 +79,8 @@ const primaryTarget = computed(() => {
 .brief-distribution-heading a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-link); border-radius: 4px; }
 .brief-state-track { display: flex; gap: 3px; height: 4px; margin: 14px 0 10px; overflow: hidden; border-radius: 3px; }
 .brief-state-track span { min-width: 3px; background: var(--color-status-ok); opacity: .7; }
+.brief-state-track [data-status="neutral"] { background: var(--color-surface-400); }
+.brief-project[data-status="neutral"] .brief-project-state i { background: var(--color-surface-400); }
 .brief-state-track [data-status="attention"] { background: var(--color-status-warn); }
 .brief-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .brief-counts a { border-radius: 8px; padding: 4px 6px; margin-left: -6px; transition: background 160ms; }

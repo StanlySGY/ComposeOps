@@ -2,8 +2,8 @@
   <BaseModal
     :show="show"
     title="新建 Compose 项目"
-    size-class="max-w-[calc(100vw-2rem)] sm:max-w-3xl"
-    body-class="space-y-4 p-4"
+    size-class="max-w-[calc(100vw-2rem)] sm:max-w-3xl flex max-h-[88dvh] flex-col overflow-hidden"
+    body-class="min-h-0 flex-1 overflow-y-auto space-y-4 p-4"
     :close-disabled="busy && !jobId"
     @close="close"
   >
@@ -32,13 +32,15 @@
             autocomplete="off"
             placeholder="例如 my-web"
             aria-label="项目名称"
-            :aria-invalid="!!fieldError"
+            :aria-invalid="!!fieldError" :aria-describedby="fieldError ? 'compose-name-hint compose-name-error' : 'compose-name-hint'" @blur="nameTouched = true"
           />
-          <span class="text-[11px] text-muted">小写字母或数字开头，只能包含小写字母、数字、_ 和 -，最多 40 个字符。</span>
-          <span v-if="fieldError" class="field-error" role="alert">{{ fieldError }}</span>
+          <span id="compose-name-hint" class="text-[11px] text-muted">小写字母或数字开头，只能包含小写字母、数字、_ 和 -，最多 40 个字符。</span>
+          <span v-if="fieldError" id="compose-name-error" class="field-error" role="alert">{{ fieldError }}</span>
+          <button v-if="lowercaseSuggestion" type="button" class="text-left text-xs text-status-info" :disabled="busy || persisted" @click="projectName = lowercaseSuggestion">改为 {{ lowercaseSuggestion }}</button>
         </label>
         <div class="grid content-start gap-2">
           <HostDirectoryPicker v-if="show" v-model="rootDir" :host-id="options.hostId" :roots="options.roots" :disabled="busy || persisted || options.supported === false" />
+          <span v-if="directoryError" class="field-error" role="status">{{ directoryError }}</span>
           <span class="break-all text-[11px] text-muted">最终目录：{{ finalDirectory }}</span>
         </div>
       </div>
@@ -51,9 +53,10 @@
           rows="14"
           :disabled="busy || persisted"
           spellcheck="false"
-          aria-label="Compose YAML"
+          aria-label="Compose YAML" :aria-invalid="composeTouched && !composeContent.trim()" @blur="composeTouched = true"
           placeholder="services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - &quot;8080:80&quot;"
         />
+        <span v-if="composeTouched && !composeContent.trim()" class="field-error" role="status">请填写 Compose YAML。</span>
         <span class="text-[11px] text-muted">支持标准 Docker Compose YAML，最大 1 MiB；部署前会执行 docker compose config --quiet。</span>
       </label>
 
@@ -103,6 +106,9 @@
     </div>
 
     <template #footer>
+      <div class="w-full min-w-0 space-y-2">
+      <p v-if="submitReason && !busy" class="text-xs text-muted" role="status" aria-live="polite">{{ submitReason }}</p>
+      <div class="flex flex-wrap justify-end gap-2">
       <button class="btn-secondary" :disabled="busy && !jobId" @click="close">{{ busy && jobId ? '后台继续' : result ? '关闭' : '取消' }}</button>
       <button v-if="result && !busy && !result.outcomeUnknown" class="btn-secondary" @click="reset">新建另一项目</button>
       <button class="btn-primary" :disabled="busy || !canSubmit" @click="submit">
@@ -110,6 +116,7 @@
         <Rocket v-else class="h-4 w-4" />
         {{ busy ? '创建并部署中…' : '创建并部署' }}
       </button>
+      </div></div>
     </template>
   </BaseModal>
 </template>
@@ -133,7 +140,12 @@ const projectName = ref('');
 const rootDir = ref('');
 const composeContent = ref('');
 const envContent = ref('');
-const fieldError = ref('');
+const nameTouched = ref(false);
+const composeTouched = ref(false);
+const validName = computed(() => /^[a-z0-9][a-z0-9_-]{0,39}$/.test(projectName.value.trim()));
+const fieldError = computed(() => !projectName.value.trim() ? (nameTouched.value ? '请填写项目名称。' : '') : validName.value ? '' : /[A-Z]/.test(projectName.value) ? '项目名称只能使用小写字母，请修改大写字符。' : '名称需以小写字母或数字开头，只能包含小写字母、数字、_ 和 -。');
+const lowercaseSuggestion = computed(() => /[A-Z]/.test(projectName.value) && /^[a-z0-9][a-z0-9_-]{0,39}$/.test(projectName.value.trim().toLowerCase()) ? projectName.value.trim().toLowerCase() : '');
+const directoryError = computed(() => rootDir.value.startsWith('/') ? '' : '请选择以 / 开头的宿主机目录。');
 const busy = ref(false);
 const phase = ref('');
 const output = ref('');
@@ -160,16 +172,27 @@ const phaseLabels = {
   starting: '构建并启动服务',
 };
 const phaseLabel = computed(() => phaseLabels[phase.value] || (busy.value ? '准备部署' : '部署输出'));
-const canSubmit = computed(() => !!options.value && options.value.supported !== false &&
-  rootDir.value.startsWith('/') && /^[a-z0-9][a-z0-9_-]{0,39}$/.test(projectName.value.trim()) &&
-  !!composeContent.value.trim() && !sizeError.value && !persisted.value && !result.value?.outcomeUnknown);
+const submitReason = computed(() => {
+  if (persisted.value) return '项目文件已创建，可查看项目或新建另一项目。';
+  if (result.value?.outcomeUnknown) return '结果尚未确认，请先核对后台任务，避免重复部署。';
+  if (optionsError.value) return optionsError.value;
+  if (!options.value) return '正在读取创建配置…';
+  if (options.value.supported === false) return options.value.reason || '当前节点不支持创建项目。';
+  if (!projectName.value.trim()) return '请填写项目名称。';
+  if (!validName.value) return fieldError.value;
+  if (directoryError.value) return directoryError.value;
+  if (!composeContent.value.trim()) return '请填写 Compose YAML。';
+  return sizeError.value;
+});
+const canSubmit = computed(() => !submitReason.value);
 
 function reset() {
   jobId.value = '';
   projectName.value = '';
   composeContent.value = '';
   envContent.value = '';
-  fieldError.value = '';
+  nameTouched.value = false;
+  composeTouched.value = false;
   output.value = '';
   result.value = null;
   phase.value = '';
@@ -222,11 +245,6 @@ function close() {
 
 async function submit() {
   if (busy.value || !canSubmit.value) return;
-  fieldError.value = '';
-  if (!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(projectName.value.trim())) {
-    fieldError.value = '项目名称格式无效。';
-    return;
-  }
   busy.value = true;
   output.value = '';
   result.value = null;

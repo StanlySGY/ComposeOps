@@ -78,6 +78,7 @@ function projectSnapshot(data) {
     project.composeMode = project.editable ? (project.mounted ? 'direct' : 'workspace') : 'containers';
     project.favorite = !!preference.favorite;
     project.note = preference.note || '';
+    project.operationalIntent = preference.operationalIntent || 'unknown';
     return project;
   }).sort((a, b) => Number(b.managed) - Number(a.managed) || Number(b.favorite) - Number(a.favorite) ||
     a.owner.localeCompare(b.owner) || a.projectName.localeCompare(b.projectName));
@@ -183,6 +184,7 @@ async function scanProjectsUncached(activeDocker, host) {
       networkMode: c.HostConfig?.NetworkMode || '',
       state: c.State,
       statusText: c.Status,
+      exitCode: /Exited \((\d+)\)/.test(c.Status || '') ? Number(/Exited \((\d+)\)/.exec(c.Status)[1]) : null,
       image: c.Image,
       imageId: c.ImageID || '',
       // Docker 列表 API 的 Mounts 包含 named/anonymous volume 引用；保留它们供 CMDB 建立血缘关系。
@@ -200,12 +202,19 @@ async function scanProjectsUncached(activeDocker, host) {
     });
   }
 
-  const hostContainers = [...projects.values()].flatMap(project => project.containers).filter(container => container.networkMode === 'host');
+  const hostContainers = [...projects.values()].flatMap(project => project.containers).filter(container => container.networkMode === 'host' || container.state !== 'running');
+  const metadataDeadline = AbortSignal.timeout(5000);
   let hostIndex = 0;
   await Promise.all(Array.from({ length: Math.min(6, hostContainers.length) }, async () => {
-    while (hostIndex < hostContainers.length) {
+    while (hostIndex < hostContainers.length && !metadataDeadline.aborted) {
       const container = hostContainers[hostIndex++];
-      try { container.hostPorts = extractHostPorts(await activeDocker.getContainer(container.id).inspect()); }
+      try {
+        const info = await activeDocker.getContainer(container.id).inspect({ abortSignal: metadataDeadline });
+        if (container.networkMode === 'host') container.hostPorts = extractHostPorts(info);
+        container.exitCode = info.State?.ExitCode ?? container.exitCode;
+        container.oomKilled = !!info.State?.OOMKilled;
+        container.stateError = info.State?.Error || '';
+      }
       catch { container.hostPorts = []; }
     }
   }));

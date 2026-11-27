@@ -75,7 +75,8 @@ test('容器 inspect 期间切节点会阻止随后写操作', async t => {
   let inspected;
   let writes = 0;
   t.mock.method(getDockerForHost('local'), 'listContainers', async () => [{ ...row, State: 'exited' }]);
-  t.mock.method(getDockerForHost('local'), 'getContainer', () => ({ inspect: () => new Promise(resolve => { inspected = resolve; }), start: async () => { writes++; } }));
+  let inspectCount = 0;
+  t.mock.method(getDockerForHost('local'), 'getContainer', () => ({ inspect: () => ++inspectCount === 1 ? Promise.resolve({ State: { Status: 'exited' } }) : new Promise(resolve => { inspected = resolve; }), start: async () => { writes++; } }));
   const [project] = await scanProjects();
   const action = await prepareProjectAction({ ...project, managed: true, mountEnabled: false }, 'up');
   const result = action.run();

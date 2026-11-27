@@ -281,19 +281,22 @@ export default async function projectRoutes(fastify) {
   fastify.patch('/:id/preferences', {
     schema: {
       params: idParams,
-      body: { type: 'object', additionalProperties: false, properties: { favorite: {}, note: {} } },
+      body: { type: 'object', additionalProperties: false, properties: { favorite: {}, note: {}, operationalIntent: {} } },
     },
   }, async (request, reply) => {
     const project = await projectOr404(request.params.id, reply);
     if (!project) return;
-    const { favorite, note } = request.body || {};
+    const { favorite, note, operationalIntent } = request.body || {};
     if (favorite !== undefined && typeof favorite !== 'boolean') {
       return reply.code(400).send({ error: 'invalid_favorite', message: '无效的收藏值' });
     }
     if (note !== undefined && typeof note !== 'string') {
       return reply.code(400).send({ error: 'invalid_note', message: '备注内容无效' });
     }
-    return setProjectPreference(project.id, { favorite, note });
+    if (operationalIntent !== undefined && !['unknown', 'running', 'stopped', 'maintenance'].includes(operationalIntent)) {
+      return reply.code(400).send({ error: 'invalid_operational_intent', message: '无效的项目运行意图' });
+    }
+    return setProjectPreference(project.id, { favorite, note, operationalIntent });
   });
 
   fastify.get('/:id/compose', {

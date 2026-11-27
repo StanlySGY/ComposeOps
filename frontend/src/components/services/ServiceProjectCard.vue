@@ -6,7 +6,7 @@
       <button class="service-project-card__toggle" :aria-expanded="expanded" :aria-controls="`project-detail-${project.id}`" @click="$emit('toggle-expand')">
         <span class="project-avatar" aria-hidden="true"><Boxes :size="19" /></span>
         <span class="project-identity"><strong>{{ project.projectName }}</strong><span>{{ project.note || project.owner || 'Compose 项目' }}</span></span>
-        <span class="project-health-summary"><StatusBadge :status="project.status" :health="attention && project.status === 'running' ? 'unhealthy' : ''" /><span class="project-container-count">{{ runningCount }}/{{ project.containers.length }} 容器运行</span></span>
+        <span class="project-health-summary"><StatusBadge :status="project.status" :health="project.containers.some(container => container.health === 'unhealthy') ? 'unhealthy' : ''" /><span v-if="project.status !== 'running' || project.operationalIntent === 'maintenance' || project.operationalIntent === 'stopped'" class="text-xs text-muted">{{ attentionSummary.label }}</span><span class="project-container-count">{{ runningCount }}/{{ project.containers.length }} 容器运行</span></span>
         <span class="project-mode">{{ project.managed ? (project.editable ? 'Compose' : '容器模式') : '未纳管' }}</span>
         <span class="project-path" :title="project.workingDir">{{ project.workingDir }}</span>
         <ChevronDown class="w-4 h-4 text-surface-400 shrink-0 transition-transform" :class="{ 'rotate-180': expanded }" />
@@ -15,16 +15,17 @@
       <ImageUpdatePanel :project="project" compact @result="updateInfo = $event" @open="$emit('upgrade')" />
       <button class="icon-btn hidden sm:inline-flex" title="编辑备注" aria-label="编辑备注" @click="editNote"><Pencil class="w-4 h-4" /></button>
     </header>
-    <nav class="flex flex-wrap items-center gap-1 border-t border-surface-800/50 px-3 py-2" :aria-label="`${project.projectName} 快捷操作`">
+    <nav v-if="!expanded" class="flex flex-wrap items-center gap-1 border-t border-surface-800/50 px-3 py-2" :aria-label="`${project.projectName} 快捷操作`">
       <CapabilityLink v-for="action in quickActions" :key="action.label" class="btn-ghost btn-sm gap-1.5" :disabled="!project.managed || action.disabled" :reason="!project.managed ? '项目尚未纳管' : '容器运行后才能打开终端'" :to="action.to"><component :is="action.icon" class="h-3.5 w-3.5" />{{ action.label }}</CapabilityLink>
       <span class="ml-auto text-xs text-muted">{{ project.containers.length }} 个容器</span>
     </nav>
 
     <div v-if="webuiLinks.length" class="px-3 pb-2 lg:hidden"><WebUiLauncher :links="webuiLinks" @configure="webuiService = $event; webuiOpen = true" /></div>
     <div v-if="expanded" :id="`project-detail-${project.id}`" class="project-detail">
+      <div class="flex flex-wrap items-center gap-2 px-3 py-2 text-xs"><label :for="`intent-${project.id}`">运行意图</label><select :id="`intent-${project.id}`" class="input max-w-44" v-model="intentDraft" :disabled="intentSaving" @change="saveIntent($event.target.value)"><option v-for="(label, value) in operationalIntentLabels" :key="value" :value="value">{{ label }}</option></select><span class="text-muted">仅标注预期，不启停容器；异常证据仍提示。</span><span v-if="intentSaving" role="status">保存中…</span></div>
       <div v-if="attention" class="project-attention-summary"><AlertTriangle :size="16" /><span><strong>{{ attentionSummary.label }}</strong> · {{ attentionSummary.detail }}</span><span class="hidden md:inline text-muted ml-auto">先查看日志定位原因，再决定是否重启</span></div>
       <div class="project-actions" role="group" :aria-label="`${project.projectName} 项目操作`">
-        <CapabilityLink class="btn-primary" :disabled="!project.managed" reason="纳管项目后可查看日志" :to="toolLocation('logs', attentionContainer?.id)"><ScrollText :size="16" />{{ attention ? '查看异常日志' : '项目日志' }}</CapabilityLink>
+        <CapabilityLink v-if="project.containers.length !== 1" class="btn-primary" :disabled="!project.managed" reason="纳管项目后可查看日志" :to="toolLocation('logs', attentionContainer?.id)"><ScrollText :size="16" />{{ attention ? '查看异常日志' : '项目日志' }}</CapabilityLink>
         <CapabilityLink class="btn-secondary" :disabled="!project.editable" reason="需要可访问的 Compose 目录" :to="toolLocation('compose')"><FileCode2 :size="16" />配置</CapabilityLink>
         <CapabilityLink class="btn-secondary" :disabled="!project.editable" reason="需要可访问的 Compose 目录" :to="toolLocation('review')"><FileCode2 :size="16" />评审</CapabilityLink>
         <CapabilityLink class="btn-ghost" :disabled="!project.managed" reason="项目尚未纳管" :to="{ ...toolLocation('review'), query: { ...toolLocation('review').query, tab: 'rollback' } }"><History :size="16" />回滚</CapabilityLink>
@@ -50,12 +51,12 @@
 
       <div class="project-container-table" aria-label="Compose 服务列表">
         <div class="service-list-heading"><div><span class="service-list-eyebrow">WORKLOADS</span><strong>服务与容器</strong><span>服务级操作作用于该服务的全部副本；容器级操作只作用于单个容器</span></div><div class="service-list-tools"><span class="service-total">{{ serviceGroups.length }} 个服务 · {{ project.containers.length }} 个容器</span><button v-if="serviceGroups.length > 1" class="service-view-toggle" @click="toggleAllServiceGroups">{{ allServicesCollapsed ? '全部展开' : '全部折叠' }}</button></div></div>
-        <section v-for="group in serviceGroups" :key="group.name" :data-service-name="group.name" class="service-group" :class="{ 'service-group--attention': group.runningCount < group.containers.length || group.unhealthyCount > 0 }">
+        <section v-for="group in serviceGroups" :key="group.name" :data-service-name="group.name" class="service-group" :class="{ 'service-group--attention': group.attention }">
           <header class="service-group__header">
             <button class="service-group__summary" :aria-expanded="!isServiceCollapsed(group.name)" :aria-controls="'service-containers-' + project.id + '-' + group.name" @click="toggleServiceGroup(group.name)">
               <span class="service-group__glyph"><Boxes :size="17" /></span>
               <span class="service-group__identity"><strong>{{ group.name }}</strong><small>{{ group.containers.length }} 个副本</small></span>
-              <span class="service-group__health" :class="group.runningCount === group.containers.length && group.unhealthyCount === 0 ? 'is-healthy' : 'is-warning'" :title="group.unhealthyCount ? `${group.unhealthyCount} 个容器健康检查异常` : ''"><i></i>{{ group.runningCount }}/{{ group.containers.length }} 运行<span v-if="group.unhealthyCount">· {{ group.unhealthyCount }} 异常</span></span>
+              <span class="service-group__health" :class="group.attention ? 'is-warning' : group.runningCount === group.containers.length ? 'is-healthy' : 'is-neutral'" :title="group.unhealthyCount ? `${group.unhealthyCount} 个容器健康检查异常` : ''"><i></i>{{ group.runningCount }}/{{ group.containers.length }} 运行<span v-if="group.unhealthyCount">· {{ group.unhealthyCount }} 异常</span></span>
               <ChevronDown :size="16" class="service-group__chevron" :class="{ 'is-collapsed': isServiceCollapsed(group.name) }" />
             </button>
             <div v-if="group.name !== '未标记服务'" class="service-group__actions" role="group" :aria-label="group.name + ' 服务级操作（作用于全部副本）'">
@@ -112,7 +113,7 @@ import ActionDisclosure from '../common/ActionDisclosure.vue';
 import CapabilityLink from '../common/CapabilityLink.vue';
 import BaseModal from '../common/BaseModal.vue';
 import { useRoute } from 'vue-router';
-import { projectAttention } from '../../lib/project-health.js';
+import { projectAttention, needsAttention, operationalIntentLabels } from '../../lib/project-health.js';
 import { projectToolLocation } from '../../lib/project-navigation.js';
 import { api, streamProjectStats } from '../../api/client.js';
 import ConfirmDialog from '../common/ConfirmDialog.vue';
@@ -133,6 +134,17 @@ const pendingAction = ref('');
 const pendingServiceAction = ref(null);
 const serviceActionRunning = ref(false);
 const collapsedServiceGroups = ref(new Set());
+const intentSaving = ref(false);
+const intentDraft = ref('unknown');
+watch(() => props.project.operationalIntent, value => { intentDraft.value = value || 'unknown'; }, { immediate: true });
+async function saveIntent(operationalIntent) {
+  if (intentSaving.value) return;
+  const project = props.project;
+  intentSaving.value = true;
+  try { const saved = await api.saveProjectPreference(project.id, { operationalIntent }); project.operationalIntent = saved.operationalIntent; emit('refresh'); }
+  catch (error) { toast.error(`运行意图保存失败：${error.message}`); }
+  finally { intentSaving.value = false; intentDraft.value = props.project.operationalIntent || 'unknown'; }
+}
 const noteOpen = ref(false);
 const noteDraft = ref('');
 const noteError = ref('');
@@ -150,6 +162,7 @@ const serviceGroups = computed(() => {
     containers,
     runningCount: containers.filter(item => item.state === 'running').length,
     unhealthyCount: containers.filter(item => item.health === 'unhealthy').length,
+    attention: needsAttention({ operationalIntent: props.project.operationalIntent, containers, status: containers.every(item => item.state === 'running') ? 'running' : containers.some(item => item.state === 'running') ? 'partial' : 'stopped' }),
   }));
 });
 function isServiceCollapsed(name) { return collapsedServiceGroups.value.has(name); }
@@ -315,7 +328,7 @@ function closeStats() {
 
 const locked = computed(() => props.busy || !!props.actionRunning || serviceActionRunning.value);
 const dbContainers = computed(() => props.project.containers.filter((c) => /(postgres|postgis|mysql|mariadb|redis|valkey|mongo)/i.test(c.image)));
-const attention = computed(() => props.project.status !== 'running' || props.project.containers.some((container) => container.health === 'unhealthy'));
+const attention = computed(() => needsAttention(props.project));
 const dependencyText = computed(() => {
   const entries = [...dependencyMap.value.entries()]
     .filter(([, deps]) => deps && deps.length)
@@ -383,6 +396,8 @@ function containerStateHint(container) {
 
 <style scoped>
 .service-project-card { border-radius: 13px; }
+.service-group__health.is-neutral { color: var(--color-surface-400); }
+.service-group__health.is-neutral i { background: var(--color-surface-400); }
 .service-project-card.is-expanded { border-color: color-mix(in srgb, var(--color-link) 26%, var(--line-subtle)); }
 .project-avatar { display: grid; place-items: center; width: 38px; height: 40px; flex-shrink: 0; color: var(--color-link); border: 1px solid rgba(147,186,255,.14); border-radius: 10px; background: linear-gradient(140deg, rgba(147,186,255,.1), rgba(147,186,255,.025)); }
 .project-quick-actions { background: rgba(0,0,0,.08); padding-inline: 18px; }

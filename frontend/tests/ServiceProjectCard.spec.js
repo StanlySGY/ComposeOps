@@ -29,6 +29,27 @@ afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; });
 const button = name => wrapper.findAll('button').find(item => item.text() === name);
 
 describe('项目卡片操作契约', () => {
+  it('单容器展开后只保留一组日志、终端和诊断入口，折叠后保留快捷操作', async () => {
+    await start({ status: 'running', containers: [{ id: 'single', name: 'single', service: 'web', state: 'running', image: 'nginx', ports: [] }] });
+    expect(wrapper.find('nav[aria-label="web 快捷操作"]').exists()).toBe(false);
+    for (const path of ['/logs', '/shell', '/agent']) expect(wrapper.findAll(`a[href*="${path}"]`)).toHaveLength(1);
+    await wrapper.setProps({ expanded: false });
+    expect(wrapper.find('.project-detail').exists()).toBe(false);
+    expect(wrapper.get('nav[aria-label="web 快捷操作"]').exists()).toBe(true);
+  });
+  it('正常计划停机不渲染异常提示，意图保存失败保留原意图', async () => {
+    await start({ operationalIntent: 'stopped', status: 'stopped', containers: [{ id: 'single', name: 'single', service: 'web', state: 'exited', exitCode: 0, image: 'nginx', ports: [] }] });
+    expect(wrapper.find('.project-attention-summary').exists()).toBe(false);
+    expect(wrapper.get('.service-group').classes()).not.toContain('service-group--attention');
+    api.saveProjectPreference.mockRejectedValueOnce(new Error('offline'));
+    await wrapper.get('select').setValue('running'); await flushPromises();
+    expect(project.operationalIntent).toBe('stopped');
+    expect(wrapper.get('select').element.value).toBe('stopped');
+    api.saveProjectPreference.mockResolvedValueOnce({ operationalIntent: 'running' });
+    await wrapper.get('select').setValue('running'); await flushPromises();
+    expect(project.operationalIntent).toBe('running');
+    expect(wrapper.find('.project-attention-summary').exists()).toBe(true);
+  });
   it('停止容器的终端没有 href，日志仍可访问且携带原筛选', async () => {
     await start();
     const row = wrapper.get('[data-container="stopped"]');

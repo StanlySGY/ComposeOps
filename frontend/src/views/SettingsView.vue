@@ -1,15 +1,18 @@
 <template>
   <div class="page-shell page-shell-readable">
     <div class="page-header"><div><h1 class="page-title">设置</h1><p class="page-subtitle">个人偏好、通知、更新与维护</p></div></div>
-    <div class="tabs-segment">
+    <label class="flex items-center gap-2 text-xs text-muted sm:hidden">设置分类<select class="input flex-1" aria-label="设置分类" :value="tab" @change="setTab($event.target.value)"><option v-for="item in tabs" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
+    <div ref="tabNavigation" class="tabs-segment" aria-label="设置分类导航">
       <button v-for="item in tabs" :key="item.id" :class="{ active: tab === item.id }" :aria-pressed="tab === item.id" @click="setTab(item.id)"><component :is="item.icon" class="w-4 h-4" />{{ item.label }}</button>
     </div>
+    <div v-if="unsavedSections.length" class="alert-warning flex flex-wrap items-center gap-2" role="status" aria-live="polite"><span>有未保存修改：</span><button v-for="section in unsavedSections" :key="section.label" class="underline underline-offset-2" @click="setTab(section.tab)">{{ section.label }}</button><span class="text-xs">站内切换会保留；刷新或关闭前请保存。</span></div>
     <p v-if="message" class="alert-success" role="status" aria-live="polite" aria-atomic="true">{{ message }}</p><p v-if="error" class="alert-error" role="alert" aria-live="assertive" aria-atomic="true">{{ error }}</p>
+
+    <KeepAlive><AiChannelsPanel v-if="tab === 'ai' && loads.ai.ready" v-model:channels="ai.channels" @health-change="refreshChannelHealth" /></KeepAlive>
 
     <section v-if="tab === 'ai'" class="settings-section">
       <SettingsLoadState :state="loads.ai" name="ai" label="AI 设置" @retry="loadAi" />
       <fieldset class="min-w-0 space-y-4" :disabled="!loads.ai.ready || savingAi">
-      <AiChannelsPanel v-if="loads.ai.ready" v-model:channels="ai.channels" @health-change="refreshChannelHealth" />
       <h2 class="section-title">通用 AI 设置</h2>
       <div class="ios-group">
         <div class="ios-row">
@@ -46,7 +49,7 @@
           </div>
         </div>
       </div>
-      <button class="btn-primary self-start" @click="saveAi"><Save class="w-4 h-4" />{{ savingAi ? '保存中…' : '保存通用设置' }}</button>
+      <div class="flex flex-wrap items-center gap-2"><button class="btn-primary self-start" @click="saveAi"><Save class="w-4 h-4" />{{ savingAi ? '保存中…' : '保存通用设置' }}</button><button v-if="aiDraft.dirty.value" class="btn-secondary" @click="aiDraft.revert">撤销修改</button><span class="text-xs text-muted" role="status">{{ aiDraft.dirty.value ? '有未保存修改' : '已保存' }}</span></div>
       </fieldset>
     </section>
 
@@ -64,7 +67,7 @@
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">自动刷新间隔（秒）</div><div class="ios-row-desc">服务、监控等页面的轮询周期,最小 3 秒。</div></div><div class="ios-row-control"><input v-model.number="preferences.refreshInterval" type="number" min="3" max="300" class="input max-w-24 text-center" aria-label="自动刷新间隔（秒）" /></div></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">日志默认行数</div><div class="ios-row-desc">打开日志页时默认拉取的行数,10–5000。</div></div><div class="ios-row-control"><input v-model.number="preferences.logTail" type="number" min="10" max="5000" class="input max-w-24 text-center" aria-label="日志默认行数" /></div></div>
       </div>
-      <button class="btn-primary self-start" :disabled="!preferencesReady || savingPreferences" @click="savePreferences"><Save class="w-4 h-4" />{{ savingPreferences ? '保存中…' : '保存偏好' }}</button>
+      <div class="flex flex-wrap items-center gap-2"><button class="btn-primary self-start" :disabled="!preferencesReady || savingPreferences" @click="savePreferences"><Save class="w-4 h-4" />{{ savingPreferences ? '保存中…' : '保存偏好' }}</button><button v-if="preferencesDraft.dirty.value" class="btn-secondary" @click="preferencesDraft.revert">撤销修改</button><span class="text-xs text-muted" role="status">{{ preferencesDraft.dirty.value ? '有未保存修改' : '已保存' }}</span></div>
       </fieldset>
       <h2 class="section-title">修改管理员密码</h2>
       <div class="ios-group">
@@ -124,7 +127,7 @@
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">OOM 内存溢出</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="oom" aria-label="OOM 内存溢出" /></label></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">容器不健康</div></div><label class="toggle-label"><input v-model="alertEvents" type="checkbox" value="unhealthy" aria-label="容器不健康" /></label></div>
       </div>
-      <div class="flex gap-2"><button class="btn-primary" :disabled="savingNotifications" @click="saveNotifications"><Save class="w-4 h-4" />{{ savingNotifications ? '保存中…' : '保存通知设置' }}</button><button class="btn-secondary" :disabled="testingNotifications || savingNotifications" @click="testNotifications"><Send class="w-4 h-4" />{{ testingNotifications ? '发送中…' : '发送测试' }}</button></div>
+      <div class="flex flex-wrap items-center gap-2"><button class="btn-primary" :disabled="savingNotifications" @click="saveNotifications"><Save class="w-4 h-4" />{{ savingNotifications ? '保存中…' : '保存通知设置' }}</button><button class="btn-secondary" :disabled="testingNotifications || savingNotifications" @click="testNotifications"><Send class="w-4 h-4" />{{ testingNotifications ? '发送中…' : '发送测试' }}</button><button v-if="notificationsDraft.dirty.value" class="btn-secondary" @click="notificationsDraft.revert">撤销修改</button><span class="text-xs text-muted" role="status">{{ notificationsDraft.dirty.value ? '有未保存修改' : '已保存' }}</span></div>
       </fieldset>
     </section>
 
@@ -135,7 +138,7 @@
       <div class="ios-group">
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">定时检查镜像更新</div><div class="ios-row-desc">只查询远端镜像摘要并发送提醒，不会下载镜像或重建容器。</div></div><label class="toggle-label"><input v-model="updates.autoEnabled" type="checkbox" aria-label="定时检查镜像更新" /></label></div>
         <div class="ios-row"><div class="ios-row-main"><div class="ios-row-title">检查间隔（小时）</div></div><div class="ios-row-control"><input v-model.number="updates.intervalHours" type="number" min="1" max="720" class="input max-w-24 text-center" aria-label="镜像更新检查间隔（小时）" /></div></div>
-      </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" :disabled="savingUpdates" @click="saveUpdates"><Save class="w-4 h-4" />{{ savingUpdates ? '保存中…' : '保存更新策略' }}</button><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
+      </div><div class="flex flex-wrap items-center gap-3"><button class="btn-primary" :disabled="savingUpdates" @click="saveUpdates"><Save class="w-4 h-4" />{{ savingUpdates ? '保存中…' : '保存更新策略' }}</button><button v-if="updatesDraft.dirty.value" class="btn-secondary" @click="updatesDraft.revert">撤销修改</button><span class="text-xs text-muted" role="status">{{ updatesDraft.dirty.value ? '有未保存修改' : '已保存' }}</span><span v-if="updates.lastCheck" class="text-muted">上次检查：{{ new Date(updates.lastCheck).toLocaleString() }}</span></div>
       </fieldset>
       <SettingsLoadState :state="loads.usage" name="usage" label="磁盘用量" @retry="loadUsage" />
       <div class="border-t border-surface-800 pt-4 space-y-3"><div class="flex items-center justify-between"><h2 class="section-title">Docker 空间</h2><div class="flex items-center gap-2"><button class="icon-btn" title="刷新用量" aria-label="刷新用量" @click="loadUsage"><RefreshCw class="w-4 h-4" /></button><button class="btn-primary" @click="storageModal = true"><HardDrive class="w-4 h-4" />清理 Hub</button></div></div>
@@ -194,9 +197,9 @@
 
     <section v-if="tab === 'hosts'" class="settings-section">
       <SettingsLoadState :state="{ ready: !hostsStore.loading && !hostsStore.error, loading: hostsStore.loading, error: hostsStore.error }" name="hosts" label="Docker 节点" @retry="hostsStore.load(true)" />
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div><h2 class="section-title">Docker 节点纳管</h2><p class="text-sm text-surface-400 mt-1">添加远程 Docker 主机(Local/TCP/SSH),全局切换后所有项目、日志与指标跟随目标节点。</p></div>
-        <button class="btn-primary" @click="openHostEditor()"><Server class="w-4 h-4" />添加远程主机</button>
+        <button class="btn-primary shrink-0 whitespace-nowrap" @click="openHostEditor()"><Server class="w-4 h-4" />添加远程主机</button>
       </div>
       <div class="grid gap-3 sm:grid-cols-2">
         <div v-for="host in hostsStore.hosts" :key="host.id" class="card p-3 flex items-start gap-3" :class="{ 'ring-1 ring-status-ok/60': host.id === hostsStore.activeHostId }">
@@ -262,7 +265,7 @@
       <template v-if="mcp.enabled">
         <div class="form-grid">
           <label>暴露范围
-            <select v-model="mcp.mode" class="input" :disabled="savingMcp" @change="saveMcp">
+            <select v-model="mcp.mode" aria-label="MCP 工具模式" class="input" :disabled="savingMcp" @change="saveMcp">
               <option value="readonly">只读工具(推荐)</option>
               <option value="all">包含高风险工具(不含 critical)</option>
             </select>
@@ -305,6 +308,8 @@
 </template>
 
 <script setup>
+import { useFormDraft, useUnsavedChanges } from '../composables/useFormDraft.js';
+import { useSelectedTabReveal } from '../composables/useSelectedTabReveal.js';
 import ThemeSelect from '../components/common/ThemeSelect.vue';
 import ImageUpdatePanel from '../components/services/ImageUpdatePanel.vue';
 import DataMaintenancePanel from '../components/settings/DataMaintenancePanel.vue';
@@ -325,6 +330,13 @@ const route = useRoute();
 const router = useRouter();
 const initialTab = tabs.some((item) => item.id === route.query.tab) ? route.query.tab : 'ai';
 const tab = ref(initialTab); const message = ref(''); const error = ref(''); const aiStore = useAiStore(); const hostsStore = useHostsStore(); const ai = ref({ channels: [], failoverEnabled: true }); const searchMasked = ref(false); const savingAi = ref(false); const preferences = ref({ refreshInterval: 5, logTail: 200 }); const password = ref({ currentPassword: '', nextPassword: '' }); const notifications = ref({}); const updates = ref({ autoEnabled: false, intervalHours: 24 }); const usage = ref(null); const capabilities = ref({}); const storageModal = ref(false); const alertEvents = ref(['exit', 'oom', 'unhealthy']);
+const tabNavigation = ref(null);
+useSelectedTabReveal(tabNavigation, tab);
+const generalAiValues = () => ({ failoverEnabled: ai.value.failoverEnabled, systemPrompt: ai.value.systemPrompt, searchProvider: ai.value.searchProvider, searchApiKey: ai.value.searchApiKey, searchBaseUrl: ai.value.searchBaseUrl });
+const aiDraft = useFormDraft(generalAiValues, values => { Object.assign(ai.value, values); });
+const preferencesDraft = useFormDraft(() => preferences.value, values => { preferences.value = values; });
+const notificationsDraft = useFormDraft(() => ({ config: notifications.value, events: alertEvents.value }), values => { notifications.value = values.config; alertEvents.value = values.events; });
+const updatesDraft = useFormDraft(() => ({ autoEnabled: updates.value.autoEnabled, intervalHours: updates.value.intervalHours }), values => { Object.assign(updates.value, values); });
 const mountPlan = ref(null); const mountLoading = ref(false); const highlightedProjectId = computed(() => String(route.query.projectId || ''));
 const hostEditor = ref(null); const savingHost = ref(false); const savingPreferences = ref(false); const changingPassword = ref(false); const savingNotifications = ref(false); const testingNotifications = ref(false); const savingUpdates = ref(false);
 const loads = reactive(Object.fromEntries(['ai', 'notifications', 'updates', 'mounts', 'usage', 'capabilities', 'mcp'].map(key => [key, { loading: false, ready: false, error: '' }])));
@@ -364,12 +376,23 @@ const mountsDirty = computed(() => {
   return selected.length !== saved.length || selected.some((id, index) => id !== saved[index]);
 });
 const selectionDirty = computed(() => managementDirty.value || mountsDirty.value);
+const unsavedSections = computed(() => [
+  { tab: 'ai', label: '通用 AI', dirty: aiDraft.dirty.value },
+  { tab: 'ai', label: 'AI 渠道', dirty: ai.value.channels.some(channel => channel.dirty || channel.saved === false) },
+  { tab: 'personal', label: '界面偏好', dirty: preferencesDraft.dirty.value },
+  { tab: 'personal', label: '密码', dirty: !!(password.value.currentPassword || password.value.nextPassword) },
+  { tab: 'notifications', label: '通知', dirty: notificationsDraft.dirty.value },
+  { tab: 'maintenance', label: '更新策略', dirty: updatesDraft.dirty.value },
+  { tab: 'mounts', label: '项目纳管', dirty: selectionDirty.value },
+].filter(section => section.dirty));
+useUnsavedChanges(computed(() => unsavedSections.value.length > 0));
 function ok(text) { message.value = text; error.value = ''; } function fail(e) { error.value = e.message; message.value = ''; }
 function applyAiConfig(cfg) {
   ai.value = { channels: (cfg.channels || []).map((item) => ({ ...item, apiKey: '', saved: true, dirty: false })),
     failoverEnabled: cfg.failoverEnabled !== false, systemPrompt: cfg.systemPrompt,
     searchProvider: cfg.searchProvider || 'builtin', searchProviders: cfg.searchProviders, searchApiKey: '', searchBaseUrl: cfg.searchBaseUrl || '' };
   searchMasked.value = !!cfg.searchApiKey;
+  aiDraft.accept();
 }
 async function refreshChannelHealth() {
   try {
@@ -479,6 +502,7 @@ async function loadPreferences() {
   preferencesError.value = '';
   try {
     preferences.value = await api.getPreferences();
+    preferencesDraft.accept();
     preferencesReady.value = true;
   } catch (cause) {
     preferencesError.value = `读取偏好失败：${cause.message}`;
@@ -493,11 +517,12 @@ function loadNotifications() {
   return loadSection('notifications', () => Promise.all([api.getNotifications(), api.getNotificationEvents()]), ([config, events]) => {
     notifications.value = config;
     alertEvents.value = events.events || [];
+    notificationsDraft.accept();
   });
 }
 function loadUpdates() {
   if (savingUpdates.value) return;
-  return loadSection('updates', () => api.getUpdateSettings(), config => { updates.value = config; });
+  return loadSection('updates', () => api.getUpdateSettings(), config => { updates.value = config; updatesDraft.accept(); });
 }
 function loadCapabilities() {
   return loadSection('capabilities', () => api.getCapabilities(), config => { capabilities.value = config; });
@@ -521,6 +546,7 @@ async function saveAi() {
     await aiStore.saveConfig(payload);
     searchMasked.value = !!aiStore.config.searchApiKey;
     ai.value.searchApiKey = '';
+    aiDraft.accept();
     ok('通用 AI 设置已保存');
   } catch (e) { fail(e); }
   finally { savingAi.value = false; }
@@ -536,6 +562,7 @@ async function savePreferences() {
     if (!Number.isInteger(logTail) || logTail < 10 || logTail > 5000) throw new Error('日志默认行数必须是 10–5000 的整数');
     savingPreferences.value = true;
     preferences.value = await api.savePreferences(preferences.value);
+    preferencesDraft.accept();
     ok('个人偏好已保存');
   } catch (e) { fail(e); } finally { savingPreferences.value = false; }
 }
@@ -619,11 +646,12 @@ async function saveNotifications() {
     savingNotifications.value = true;
     notifications.value = await api.saveNotifications({ ...n, events: alertEvents.value });
     await api.saveNotificationEvents(alertEvents.value);
+    notificationsDraft.accept();
     ok('通知配置已保存');
   } catch (e) { fail(e); } finally { savingNotifications.value = false; }
 }
 async function testNotifications() { if (testingNotifications.value || savingNotifications.value || !loads.notifications.ready) return; testingNotifications.value = true; try { const result = await api.testNotifications(notifications.value); if (result?.skipped) { ok(result.message || '通知未发送：请先启用一个通知渠道。'); return; } ok('测试通知已发送'); } catch (e) { fail(e); } finally { testingNotifications.value = false; } }
-async function saveUpdates() { if (savingUpdates.value || !loads.updates.ready) return; try { if (!Number.isInteger(Number(updates.value.intervalHours)) || Number(updates.value.intervalHours) < 1 || Number(updates.value.intervalHours) > 720) throw new Error('镜像检查间隔必须是 1–720 小时的整数'); savingUpdates.value = true; updates.value = await api.saveUpdateSettings(updates.value); ok('更新策略已保存'); } catch (e) { fail(e); } finally { savingUpdates.value = false; } }
+async function saveUpdates() { if (savingUpdates.value || !loads.updates.ready) return; try { if (!Number.isInteger(Number(updates.value.intervalHours)) || Number(updates.value.intervalHours) < 1 || Number(updates.value.intervalHours) > 720) throw new Error('镜像检查间隔必须是 1–720 小时的整数'); savingUpdates.value = true; updates.value = await api.saveUpdateSettings(updates.value); updatesDraft.accept(); ok('更新策略已保存'); } catch (e) { fail(e); } finally { savingUpdates.value = false; } }
 function loadUsage() { return loadSection('usage', () => api.getStorageDf(), result => { usage.value = result; }); }
 function applyMountPlan(plan) {
   mountPlan.value = plan;

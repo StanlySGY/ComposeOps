@@ -46,9 +46,9 @@
       <div v-if="!metricsCollapsed" class="metric-grid service-metrics mt-3">
         <MetricTile interactive title="已纳管项目" :value="managedCount" :sub="`共 ${store.projects.length} 个项目`" :icon="Boxes" :active="filter === 'managed'" :aria-pressed="filter === 'managed'" @click="filter = filter === 'managed' ? 'all' : 'managed'" />
         <MetricTile interactive title="健康运行" :value="healthyCount" sub="项目状态正常" :icon="CircleCheckBig" tone="text-status-ok" :active="filter === 'running'" :aria-pressed="filter === 'running'" @click="filter = filter === 'running' ? 'all' : 'running'" />
-        <MetricTile interactive title="需要关注" :value="attentionCount" sub="停止或健康异常" :icon="AlertTriangle" tone="text-status-warn" :active="filter === 'attention'" :aria-pressed="filter === 'attention'" @click="filter = filter === 'attention' ? 'all' : 'attention'" />
+        <MetricTile interactive title="需要关注" :value="attentionCount" sub="故障或与运行意图不符" :icon="AlertTriangle" tone="text-status-warn" :active="filter === 'attention'" :aria-pressed="filter === 'attention'" @click="filter = filter === 'attention' ? 'all' : 'attention'" />
         <MetricTile interactive title="运行中容器" :value="`${runningContainerCount} / ${containerCount}`" :sub="`${stoppedContainerCount} 个未运行`" :icon="Container" :active="filter === 'stopped'" :aria-pressed="filter === 'stopped'" @click="filter = filter === 'stopped' ? 'all' : 'stopped'" />
-        <MetricTile title="健康分数" :value="healthScore" sub="项目与容器综合状态" :icon="Gauge" :tone="healthTone" />
+        <MetricTile title="健康分数" :value="healthScore" sub="停机与维护不计入评分" :icon="Gauge" :tone="healthTone" />
       </div>
     </section>
     <div v-if="store.projects.length" class="service-filter-views" role="group" aria-label="常用服务筛选">
@@ -58,6 +58,7 @@
       <label class="search-field"><Search class="h-4 w-4" /><input v-model="searchQuery" type="search" aria-label="搜索服务项目" placeholder="搜索项目、容器、镜像或路径" /></label>
       <select v-model="filter" class="input sm:w-40" aria-label="状态筛选"><option value="all">全部项目</option><option value="attention">需要关注</option><option value="running">健康运行</option><option value="stopped">已停止</option><option value="managed">已纳管</option><option value="unmanaged">未纳管</option><option value="favorites">仅收藏</option></select>
       <select v-model="sort" class="input sm:w-40" aria-label="项目排序"><option value="priority">异常与收藏优先</option><option value="name">按项目名称</option><option value="owner">按项目归属</option></select>
+      <button class="btn-ghost btn-sm" :disabled="!expandedIds.size" @click="collapseAll">全部收起</button>
       <label class="service-select-all"><input type="checkbox" :checked="allVisibleSelected" :indeterminate="someVisibleSelected && !allVisibleSelected" :disabled="busy || !visibleManagedProjects.length" @change="toggleAllVisible" />选择当前</label>
       <span class="ml-auto whitespace-nowrap text-muted" role="status" aria-live="polite">显示 {{ visibleProjects.length }} / {{ store.projects.length }}</span>
     </div>
@@ -94,6 +95,7 @@
 </template>
 
 <script setup>
+import { needsAttention as hasAttention, isHealthyProject } from '../lib/project-health.js';
 import MetricTile from '../components/common/MetricTile.vue';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -220,7 +222,7 @@ const containerCount = computed(() => store.projects.reduce((count, project) => 
 const managedCount = computed(() => store.projects.filter((project) => project.managed).length);
 const runningContainerCount = computed(() => store.projects.reduce((count, project) => count + project.containers.filter((container) => container.state === 'running').length, 0));
 const stoppedContainerCount = computed(() => containerCount.value - runningContainerCount.value);
-const healthyCount = computed(() => store.projects.filter((project) => !hasAttention(project)).length);
+const healthyCount = computed(() => store.projects.filter(isHealthyProject).length);
 const attentionCount = computed(() => store.projects.filter(hasAttention).length);
 const quickFilters = computed(() => [
   { value: 'all', label: '全部项目', icon: Boxes, count: store.projects.length },
@@ -229,15 +231,16 @@ const quickFilters = computed(() => [
   { value: 'favorites', label: '我的收藏', icon: Star, count: store.projects.filter(project => project.favorite).length },
 ]);
 const healthScore = computed(() => {
-  if (!store.projects.length) return 100;
-  const total = store.projects.reduce((count, project) => count + Math.max(1, project.containers.length), 0);
-  const penalties = store.projects.reduce((sum, project) => {
+  const assessed = store.projects.filter(project => isHealthyProject(project) || hasAttention(project));
+  if (!assessed.length) return '—';
+  const total = assessed.reduce((count, project) => count + Math.max(1, project.containers.length), 0);
+  const penalties = assessed.reduce((sum, project) => {
     if (hasAttention(project)) sum += Math.max(1, project.containers.length) * (project.status === 'stopped' ? 1 : 0.6);
     return sum;
   }, 0);
   return Math.max(0, Math.round((1 - penalties / total) * 100));
 });
-const healthTone = computed(() => healthScore.value >= 90 ? 'text-status-ok' : healthScore.value >= 70 ? 'text-status-warn' : 'text-status-error');
+const healthTone = computed(() => healthScore.value === '—' ? 'text-surface-400' : healthScore.value >= 90 ? 'text-status-ok' : healthScore.value >= 70 ? 'text-status-warn' : 'text-status-error');
 const filteredProjects = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   const matcher = statusMatchers[filter.value];
@@ -267,21 +270,18 @@ async function handleCustomComposeCreated(result) {
     expandedIds.value = new Set([...expandedIds.value, result.projectId]);
   }
 }
-function hasAttention(project) { return project.status !== 'running' || project.containers.some((container) => container.health === 'unhealthy'); }
 function searchIndex(project) { return [project.projectName, project.owner, project.workingDir, project.note, ...project.containers.flatMap((container) => [container.name, container.image])].join(' ').toLowerCase(); }
-const statusMatchers = { attention: (p) => hasAttention(p), running: (p) => !hasAttention(p), managed: (p) => p.managed, unmanaged: (p) => !p.managed, favorites: (p) => p.favorite, stopped: (p) => p.containers.some((c) => c.state !== 'running') };
+const statusMatchers = { attention: (p) => hasAttention(p), running: isHealthyProject, managed: (p) => p.managed, unmanaged: (p) => !p.managed, favorites: (p) => p.favorite, stopped: (p) => p.containers.some((c) => c.state !== 'running') };
 const sortComparators = { name: (a, b) => a.projectName.localeCompare(b.projectName), owner: (a, b) => a.owner.localeCompare(b.owner) || a.projectName.localeCompare(b.projectName), priority: (a, b) => Number(hasAttention(b)) - Number(hasAttention(a)) || Number(b.favorite) - Number(a.favorite) || Number(b.managed) - Number(a.managed) || a.projectName.localeCompare(b.projectName) };
 function toggleSelection(projectId) { selectedIds.value = selectedIds.value.includes(projectId) ? selectedIds.value.filter((id) => id !== projectId) : [...selectedIds.value, projectId]; }
 function toggleAllVisible() { const visibleIds = visibleManagedProjects.value.map((project) => project.id); selectedIds.value = allVisibleSelected.value ? selectedIds.value.filter((id) => !visibleIds.includes(id)) : [...new Set([...selectedIds.value, ...visibleIds])]; }
-const seenProjectCards = new Set();
-watch(() => store.projects, (projects) => {
-  const next = new Set(expandedIds.value);
-  for (const project of projects) {
-    if (!seenProjectCards.has(project.id) && project.containers.length === 1) next.add(project.id);
-    seenProjectCards.add(project.id);
-  }
-  expandedIds.value = next;
-}, { immediate: true });
+function readExpanded(hostId) {
+  try { const ids = JSON.parse(localStorage.getItem(`composeops:expanded-projects:${hostId}`) || '[]'); return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === 'string').slice(0, 1000) : []); }
+  catch { return new Set(); }
+}
+watch(() => hosts.activeHostId, (hostId) => { expandedIds.value = readExpanded(hostId); }, { immediate: true, flush: 'sync' });
+watch(expandedIds, ids => { try { localStorage.setItem(`composeops:expanded-projects:${hosts.activeHostId}`, JSON.stringify([...ids].slice(0, 1000))); } catch { /* memory only */ } });
+function collapseAll() { expandedIds.value = new Set(); }
 function toggleExpanded(projectId) { const next = new Set(expandedIds.value); if (next.has(projectId)) next.delete(projectId); else next.add(projectId); expandedIds.value = next; }
 function actionLabel(action) { return ({ up: '启动', restart: '重启', stop: '停止', pull: '拉取', ps: '状态', 'source-deploy': '拉取源码并重建', 'source.deploy': '拉取源码并重建', 'compose.create': '创建 Compose 项目', 'env.apply': '应用环境变量', 'env.save': '保存环境变量' })[action] || action; }
 async function run(project, action) {

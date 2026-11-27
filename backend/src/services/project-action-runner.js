@@ -1,3 +1,4 @@
+import { getProjectPreference, setProjectPreference } from '../lib/db.js';
 import { ACTIONS, resolveProjectFile, spawnCompose } from './compose-runner.js';
 import { runWorkspaceCompose } from './compose-workspace.js';
 import { runContainerAction, supportsContainerAction } from './project-control.js';
@@ -18,7 +19,25 @@ export function assertProjectActionAllowed(project, action) {
   }
 }
 
+// Track explicit whole-project lifecycle requests after confirmed success only.
+// A maintenance label remains deliberate until the user changes it.
 export async function prepareProjectAction(project, action) {
+  const prepared = await prepareAction(project, action);
+  const run = prepared.run;
+  return { ...prepared, run(...args) {
+    return withProjectOperationLock(project.id, async () => {
+      const originalIntent = getProjectPreference(project.id).operationalIntent;
+      const code = await run(...args);
+      const intent = { up: 'running', restart: 'running', stop: 'stopped', down: 'stopped' }[action];
+      if (code === 0 && intent && originalIntent !== 'maintenance' && getProjectPreference(project.id).operationalIntent === originalIntent) {
+        setProjectPreference(project.id, { operationalIntent: intent });
+      }
+      return code;
+    });
+  } };
+}
+
+async function prepareAction(project, action) {
   assertProjectHostUnchanged(project);
   assertProjectActionAllowed(project, action);
   if (project.editable && project.mounted) {

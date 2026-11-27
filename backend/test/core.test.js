@@ -164,7 +164,7 @@ test('project management is explicit and can be updated as a discovered allowlis
   assert.equal(database.getProjectPreference('new-project').managed, 0);
   database.setProjectPreference('project-a', { managed: true, favorite: true, note: 'primary' });
   database.setProjectPreference('vanished-project', { managed: true });
-  assert.deepEqual(database.getProjectPreference('project-a'), { managed: 1, favorite: 1, note: 'primary' });
+  assert.deepEqual(database.getProjectPreference('project-a'), { managed: 1, favorite: 1, note: 'primary', operationalIntent: 'unknown' });
   database.setProjectManagement(['project-a', 'project-b'], ['project-b']);
   assert.equal(database.getProjectPreference('project-a').managed, 0);
   assert.equal(database.getProjectPreference('project-b').managed, 1);
