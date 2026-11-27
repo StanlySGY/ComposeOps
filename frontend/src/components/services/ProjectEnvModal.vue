@@ -1,6 +1,8 @@
 <template>
   <BaseModal
     :show="true"
+    :close-on-route-change="false"
+    :close-disabled="saving"
     :title="project.projectName"
     size-class="flex max-h-[86vh] max-w-[calc(100vw-1.5rem)] flex-col sm:max-w-4xl"
     body-class="flex min-h-0 flex-1 flex-col p-0"

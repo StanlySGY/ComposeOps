@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="show" class="modal-backdrop" @click.self="!closeDisabled && emit('close')" @keydown="trapTab">
+      <div v-if="visible" class="modal-backdrop" @click.self="!closeDisabled && emit('close')" @keydown="trapTab">
         <Transition name="modal-pop" appear>
           <div ref="modalRef" class="modal" :class="sizeClass" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1">
             <div class="modal-header">
@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import { X } from 'lucide-vue-next';
 import { useEscapeKey } from '../../composables/useEscapeKey.js';
 
@@ -36,12 +36,18 @@ const props = defineProps({
   sizeClass: { type: String, default: '' },
   bodyClass: { type: String, default: 'p-3' },
   closeDisabled: { type: Boolean, default: false },
+  closeOnRouteChange: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['close']);
+const pageActive = ref(true);
+const visible = computed(() => props.show && pageActive.value);
+onActivated(() => { pageActive.value = true; });
+onDeactivated(() => { pageActive.value = false; });
 
 useEscapeKey({
-  active: computed(() => props.show),
+  active: visible,
+  closeOnRouteChange: props.closeOnRouteChange,
   onClose: () => { if (!props.closeDisabled) emit('close'); },
   layer: 'modal',
   lockBody: true,
@@ -74,12 +80,12 @@ function trapTab(event) {
     first.focus();
   }
 }
-watch(() => props.show, async (visible) => {
-  if (visible) {
+watch(visible, async (isVisible) => {
+  if (isVisible) {
     previousFocus = document.activeElement;
     await nextTick();
     const modal = modalRef.value;
-    if (!modal) return;
+    if (!modal || !visible.value) return;
     const focusables = focusableIn(modal);
     (focusables[0] || modal).focus({ preventScroll: true });
   } else restoreFocus();

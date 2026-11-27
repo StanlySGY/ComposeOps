@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch } from 'vue';
+import { onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 /**
@@ -11,6 +11,7 @@ import { useRoute } from 'vue-router';
 const LAYER_WEIGHT = { modal: 40, drawer: 30, event: 20, command: 10 };
 const layerStack = []; // 元素: { close, weight },按 weight 降序,同层后开在前
 let bodyLockCount = 0;
+let previousBodyOverflow = '';
 
 /**
  * @param {object} opts
@@ -20,13 +21,14 @@ let bodyLockCount = 0;
  * @param {string} [opts.layer='modal']               分层语义:modal | drawer | event | command
  * @param {boolean} [opts.lockBody=false]             打开期间锁定 body 滚动
  */
-export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBody = false, closeOnQueryChange = true }) {
+export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBody = false, closeOnQueryChange = true, closeOnRouteChange = true }) {
   const route = useRoute();
+  const pageActive = ref(true);
 
   watch(
-    active,
+    () => pageActive.value && active.value && (!enabled || enabled.value),
     (isOpen) => {
-      if (isOpen && (!enabled || enabled.value)) pushLayer();
+      if (isOpen) pushLayer();
       else removeLayer();
     },
     { immediate: true }
@@ -50,20 +52,22 @@ export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBo
   }
 
   function onKeydown(event) {
-    if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || !layerStack.length) return;
+    if (event.defaultPrevented || event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || !layerStack.length) return;
     const top = layerStack[layerStack.length - 1];
     if (top.close !== onClose) return; // 只处理栈顶
     event.preventDefault();
     onClose();
   }
   window.addEventListener('keydown', onKeydown);
+  onActivated(() => { pageActive.value = true; window.addEventListener('keydown', onKeydown); });
+  onDeactivated(() => { pageActive.value = false; window.removeEventListener('keydown', onKeydown); removeLayer(); });
 
   watch(
     // route 在无 router 上下文(纯函数式调用/单测)时为 undefined,防御性可选
     () => closeOnQueryChange ? route?.fullPath : route?.path,
     () => {
-      if (active.value) onClose();
-      else removeLayer();
+      if (!pageActive.value || !active.value || (enabled && !enabled.value)) { removeLayer(); return; }
+      if (closeOnRouteChange) onClose();
     }
   );
 
@@ -75,6 +79,7 @@ export function useEscapeKey({ active, onClose, enabled, layer = 'modal', lockBo
 
 /** 锁定/解锁 body 滚动;计数方式支持多弹层叠加,全部关闭后才恢复。 */
 function lockBodyScroll(lock) {
+  if (lock && bodyLockCount === 0) previousBodyOverflow = document.body.style.overflow;
   bodyLockCount = Math.max(0, bodyLockCount + (lock ? 1 : -1));
-  document.body.style.overflow = bodyLockCount > 0 ? 'hidden' : '';
+  document.body.style.overflow = bodyLockCount > 0 ? 'hidden' : previousBodyOverflow;
 }

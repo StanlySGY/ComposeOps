@@ -10,6 +10,7 @@
       </div>
       <aside class="flex flex-col gap-2 border-t border-surface-800 p-3 md:border-l md:border-t-0">
         <p class="text-xs text-muted">快捷操作</p>
+        <button v-if="!streaming && status !== 'idle'" class="btn-secondary" aria-label="重新运行 AI 诊断" @click="start">重新诊断</button>
         <button class="btn-primary" :disabled="!fullText || !projectId" @click="sendToAgent"><Sparkles class="w-4 h-4" />交给 Agent 制定修复</button>
         <button class="btn-secondary" :disabled="!fullText" @click="copyFix"><Copy class="w-4 h-4" />复制修复建议</button>
         <button class="btn-secondary" :disabled="!projectId" @click="goCompose"><FileCode2 class="w-4 h-4" />跳转 Compose 编辑器</button>
@@ -22,7 +23,7 @@
 
 <script setup>
 import { deepLink } from '../../lib/deep-links.js';
-import { computed, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import { streamSse } from '../../api/client.js';
 import { stripAgentProtocol } from '../../lib/agent-text.js';
 import { useToastStore } from '../../stores/toast.js';
@@ -52,22 +53,30 @@ const streaming = ref(false);
 const status = ref('idle'); // idle | running | done | error
 const statusMessage = ref('');
 let controller = null;
+let request = 0, pageActive = true;
 
 const title = computed(() => props.projectName || '容器诊断');
-const statusText = computed(() => status.value === 'error' && statusMessage.value ? statusMessage.value : ({ idle: '', running: 'AI 正在分析日志…', done: '诊断完成', error: '诊断失败' })[status.value] || '');
-const statusClass = computed(() => status.value === 'error' ? 'text-status-error' : status.value === 'done' ? 'text-status-ok' : 'text-muted');
+const statusText = computed(() => ['error', 'stopped'].includes(status.value) && statusMessage.value ? statusMessage.value : ({ idle: '', running: 'AI 正在分析日志…', done: '诊断完成', error: '诊断失败' })[status.value] || '');
+const statusClass = computed(() => status.value === 'error' ? 'text-status-error' : status.value === 'stopped' ? 'text-status-warn' : status.value === 'done' ? 'text-status-ok' : 'text-muted');
 
-watch(() => props.open, (isOpen) => { if (isOpen) start(); });
+watch(() => [props.open, props.projectId, props.containerId, props.rawLogs, props.failedCommand, props.exitCode, props.envKeys], () => {
+  if (props.open && pageActive) void start();
+  else stop();
+}, { immediate: true });
+onBeforeUnmount(stop);
+onDeactivated(() => { pageActive = false; stop(); });
+// Returning to a cached page must not silently repeat a billed model request.
+onActivated(() => { pageActive = true; });
 
 async function start() {
   stop();
-  text.value = '';
-  fullText.value = '';
-  streaming.value = true;
-  status.value = 'running';
-  statusMessage.value = '';
-  controller = new AbortController();
-  let rawText = '';
+  if (!props.open || !pageActive) return;
+  const version = request, activeController = new AbortController();
+  const current = () => pageActive && props.open && version === request;
+  let terminal = false, rawText = '';
+  text.value = ''; fullText.value = '';
+  streaming.value = true; status.value = 'running'; statusMessage.value = '';
+  controller = activeController;
   try {
     await streamSse('/ai/diagnose', {
       projectId: props.projectId,
@@ -76,24 +85,32 @@ async function start() {
       exitCode: props.exitCode,
       rawLogs: props.rawLogs,
       envKeys: props.envKeys,
-    }, (frame) => {
+    }, frame => {
+      if (!current() || terminal) return;
       if (frame.type === 'token') { rawText += frame.data || ''; text.value = stripAgentProtocol(rawText); }
-      else if (frame.type === 'done') { fullText.value = stripAgentProtocol(frame.data || rawText); text.value = fullText.value; status.value = 'done'; }
-      else if (frame.type === 'error') { status.value = 'error'; statusMessage.value = frame.data; }
-    }, controller.signal);
-  } catch (e) {
-    if (e.name !== 'AbortError') { status.value = 'error'; }
+      else if (frame.type === 'done') {
+        terminal = true; fullText.value = stripAgentProtocol(frame.data || rawText); text.value = fullText.value; status.value = 'done'; streaming.value = false;
+        activeController.abort();
+      } else if (frame.type === 'error') {
+        terminal = true; status.value = 'error'; statusMessage.value = String(frame.data?.message || frame.data || '诊断失败'); streaming.value = false;
+        activeController.abort();
+      }
+    }, activeController.signal);
+    if (current() && !terminal) { status.value = 'error'; statusMessage.value = '诊断连接已结束，但未收到完成结果。可重新运行诊断。'; }
+  } catch (error) {
+    if (current() && !terminal) {
+      status.value = error.name === 'AbortError' ? 'stopped' : 'error';
+      statusMessage.value = error.name === 'AbortError' ? '诊断已中止，可重新运行。' : error.message || '诊断连接失败，可重新运行。';
+    }
   } finally {
-    streaming.value = false;
+    if (current()) { streaming.value = false; controller = null; }
   }
 }
 function stop() {
-  if (controller) {
-    try { controller.abort(); } catch {
-      // 控制器已经结束时 abort 失败不影响关闭诊断弹窗。
-    }
-    controller = null;
-  }
+  request++;
+  controller?.abort(); controller = null;
+  if (streaming.value) { status.value = 'stopped'; statusMessage.value = '诊断已中止，保留已收到的内容。需要时可重新运行。'; }
+  streaming.value = false;
 }
 function close() { stop(); emit('close'); }
 async function copyFix() {

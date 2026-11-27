@@ -1509,6 +1509,11 @@ body {
   .agent-message { margin-bottom: 18px; }
   .agent-markdown { padding: 10px 12px; border-radius: 12px; }
   .toast-container { bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
+  /* Mobile dialogs are bottom sheets; feedback must leave their actions visible. */
+  body:has([role="dialog"][aria-modal="true"]) .toast-container {
+    top: calc(1rem + env(safe-area-inset-top));
+    bottom: auto;
+  }
 }
 
 /* ===== ComposeOps visual refresh: Linear 的克制 + Things 的清晰层级 =====
