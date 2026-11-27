@@ -73,7 +73,7 @@ async function show() {
     global: {
       stubs: {
         OperationsCenterView: true,
-        BaseModal: { props: ['show'], template: '<section v-if="show"><slot /></section>' },
+        BaseModal: { props: ['show'], template: '<section v-if="show"><slot /><slot name="footer" /></section>' },
         ConfirmDialog: true,
       },
     },
@@ -81,7 +81,67 @@ async function show() {
   await flushPromises();
 }
 const button = (text) => wrapper.findAll('button').find((b) => b.text() === text);
+const previewRestore = () => wrapper.get('input[placeholder="/srv/restore"]').element.closest('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 describe('完整备份界面的真实确认条件', () => {
+  it('后台轮询等待响应时保留空状态与操作入口，避免每五秒布局跳动', async () => {
+    vi.useFakeTimers();
+    try {
+      route.current.query = { tab: 'backups' };
+      await show();
+      let finish;
+      client.getMaintenance.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(wrapper.text()).toContain('为应用保留一份完整副本');
+      expect(button('前往选择应用')).toBeDefined();
+      expect(wrapper.find('[aria-label="正在加载运维信息"]').exists()).toBe(false);
+      await wrapper.get('#maintenance-tab-sync').trigger('click');
+      expect(button('配置第一个目标')).toBeDefined();
+      await wrapper.get('#maintenance-tab-tasks').trigger('click');
+      expect(wrapper.text()).toContain('暂无任务记录');
+      finish(overview());
+      await flushPromises();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('页签只保留一个 Tab 停靠点，方向键与 Home/End 同步选中状态', async () => {
+    await show();
+    expect(wrapper.findAll('[role="tab"][tabindex="0"]')).toHaveLength(1);
+    await wrapper.get('#maintenance-tab-containers').trigger('keydown', { key: 'ArrowLeft' });
+    expect(wrapper.get('#maintenance-tab-tasks').attributes('tabindex')).toBe('0');
+    expect(router.replace).toHaveBeenLastCalledWith({ query: { tab: 'tasks' } });
+    await wrapper.get('#maintenance-tab-tasks').trigger('keydown', { key: 'Home' });
+    expect(wrapper.get('#maintenance-tab-containers').attributes('tabindex')).toBe('0');
+    await wrapper.get('#maintenance-tab-containers').trigger('keydown', { key: 'End' });
+    expect(wrapper.get('#maintenance-tab-tasks').attributes('aria-selected')).toBe('true');
+    expect(client.executeMaintenance).not.toHaveBeenCalled();
+  });
+  it('筛选隐藏选择时解释实际作用范围，清空选择也清掉隐藏项', async () => {
+    client.getMaintenance.mockResolvedValue({ ...overview(), containers: [
+      ...overview().containers, { id: 'other', name: 'other', image: 'other:1', state: 'running' },
+    ] });
+    await show();
+    await wrapper.findAll('label').find(label => label.text() === '选择当前应用').get('input').setValue(true);
+    await wrapper.get('input[aria-label="搜索容器、应用或镜像"]').setValue('app-web');
+    expect(wrapper.text()).toContain('另有 1 个已选容器被筛选隐藏，不参与本次备份');
+    await button('清空选择').trigger('click');
+    await button('清除筛选').trigger('click');
+    expect(wrapper.findAll('.maintenance-group')).toHaveLength(2);
+    expect(wrapper.findAll('.maintenance-group input').every(input => !input.element.checked)).toBe(true);
+    expect(button('备份所选应用').element.disabled).toBe(true);
+    expect(client.prepareMaintenance).not.toHaveBeenCalled();
+  });
+  it('空备份与未配置同步提供下一步入口，不直接提交运维操作', async () => {
+    route.current.query = { tab: 'backups' };
+    await show();
+    await button('前往选择应用').trigger('click');
+    expect(wrapper.get('#maintenance-tab-containers').attributes('aria-selected')).toBe('true');
+    await wrapper.get('#maintenance-tab-sync').trigger('click');
+    await button('配置第一个目标').trigger('click');
+    expect(wrapper.text()).toContain('目标名称');
+    expect(client.saveSyncTarget).not.toHaveBeenCalled();
+    expect(client.executeMaintenance).not.toHaveBeenCalled();
+  });
   it('可更新筛选保留同 Compose 全部容器，搜索与全选只操作当前显示的应用', async () => {
     const containers = [
       { id, name: 'app-web', service: 'web', projectId: 'app', projectName: 'app', image: 'web:1', state: 'running' },
@@ -225,9 +285,11 @@ describe('完整备份界面的真实确认条件', () => {
     client.executeFullRestore.mockResolvedValue({ id: 'restore-job' });
     await show(); await button('隔离恢复').trigger('click');
     const input = wrapper.findAll('label').find(l => l.text().includes('已存在的宿主机父目录')).get('input');
-    await input.setValue('/new'); await button('校验备份并预览映射').trigger('click'); await flushPromises();
+    await input.setValue('/new'); previewRestore(); await flushPromises();
     expect(client.prepareFullRestore).toHaveBeenCalledWith({ backupId: 'backup1', destination: '/new', expectedHostId: 'local' });
-    expect(wrapper.text()).toContain('prod_db → /new/unique/db');
+    const mapping = wrapper.get('.maintenance-mapping');
+    expect(mapping.text()).toContain('源位置prod_db');
+    expect(mapping.text()).toContain('恢复到/new/unique/db');
     expect(button('执行隔离恢复').element.disabled).toBe(true);
     await wrapper.findAll('label').find(l => l.text().includes('确认上述新目录')).get('input').setValue(true);
     await button('执行隔离恢复').trigger('click'); await flushPromises();
@@ -243,7 +305,9 @@ describe('完整备份界面的真实确认条件', () => {
     await show(); await button('隔离恢复').trigger('click');
     const input = wrapper.get('input[placeholder="/srv/restore"]');
     await input.setValue('/old');
-    await button('校验备份并预览映射').trigger('click');
+    previewRestore(); await flushPromises();
+    expect(button('正在校验备份…').element.disabled).toBe(true);
+    expect(wrapper.text()).toContain('完成前不会创建恢复副本');
     await input.setValue('/new');
     finish({ token: 'old-token', root: '/old/unique', mappings: [], blockers: [] });
     await flushPromises();
@@ -251,9 +315,32 @@ describe('完整备份界面的真实确认条件', () => {
     expect(wrapper.text()).toContain('目录已修改');
     expect(client.executeFullRestore).not.toHaveBeenCalled();
     client.prepareFullRestore.mockResolvedValueOnce({ token: 'new-token', root: '/new/unique', mappings: [], blockers: [] });
-    await button('校验备份并预览映射').trigger('click'); await flushPromises();
+    previewRestore(); await flushPromises();
     expect(wrapper.text()).toContain('/new/unique');
     expect(button('执行隔离恢复').element.disabled).toBe(true);
+  });
+  it('修改已校验目录后清除启动及确认选择，阻断项仍禁止执行', async () => {
+    route.current.query = { tab: 'backups' };
+    client.getMaintenance.mockResolvedValue({ ...overview(), backups: [{ id: 'b1', names: ['app'], path: '/backups/b1' }] });
+    client.prepareFullRestore.mockResolvedValue({ token: 'r1', root: '/new/unique', mappings: [], blockers: [] });
+    await show(); await button('隔离恢复').trigger('click');
+    const input = wrapper.get('input[placeholder="/srv/restore"]');
+    await input.setValue('   '); previewRestore(); await flushPromises();
+    expect(client.prepareFullRestore).not.toHaveBeenCalled();
+    await input.setValue('/new'); previewRestore(); await flushPromises();
+    for (const check of wrapper.findAll('.maintenance-check-option input')) await check.setValue(true);
+    expect(button('执行隔离恢复').element.disabled).toBe(false);
+    await input.setValue('/another');
+    expect(button('执行隔离恢复')).toBeUndefined();
+    expect(wrapper.text()).toContain('目录已修改，请重新校验');
+    previewRestore(); await flushPromises();
+    expect(wrapper.findAll('.maintenance-check-option input').every(check => !check.element.checked)).toBe(true);
+    client.prepareFullRestore.mockResolvedValue({ token: 'blocked', root: '/new/unique', mappings: [], blockers: ['空间不足'] });
+    previewRestore(); await flushPromises();
+    expect(wrapper.text()).toContain('空间不足');
+    expect(wrapper.findAll('.maintenance-check-option input').every(check => check.element.disabled)).toBe(true);
+    expect(button('执行隔离恢复').element.disabled).toBe(true);
+    expect(client.executeFullRestore).not.toHaveBeenCalled();
   });
   it('备份重新预检期间再次修改路径，旧结果不能恢复确认权限', async () => {
     await show(); await button('备份').trigger('click'); await flushPromises();

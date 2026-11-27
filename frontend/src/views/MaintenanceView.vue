@@ -36,7 +36,6 @@
       正在预检完整范围；已暂停本页镜像检查，等待所选应用工作区空闲…
     </p>
 
-    <details class="section-panel mb-4" @toggle="scopeVisible = $event.target.open"><summary class="cursor-pointer text-sm">只读查看应用备份范围</summary><FullBackupPlanPanel v-if="scopeVisible" class="mt-4" /></details>
     <template v-if="plan">
       <div class="flex items-center justify-between gap-3">
         <h2 class="section-title">
@@ -134,7 +133,8 @@
             class="mt-1"
           />已确认完整范围及停机影响，并确保没有其他程序继续写入</label
         >
-        <button class="btn-primary" :disabled="!canExecute" @click="execute">
+        <p v-if="backupBlockedReason" id="backup-next-step" class="text-sm text-muted" role="status">{{ backupBlockedReason }}</p>
+        <button class="btn-primary" :disabled="!canExecute" :aria-describedby="backupBlockedReason ? 'backup-next-step' : undefined" @click="execute">
           <Archive class="h-4 w-4" />{{
             busy ? '提交中…' : '开始完整备份'
           }}
@@ -151,6 +151,7 @@
           role="tab"
           :class="{ active: tab === item.id }"
           :aria-selected="tab === item.id"
+          :tabindex="tab === item.id ? 0 : -1"
           aria-controls="maintenance-panel"
           @click="setTab(item.id)"
           @keydown="tabKeydown"
@@ -164,6 +165,8 @@
         :aria-labelledby="'maintenance-tab-' + tab"
         class="space-y-5"
       >
+        <Skeleton v-if="loading && !hasLoaded" variant="cards" :rows="2" label="正在加载运维信息" />
+        <template v-else>
         <template v-if="tab === 'containers'">
           <div class="toolbar-panel maintenance-filters">
             <label class="search-field"><Search class="h-4 w-4" /><input
@@ -183,6 +186,7 @@
             <label v-if="helperCount" class="toggle-label whitespace-nowrap text-muted">
               <input v-model="showHelpers" type="checkbox" />显示辅助容器（{{ helperCount }}）
             </label>
+            <button v-if="hasFilters" class="btn-ghost" @click="resetFilters">清除筛选</button>
           </div>
           <div class="maintenance-check-summary" role="status" aria-live="polite">
             <span v-if="checkingUpdates" class="flex items-center gap-2">
@@ -196,10 +200,13 @@
             >
           </div>
           <div class="section-panel flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-4">
+            <div class="space-y-1" role="status">
               <span class="text-xs text-muted">当前列表已选 {{ selectedGroupCount }} 个应用 · {{ selectedForAction.length }} 个容器</span>
+              <p v-if="hiddenSelectedCount" class="text-xs text-muted">另有 {{ hiddenSelectedCount }} 个已选容器被筛选隐藏，不参与本次备份。</p>
+              <p v-else-if="!selectedForAction.length" class="text-xs text-muted">勾选应用后可批量备份，也可使用每个应用右侧的备份按钮。</p>
             </div>
             <div class="flex flex-wrap gap-2">
+              <button v-if="selected.length" class="btn-ghost" :disabled="busy" @click="selected = []">清空选择</button>
               <button
                 class="btn-secondary"
                 :disabled="busy || !selectedForAction.length"
@@ -289,15 +296,32 @@
                 </table>
               </div>
             </article>
-            <p v-if="!maintenanceGroups.length && !loading" class="p-6 text-center text-sm text-muted" role="status">{{ updateFilter === 'updatable' ? (checkingUpdates ? '正在检查镜像，可更新的应用会陆续显示' : '没有符合条件的可更新应用') : '没有匹配应用或容器' }}</p>
+            <EmptyState v-if="!maintenanceGroups.length && hasLoaded && !error" compact icon="Search"
+              :title="updateFilter === 'updatable' ? (checkingUpdates ? '正在检查镜像，可更新的应用会陆续显示' : '没有符合条件的可更新应用') : '没有匹配应用或容器'"
+              :description="hasFilters ? '可清除筛选，重新查看当前节点的全部应用。' : '当前节点暂未发现容器，可以刷新列表重试。'"
+              :action-label="hasFilters ? '重置筛选' : '刷新列表'" @action="hasFilters ? resetFilters() : refresh()" />
           </div>
           <p class="text-xs text-muted">
             镜像检查只报告更新状态；更新需前往项目完成发布评审。完整备份需单独预检并确认停机范围，成功后恢复原启停状态并检查健康。面板自身、临时辅助容器或无法完整保存的数据会在备份预检中明确阻止。
           </p>
+          <details class="section-panel" :open="scopeVisible" @toggle="scopeVisible = $event.target.open"><summary class="cursor-pointer text-sm">只读查看应用备份范围</summary><FullBackupPlanPanel v-if="scopeVisible" class="mt-4" /></details>
         </template>
 
         <template v-if="tab === 'backups'">
-          <section class="section-panel space-y-3">
+          <div class="maintenance-section-heading">
+            <div>
+              <h2 class="section-title">已保存的完整备份 <span class="maintenance-count">{{ data.backups.length }}</span></h2>
+              <p class="mt-1 text-xs text-muted">先保存完整副本，再通过隔离恢复验证可用性。</p>
+            </div>
+            <button class="btn-primary" :disabled="busy" @click="setTab('containers')"><Plus class="h-4 w-4" />选择应用备份</button>
+          </div>
+          <details class="section-panel maintenance-backup-settings" :open="!data.settings.backupPath" aria-label="备份设置">
+            <summary class="maintenance-settings-summary">
+              <span class="flex items-center gap-2"><Settings2 class="h-4 w-4" />保存位置与恢复密钥</span>
+              <span class="text-xs text-muted">{{ data.settings.backupPath ? '已配置保存位置 · 展开修改或下载密钥' : '先设置宿主机保存目录' }}</span>
+            </summary>
+            <div class="maintenance-settings-grid">
+          <section class="space-y-3 min-w-0">
             <h2 class="section-title">默认备份保存路径</h2>
             <label class="block text-sm"
               >当前节点的宿主机目录<input
@@ -313,37 +337,43 @@
               检查并保存
             </button>
           </section>
-          <section class="section-panel space-y-3">
-            <h2 class="section-title">备份加密与恢复密钥</h2>
+          <section class="space-y-3 min-w-0">
+            <h2 class="section-title flex items-center gap-2"><KeyRound class="h-4 w-4" />备份加密与恢复密钥</h2>
             <p class="text-sm text-muted">恢复密钥由面板自动生成并持久保存，用于解密完整备份。请另外下载保存一份，并存放在备份介质之外。</p>
             <a class="btn-secondary inline-flex" href="/api/v1/maintenance/recovery-key" download="composeops-recovery.key"><Download class="h-4 w-4" />下载恢复密钥</a>
           </section>
-          <section v-for="backup in data.backups" :key="backup.id" class="section-panel space-y-3">
+            </div>
+          </details>
+          <section v-for="backup in data.backups" :key="backup.id" class="section-panel maintenance-backup-card space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 class="section-title">{{ backup.names.join('、') }}</h3>
+              <div class="min-w-0">
+                <h3 class="section-title break-words">{{ backup.names.join('、') }}</h3>
                 <p class="text-xs text-muted mt-1">
                   {{ time(backup.createdAt) }} · {{ bytes(backup.bytes) }}
                 </p>
               </div>
-              <span class="status-badge text-accent">完整备份 · 文件校验通过</span>
+              <span class="maintenance-verified"><ShieldCheck class="h-4 w-4" />文件校验通过</span>
             </div>
-            <p class="break-all text-xs text-muted">{{ backup.path }}</p>
+            <p class="maintenance-path"><FolderArchive class="h-4 w-4 shrink-0" aria-hidden="true" /><span>{{ backup.path }}</span></p>
             <p class="text-xs text-muted">
               覆盖配置、挂载、全部卷、镜像、可写层及恢复清单；尚未验证实际恢复。
             </p>
-            <button
+            <div class="maintenance-backup-actions">
+              <button class="btn-primary" :disabled="busy" @click="openRestore(backup)"><ArchiveRestore class="h-4 w-4" />隔离恢复</button>
+              <button
               class="btn-secondary"
               :disabled="busy || !targets.some((t) => t.tested)"
+              :aria-describedby="!targets.some((t) => t.tested) ? 'sync-hint-' + backup.id : undefined"
               @click="openSync(backup)"
             >
               同步此备份
             </button>
-            <button class="btn-secondary ml-2" :disabled="busy" @click="openRestore(backup)">隔离恢复</button>
+              <p v-if="!targets.some((t) => t.tested)" :id="'sync-hint-' + backup.id" class="text-xs text-muted">异地同步需先<button class="maintenance-text-action" @click="setTab('sync')">配置并测试同步目标</button></p>
+            </div>
           </section>
-          <p v-if="!data.backups.length && !loading" class="text-sm text-muted">
-            暂无已完成且校验通过的完整备份。未完成的备份只在任务记录中显示。
-          </p>
+          <EmptyState v-if="!data.backups.length && hasLoaded && !error" illustration="recovery" title="为应用保留一份完整副本"
+            description="暂无已完成且校验通过的完整备份。选择应用并预检后开始；未完成的备份可在任务记录中查看。"
+            action-label="前往选择应用" @action="setTab('containers')" />
         </template>
 
         <template v-if="tab === 'sync'">
@@ -412,7 +442,9 @@
               </button>
             </div>
           </section>
-          <p v-if="!targets.length" class="text-sm text-muted">尚未配置同步目标。</p>
+          <EmptyState v-if="!targets.length && hasLoaded && !error" icon="Network" illustration="none" title="给备份增加一个异地副本"
+            description="支持 WebDAV 与 115。添加目标后，先完成授权和连接测试，再开启同步。"
+            action-label="配置第一个目标" :action-disabled="busy" @action="editTarget()" />
           <p class="text-xs text-muted">
             保留本地副本。按节点和备份批次保存，失败可独立重试；只有全部文件通过远端校验才显示同步成功。测试连接会写入独立测试文件。
           </p>
@@ -469,7 +501,8 @@
               重新选择备份并重试
             </button>
           </section>
-          <p v-if="!data.tasks.length && !loading" class="text-sm text-muted">暂无任务记录。</p>
+          <EmptyState v-if="!data.tasks.length && hasLoaded && !error" compact icon="History" title="暂无任务记录"
+            description="备份、恢复或同步提交后，执行进度和结果都会保留在这里。" />
           <details class="section-panel" @toggle="legacyOpen = $event.target.open">
             <summary class="text-sm text-accent">原定时运维计划、Agent 后台任务与巡检</summary>
             <p class="mt-3 text-xs text-muted">
@@ -478,25 +511,57 @@
             <OperationsCenterView v-if="legacyOpen" embedded />
           </details>
         </template>
+        </template>
       </div>
     </template>
 
-    <BaseModal :show="!!restoreTarget" title="隔离恢复完整备份" :close-disabled="busy" @close="restoreTarget = null">
-      <div class="p-4 space-y-4">
-        <p class="text-sm text-muted">在指定父目录下新建唯一恢复目录。数据卷重映射为独立目录，网络与端口隔离，不覆盖原应用。</p>
+    <BaseModal :show="!!restoreTarget" title="隔离恢复完整备份" size-class="maintenance-restore-modal" body-class="p-4 sm:p-5 min-h-0 overflow-y-auto" :close-disabled="busy" @close="restoreTarget = null">
+      <div class="space-y-5" :aria-busy="busy">
+        <ol class="maintenance-restore-steps" aria-label="隔离恢复步骤">
+          <li :aria-current="!restorePlan ? 'step' : undefined" :class="{ 'is-current': !restorePlan }"><span>1</span>选择目录</li>
+          <li :aria-current="restorePlan && !restoreConfirmed ? 'step' : undefined" :class="{ 'is-current': restorePlan && !restoreConfirmed }"><span>2</span>核对映射</li>
+          <li :aria-current="restorePlan && restoreConfirmed ? 'step' : undefined" :class="{ 'is-current': restorePlan && restoreConfirmed }"><span>3</span>确认恢复</li>
+        </ol>
+        <div class="maintenance-restore-context">
+          <ArchiveRestore class="h-5 w-5 shrink-0" aria-hidden="true" />
+          <div class="min-w-0"><p class="text-sm font-medium break-words">{{ restoreTarget?.names.join('、') }}</p><p class="mt-1 text-xs text-muted leading-5">新建独立目录、网络和数据副本，不覆盖原应用；默认保持副本停止。</p></div>
+        </div>
         <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
-        <label class="block text-sm">已存在的宿主机父目录<input v-model="restoreDirectory" class="input mt-2 w-full" placeholder="/srv/restore" /></label>
-        <button class="btn-secondary" :disabled="busy || !restoreDirectory" @click="previewRestore">校验备份并预览映射</button>
+        <form class="space-y-3" @submit.prevent="previewRestore">
+          <label class="block text-sm">已存在的宿主机父目录<input v-model="restoreDirectory" class="input mt-2 w-full" placeholder="/srv/restore" aria-describedby="restore-directory-help" /></label>
+          <p id="restore-directory-help" class="text-xs text-muted">会在此目录内创建唯一的恢复子目录，预览后可核对全部保存位置。</p>
+          <p v-if="restoreNeedsPreview" class="maintenance-inline-notice" role="status">目录已修改，请重新校验后再确认恢复。</p>
+          <button class="btn-secondary" :disabled="busy || !restoreDirectory.trim()" type="submit"><RefreshCw v-if="restorePreviewing" class="h-4 w-4 animate-spin motion-reduce:animate-none" />{{ restorePreviewing ? '正在校验备份…' : '校验备份并预览映射' }}</button>
+          <p v-if="restorePreviewing" class="text-xs text-muted" role="status">正在校验备份文件并生成隔离映射，完成前不会创建恢复副本。</p>
+        </form>
         <template v-if="restorePlan">
-          <p class="text-xs break-all">新目录：{{ restorePlan.root }}</p>
-          <ul class="space-y-2 text-xs"><li v-for="entry in restorePlan.mappings" :key="entry.file" class="break-all">{{ entry.source }} → {{ entry.target }}</li></ul>
-          <p v-for="blocker in restorePlan.blockers" :key="blocker" class="alert-error">{{ blocker }}</p>
-          <label class="flex gap-2 text-sm"><input v-model="restoreStart" type="checkbox" />在隔离网络中启动原先运行的服务并检查状态</label>
-          <p class="text-xs text-muted">默认只创建停止的副本。启动检查不代表业务恢复验收；业务 SQL / HTTP 验证请使用可靠性页面的业务恢复演练。</p>
-          <label class="flex gap-2 text-sm"><input v-model="restoreConfirmed" type="checkbox" />确认上述新目录与隔离副本范围</label>
-          <button class="btn-primary" :disabled="busy || !restoreConfirmed || restorePlan.blockers.length" @click="executeRestore">执行隔离恢复</button>
+          <section class="space-y-3" aria-label="恢复路径映射">
+            <h3 class="section-title">核对恢复位置 <span class="maintenance-count">{{ restorePlan.mappings.length }} 项映射</span></h3>
+            <div class="maintenance-path"><FolderArchive class="h-4 w-4 shrink-0" aria-hidden="true" /><div><span class="block mb-1 text-xs text-muted">新目录</span><span>{{ restorePlan.root }}</span></div></div>
+            <ul class="maintenance-mappings" aria-label="源位置与恢复位置">
+              <li v-for="entry in restorePlan.mappings" :key="entry.file" class="maintenance-mapping">
+                <div><span class="maintenance-mapping-label">源位置</span><span class="maintenance-mapping-path">{{ entry.source }}</span></div>
+                <ArrowRight class="maintenance-mapping-arrow h-4 w-4" aria-hidden="true" />
+                <div><span class="maintenance-mapping-label">恢复到</span><span class="maintenance-mapping-path">{{ entry.target }}</span></div>
+              </li>
+            </ul>
+          </section>
+          <div v-if="restorePlan.blockers.length" class="alert-error" role="alert"><p class="font-medium">预检未通过，请先解决以下问题</p><ul class="mt-2 list-disc pl-5"><li v-for="blocker in restorePlan.blockers" :key="blocker">{{ blocker }}</li></ul></div>
+          <div class="maintenance-restore-options">
+            <label class="maintenance-check-option"><input v-model="restoreStart" type="checkbox" :disabled="busy || !!restorePlan.blockers.length" /><span>在隔离网络中启动原先运行的服务并检查状态<span class="mt-1 block text-xs text-muted leading-5">默认只创建停止的副本。启动检查不代表业务恢复验收；业务 SQL / HTTP 验证请使用可靠性页面的业务恢复演练。</span></span></label>
+            <label class="maintenance-check-option"><input v-model="restoreConfirmed" type="checkbox" :disabled="busy || !!restorePlan.blockers.length" />确认上述新目录与隔离副本范围</label>
+          </div>
         </template>
       </div>
+      <template #footer>
+        <div class="maintenance-restore-footer">
+          <p id="restore-next-step" class="text-xs text-muted" role="status">{{ restorePreviewing ? '正在校验，请稍候。' : !restorePlan ? '先校验备份，再核对恢复位置。' : restorePlan.blockers.length ? '请解决预检问题后重新校验。' : !restoreConfirmed ? '核对映射并勾选确认后可执行。' : restoreStart ? '将创建隔离副本并启动原先运行的服务。' : '将创建隔离副本，保持停止状态。' }}</p>
+          <div class="flex gap-2 shrink-0">
+            <button class="btn-secondary" :disabled="busy" @click="restoreTarget = null">取消</button>
+            <button v-if="restorePlan" class="btn-primary" :disabled="busy || !restoreConfirmed || !!restorePlan.blockers.length" aria-describedby="restore-next-step" @click="executeRestore">{{ busy && !restorePreviewing ? '提交中…' : '执行隔离恢复' }}</button>
+          </div>
+        </div>
+      </template>
     </BaseModal>
     <BaseModal :show="!!updateTarget" title="镜像检查详情" @close="updateTarget = null">
       <div v-if="updateTarget" class="p-4 space-y-4">
@@ -670,10 +735,12 @@
 import FullBackupPlanPanel from '../components/resources/FullBackupPlanPanel.vue';
 import { computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Archive, ChevronDown, Download, Layers, Plus, RefreshCw, Search } from 'lucide-vue-next';
+import { Archive, ArchiveRestore, ArrowRight, ChevronDown, Download, FolderArchive, KeyRound, Layers, Plus, RefreshCw, Search, Settings2, ShieldCheck } from 'lucide-vue-next';
 import { api } from '../api/client.js';
 import BaseModal from '../components/common/BaseModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
+import EmptyState from '../components/common/EmptyState.vue';
+import Skeleton from '../components/common/Skeleton.vue';
 import OperationsCenterView from './OperationsCenterView.vue';
 
 const tabs = [
@@ -687,6 +754,7 @@ const route = useRoute(),
 const normalizeTab = (value) => (tabs.some((t) => t.id === value) ? value : 'containers');
 const tab = ref(normalizeTab(route.query.tab));
 const data = ref({ containers: [], backups: [], tasks: [], hostId: '', settings: {} });
+const hasLoaded = ref(false);
 const targets = ref([]),
   selected = ref([]),
   query = ref(''),
@@ -806,6 +874,12 @@ const operationReason = (container) =>
 const selectable = computed(() => maintenanceGroups.value.filter((group) => !groupReason(group)).flatMap((group) => group.members));
 // 隐藏的选中项保留勾选，但批量动作只作用于当前筛选列表。
 const selectedForAction = computed(() => selectable.value.filter(c => selected.value.includes(c.id)).map(c => c.id));
+const hiddenSelectedCount = computed(() => selected.value.filter(id => !selectedForAction.value.includes(id)).length);
+const hasFilters = computed(() => !!query.value.trim() || updateFilter.value !== 'all');
+function resetFilters() {
+  query.value = '';
+  updateFilter.value = 'all';
+}
 const allSelected = computed(
   () => !!selectable.value.length && selectable.value.every((c) => selected.value.includes(c.id))
 );
@@ -826,6 +900,14 @@ const canExecute = computed(
     confirmed.value &&
     keySaved.value
 );
+const backupBlockedReason = computed(() => {
+  if (!plan.value) return '';
+  if (planStale.value) return '保存路径已修改，请重新预检路径及范围。';
+  if (plan.value.blockers.length || !plan.value.coverageVerified) return '预检未通过，请先解决完整范围或空间问题。';
+  if (!keySaved.value) return '请先下载并单独保存恢复密钥，然后勾选确认。';
+  if (!confirmed.value) return '请确认完整备份范围与停机影响后再开始。';
+  return '';
+});
 async function load(quiet = false) {
   if (loading.value || disposed || !viewActive) return;
   loading.value = true;
@@ -834,6 +916,7 @@ async function load(quiet = false) {
     const [overview, result] = await Promise.all([api.getMaintenance(), api.getSyncTargets()]);
     if (current !== epoch || disposed) return;
     data.value = overview;
+    hasLoaded.value = true;
     proxyUrl.value = overview.imageCheck?.proxyUrl || '';
     selected.value = selected.value.filter((id) =>
       overview.containers.some((c) => c.id === id && !operationReason(c))
@@ -1256,6 +1339,8 @@ function resetContext() {
   epoch++;
   loading.value = false;
   busy.value = false;
+  hasLoaded.value = false;
+  restorePreviewing.value = false;
   data.value = { containers: [], tasks: [], backups: [], settings: {} };
   targets.value = [];
   selected.value = [];
@@ -1338,26 +1423,35 @@ onDeactivated(deactivate);
 onBeforeUnmount(() => { deactivate(); disposed = true; });
 const scopeVisible = ref(false);
 const restoreTarget = ref(null), restoreDirectory = ref(''), restorePlan = ref(null), restoreStart = ref(false), restoreConfirmed = ref(false);
+const restorePreviewing = ref(false), restoreNeedsPreview = ref(false);
 let restorePlanRevision = 0;
-watch([restoreDirectory, restoreTarget], () => {
+watch([restoreDirectory, restoreTarget], ([, target], [, previousTarget]) => {
   restorePlanRevision++;
+  restoreNeedsPreview.value = target === previousTarget && !!target && (restoreNeedsPreview.value || !!restorePlan.value || restorePreviewing.value);
   restorePlan.value = null;
   restoreConfirmed.value = false;
+  restoreStart.value = false;
 }, { flush: 'sync' });
 function openRestore(backup) {
   error.value = ''; restoreTarget.value = backup; restorePlan.value = null; restoreConfirmed.value = false; restoreStart.value = false;
 }
 function previewRestore() {
+  if (!restoreTarget.value || !restoreDirectory.value.trim()) return;
   return perform(async valid => {
-    const revision = restorePlanRevision;
-    const result = await api.prepareFullRestore({ backupId: restoreTarget.value.id, destination: restoreDirectory.value, expectedHostId: data.value.hostId });
-    if (!valid()) return;
-    if (revision !== restorePlanRevision) {
-      notice.value = '目录已修改，请重新校验备份并预览映射。';
-      error.value = notice.value;
-      return;
+    restorePreviewing.value = true;
+    try {
+      const revision = restorePlanRevision;
+      const result = await api.prepareFullRestore({ backupId: restoreTarget.value.id, destination: restoreDirectory.value, expectedHostId: data.value.hostId });
+      if (!valid()) return;
+      if (revision !== restorePlanRevision) {
+        notice.value = '目录已修改，请重新校验备份并预览映射。';
+        error.value = notice.value;
+        return;
+      }
+      restorePlan.value = result; restoreConfirmed.value = false; restoreNeedsPreview.value = false;
+    } finally {
+      if (valid()) restorePreviewing.value = false;
     }
-    restorePlan.value = result; restoreConfirmed.value = false;
   });
 }
 function executeRestore() {
@@ -1371,6 +1465,54 @@ function executeRestore() {
 </script>
 
 <style scoped>
+:global(.modal.maintenance-restore-modal) { display: flex; flex-direction: column; overflow: hidden; }
+:global(.maintenance-restore-modal > .modal-header), :global(.maintenance-restore-modal > footer) { flex-shrink: 0; }
+.maintenance-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.maintenance-count { margin-left: 6px; padding: 2px 7px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text-soft); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.maintenance-settings-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px 20px; flex-wrap: wrap; cursor: pointer; font-size: 13px; list-style: none; }
+.maintenance-settings-summary::after { content: '+'; color: var(--text-soft); font-size: 18px; }
+.maintenance-backup-settings[open] > summary::after { content: '−'; }
+.maintenance-settings-summary > .text-muted { margin-left: auto; }
+.maintenance-settings-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px; border-top: 1px solid var(--line-strong); padding-top: 20px; margin-top: 16px; }
+.maintenance-backup-card { border-radius: 12px; }
+.maintenance-verified { display: inline-flex; align-items: center; gap: 6px; border: 1px solid light-dark(#b9ddce, #2f594a); background: light-dark(#edf8f2, #182b25); color: light-dark(#116444, #92e0ba); border-radius: 6px; padding: 5px 8px; font-size: 12px; white-space: nowrap; }
+.maintenance-path { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: rgb(var(--ui-panel-rgb) / .45); color: var(--text-soft); font-size: 12px; overflow-wrap: anywhere; }
+.maintenance-path > :last-child { min-width: 0; }
+.maintenance-backup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.maintenance-backup-actions > p { margin-left: auto; }
+.maintenance-text-action { padding: 6px 2px; color: light-dark(#1d4ed8, #93c5fd); text-decoration: underline; text-underline-offset: 3px; }
+.maintenance-restore-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 0 16px; border-bottom: 1px solid var(--line-strong); font-size: 12px; color: var(--text-soft); }
+.maintenance-restore-steps li { display: flex; align-items: center; gap: 8px; }
+.maintenance-restore-steps li > span { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border: 1px solid var(--line-strong); border-radius: 50%; font-size: 12px; }
+.maintenance-restore-steps .is-current { color: var(--text-bright); font-weight: 600; }
+.maintenance-restore-steps .is-current > span { background: var(--color-accent); color: white; border-color: var(--color-accent); }
+.maintenance-restore-context { display: flex; align-items: flex-start; gap: 12px; }
+.maintenance-restore-context > svg { color: var(--color-status-ok); margin-top: 2px; }
+.maintenance-mappings { display: grid; gap: 8px; }
+.maintenance-mapping { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 12px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.maintenance-mapping-label { display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 5px; }
+.maintenance-mapping-path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-soft); overflow-wrap: anywhere; }
+.maintenance-mapping-arrow { color: var(--text-faint); align-self: center; }
+.maintenance-restore-options { display: grid; gap: 10px; }
+.maintenance-check-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 13px; cursor: pointer; }
+.maintenance-check-option:has(input:checked) { border-color: var(--color-accent); background: rgb(var(--ui-panel-rgb) / .6); }
+.maintenance-check-option:has(input:disabled) { cursor: default; }
+.maintenance-check-option input { flex: none; margin-top: 3px; }
+.maintenance-inline-notice { border-left: 3px solid var(--color-accent); padding: 8px 12px; background: rgb(var(--ui-panel-rgb) / .6); font-size: 12px; color: var(--text-soft); }
+.maintenance-restore-footer { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 12px; }
+.maintenance-backup-settings summary:focus-visible, .maintenance-text-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; border-radius: 4px; }
+@media (max-width: 639px) {
+  .maintenance-settings-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .maintenance-settings-summary > .text-muted { flex-basis: 100%; order: 1; margin-left: 0; }
+  .maintenance-settings-summary::after { margin-left: auto; }
+  .maintenance-backup-actions > p { flex-basis: 100%; margin-left: 0; }
+  .maintenance-restore-footer { flex-direction: column; align-items: stretch; }
+  .maintenance-restore-footer > div { justify-content: flex-end; }
+  .maintenance-mapping { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .maintenance-mapping-arrow { transform: rotate(90deg); }
+  .maintenance-restore-steps { gap: 4px; }
+  .maintenance-restore-steps li { gap: 5px; }
+}
 .maintenance-filters { flex-wrap: wrap; }
 .maintenance-filters .search-field { flex: 1 1 260px; }
 @media (max-width: 639px) {

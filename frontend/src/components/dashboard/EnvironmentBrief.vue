@@ -60,7 +60,7 @@ const primaryTarget = computed(() => {
 </script>
 
 <style scoped>
-.environment-brief { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr); align-items: center; gap: 36px; padding: 28px 30px; overflow: hidden; border: 1px solid var(--line-subtle); border-radius: 16px; background: radial-gradient(ellipse at 95% 0, rgba(72, 140, 134, .09), transparent 60%), linear-gradient(115deg, #1a232b, #151c24); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
+.environment-brief { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr); align-items: center; gap: 36px; padding: 28px 30px; overflow: hidden; border: 1px solid var(--line-subtle); border-radius: 16px; background: radial-gradient(ellipse at 95% 0, rgba(72, 140, 134, .09), transparent 60%), linear-gradient(115deg, light-dark(#f7fbfa, #1a232b), light-dark(#ffffff, #151c24)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
 .brief-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--color-surface-200); font-size: 12px; }
 .brief-eyebrow > span:last-child { padding-left: 12px; margin-left: 4px; border-left: 1px solid var(--line-subtle); color: var(--color-surface-400); font-size: 11px; }
 .brief-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-status-ok); box-shadow: 0 0 0 4px rgba(110,231,183,.08); }
@@ -86,7 +86,7 @@ const primaryTarget = computed(() => {
 .brief-counts i { width: 5px; height: 5px; border-radius: 50%; }
 .is-healthy { background: var(--color-status-ok); }.is-attention { background: var(--color-status-warn); }
 .brief-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
-.brief-project { position: relative; min-width: 0; padding: 9px 24px 9px 10px; border: 1px solid var(--line-subtle); border-radius: 8px; background: rgba(15,20,26,.24); transition: background 160ms, border-color 160ms; }
+.brief-project { position: relative; min-width: 0; padding: 9px 24px 9px 10px; border: 1px solid var(--line-subtle); border-radius: 8px; background: light-dark(rgba(255,255,255,.72), rgba(15,20,26,.24)); transition: background 160ms, border-color 160ms; }
 .brief-project-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-surface-200); font-size: 11px; }
 .brief-project-state { display: flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 10px; color: var(--color-surface-400); }
 .brief-project-state i { width: 4px; height: 4px; border-radius: 50%; background: var(--color-status-ok); }
