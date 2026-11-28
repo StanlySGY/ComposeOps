@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import db, { createAiSession, addAiMessage, setSetting, pruneAiData } from '../src/lib/db.js';
 import { createRun, patchRun, appendRunEvent } from '../src/services/agent/run-store.js';
-import { archiveCompletedRunEvents, readRunArchive, dataLifecycleStatus } from '../src/services/data-lifecycle.js';
+import { archiveCompletedRunEvents, readRunArchive, dataLifecycleStatus, archiveStorageStatus, validateArchiveConfiguration } from '../src/services/data-lifecycle.js';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'event-archive-')); fs.chmodSync(root, 0o700);
 process.env.AGENT_ARCHIVE_DIR = root;
 test('retention preserves active/interrupted/unknown task histories', () => {
@@ -28,5 +28,33 @@ test('archive verifies authenticated encryption before pruning and leaves unreso
  appendRunEvent(done.id, { type: 'trace', content: 'must keep without key' }); db.prepare('UPDATE agent_run_events SET created_at=1').run();
  assert.throws(() => archiveCompletedRunEvents(), /密钥/); assert.ok(db.prepare('SELECT count(*) AS n FROM agent_run_events WHERE run_id=?').get(done.id).n);
  assert.ok(dataLifecycleStatus().databaseBytes > 0);
+});
+test('archive readiness requires a key even without old events; inventory ignores symlinks and marks partial scans', async () => {
+ delete process.env.DB_ENCRYPTION_KEY;
+ assert.throws(() => validateArchiveConfiguration(), /密钥/);
+ const missingKey = archiveStorageStatus({ refresh: true });
+ process.env.DB_ENCRYPTION_KEY = 'a'.repeat(64);
+ assert.equal((await missingKey).ready, false);
+ const target=path.join(root,'agent-events-100-abcdef.enc'); fs.writeFileSync(target,'opaque');
+ fs.symlinkSync('/etc/passwd', path.join(root,'agent-events-200-abcdef.enc'));
+ const info=await archiveStorageStatus({ refresh: true });
+ assert.equal(info.ready,true); assert.equal(info.files,2); assert.equal(info.partial,false);
+ for(let i=0;i<1002;i++)fs.writeFileSync(path.join(root,'unrelated-'+i),'');
+ const partial=await archiveStorageStatus({ refresh:true });assert.equal(partial.partial,true);assert.equal(partial.limit,1000);
+ fs.chmodSync(root,0o755);assert.equal((await archiveStorageStatus()).ready,false);fs.chmodSync(root,0o700);
+});
+test('oversized events remain in source while bounded archive reports the skipped records', () => {
+ process.env.DB_ENCRYPTION_KEY='a'.repeat(64);
+ const run=createRun('large completed',{sessionId:createAiSession()});patchRun(run.id,{status:'completed'});
+ db.prepare('INSERT INTO agent_run_events(run_id,event_json,created_at) VALUES(?,?,1)').run(run.id,JSON.stringify({type:'trace',content:'x'.repeat(4*1024**2)}));
+ db.prepare('UPDATE agent_runs SET updated_at=1 WHERE id=?').run(run.id);db.prepare('UPDATE agent_run_events SET created_at=1 WHERE run_id=?').run(run.id);
+ const result=archiveCompletedRunEvents();assert.equal(result.oversized,1);
+ assert.equal(db.prepare('SELECT count(*) n FROM agent_run_events WHERE run_id=?').get(run.id).n,1);
+ assert.match(dataLifecycleStatus().archiveError,/4 MiB/);
+});
+test('concurrent inventory readers share a readable failure when directory becomes unavailable', async t => {
+ t.mock.method(fs.promises,'opendir',async()=>{throw new Error('archive unavailable');});
+ const results=await Promise.all([archiveStorageStatus({refresh:true}),archiveStorageStatus({refresh:true})]);
+ assert.ok(results.every(result=>result.ready===false&&result.error==='archive unavailable'));
 });
 test.after(() => { fs.rmSync(root, { recursive: true, force: true }); delete process.env.AGENT_ARCHIVE_DIR; delete process.env.DB_ENCRYPTION_KEY; });

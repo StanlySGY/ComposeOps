@@ -36,3 +36,17 @@ test('channel failover is charged per attempt; budget exhaustion does not dispat
  await assert.rejects(requestWithAiChannels({ channels, messages: [], tools: [], beforeRequest: data => budget.reserve(data) }, async () => { calls++; throw Object.assign(new Error('limit'), { status: 429 }); }), /预算/);
  assert.equal(calls, 1);
 });
+
+test('malformed and partial provider usage cannot refund the budget, zero settles once', () => {
+ for (const usage of [{ prompt_tokens: 1 }, { total_tokens: -1 }, { total_tokens: '1' }, { total_tokens: 1, completion_tokens: -1 }, { total_tokens: NaN }]) {
+  const budget = createRunBudget({ budgetLimits: limits }, () => {});
+  budget.reserve({ messages: [], tools: [] }); const before = budget.snapshot().used;
+  budget.settle(usage); assert.equal(budget.snapshot().used, before); assert.equal(budget.snapshot().estimated, true);
+ }
+ const budget = createRunBudget({ budgetLimits: limits }, () => {});
+ budget.reserve({ messages: [], tools: [] }); budget.settle({ total_tokens: 0 });
+ assert.equal(budget.snapshot().used, 0); assert.equal(budget.snapshot().estimated, false);
+ budget.settle({ total_tokens: 500 }); assert.equal(budget.snapshot().used, 0);
+ budget.reserve({ messages: [], tools: [] }); budget.settle({ total_tokens: 1, prompt_tokens: 10, completion_tokens: 20 });
+ assert.equal(budget.snapshot().used, 30);
+});

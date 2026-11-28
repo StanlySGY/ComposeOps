@@ -1,4 +1,4 @@
-import { dataLifecycleStatus, archiveCompletedRunEvents } from '../services/data-lifecycle.js';
+import { dataLifecycleReport, validateArchiveConfiguration, archiveCompletedRunEvents } from '../services/data-lifecycle.js';
 import { addOperation, exportUserData, getSetting, getAiRetentionStatus, pruneAiData, importUserData, listOperations, setSetting } from '../lib/db.js';
 import { getNotificationConfig, saveNotificationConfig, sendNotification } from '../services/notifications.js';
 import { checkImageUpdates, getDockerUsage, pruneDocker } from '../services/maintenance.js';
@@ -6,12 +6,12 @@ import { restartAlertMonitor } from '../services/alert-monitor.js';
 import { notificationConfigBody } from '../lib/schemas.js';
 
 export default async function personalRoutes(fastify) {
-  fastify.get('/maintenance/data-lifecycle', async () => dataLifecycleStatus());
+  fastify.get('/maintenance/data-lifecycle', async () => dataLifecycleReport());
   fastify.put('/maintenance/data-lifecycle', { schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } } } }, async request => {
-    if (request.body.enabled && !process.env.AGENT_ARCHIVE_DIR) throw Object.assign(new Error('请先配置仓库外的 AGENT_ARCHIVE_DIR'), { statusCode: 400 });
-    setSetting('retention.run_archive_enabled', request.body.enabled ? '1' : '0'); return dataLifecycleStatus();
+    if (request.body.enabled) { try { validateArchiveConfiguration({ create: true }); } catch (error) { throw Object.assign(error, { statusCode: 400 }); } }
+    setSetting('retention.run_archive_enabled', request.body.enabled ? '1' : '0'); return dataLifecycleReport();
   });
-  fastify.post('/maintenance/data-lifecycle/archive', async () => ({ result: archiveCompletedRunEvents(), ...dataLifecycleStatus() }));
+  fastify.post('/maintenance/data-lifecycle/archive', async () => ({ result: archiveCompletedRunEvents(), ...await dataLifecycleReport() }));
 
   fastify.get('/preferences', async () => ({
     refreshInterval: Number(getSetting('ui.refresh_interval', '5')),

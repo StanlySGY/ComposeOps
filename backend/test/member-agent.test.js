@@ -44,7 +44,7 @@ test('member Agent: isolated context, tools and ownership; no other project or g
  db.prepare("INSERT INTO ai_memories(memory_key,value) VALUES('global','GLOBAL_PRIVATE_CANARY')").run();
  requested = 'compose.ps'; captured = [];
  const response = await start(); assert.equal(response.statusCode, 200, response.body); const run = await until(response.json().run.id, r => r.status === 'completed');
- assert.ok(captured.length >= 2); assert.doesNotMatch(JSON.stringify(captured), /GLOBAL_PRIVATE_CANARY|team-1|server.inspect|memory.search/);
+ assert.ok(captured.length >= 2); assert.doesNotMatch(JSON.stringify(captured), /GLOBAL_PRIVATE_CANARY|team-1|server.inspect|memory.search|tool\.search/);
  assert.ok(captured[0].tools.length <= 5); assert.equal(captured[0].max_tokens, 4096); assert.ok(run.checkpoint.budget.used > 0);
  assert.equal((await app.inject({ url: prefix + '/' + run.id, headers: view })).statusCode, 404);
  assert.equal((await start(op, other.id)).statusCode, 403);

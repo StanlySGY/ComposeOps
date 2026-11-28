@@ -1,3 +1,4 @@
+import { createToolDiscovery, SEARCH_TOOL_NAME } from './tool-discovery.js';
 import { createRunBudget } from './budget.js';
 import { assertAgentAuthority } from './scope.js';
 import { accountById } from '../../lib/accounts.js';
@@ -649,15 +650,15 @@ export class OperationsAgent {
       publishTrace('tool_discovery', `已按本轮意图筛选工具：${visibleTools.length}/${allTools.length} 项`, {
         toolCount: visibleTools.length, totalTools: allTools.length, domains: selectedDomains,
       });
-      // 转换为 OpenAI tool 格式
-      const tools = visibleTools.map((tool) => ({
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters,
-        }
+      // Discovery state is local to this execution, never attached to the shared Agent.
+      const discoverable = allTools.filter(tool => roleAllowed(role, tool.name)
+        && (context.webSearchEnabled === true || !tool.name.startsWith('web.')));
+      const discovery = !context.memberScope && discoverable.length > visibleTools.length
+        ? createToolDiscovery(discoverable, visibleTools) : null;
+      let tools = discovery ? discovery.schemas() : visibleTools.map(tool => ({
+        type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters },
       }));
+      if (discovery) messages[0].content += '\n如果当前目录缺少完成目标的工具，先调用 tool.search 搜索能力；只能使用返回的已加载工具。搜索不代表授权或执行。';
 
       updateAgentPlan(planId, { status: 'executing', progressStage: 'Tool Loop 执行中', updatedAt: new Date().toISOString() });
       publishTrace('loop_started', `开始 Tool Loop 执行,角色:${roleMeta.label}`, { tools: tools.length });
@@ -730,6 +731,7 @@ export class OperationsAgent {
             'gen_ai.operation.name': 'chat', 'gen_ai.request.model': cfg.model,
             'composeops.loop.iteration': loopCount,
           });
+          if (discovery) tools = discovery.schemas();
           const response = await callOpenAI({
             ...cfg,
             messages: budget.fit(callMessages, tools),
@@ -837,7 +839,7 @@ export class OperationsAgent {
             onEvent({ type: 'tool_requested', toolCallId: toolCall.id, tool: toolName, params: toolParams });
 
             // 检查工具风险等级,决定是否需要确认
-            const tool = this.getTool(toolName);
+            const tool = toolName === SEARCH_TOOL_NAME ? discovery?.tool : this.getTool(toolName);
             if (!tool) {
               const errorMsg = `工具 ${toolName} 未注册`;
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
@@ -845,7 +847,7 @@ export class OperationsAgent {
               continue;
             }
 
-            if (!roleAllowed(role, toolName)) {
+            if (toolName !== SEARCH_TOOL_NAME && !roleAllowed(role, toolName)) {
               const errorMsg = `当前 Agent 角色不允许使用工具 ${toolName}`;
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errorMsg });
               onEvent({ type: 'tool_error', toolCallId: toolCall.id, tool: toolName, error: errorMsg });
@@ -868,7 +870,7 @@ export class OperationsAgent {
               onEvent({ type: 'tool_error', toolCallId: toolCall.id, tool: toolName, error: error.message });
               continue;
             }
-            const dynamicRisk = assessRisk(toolName, toolParams, { ...context, ...resolved });
+            const dynamicRisk = toolName === SEARCH_TOOL_NAME ? 'low' : assessRisk(toolName, toolParams, { ...context, ...resolved });
             const policyProjectId = resolved.project?.id || toolParams.projectId || context.projectId || '';
             const policy = evaluateAgentPolicy({ toolName, params: toolParams, projectId: policyProjectId });
             const policySpan = otelTrace.startSpan('tool_policy', {
@@ -1095,7 +1097,9 @@ export class OperationsAgent {
                 ruleName: policyAllowsSkip ? policy.ruleName : '', reason: policyAllowsSkip ? policy.reason : '',
                 parametersHash, details: { confirmationStatus, projectId: policyProjectId || null },
               });
-              const result = await this.executeTool(toolName, effectiveParams, context, trace, executionContext);
+              const result = toolName === SEARCH_TOOL_NAME
+                ? { success: true, result: discovery.tool.execute(effectiveParams), durationMs: 0, postconditionStatus: 'passed' }
+                : await this.executeTool(toolName, effectiveParams, context, trace, executionContext);
               toolSpan.end({ ok: !!result.success, values: { 'composeops.tool.duration_ms': Number(result.durationMs || 0) } });
               updateAgentExecution(execId, { status: result.success ? 'success' : 'failed', result: result.result, error: result.error, durationMs: result.durationMs });
               recordAgentAuditEvent({

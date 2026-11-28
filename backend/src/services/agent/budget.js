@@ -37,7 +37,7 @@ export function createRunBudget(context, emit) {
   const limits = context.budgetLimits || readAgentBudget();
   const saved = context.durableRunId ? getRun(context.durableRunId)?.checkpoint?.budget : null;
   const state = { used: 0, reported: 0, reservedUnknown: 0, attempts: 0, savedBytes: 0, ...saved, limits };
-  let reservation = 0;
+  let reservation = null;
   const publish = () => {
     const next = { ...state, remaining: Math.max(0, limits.total - state.used), estimated: state.reservedUnknown > 0, warning: state.used >= limits.total * .8 };
     if (context.durableRunId) { const run = getRun(context.durableRunId); patchRun(run.id, { checkpoint: { ...run.checkpoint, budget: next } }); }
@@ -47,18 +47,33 @@ export function createRunBudget(context, emit) {
     limits,
     fit(messages, tools) { const fit = fitAgentContext(messages, tools, limits.inputBytes); state.savedBytes += fit.savedBytes; return fit.messages; },
     reserve({ messages, tools }) {
-      reservation = bytes({ messages, tools }) + limits.output;
-      if (state.attempts >= limits.rounds || state.used + reservation > limits.total) throw budgetExceeded();
+      const nextReservation = bytes({ messages, tools }) + limits.output;
+      if (state.attempts >= limits.rounds || state.used + nextReservation > limits.total) throw budgetExceeded();
+      reservation = nextReservation;
       state.used += reservation; state.reservedUnknown += reservation; state.attempts++; publish();
     },
     settle(usage) {
-      const count = Number(usage?.total_tokens) || (Number(usage?.prompt_tokens) + Number(usage?.completion_tokens));
-      if (Number.isFinite(count) && count >= 0 && usage && (usage.total_tokens != null || usage.prompt_tokens != null)) {
+      if (reservation === null) return; // Duplicate transport completion must not credit a request twice.
+      const count = verifiedUsageTotal(usage);
+      if (count !== null) {
         state.used += count - reservation; state.reservedUnknown -= reservation; state.reported += count;
       }
-      reservation = 0; publish();
+      reservation = null; publish();
     },
     assertRemaining() { if (state.used >= limits.total) throw budgetExceeded(); },
     snapshot: publish,
   };
+}
+
+/** Partial, negative or malformed provider usage never refunds a conservative reservation. */
+export function verifiedUsageTotal(usage) {
+  const valid = value => Number.isSafeInteger(value) && value >= 0;
+  if (!usage || typeof usage !== 'object') return null;
+  const { total_tokens: total, prompt_tokens: input, completion_tokens: output } = usage;
+  for (const value of [total, input, output]) if (value != null && !valid(value)) return null;
+  const components = valid(input) && valid(output) ? input + output : null;
+  if (components !== null && !valid(components)) return null;
+  if (!valid(total)) return components;
+  // An inconsistent total cannot erase tokens reported in the component fields.
+  return Math.max(total, components ?? (input || 0) + (output || 0));
 }

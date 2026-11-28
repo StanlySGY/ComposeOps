@@ -16,7 +16,7 @@ for (const key of ['DB_ENCRYPTION_KEY', 'DB_ENCRYPTION_KEY_FILE', 'OTEL_EXPORTER
 const raw = new Docker(), name = 'composeops-agent-eval-' + randomBytes(5).toString('hex');
 const fixtureIds = new Set(), reports = [], original = {};
 const before = (await raw.listContainers({ all: true })).map(row => ({ id: row.Id, state: row.State }));
-const { default: db, createAiSession, getProjectPreference, setProjectPreference } = await import('../backend/src/lib/db.js');
+const { default: db, createAiSession, getProjectPreference, setProjectPreference, listAiMemories } = await import('../backend/src/lib/db.js');
 const { getDockerForHost } = await import('../backend/src/services/docker-hosts.js');
 const { scanProjects, invalidateScanCache } = await import('../backend/src/services/scanner.js');
 const { setAiConfig } = await import('../backend/src/services/ai.js');
@@ -26,7 +26,7 @@ const { getRun, runEffects } = await import('../backend/src/services/agent/run-s
 const { projectGroupMetadata } = await import('../backend/src/services/project-groups.js');
 const { listSreProfiles } = await import('../backend/src/services/sre-profiles.js');
 const client = getDockerForHost('local');
-const allowed = new Set(['project.discover','project.list_managed','project.manage','group.list','group.save','group.assign','compose.ps','compose.logs','compose.restart','compose.stop','compose.up','sre.context','sre.profile.save','ui.present']);
+const allowed = new Set(['project.discover','project.list_managed','project.manage','group.list','group.save','group.assign','compose.ps','compose.logs','compose.restart','compose.stop','compose.up','sre.context','sre.profile.save','ui.present','memory.save']);
 const agent = new OperationsAgent();
 for (const tool of [...agent.tools.keys()]) if (!allowed.has(tool)) agent.tools.delete(tool);
 const getTool = agent.getTool.bind(agent); agent.getTool = name => allowed.has(name) ? getTool(name) : null;
@@ -65,6 +65,11 @@ try {
   client.getContainer = id => { assert.ok(fixtureIds.has(id), 'Model requested non-fixture container'); return raw.getContainer(id); };
   client.info = async () => ({ ID: (await raw.info()).ID });
   const [project] = await scanProjects('local'); assert.ok(project); assert.equal(project.containers.length, 2);
+  await run('discover-hidden-memory-tool', '请先用 tool.search 查找保存长期偏好的工具，再记录明确偏好：键 acceptance.discovery，值“维护操作完成后需要中文验收摘要”，来源是用户陈述。仅写入这个偏好，不操作容器。', project, ({ events }) => {
+    assert.ok(events.some(event => event.type === 'tool_requested' && event.tool === 'tool.search'));
+    assert.ok(events.some(event => event.type === 'tool_requested' && event.tool === 'memory.save'));
+    assert.ok(listAiMemories(50).some(item => item.memoryKey === 'acceptance.discovery' && item.value.includes('中文')));
+  });
   await run('discover-adopt-and-group', `请发现 local 节点的 ${name} 项目，纳管并关闭 Compose 目录授权，放入新建分组“隔离验收组”。只处理这个项目，逐次确认由验收人员提供。完成后读取分组核对。`, project, ({ events }) => {
     assert.equal(getProjectPreference(project.id).managed, 1); assert.equal(projectGroupMetadata(project.id).groupName, '隔离验收组'); assert.ok(events.some(e => e.type === 'confirmation_required' && e.tool === 'project.manage'));
   });

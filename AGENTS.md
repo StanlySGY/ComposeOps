@@ -94,6 +94,9 @@ Use CodeGraph to understand or locate code BEFORE grep/find or reading files, wh
 **Other useful commands:** `codegraph query` (symbol search), `codegraph node` (one symbol's source + caller/callee trail), `codegraph callers` / `codegraph callees` / `codegraph impact` (dependency analysis), `codegraph files` (project structure).
 
 ## Agent 预算与长期维护（v37）
+- Agent 可通过运行内 `tool.search` 按需加载已有工具，目录先按角色与联网开关过滤；成员执行器不开放全局搜索。发现状态为单次执行局部闭包，不注册到全局/MCP，不绕过策略、审批或项目权限。每次最多 5 项，每轮任务最多追加 12 项 / 24000 UTF-8 字节定义。
+- 预算结算只接受非负安全整数；分量不完整、非法或缺失 usage 保留预留，重复 settle 不重复退款，总量与分量冲突时取较大值。
 - 请求预算在每次渠道调用前预留；无 usage/失败尝试保守计账。任务恢复继承 checkpoint.budget，trace 更新不得覆盖预算。模型回喂禁止包含 thoughts 全量轨迹。
 - 未完成/结果未知任务的历史不参与 AI 定期清理。已完成任务过期事件只能在外置目录加密归档、fsync、解密核对后删除精确行；不能清理任务结果/副作用证据来缩小数据库。
+- 归档启用前校验外置密钥、仓库/数据库外目录及 0700 权限；批次最多 100 条、约 8 MiB，单条超过 4 MiB 留源并提示离线处理。目录容量异步采样、30 秒缓存、最多检查 1000 项，部分扫描必须明示；共享采样失败不得导致并发 GET 变成 500。
 - `scripts/agent-long-observation.mjs --hours=24 --output=/outside/path --health=http://127.0.0.1:28765/health`：合成模型隔离负载与线上只读存活观察。未跑满实际时间不得记录 passed。
