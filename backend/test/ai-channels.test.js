@@ -261,6 +261,25 @@ test('流式 content 与 reasoning 的秘密跨 SSE chunk 拆分时不会泄露�
   assert.ok(eofReasoning.join('').includes('[REDACTED]'));
 });
 
+test('带空格和转义引号的凭据跨 SSE 小分片时，正文与推理均完整脱敏', async t => {
+  const content = '正常前文\nPASSWORD="fictional alpha beta"\n' + JSON.stringify({ DB_PASSWORD: 'fictional "quoted" tail', port: 8080 }) + '\n正常尾文 保留空格🙂\n分析结束';
+  const reasoning = "判断过程\nDB_PASSWORD='fictional ''quoted'' tail'\nAuthorization: Basic ZmljdGlvbmFsOnBhc3N3b3Jk\n继续分析\n判断结束";
+  const deltas = [];
+  for (const value of content) deltas.push({ content: value });
+  for (const value of reasoning) deltas.push({ reasoning_content: value });
+  const wire = deltas.map((delta, index) => frame(delta, index === deltas.length - 1 ? 'stop' : undefined)).join('') + 'data: [DONE]\n\n';
+  t.mock.method(globalThis, 'fetch', async () => new Response(wire));
+  const tokens = [], thoughts = [];
+  const check = text => { for (const secret of ['fictional', 'alpha', 'beta', 'quoted', 'tail', 'ZmljdGlvbmFsOnBhc3N3b3Jk']) assert.ok(!text.includes(secret), secret); };
+  const result = await callOpenAI({ channels: [channel('quoted-redaction')], messages: [], stream: true,
+    onToken: chunk => { tokens.push(chunk); check(tokens.join('')); },
+    onReasoning: chunk => { thoughts.push(chunk); check(thoughts.join('')); },
+  });
+  assert.equal(result.content, tokens.join(''));
+  assert.ok(tokens.join('').includes('正常尾文 保留空格🙂\n'));
+  assert.ok(thoughts.join('').includes('继续分析\n'));
+});
+
 test('输出文字或推理后流中断不自动切换，不拼接不同渠道内容', async t => {
   for (const delta of [{ content: '已经输出' }, { reasoning_content: '正在推理' }]) {
     let calls = 0;

@@ -9,17 +9,11 @@
  *
  * 单用户控制台,集合按进程生命周期累积;提供 reset 仅供测试。
  */
-import { isSensitiveKey, redactText } from './redaction.js';
+import { isSensitiveKey, redactText, sensitiveAssignments } from './redaction.js';
 
 const VALUE_MIN = 4;
 const VALUE_MAX = 400;
 const MAX_VALUES = 300;
-
-/** KEY=VALUE(KEY 形态宽松,由 isSensitiveKey 把关)与 JSON "KEY":"VALUE" 两种收割形态。 */
-const HARVEST_PATTERNS = [
-  /(?:^|[\n|;,]|[\s"'{(])([A-Za-z][A-Za-z0-9_.-]{1,63})\s*=\s*(?:"([^"\n]{1,400})"|'([^'\n]{1,400})'|([^\s,;|&`]{1,400}))/g,
-  /"([A-Za-z][A-Za-z0-9_.-]{1,63})"\s*:\s*"([^"\n]{1,400})"/g,
-];
 
 /** 不依赖键名的静态密钥形态(与 redaction.js 的键值形态互补)。 */
 const STATIC_SECRET_PATTERNS = [
@@ -38,7 +32,7 @@ const STREAM_TOKEN_PREFIXES = [
   'apiKey', 'privateKey', 'accessKey', 'authKey', 'signingKey',
   '"API_KEY"', '"apiKey"', '"password"', '"token"', '"secret"', "'API_KEY'", "'apiKey'", "'password'", "'token'", "'secret'",
 ];
-const SENSITIVE_ASSIGNMENT_TAIL = /(?:^|[\s,{;])((?:"([^"]{2,64})"|'([^']{2,64})'|([A-Za-z][A-Za-z0-9_.-]{1,63}))\s*[:=]\s*["']?[^"'\s,;|&]*)$/;
+const SENSITIVE_ASSIGNMENT_TAIL = /(?:^|[\s,{;])((?:"([^"]{2,64})"|'([^']{2,64})'|([A-Za-z][A-Za-z0-9_.-]{1,63}))[ \t]*[:=][ \t]*["']?[^"'\s,;|&]*)$/;
 const BEARER_TAIL = /(?:^|[\s,{;])(authorization\s*:\s*bearer\s+[A-Za-z0-9._~+/-]*)$/i;
 const BEARER_GENERIC_TAIL = /(?:^|[^A-Za-z0-9])(bearer\s+[A-Za-z0-9._~+/-]*)$/i;
 const AUTHORIZATION_COLON_TAIL = /(?:^|[^A-Za-z0-9])(authorization\s*:\s*)$/i;
@@ -59,13 +53,14 @@ export function harvestSecretValues(text) {
   const source = String(text ?? '');
   if (!source || source.length > 2_000_000) return 0;
   let added = 0;
-  for (const pattern of HARVEST_PATTERNS) {
-    pattern.lastIndex = 0;
-    let match;
-    while ((match = pattern.exec(source)) !== null) {
-      const key = match[1];
-      const value = [match[2], match[3], match[4]].find((item) => typeof item === 'string' && item.length) || '';
-      if (!key || !isSensitiveKey(key)) continue;
+  for (const span of sensitiveAssignments(source)) {
+    const raw = source.slice(span.valueStart, span.valueEnd);
+    const values = new Set([raw]);
+    if (span.quote === '"' && span.complete) {
+      try { values.add(JSON.parse('"' + raw + '"')); } catch { /* Literal env value. */ }
+    } else if (span.quote === "'") values.add(raw.replace(/''/g, "'").replace(/\\'/g, "'"));
+    if (span.authorization) values.add(raw.replace(/^(?:Basic|Bearer)\s+/i, ''));
+    for (const value of values) {
       const trimmed = value.trim();
       if (trimmed.length < VALUE_MIN || trimmed.length > VALUE_MAX) continue;
       if (looksLikePlaceholder(trimmed)) continue;
@@ -90,6 +85,16 @@ export function secretStreamHoldbackLength(text) {
   const source = String(text ?? '');
   if (!source) return 0;
   let hold = 0;
+  const assignments = [...sensitiveAssignments(source)];
+  for (const span of assignments) {
+    if (!span.complete || (span.quote && span.end === source.length)) hold = Math.max(hold, source.length - span.start);
+  }
+  // Preserve an unfinished identifier (and its opening quote) until it is
+  // clear whether the next chunk supplies a sensitive assignment separator.
+  const identifier = /(?:^|[^A-Za-z0-9_.$-])(['"]?[A-Za-z_](?:[A-Za-z0-9_.-]{0,126}[A-Za-z0-9_-])?['"]?)$/.exec(source);
+  if (identifier) hold = Math.max(hold, identifier[1].length);
+  const pendingKey = /(?:^|[^A-Za-z0-9_.$-])((['"]?)([A-Za-z_][A-Za-z0-9_.-]{0,127})\2[\t\n\r ]+)$/.exec(source);
+  if (pendingKey && (isSensitiveKey(pendingKey[3]) || /^(?:proxy-)?authorization$/i.test(pendingKey[3]))) hold = Math.max(hold, pendingKey[1].length);
 
   for (const secret of harvested) {
     const max = Math.min(secret.length - 1, source.length);
@@ -130,6 +135,12 @@ export function secretStreamHoldbackLength(text) {
   const bearerGenericTail = BEARER_GENERIC_TAIL.exec(source);
   if (bearerGenericTail) hold = Math.max(hold, bearerGenericTail[1].length);
 
+  // A held token may be inside an already closed quoted value. Never emit its
+  // key before the held tail, or the next chunk would lose redaction context.
+  for (const span of assignments) {
+    const boundary = source.length - hold;
+    if (boundary > span.start && boundary < span.end) hold = source.length - span.start;
+  }
   return hold;
 }
 
@@ -139,6 +150,13 @@ export function secretStreamHoldbackLength(text) {
  */
 export function redactSecretStreamTail(text) {
   const source = String(text ?? '');
+  // Generic identifier lookahead can exceed a known secret prefix. On final
+  // flush only the actual secret suffix is masked, not the preceding word.
+  let knownSuffix = 0;
+  for (const secret of harvested) for (let size = Math.min(secret.length - 1, source.length); size >= 4 && size > knownSuffix; size--) {
+    if (source.endsWith(secret.slice(0, size))) { knownSuffix = size; break; }
+  }
+  if (knownSuffix) return redactSecrets(source.slice(0, -knownSuffix)) + '[REDACTED]';
   const hold = secretStreamHoldbackLength(source);
   if (!hold) return redactSecrets(source);
 
@@ -149,6 +167,8 @@ export function redactSecretStreamTail(text) {
   const assignmentTail = SENSITIVE_ASSIGNMENT_TAIL.exec(source);
   const assignmentKey = assignmentTail && (assignmentTail[2] || assignmentTail[3] || assignmentTail[4] || '');
   const keyOrBearerPrefix = Boolean(
+    [...sensitiveAssignments(source)].some(span => !span.complete)
+    ||
     (assignmentTail && isSensitiveKey(assignmentKey))
     || BEARER_PREFIX_TAIL.exec(source)
     || AUTHORIZATION_COLON_TAIL.exec(source)
@@ -162,11 +182,11 @@ export function redactSecretStreamTail(text) {
 }
 
 /**
- * 对出站文本做值级脱敏:先过键值形态/Bearer 的静态规则,再按"最长优先"
- * 逐个替换已知密钥值(split/join 避免正则转义问题),最后补静态 token 形态。
+ * 对出站文本做值级脱敏:先按"最长优先"替换完整已知值，再处理静态 token
+ * 和键值语法。不能先遮住已知值中的片段，否则剩余部分将失去匹配上下文。
  */
 export function redactSecrets(text) {
-  let out = redactText(text);
+  let out = String(text ?? '');
   if (harvested.size) {
     const values = [...harvested].sort((a, b) => b.length - a.length);
     for (const value of values) out = out.split(value).join('[REDACTED]');
@@ -175,7 +195,7 @@ export function redactSecrets(text) {
     pattern.lastIndex = 0;
     out = out.replace(pattern, '[REDACTED]');
   }
-  return out;
+  return redactText(out);
 }
 
 /**

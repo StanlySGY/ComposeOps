@@ -5,11 +5,57 @@ export function isSensitiveKey(key = '') {
   return SENSITIVE_KEY.test(String(key));
 }
 
+/** Locate complete values, including quotes and escapes, before replacing any
+ * text. Masking a prefix first would destroy the context needed for its tail. */
+export function* sensitiveAssignments(source) {
+  const heads = /(^|[^A-Za-z0-9_.$-])(?:(['"])([A-Za-z_][A-Za-z0-9_.-]{0,127})\2|([A-Za-z_][A-Za-z0-9_.-]{0,127}))[\t\n\r ]*[=:][ \t]*/g;
+  let match;
+  while ((match = heads.exec(source))) {
+    const key = match[3] || match[4];
+    const authorization = /^(?:proxy-)?authorization$/i.test(key);
+    if (!authorization && !isSensitiveKey(key)) continue;
+    const start = match.index + match[1].length;
+    let valueStart = heads.lastIndex;
+    // JSON may place a quoted value on the next line. An empty env assignment
+    // must not eat the following setting, so only cross newlines for quotes.
+    const afterWhitespace = source.slice(valueStart).search(/\S/);
+    if (afterWhitespace > 0 && /['"]/.test(source[valueStart + afterWhitespace])) valueStart += afterWhitespace;
+    const quote = /['"]/.test(source[valueStart] || '') ? source[valueStart] : '';
+    let end = valueStart, valueEnd, complete = false;
+    if (quote) {
+      valueStart++; end = valueStart;
+      while (end < source.length) {
+        if (source[end] === '\\' && end + 1 < source.length) { end += 2; continue; }
+        if (source[end] === quote) {
+          if (quote === "'" && source[end + 1] === "'") { end += 2; continue; }
+          complete = true; break;
+        }
+        end++;
+      }
+      valueEnd = end;
+      if (complete) end++;
+    } else {
+      const delimiter = authorization ? /[\r\n"']/ : /[\s,;|&`"'\]})]/;
+      if (source.startsWith('[REDACTED]', end)) end += '[REDACTED]'.length;
+      while (end < source.length && !delimiter.test(source[end])) end++;
+      valueEnd = end; complete = end < source.length;
+      // Whitespace alone may still precede a JSON string in the next chunk.
+      if (end === valueStart && /^\s*$/.test(source.slice(end))) complete = false;
+    }
+    yield { start, valueStart, valueEnd, end, quote, key, authorization, complete };
+    heads.lastIndex = Math.max(heads.lastIndex, end);
+  }
+}
+
 export function redactText(value) {
-  return String(value ?? '')
+  const source = String(value ?? '');
+  let output = '', cursor = 0;
+  for (const span of sensitiveAssignments(source)) {
+    output += source.slice(cursor, span.valueStart) + '[REDACTED]';
+    cursor = span.valueEnd;
+  }
+  return (output + source.slice(cursor))
     .replace(/((?:authorization\s*:\s*)?bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:SECRET|TOKEN|PASSWORD|PASSWD|PASS|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH[_-]?KEY|SIGNING[_-]?KEY)\s*[=:]\s*)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:"|')?(?:SECRET|TOKEN|PASSWORD|PASSWD|PASS|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH[_-]?KEY|SIGNING[_-]?KEY)(?:"|')?\s*:\s*")([^"]*)(")/gi, '$1[REDACTED]$3')
     .slice(0, MAX_STRING_LENGTH);
 }
 
