@@ -1,4 +1,4 @@
-import {
+import db, {
   upsertAsset,
   getAsset,
   listAssets,
@@ -7,7 +7,7 @@ import {
   listAssetRelations,
   deleteAssetRelation,
 } from '../lib/db.js';
-import { listHosts, getActiveHostId, getActivityDocker } from './docker-hosts.js';
+import { listHosts, getActiveHostId, getDockerForHost, getHost, hostConnectionRevision } from './docker-hosts.js';
 import { scanProjects } from './scanner.js';
 
 /**
@@ -17,105 +17,159 @@ import { scanProjects } from './scanner.js';
  * - 知识图谱直接读取本服务,不再维护第二套实体。
  */
 
-/** 从当前 Docker 扫描结果同步资产与关系(幂等 upsert)。 */
-export async function syncAssets() {
-  const activeHostId = getActiveHostId();
-  const hosts = listHosts();
-  const projects = await scanProjects().catch(() => []);
-  const docker = getActivityDocker();
-  const [volumeResult, networkResult] = await Promise.all([
-    docker.listVolumes().catch(() => ({ Volumes: [] })),
-    docker.listNetworks().catch(() => []),
-  ]);
-
-  // 1. Host 资产
-  for (const host of hosts) {
-    upsertAsset({
-      id: `host:${host.id}`,
-      kind: 'host',
-      name: host.id,
-      displayName: host.name,
-      hostId: host.id,
-      status: host.status === 'online' ? 'online' : 'offline',
-      properties: { type: host.type, version: host.version || '', containerCount: host.containerCount || 0, latencyMs: host.latencyMs || 0 },
-      source: 'docker',
-    });
+/** Capture one complete node snapshot before touching the inventory. */
+async function readSyncSnapshot(hostId, { timeoutMs = 10000 } = {}) {
+  const revision = hostConnectionRevision(hostId);
+  const docker = getDockerForHost(hostId);
+  const controller = new AbortController(), { signal } = controller;
+  const deadline = Math.max(1, Math.min(Number(timeoutMs) || 10000, 60000));
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error('资产同步读取超时，请检查节点连接后重试；既有台账保留。'), { statusCode: 504 })), deadline);
+  let onAbort;
+  const cancelled = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  const read = (label, action) => Promise.resolve().then(action).catch(cause => {
+    if (signal.aborted) throw signal.reason;
+    const changed = label === '项目清单' && cause.statusCode === 409;
+    throw Object.assign(new Error(changed ? '扫描期间节点配置已变化，请重新同步；既有台账保留。' : `${label}读取失败，请检查节点连接后重试；既有台账保留。`), { statusCode: changed ? 409 : 502 });
+  });
+  try {
+    const [projects, volumeResult, networkResult] = await Promise.race([
+      Promise.all([
+        read('项目清单', () => scanProjects(hostId, { signal, timeoutMs: deadline })),
+        read('卷清单', () => docker.listVolumes({ abortSignal: signal })),
+        read('网络清单', () => docker.listNetworks({ abortSignal: signal })),
+      ]), cancelled,
+    ]);
+    if (!getHost(hostId) || hostConnectionRevision(hostId) !== revision) {
+      throw Object.assign(new Error('扫描期间节点配置已变化，请重新同步；既有台账保留。'), { statusCode: 409 });
+    }
+    if (!Array.isArray(projects) || !volumeResult || !Object.hasOwn(volumeResult, 'Volumes') ||
+        (volumeResult.Volumes !== null && !Array.isArray(volumeResult.Volumes)) || !Array.isArray(networkResult)) {
+      throw Object.assign(new Error('节点返回的资产清单格式无效，未更新既有台账。'), { statusCode: 502 });
+    }
+    // Docker can return a partial volume list with warnings even on HTTP 200.
+    if (volumeResult.Warnings?.length) {
+      throw Object.assign(new Error('卷清单含驱动读取警告，无法确认完整性；请检查节点卷驱动后重试，既有台账保留。'), { statusCode: 502 });
+    }
+    return { projects, volumeResult, networkResult };
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+    controller.abort();
   }
+}
 
-  // 2. Project 资产 + 关系(project runs_on host)
-  const pendingVolumeRelations = [];
-  for (const project of projects) {
-    const projectId = project.id || project.projectName || project.name;
-    if (!projectId) continue;
-    upsertAsset({
-      id: `project:${projectId}`,
-      kind: 'project',
-      name: projectId,
-      displayName: project.projectName || project.name || projectId,
-      hostId: activeHostId,
-      status: project.status || 'unknown',
-      properties: { composeFile: project.composeFile || '', containerCount: project.containerCount || 0 },
-      source: 'scanner',
-    });
-    addAssetRelation(`project:${projectId}`, `host:${activeHostId}`, 'runs_on');
+const syncInFlights = new Map();
 
-    // 3. Container 资产 + 关系(container runs_on project)
-    for (const container of project.containers || []) {
-      const containerId = container.id || container.containerId;
-      if (!containerId) continue;
+/** Concurrent callers share a snapshot only within the same connection revision. */
+export async function syncAssets(options = {}) {
+  const hostId = getActiveHostId(), revision = hostConnectionRevision(hostId);
+  const existing = syncInFlights.get(hostId);
+  if (existing?.revision === revision) return existing.promise;
+  const pending = { revision, promise: null };
+  pending.promise = synchronizeNode(hostId, options).finally(() => {
+    if (syncInFlights.get(hostId) === pending) syncInFlights.delete(hostId);
+  });
+  syncInFlights.set(hostId, pending);
+  return pending.promise;
+}
+
+/** 从固定节点完整扫描后，在一个事务中更新资产与关系。 */
+async function synchronizeNode(activeHostId, options) {
+  const hosts = listHosts();
+  const { projects, volumeResult, networkResult } = await readSyncSnapshot(activeHostId, options);
+  return db.transaction(() => {
+    // 1. Host 资产
+    for (const host of hosts) {
       upsertAsset({
-        id: `container:${containerId}`,
-        kind: 'container',
-        name: containerId,
-        displayName: container.name || containerId,
+        id: `host:${host.id}`,
+        kind: 'host',
+        name: host.id,
+        displayName: host.name,
+        hostId: host.id,
+        status: host.status === 'online' ? 'online' : 'offline',
+        properties: { type: host.type, version: host.version || '', containerCount: host.containerCount || 0, latencyMs: host.latencyMs || 0 },
+        source: 'docker',
+      });
+    }
+
+    // 2. Project 资产 + 关系(project runs_on host)
+    const pendingVolumeRelations = [];
+    for (const project of projects) {
+      const projectId = project.id || project.projectName || project.name;
+      if (!projectId) continue;
+      upsertAsset({
+        id: `project:${projectId}`,
+        kind: 'project',
+        name: projectId,
+        displayName: project.projectName || project.name || projectId,
         hostId: activeHostId,
-        status: container.state || container.status || 'unknown',
-        properties: { image: container.image || '', project: projectId },
+        status: project.status || 'unknown',
+        properties: { composeFile: project.composeFile || '', containerCount: project.containerCount || 0 },
         source: 'scanner',
       });
-      addAssetRelation(`container:${containerId}`, `project:${projectId}`, 'runs_on');
-      for (const volumeName of container.volumes || []) {
-        if (volumeName) pendingVolumeRelations.push({ containerId, volumeName: String(volumeName) });
+      addAssetRelation(`project:${projectId}`, `host:${activeHostId}`, 'runs_on');
+
+      // 3. Container 资产 + 关系(container runs_on project)
+      for (const container of project.containers || []) {
+        const containerId = container.id || container.containerId;
+        if (!containerId) continue;
+        upsertAsset({
+          id: `container:${containerId}`,
+          kind: 'container',
+          name: containerId,
+          displayName: container.name || containerId,
+          hostId: activeHostId,
+          status: container.state || container.status || 'unknown',
+          properties: { image: container.image || '', project: projectId },
+          source: 'scanner',
+        });
+        addAssetRelation(`container:${containerId}`, `project:${projectId}`, 'runs_on');
+        for (const volumeName of container.volumes || []) {
+          if (volumeName) pendingVolumeRelations.push({ containerId, volumeName: String(volumeName) });
+        }
       }
     }
-  }
 
-  for (const volume of volumeResult?.Volumes || []) {
-    if (!volume?.Name) continue;
-    upsertAsset({
-      id: `volume:${activeHostId}:${volume.Name}`,
-      kind: 'volume',
-      name: volume.Name,
-      displayName: volume.Name,
-      hostId: activeHostId,
-      status: 'available',
-      properties: { driver: volume.Driver || '', mountpoint: volume.Mountpoint || '', scope: volume.Scope || '' },
-      source: 'docker',
-    });
-    addAssetRelation(`volume:${activeHostId}:${volume.Name}`, `host:${activeHostId}`, 'runs_on');
-  }
-  // 容器与卷的挂载血缘：先创建卷资产，再写关系，避免关系指向不存在的资产。
-  for (const { containerId, volumeName } of pendingVolumeRelations) {
-    const volumeAssetId = `volume:${activeHostId}:${volumeName}`;
-    if (getAsset(volumeAssetId)) addAssetRelation(`container:${containerId}`, volumeAssetId, 'mounts');
-  }
-  for (const network of networkResult || []) {
-    if (!network?.Id && !network?.Name) continue;
-    const networkName = network.Name || network.Id;
-    upsertAsset({
-      id: `network:${activeHostId}:${networkName}`,
-      kind: 'network',
-      name: networkName,
-      displayName: networkName,
-      hostId: activeHostId,
-      status: Object.keys(network.Containers || {}).length ? 'connected' : 'available',
-      properties: { driver: network.Driver || '', scope: network.Scope || '', internal: !!network.Internal },
-      source: 'docker',
-    });
-    addAssetRelation(`network:${activeHostId}:${networkName}`, `host:${activeHostId}`, 'runs_on');
-  }
+    for (const volume of volumeResult?.Volumes || []) {
+      if (!volume?.Name) continue;
+      upsertAsset({
+        id: `volume:${activeHostId}:${volume.Name}`,
+        kind: 'volume',
+        name: volume.Name,
+        displayName: volume.Name,
+        hostId: activeHostId,
+        status: 'available',
+        properties: { driver: volume.Driver || '', mountpoint: volume.Mountpoint || '', scope: volume.Scope || '' },
+        source: 'docker',
+      });
+      addAssetRelation(`volume:${activeHostId}:${volume.Name}`, `host:${activeHostId}`, 'runs_on');
+    }
+    // 容器与卷的挂载血缘：先创建卷资产，再写关系，避免关系指向不存在的资产。
+    for (const { containerId, volumeName } of pendingVolumeRelations) {
+      const volumeAssetId = `volume:${activeHostId}:${volumeName}`;
+      if (getAsset(volumeAssetId)) addAssetRelation(`container:${containerId}`, volumeAssetId, 'mounts');
+    }
+    for (const network of networkResult || []) {
+      if (!network?.Id && !network?.Name) continue;
+      const networkName = network.Name || network.Id;
+      upsertAsset({
+        id: `network:${activeHostId}:${networkName}`,
+        kind: 'network',
+        name: networkName,
+        displayName: networkName,
+        hostId: activeHostId,
+        status: Object.keys(network.Containers || {}).length ? 'connected' : 'available',
+        properties: { driver: network.Driver || '', scope: network.Scope || '', internal: !!network.Internal },
+        source: 'docker',
+      });
+      addAssetRelation(`network:${activeHostId}:${networkName}`, `host:${activeHostId}`, 'runs_on');
+    }
 
-  return { hosts: hosts.length, projects: projects.length, volumes: (volumeResult?.Volumes || []).length, networks: (networkResult || []).length };
+    return { hosts: hosts.length, projects: projects.length, volumes: (volumeResult?.Volumes || []).length, networks: (networkResult || []).length };
+  })();
 }
 
 export function getAssetById(id) {

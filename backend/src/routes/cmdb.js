@@ -53,9 +53,14 @@ export default async function cmdbRoutes(fastify) {
   });
 
   fastify.post('/assets/sync', async () => {
-    const result = await syncAssets();
-    addOperation({ action: 'cmdb.sync', status: 'success', detail: `hosts=${result.hosts}, projects=${result.projects}` });
-    return { ok: true, ...result };
+    try {
+      const result = await syncAssets();
+      addOperation({ action: 'cmdb.sync', status: 'success', detail: `hosts=${result.hosts}, projects=${result.projects}` });
+      return { ok: true, ...result };
+    } catch (error) {
+      addOperation({ action: 'cmdb.sync', status: 'failed', detail: error.message });
+      throw error;
+    }
   });
 
   fastify.get('/topology', { schema: { querystring: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 500 }, offset: { type: 'integer', minimum: 0, maximum: 100000 } } } } }, async (request) => getTopology(request.query || {}));
