@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { setImmediate as settle } from 'node:timers/promises';
 import test from 'node:test';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-container-events-'));
 process.env.DB_PATH = path.join(tempDir, 'test.db');
 const { subscribeContainerEvents, startStateRecorder } = await import('../src/services/container-events.js');
-const { getActivityDocker, setActiveHost, upsertHost } = await import('../src/services/docker-hosts.js');
+const { getActivityDocker, setActiveHost, upsertHost, deleteHost } = await import('../src/services/docker-hosts.js');
 const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
 const { setProjectPreference, listContainerStateEvents } = await import('../src/lib/db.js');
 const docker = getActivityDocker();
@@ -32,7 +32,7 @@ test('Docker Events 跨 chunk/UTF-8 JSON 保留完整事件,坏行不吞后续�
   await settle();
   for (const byte of Buffer.from(JSON.stringify(event) + '\n')) stream.write(Buffer.from([byte]));
   stream.write('not-json\n' + JSON.stringify({ ...event, Action: 'die' }) + '\n');
-  await settle();
+  for (let i = 0; i < 100 && events.length < 2; i++) await settle();
   assert.deepEqual(events.map(value => value.action), ['start', 'die']);
   assert.equal(events[0].containerName, '测试容器');
 });
@@ -138,7 +138,7 @@ test('所有节点同时订阅，切换活动节点不销毁其他节点事件�
   t.mock.method(docker, 'getEvents', async () => localStream);
   const remoteEvents = t.mock.method(remote, 'getEvents', async () => remoteStream);
   const unsubscribe = subscribeContainerEvents(() => {});
-  t.after(() => { unsubscribe(); setActiveHost('local'); });
+  t.after(() => { unsubscribe(); setActiveHost('local'); deleteHost(host.id); });
   await settle();
   setActiveHost(host.id);
   await settle();
@@ -146,4 +146,93 @@ test('所有节点同时订阅，切换活动节点不销毁其他节点事件�
   assert.equal(remoteEvents.mock.callCount(), 1);
   unsubscribe();
   assert.equal(remoteStream.destroyed, true);
+});
+
+
+test('事件处理等待扫描时向 Docker 读取端施加背压，不预取全部事件', async t => {
+  t.mock.method(docker, 'listContainers', async () => [row]); invalidateScanCache();
+  const [project] = await scanProjects(); setProjectPreference(project.id, { managed: true });
+  let releaseScan;
+  t.mock.method(docker, 'listContainers', () => new Promise(resolve => { releaseScan = () => resolve([row]); }));
+  invalidateScanCache();
+  let produced = 0;
+  const count = 1000;
+  const stream = Readable.from((async function* () {
+    for (let index = 0; index < count; index++) {
+      produced++; yield Buffer.from(JSON.stringify({ ...event, time: 1_800_000_000 + index, Actor: { ...event.Actor, Attributes: { ...event.Actor.Attributes, filler: 'x'.repeat(4096) } } }) + '\n');
+    }
+  })(), { objectMode: false, highWaterMark: 16 * 1024 });
+  t.mock.method(docker, 'getEvents', async () => stream);
+  const seen = []; const unsubscribe = subscribeContainerEvents(item => seen.push(item));
+  t.after(unsubscribe);
+  for (let i = 0; i < 10; i++) await settle();
+  assert.ok(releaseScan, '事件处理已经进入等待扫描');
+  const producedWhileWaiting = produced;
+  releaseScan();
+  for (let i = 0; i < 100 && seen.length < count; i++) await settle();
+  t.diagnostic(`扫描挂起时预取 ${producedWhileWaiting} / ${count} 项`);
+  assert.ok(producedWhileWaiting < 20, `扫描挂起时预取了 ${producedWhileWaiting} / ${count} 项`);
+  assert.equal(seen.length, count);
+  assert.deepEqual(seen.map(item => item.timestamp), Array.from({ length: count }, (_, index) => 1_800_000_000 + index));
+});
+
+test('Docker 事件无换行超大输入中断连接并保留错误记录', async t => {
+  const stream = new PassThrough();
+  t.mock.method(docker, 'getEvents', async () => stream);
+  const errors = t.mock.method(console, 'error', () => {});
+  const unsubscribe = subscribeContainerEvents(() => {}); t.after(unsubscribe);
+  await settle(); stream.write('x'.repeat(300 * 1024));
+  for (let i = 0; i < 4; i++) await settle();
+  assert.equal(stream.destroyed, true);
+  assert.ok(errors.mock.calls.some(call => call.arguments.join(' ').includes('上限')));
+});
+
+test('事件连接建连挂起会中断并重试，迟到的旧流被销毁', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let resolveFirst; const signals = [];
+  const replacement = new PassThrough();
+  const get = t.mock.method(docker, 'getEvents', options => {
+    signals.push(options.abortSignal);
+    return signals.length === 1 ? new Promise(resolve => { resolveFirst = resolve; }) : Promise.resolve(replacement);
+  });
+  const unsubscribe = subscribeContainerEvents(() => {}); t.after(unsubscribe);
+  await settle(); t.mock.timers.tick(15_001); await settle();
+  assert.equal(signals[0]?.aborted, true);
+  t.mock.timers.tick(3001); await settle();
+  assert.equal(get.mock.callCount(), 2);
+  const old = new PassThrough(); resolveFirst(old); await settle();
+  assert.equal(old.destroyed, true); assert.equal(replacement.destroyed, false);
+});
+
+
+test('事件处理扫描尚未完成时退订，迟到扫描不得广播或启动工作流', async t => {
+  t.mock.method(docker, 'listContainers', async () => [row]); invalidateScanCache();
+  const [project] = await scanProjects(); setProjectPreference(project.id, { managed: true });
+  let release;
+  t.mock.method(docker, 'listContainers', () => new Promise(resolve => { release = () => resolve([row]); })); invalidateScanCache();
+  const stream = new PassThrough(); t.mock.method(docker, 'getEvents', async () => stream);
+  const seen = []; const unsubscribe = subscribeContainerEvents(item => seen.push(item)); t.after(unsubscribe);
+  await settle(); stream.write(JSON.stringify(event) + '\n');
+  for (let i = 0; i < 20 && !release; i++) await settle();
+  assert.ok(release); unsubscribe();
+  release(); await settle();
+  assert.equal(stream.destroyed, true); assert.deepEqual(seen, []);
+});
+
+test('已建立事件流异常关闭后重连，未换行的有效末条事件仍按序记录', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(docker, 'listContainers', async () => [row]); invalidateScanCache();
+  const [project] = await scanProjects(); setProjectPreference(project.id, { managed: true });
+  const first = new PassThrough(), second = new PassThrough();
+  let attempts = 0;
+  const get = t.mock.method(docker, 'getEvents', async () => ++attempts === 1 ? first : second);
+  const seen = []; const unsubscribe = subscribeContainerEvents(item => seen.push(item)); t.after(unsubscribe);
+  await settle(); first.end(JSON.stringify(event));
+  for (let i = 0; i < 20 && !seen.length; i++) await settle();
+  assert.deepEqual(seen.map(item => item.action), ['start']);
+  await settle(); t.mock.timers.tick(3001); await settle();
+  assert.equal(get.mock.callCount(), 2);
+  second.destroy(new Error('synthetic disconnect')); await settle();
+  t.mock.timers.tick(6001); await settle();
+  assert.equal(get.mock.callCount(), 3);
 });

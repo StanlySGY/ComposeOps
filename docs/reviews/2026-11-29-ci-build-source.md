@@ -11,3 +11,5 @@ CI run 46161924021 的 quality / Image installation, upgrade and restore（job 1
 Docker 官方 build argument 文档已实时获取，证据保存在 `~/.local/state/composeops/overnight-20261128/docker-build-variables.html`。来源：https://docs.docker.com/build/building/variables/
 
 原始失败日志：`ci-bridge-image.log`；job 状态：`ci-bridge.json`。`gh run view --log-failed` 对这个已被取消的 workflow 未返回日志，随后按准确 job ID 获取完整失败日志，未推测失败原因。
+
+推送补充：HTTPS OAuth 身份因缺少 workflow scope 被 GitHub 拒绝；随后使用本机已有且验证通过的 SSH 身份成功推送 01395f4 到 main。没有更改凭据权限、没有公开密钥或触发镜像发布。
