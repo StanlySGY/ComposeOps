@@ -1,13 +1,14 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4">
-    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert">{{ error }}<button class="text-link ml-2" :disabled="loading" @click="load">重新读取</button></p>
+    <p class="text-xs text-surface-400">仅汇总各来源最近返回的记录；时间范围和搜索只筛选已加载记录，不代表完整历史。</p>
 
     <!-- 摘要统计 -->
     <div class="metric-grid">
-      <MetricTile title="事件总数" :value="events.length" sub="当前筛选范围" :icon="History" tone="text-blue-300" />
+      <MetricTile title="事件总数" :value="filteredEvents.length" sub="当前筛选范围" :icon="History" tone="text-blue-300" />
       <MetricTile title="异常事件" :value="errorCount" sub="失败 / 严重 / 告警" :icon="CircleX" tone="text-status-error" />
       <MetricTile title="Agent 活动" :value="sourceCount('agent')" sub="执行与巡检" :icon="Bot" tone="text-status-ok" />
-      <MetricTile title="GitOps 活动" :value="sourceCount('gitops')" sub="同步与漂移" :icon="GitBranch" tone="text-violet-300" />
+      <MetricTile title="GitOps 活动" :value="sourceCount('gitops')" sub="同步与回滚" :icon="GitBranch" tone="text-violet-300" />
       <MetricTile title="定时任务" :value="sourceCount('cron')" sub="执行记录" :icon="Clock3" tone="text-status-warn" />
     </div>
 
@@ -71,12 +72,14 @@ import MetricTile from '../common/MetricTile.vue';
 import { usePagedRows } from '../../composables/usePagedRows.js';
 import HistoryControls from '../../components/common/HistoryControls.vue';
 // 运维时间机器:客户端聚合操作/Agent/告警/定时/GitOps 五路事件的只读时间线,嵌入事件中心 tab
-import { computed, onMounted, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../../composables/usePullRefresh.js';
 import { Bot, CircleX, Clock3, GitBranch, History, Search } from 'lucide-vue-next';
 import { api } from '../../api/client.js';
 import Skeleton from '../common/Skeleton.vue';
 import EmptyState from '../common/EmptyState.vue';
+import { formatTimestamp, parseTimestamp } from '../../lib/date-time.js';
+import { onAuthEpochChange } from '../../lib/auth-context.js';
 
 const loading = ref(false);
 const error = ref('');
@@ -85,6 +88,8 @@ const query = ref('');
 const sourceFilter = ref('all');
 const levelFilter = ref('all');
 const rangeFilter = ref('24h');
+let active = false, disposed = false, generation = 0, controller;
+const observedAt = ref(Date.now());
 
 const SOURCE_LABELS = { operation: '操作', agent: 'Agent', alert: '告警', cron: '定时任务', gitops: 'GitOps' };
 const LEVEL_LABELS = { success: '成功', info: '提示', warning: '关注', error: '异常' };
@@ -101,8 +106,8 @@ function dotClass(l) {
   return { success: 'border-status-ok bg-status-ok', info: 'border-sky-400 bg-sky-400', warning: 'border-status-warn bg-status-warn', error: 'border-status-error bg-status-error' }[l] || 'border-surface-500 bg-surface-500';
 }
 
-const errorCount = computed(() => events.value.filter((e) => e.level === 'error' || e.level === 'warning').length);
-function sourceCount(s) { return events.value.filter((e) => e.source === s).length; }
+const errorCount = computed(() => filteredEvents.value.filter((e) => e.level === 'error' || e.level === 'warning').length);
+function sourceCount(s) { return filteredEvents.value.filter((e) => e.source === s).length; }
 
 const filteredEvents = computed(() => {
   const needle = query.value.trim().toLowerCase();
@@ -115,27 +120,18 @@ const filteredEvents = computed(() => {
 });
 
 function rangeMs(range) {
-  const now = Date.now();
+  const now = observedAt.value;
   if (range === '1h') return now - 3600 * 1000;
   if (range === '24h') return now - 24 * 3600 * 1000;
   if (range === '7d') return now - 7 * 24 * 3600 * 1000;
   return null;
 }
 
-function formatTime(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-}
+function formatTime(value) { return formatTimestamp(value); }
 
 function resetFilters() { query.value = ''; sourceFilter.value = 'all'; levelFilter.value = 'all'; rangeFilter.value = '24h'; }
 
-function parseTs(value) {
-  if (!value) return 0;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
-}
+function parseTs(value) { return parseTimestamp(value)?.getTime() || 0; }
 
 function pushEvent(list, event) {
   if (!event || !event.timestamp) return;
@@ -143,21 +139,24 @@ function pushEvent(list, event) {
 }
 
 async function load() {
-  if (loading.value) return;
+  if (!active || disposed || loading.value) return;
+  const request = ++generation; controller = new AbortController();
+  observedAt.value = Date.now();
   loading.value = true;
   error.value = '';
   const list = [];
   try {
     const [operationData, agentData, alertData, cronData, gitopsData] = await Promise.allSettled([
-      api.getOperations(),
-      api.getAgentExecutions(),
-      api.getAlertEvents(50),
-      api.getCronHistory(50),
-      fetch('/api/v1/gitops').then((res) => { if (!res.ok) throw new Error('GitOps HTTP ' + res.status); return res.json(); }),
+      api.getOperations({ force: true, signal: controller.signal }),
+      api.getAgentExecutions('', 100, controller.signal),
+      api.getAlertEvents(50, controller.signal),
+      api.getCronHistory(50, controller.signal),
+      api.getEvents({ eventType: 'gitops', limit: 100 }, true, controller.signal),
     ]);
+    if (!active || disposed || request !== generation) return;
     const failedSources = [
       ['操作记录', operationData], ['Agent 活动', agentData], ['告警事件', alertData],
-      ['定时任务', cronData], ['GitOps 同步', gitopsData],
+      ['定时任务', cronData], ['GitOps 历史', gitopsData],
     ].filter(([, result]) => result.status === 'rejected').map(([label]) => label);
     if (failedSources.length) {
       error.value = '部分事件加载失败：' + failedSources.join('、') + '。已尽可能显示其他来源的数据。';
@@ -168,7 +167,7 @@ async function load() {
       for (const op of operationData.value.operations || []) {
         pushEvent(list, {
           source: 'operation', id: op.id, timestamp: op.createdAt,
-          level: op.status === 'success' ? 'success' : 'error',
+          level: op.status === 'success' ? 'success' : op.status === 'failed' ? 'error' : 'info',
           title: actionLabel(op.action), detail: op.detail || '',
           projectName: op.projectName || '',
         });
@@ -211,26 +210,22 @@ async function load() {
       }
     }
 
-    // GitOps 同步历史
-    if (gitopsData.status === 'fulfilled' && gitopsData.value) {
-      const repos = gitopsData.value.repositories || [];
-      for (const repo of repos) {
-        if (repo.lastSync) {
-          pushEvent(list, {
-            source: 'gitops', id: repo.id, timestamp: repo.lastSync,
-            level: repo.status === 'error' ? 'error' : 'success',
-            title: `GitOps 同步:${repo.name || ''}`, detail: repo.url || '',
-            projectName: repo.name || '',
-          });
-        }
+    // 已持久化的事件是历史事实；仓库当前状态无法还原历次同步或失败。
+    if (gitopsData.status === 'fulfilled') {
+      for (const event of gitopsData.value.events || []) {
+        pushEvent(list, {
+          source: 'gitops', id: event.id, timestamp: event.createdAt,
+          level: event.severity === 'danger' ? 'error' : event.severity === 'warning' ? 'warning' : ['resolved', 'closed'].includes(event.status) ? 'success' : 'info',
+          title: event.title, detail: event.detail || '', projectName: event.assetName || '',
+        });
       }
     }
 
     events.value = list.sort((a, b) => b.ts - a.ts);
   } catch (e) {
-    error.value = e.message || '事件加载失败';
+    if (active && request === generation) error.value = e.message || '事件加载失败';
   } finally {
-    loading.value = false;
+    if (request === generation) loading.value = false;
   }
 }
 
@@ -242,8 +237,20 @@ function agentStatusLabel(status) {
   return ({ pending: '待执行', pending_confirmation: '待确认', executing: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' })[status] || status;
 }
 
-usePullRefresh(load);
-onMounted(load);
+function stop(clear = false) {
+  active = false; generation++; controller?.abort(); controller = null; loading.value = false;
+  if (clear) { events.value = []; error.value = ''; }
+}
+function start() { if (active || disposed) return; active = true; void load(); }
+function hostChanged() { const visible = active; stop(true); if (visible) start(); }
+const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged = true } = {}) => {
+  const visible = active; stop(identityChanged);
+  if (!identityChanged && visible) start();
+});
+window.addEventListener('composeops:host-changed', hostChanged);
+usePullRefresh(load, { keepAlive: true });
+onMounted(start); onActivated(start); onDeactivated(() => stop());
+onBeforeUnmount(() => { disposed = true; stop(); stopAuthListener(); window.removeEventListener('composeops:host-changed', hostChanged); });
 
 const { rows: pagedRows, page, pageSize, total, sortKey, descending } = usePagedRows(filteredEvents, { time: item => item.ts, source: item => item.source, level: item => item.level }, 'time');
 const sortOptions = [{ key: 'time', label: '事件时间' }, { key: 'source', label: '事件来源' }, { key: 'level', label: '级别' }];

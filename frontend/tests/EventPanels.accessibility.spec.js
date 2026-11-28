@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 
 const { api } = vi.hoisted(() => ({
   api: {
-    getOperations: vi.fn(), getAgentExecutions: vi.fn(), getAlertEvents: vi.fn(), getCronHistory: vi.fn(),
+    getEvents: vi.fn(), getOperations: vi.fn(), getAgentExecutions: vi.fn(), getAlertEvents: vi.fn(), getCronHistory: vi.fn(),
     getProjects: vi.fn(), getStateUptime: vi.fn(), getStateExits: vi.fn(), getStateHistory: vi.fn(),
     listDbDumpTargets: vi.fn(), streamDbDump: vi.fn(),
   },
@@ -18,6 +18,7 @@ import DbDumpModal from '../src/components/services/DbDumpModal.vue';
 let wrapper;
 beforeEach(() => {
   vi.clearAllMocks();
+  api.getEvents.mockResolvedValue({ events: [] });
   api.getOperations.mockResolvedValue({ operations: [] });
   api.getAgentExecutions.mockResolvedValue({ plans: [] });
   api.getAlertEvents.mockResolvedValue({ events: [] });

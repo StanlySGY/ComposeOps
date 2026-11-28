@@ -285,7 +285,7 @@ export const api = {
   updateCronJob: (id, payload) => request(`/cron/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteCronJob: (id) => request(`/cron/${id}`, { method: 'DELETE' }),
   runCronJob: (id) => request(`/cron/${id}/run`, { method: 'POST' }),
-  getCronHistory: (limit = 50) => request(`/cron/history?limit=${limit}`),
+  getCronHistory: (limit = 50, signal) => request(`/cron/history?limit=${limit}`, { signal }),
   // gitops
   getGitOpsRepos: (signal) => request('/gitops', { signal }),
   getGitOpsDrift: () => request('/gitops/drift'),
@@ -324,7 +324,7 @@ export const api = {
   // alert events
   getNotificationEvents: () => request('/ops/notifications/events'),
   saveNotificationEvents: (events) => request('/ops/notifications/events', { method: 'PUT', body: JSON.stringify({ events }) }),
-  getAlertEvents: (limit = 50) => request(`/ops/alert-events?limit=${limit}`),
+  getAlertEvents: (limit = 50, signal) => request(`/ops/alert-events?limit=${limit}`, { signal }),
   updateAlertEvent: (id, patch) => request(`/ops/alert-events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   pruneAlertEvents: (days = 7) => request('/ops/alert-events/prune', { method: 'POST', body: JSON.stringify({ days }) }),
   // 守护模式:告警事件 AI 自动诊断
@@ -383,7 +383,7 @@ export const api = {
   agentApprove: (payload) => request('/ai/agent/approve', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   agentFeedback: (payload) => request('/ai/agent/feedback', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   setAgentApprovalMode: (payload) => request('/ai/agent/approval-mode', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
-  getAgentExecutions: (planId = '', limit = 100) => request(`/ai/agent/executions?${new URLSearchParams({ ...(planId ? { planId: String(planId) } : {}), limit: String(limit) })}`),
+  getAgentExecutions: (planId = '', limit = 100, signal) => request(`/ai/agent/executions?${new URLSearchParams({ ...(planId ? { planId: String(planId) } : {}), limit: String(limit) })}`, { signal }),
   getAgentPolicyGroups: () => request('/ai/agent/policy-groups'),
   createAgentPolicyGroup: (payload) => request('/ai/agent/policy-groups', { method: 'POST', body: JSON.stringify(payload) }),
   updateAgentPolicyGroup: (id, payload) => request(`/ai/agent/policy-groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
@@ -410,7 +410,7 @@ export const api = {
   getNotifications: () => request('/personal/notifications'),
   saveNotifications: (payload) => request('/personal/notifications', { method: 'PUT', body: JSON.stringify(payload) }),
   testNotifications: (payload) => request('/personal/notifications/test', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
-  getOperations: () => request('/personal/operations', { cacheable: true }),
+  getOperations: (options = {}) => request('/personal/operations', { cacheable: true, ...options }),
   getDockerUsage: async (hostId = '', signal) => normalizeDockerUsage(await request(`/personal/maintenance/usage${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`, { signal })),
   getCostAnalysisReport: async () => normalizeCostReport(await request('/cost-analysis/report')),
   getCostTrends: () => request('/cost-analysis/trends?days=7'),
@@ -442,7 +442,7 @@ export const api = {
   addCmdbRelation: (payload) => request('/cmdb/relations', { method: 'POST', body: JSON.stringify(payload) }),
   deleteCmdbRelation: (id) => request(`/cmdb/relations/${id}`, { method: 'DELETE' }),
   // 统一事件中心
-  getEvents: (params = {}, force = false) => request(`/events/events?${new URLSearchParams(params)}`, { cacheable: true, force }),
+  getEvents: (params = {}, force = false, signal) => request(`/events/events?${new URLSearchParams(params)}`, { cacheable: true, force, signal }),
   getEventStats: (force = false) => request('/events/events/stats', { cacheable: true, force }),
   updateEvent: (id, patch) => request(`/events/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   pruneEvents: (days = 30) => request('/events/events/prune', { method: 'POST', body: JSON.stringify({ days }) }),
