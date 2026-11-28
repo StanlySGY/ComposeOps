@@ -120,7 +120,10 @@ export async function previewFetch(input, options = {}) {
   }
   const reads = {
     '/health': { status: 'ok', docker: 'ok', preview: true },
-    '/auth/status': { authenticated: true, setupRequired: false },
+    '/auth/status': {
+      authenticated: true, setupRequired: false,
+      principal: { id: 'admin', username: 'admin', displayName: '预览管理员', role: 'admin', enabled: true },
+    },
     '/projects': { projects },
     '/projects/standalone-containers': { hostId: 'local', hostName: '本地 Docker', containers: [] },
     '/hosts': { hosts: [previewHost] },

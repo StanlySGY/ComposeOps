@@ -9,7 +9,10 @@ async function loginFixture(page, { setup = false, failFirst = false } = {}) {
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
     const intercepted = async (input, options) => {
       const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
-      if (path === '/api/v1/auth/status') return json({ authenticated, setupRequired: setup && !authenticated });
+      if (path === '/api/v1/auth/status') return json({
+        authenticated, setupRequired: setup && !authenticated,
+        principal: authenticated ? { id: 'admin', username: 'admin', displayName: '预览管理员', role: 'admin', enabled: true } : null,
+      });
       if (path === '/api/v1/auth/login' || path === '/api/v1/auth/setup') {
         window.loginAttempts += 1;
         if (failFirst && window.loginAttempts === 1) return json({ message: '密码不正确，请重新输入' }, 400);
@@ -28,8 +31,9 @@ test('登录视觉按屏幕加载，密码显示与失败后键盘重试连贯',
   await loginFixture(page, { failFirst: true });
   await page.goto('./#/dashboard');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('欢迎回来');
+  await expect(page.getByLabel('账号', { exact: true })).toHaveValue('admin');
   await page.screenshot({ path: test.info().outputPath('login.png'), animations: 'disabled' });
-  const password = page.getByLabel('管理员密码', { exact: true });
+  const password = page.getByLabel('密码', { exact: true });
   await password.fill('fictional-password-123');
   await page.getByRole('button', { name: '显示密码', exact: true }).click();
   await expect(password).toHaveAttribute('type', 'text');
@@ -61,7 +65,7 @@ test('初始化校验保留表单，匹配密码后可进入工作台', async ({
   await loginFixture(page, { setup: true });
   await page.goto('./#/dashboard');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('创建管理员');
-  await page.getByLabel('管理员密码', { exact: true }).fill('fictional-password-123');
+  await page.getByLabel('密码', { exact: true }).fill('fictional-password-123');
   await page.getByLabel('再次输入管理员密码', { exact: true }).fill('different-password-123');
   await page.getByRole('button', { name: '完成初始化', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('两次输入的密码不一致');
@@ -76,7 +80,7 @@ test('装饰素材不可用时仍能登录，减少动态效果与窄屏布局�
   await page.route('**/*login-control-plane-*.webp', route => route.abort());
   await loginFixture(page);
   await page.goto('./#/dashboard');
-  const password = page.getByLabel('管理员密码', { exact: true });
+  const password = page.getByLabel('密码', { exact: true });
   if ((await page.viewportSize()).width >= 1024) {
     await expect(page.locator('.login-art-fallback')).toBeVisible();
     await expect(page.locator('.login-illustration')).toHaveCount(0);

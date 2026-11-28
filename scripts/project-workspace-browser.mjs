@@ -64,7 +64,8 @@ try {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage(); const errors=[]; page.on('pageerror', e => errors.push(e.message));
     await page.goto(base);
-    const passwordInput = page.getByLabel('管理员密码', { exact: true });
+    const passwordInput = page.getByLabel('密码', { exact: true });
+    await expect(page.getByLabel('账号', { exact: true })).toHaveValue('admin');
     await expect(passwordInput).toBeVisible();
     await page.screenshot({ path: '/tmp/composeops-polish-login-'+viewport.width+'.png', animations: 'disabled' });
     await passwordInput.fill(password);
