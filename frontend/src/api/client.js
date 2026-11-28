@@ -125,7 +125,7 @@ async function request(path, opts = {}) {
     const data = await doFetch(path, opts);
     assertAuthEpoch(authEpoch);
     // Password changes revoke the old cookie and return a new session.
-    if (path === '/auth/password') advanceAuthEpoch();
+    if (path === '/auth/password') advanceAuthEpoch({ identityChanged: false });
     // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
     if (!opts.readOnly) {
       invalidateSwr('/');

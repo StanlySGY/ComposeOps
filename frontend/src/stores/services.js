@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { onScopeDispose, ref } from 'vue';
 import { api } from '../api/client.js';
+import { onAuthEpochChange } from '../lib/auth-context.js';
 
 export const useServicesStore = defineStore('services', () => {
   const projects = ref([]);
@@ -10,6 +11,7 @@ export const useServicesStore = defineStore('services', () => {
   const wsConnected = ref(false);
   let timer;
   let wsHook = null;
+  let socketVersion = 0;
   let refreshPromise = null;
   let containerEventDebounce = null;
   let refreshId = 0;
@@ -40,12 +42,16 @@ export const useServicesStore = defineStore('services', () => {
     try { await requestPromise; } finally { if (refreshPromise === requestPromise) refreshPromise = null; }
   }
 
-  function refreshForHost() {
+  function clearContext(clear = true) {
     refreshId += 1;
     refreshPromise = null;
-    projects.value = [];
-    lastLoadedAt.value = 0;
+    if (clear) { projects.value = []; lastLoadedAt.value = 0; }
+    loading.value = false;
     error.value = '';
+  }
+
+  function refreshForHost() {
+    clearContext();
     return refresh(true);
   }
 
@@ -84,7 +90,9 @@ export const useServicesStore = defineStore('services', () => {
   function startWebSocket(hook) {
     if (wsHook || !hook || typeof hook.connect !== 'function') return; // 已连接
     wsHook = hook;
+    const version = ++socketVersion;
     if (typeof hook.setErrorHandler === 'function') hook.setErrorHandler(() => {
+      if (wsHook !== hook || version !== socketVersion) return;
       wsConnected.value = false;
       // WebSocket 失败时降级到轮询
       if (!timer) startAutoRefresh(5000);
@@ -93,11 +101,13 @@ export const useServicesStore = defineStore('services', () => {
   }
 
   function stopWebSocket() {
-    if (wsHook) {
-      try { wsHook.close(); } catch {
+    const previous = wsHook;
+    wsHook = null;
+    ++socketVersion;
+    if (previous) {
+      try { previous.close(); } catch {
         // Socket 已关闭时 close 失败不应阻断轮询降级。
       }
-      wsHook = null;
     }
     if (containerEventDebounce) { clearTimeout(containerEventDebounce); containerEventDebounce = null; }
     wsConnected.value = false;
@@ -113,6 +123,17 @@ export const useServicesStore = defineStore('services', () => {
     if (timer) clearInterval(timer);
     timer = null;
   }
+
+  function resetSession() {
+    clearContext();
+    stopWebSocket();
+    stopAutoRefresh();
+  }
+  const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged }) => {
+    if (identityChanged) resetSession();
+    else clearContext(false);
+  });
+  onScopeDispose(() => { stopAuthListener(); resetSession(); });
 
   return { 
     projects, 

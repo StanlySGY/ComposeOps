@@ -512,7 +512,7 @@ const containerSocket = useWebSocket(
 );
 
 function startRealtime() {
-  if (autoRefresh.value) store.startWebSocket(containerSocket);
+  if (pageActive && autoRefresh.value) store.startWebSocket(containerSocket);
 }
 function stopRealtime() {
   store.stopAutoRefresh();
@@ -533,12 +533,16 @@ watch([() => route.name, () => route.query.focus, () => route.query.service, () 
 }, { deep: true });
 usePullRefresh(manualRefresh, { keepAlive: true });
 onMounted(async () => {
+  const activationToken = pageActivationToken;
   // 首次进入先拉项目列表,不依赖 WS 是否成功建立;
   // 后续 WS 打开成功会做一次非重连刷新,失败则降级轮询。
   await Promise.all([store.refresh(false), projectGroups.load()]);
+  if (!pageActive || activationToken !== pageActivationToken) return;
   // 更新策略只是辅助信息,读取失败不能让整个服务页进入全局异常态。
   try { updateSettings.value = await api.getUpdateSettings(); }
   catch (error) { console.warn('[ServicesView] 更新策略读取失败,保留默认设置:', error?.message || error); }
+
+  if (!pageActive || activationToken !== pageActivationToken) return;
 
   startRealtime();
   void loadInspection();

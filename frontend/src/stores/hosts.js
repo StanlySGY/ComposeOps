@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
 import { api, bumpHostEpoch } from '../api/client.js';
+import { assertAuthEpoch, getAuthEpoch, onAuthEpochChange } from '../lib/auth-context.js';
 
 export const useHostsStore = defineStore('hosts', () => {
   const hosts = ref([]);
@@ -38,9 +39,11 @@ export const useHostsStore = defineStore('hosts', () => {
 
   function ping(id) {
     if (probes.has(id)) return probes.get(id);
+    const epoch = getAuthEpoch();
     pinging.value = id;
     const requestedHost = hosts.value.find(item => item.id === id);
     const task = api.pingHost(id).then(result => {
+      assertAuthEpoch(epoch);
       const host = hosts.value.find(item => item.id === id);
       if (host && host === requestedHost && result.host) {
         mutationVersion += 1;
@@ -51,6 +54,7 @@ export const useHostsStore = defineStore('hosts', () => {
       }
       return result;
     }).finally(() => {
+      if (probes.get(id) !== task) return;
       probes.delete(id);
       pinging.value = [...probes.keys()].at(-1) || '';
     });
@@ -59,19 +63,26 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   async function addOrUpdate(payload) {
+    const epoch = getAuthEpoch();
     const result = await api.saveHost(payload);
+    assertAuthEpoch(epoch);
     await load(true);
+    assertAuthEpoch(epoch);
     return result.host;
   }
 
   async function remove(id) {
+    const epoch = getAuthEpoch();
     await api.deleteHost(id);
+    assertAuthEpoch(epoch);
     if (activeHostId.value === id) activeHostId.value = 'local';
     await load(true);
   }
 
   async function switchHost(id) {
+    const epoch = getAuthEpoch();
     const result = await api.setActiveHost(id);
+    assertAuthEpoch(epoch);
     mutationVersion += 1;
     bumpHostEpoch();
     activeHostId.value = result.activeHostId;
@@ -81,10 +92,19 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   async function assignGroup(id, group) {
+    const epoch = getAuthEpoch();
     const saved = await api.setHostGroup(id, group);
+    assertAuthEpoch(epoch);
     const host = hosts.value.find(item => item.id === id);
     mutationVersion += 1;
     if (host) host.group = saved.group;
   }
+  function resetSession(clear = true) {
+    ++loadVersion; ++mutationVersion; probes.clear();
+    if (clear) { hosts.value = []; activeHostId.value = 'local'; }
+    loading.value = false; error.value = ''; pinging.value = '';
+  }
+  const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged }) => resetSession(identityChanged));
+  onScopeDispose(() => { stopAuthListener(); resetSession(); });
   return { assignGroup, hosts, activeHostId, active, loading, error, pinging, load, ping, addOrUpdate, remove, switchHost };
 });

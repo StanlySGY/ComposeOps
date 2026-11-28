@@ -7,9 +7,9 @@ export function onAuthEpochChange(listener) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
-export function advanceAuthEpoch() {
+export function advanceAuthEpoch({ identityChanged = true } = {}) {
   epoch += 1;
-  for (const listener of listeners) listener(epoch);
+  for (const listener of listeners) listener(epoch, { identityChanged });
 }
 export function assertAuthEpoch(expected) {
   if (expected !== epoch) throw new DOMException('登录状态已变化，请重新读取；已提交的操作需核对结果。', 'AbortError');

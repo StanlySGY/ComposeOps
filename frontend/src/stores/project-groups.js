@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { onScopeDispose, ref } from 'vue';
 import { api } from '../api/client.js';
+import { assertAuthEpoch, getAuthEpoch, onAuthEpochChange } from '../lib/auth-context.js';
 
 export const useProjectGroupsStore = defineStore('project-groups', () => {
   const groups = ref([]), error = ref(''), loading = ref(false);
@@ -13,9 +14,18 @@ export const useProjectGroupsStore = defineStore('project-groups', () => {
     finally { if (version === request) loading.value = false; }
   }
   async function save(value) {
+    const epoch = getAuthEpoch();
     const saved = value.id ? await api.updateProjectGroup(value.id, { name: value.name, pinned: value.pinned }) : await api.createProjectGroup(value);
-    await load(); changed(); return saved;
+    assertAuthEpoch(epoch);
+    await load(); assertAuthEpoch(epoch); changed(); return saved;
   }
-  async function remove(id) { await api.deleteProjectGroup(id); await load(); changed(); }
+  async function remove(id) {
+    const epoch = getAuthEpoch();
+    await api.deleteProjectGroup(id); assertAuthEpoch(epoch);
+    await load(); assertAuthEpoch(epoch); changed();
+  }
+  function resetSession(clear = true) { ++request; if (clear) groups.value = []; error.value = ''; loading.value = false; }
+  const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged }) => resetSession(identityChanged));
+  onScopeDispose(() => { stopAuthListener(); resetSession(); });
   return { groups, error, loading, load, save, remove, changed };
 });

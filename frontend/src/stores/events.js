@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { onScopeDispose, ref } from 'vue';
 import { api } from '../api/client.js';
+import { assertAuthEpoch, getAuthEpoch, onAuthEpochChange } from '../lib/auth-context.js';
 
 export const useEventStore = defineStore('events', () => {
   const events = ref([]);
@@ -45,8 +46,10 @@ export const useEventStore = defineStore('events', () => {
 
   async function update(id, patch) {
     if (pendingUpdates.has(id)) return pendingUpdates.get(id);
+    const epoch = getAuthEpoch();
     const pending = (async () => {
       const data = await api.updateEvent(id, patch);
+      assertAuthEpoch(epoch);
       // Show the confirmed mutation even if the follow-up refresh is unavailable.
       const index = events.value.findIndex(event => event.id === id);
       if (index >= 0 && data.event) {
@@ -58,17 +61,30 @@ export const useEventStore = defineStore('events', () => {
       }
       // 查询条件可能在写入期间变化，按最新条件刷新，避免复活已筛掉的记录。
       await Promise.all([load(lastParams), loadStats()]);
+      assertAuthEpoch(epoch);
       return data.event;
     })();
     pendingUpdates.set(id, pending);
-    try { return await pending; } finally { pendingUpdates.delete(id); }
+    try { return await pending; } finally { if (pendingUpdates.get(id) === pending) pendingUpdates.delete(id); }
   }
 
   async function prune(days = 30) {
+    const epoch = getAuthEpoch();
     await api.pruneEvents(days);
+    assertAuthEpoch(epoch);
     await load(lastParams);
+    assertAuthEpoch(epoch);
     await loadStats();
   }
+
+  function resetSession(clear = true) {
+    ++requestId; ++statsId; pendingUpdates.clear();
+    if (clear) { events.value = []; stats.value = null; lastParams = {}; }
+    loading.value = statsLoading.value = false;
+    error.value = statsError.value = '';
+  }
+  const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged }) => resetSession(identityChanged));
+  onScopeDispose(() => { stopAuthListener(); resetSession(); });
 
   return { events, stats, loading, error, statsError, statsLoading, load, loadStats, update, prune };
 });

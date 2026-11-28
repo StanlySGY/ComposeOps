@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
 import { api } from '../api/client.js';
+import { onAuthEpochChange } from '../lib/auth-context.js';
 
 export const useWorkflowStore = defineStore('workflow', () => {
   const definitions = ref([]);
@@ -92,6 +93,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function run(id, context = {}) { return updateInstance(() => api.runWorkflow(id, context)); }
   function approve(id, payload) { return updateInstance(() => api.approveWorkflowInstance(id, payload)); }
   function cancel(id) { return updateInstance(() => api.cancelWorkflowInstance(id)); }
+  const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged }) => invalidateContext({ clear: identityChanged }));
+  onScopeDispose(() => { stopAuthListener(); invalidateContext({ clear: true }); });
   return {
     definitions, instances, definitionsLoading, instancesLoading, definitionsError, instancesError,
     loading, error, loadDefinitions, loadInstances, create, update, remove, run, approve, cancel, invalidateContext,
