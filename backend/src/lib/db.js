@@ -1326,6 +1326,26 @@ export function clearAiHistory() {
  */
 const VERACITY_WEIGHT = { stated: 1.0, unknown: 0.8, inferred: 0.7, tool: 0.5 };
 const RECALL_HALF_LIFE_HOURS = 72;
+const AI_MEMORY_SELECT = `SELECT id, scope, scope_id AS scopeId, memory_key AS memoryKey, value, source, confidence,
+  importance, veracity, last_recalled_at AS lastRecalledAt, recall_count AS recallCount,
+  created_at AS createdAt, updated_at AS updatedAt FROM ai_memories`;
+
+function aiMemoryTimestamp(value) {
+  const text = String(value || '').trim();
+  // SQLite datetime('now') is UTC; an offset-free JS Date would use the host TZ.
+  const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(text)
+    ? text.replace(' ', 'T') + 'Z' : text;
+  const stamp = Date.parse(normalized);
+  return Number.isFinite(stamp) ? stamp : null;
+}
+
+function rankAiMemory(row, now = Date.now()) {
+  const stamp = aiMemoryTimestamp(row.updatedAt) ?? aiMemoryTimestamp(row.createdAt) ?? now;
+  const ageHours = Math.max(0, (now - stamp) / 3600000);
+  const recency = Math.exp((-Math.LN2 * ageHours) / RECALL_HALF_LIFE_HOURS);
+  const weight = VERACITY_WEIGHT[row.veracity] ?? 0.8;
+  return { ...row, score: Number((Number(row.importance ?? 0.5) * weight * (0.7 + 0.3 * recency)).toFixed(4)) };
+}
 
 export function listAiMemories(limit = 100, query = '', database = db) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 200));
@@ -1333,23 +1353,13 @@ export function listAiMemories(limit = 100, query = '', database = db) {
   const candidateLimit = Math.min(Math.max(safeLimit * 4, 50), 400);
   const where = text ? `WHERE memory_key LIKE ? ESCAPE '\\' OR value LIKE ? ESCAPE '\\'` : '';
   const like = text ? `%${text.replace(/[\\%_]/g, '\\$&')}%` : '';
-  const rows = database.prepare(`
-    SELECT id, scope, scope_id AS scopeId, memory_key AS memoryKey, value, source, confidence,
-           importance, veracity, last_recalled_at AS lastRecalledAt, recall_count AS recallCount,
-           created_at AS createdAt, updated_at AS updatedAt
-    FROM ai_memories ${where}
+  const rows = database.prepare(`${AI_MEMORY_SELECT} ${where}
     ORDER BY updated_at DESC, id DESC LIMIT ?
   `).all(...(text ? [like, like, candidateLimit] : [candidateLimit]));
   const now = Date.now();
   return rows
-    .map((row) => {
-      const stamp = Date.parse(row.updatedAt || row.createdAt || '') || now;
-      const ageHours = Math.max(0, (now - stamp) / 3600000);
-      const recency = Math.exp((-Math.LN2 * ageHours) / RECALL_HALF_LIFE_HOURS);
-      const weight = VERACITY_WEIGHT[row.veracity] ?? 0.8;
-      return { ...row, score: Number((Number(row.importance || 0.5) * weight * (0.7 + 0.3 * recency)).toFixed(4)) };
-    })
-    .sort((a, b) => b.score - a.score || b.recallCount - a.recallCount || (Date.parse(b.updatedAt || 0) || 0) - (Date.parse(a.updatedAt || 0) || 0))
+    .map((row) => rankAiMemory(row, now))
+    .sort((a, b) => b.score - a.score || b.recallCount - a.recallCount || (aiMemoryTimestamp(b.updatedAt) ?? 0) - (aiMemoryTimestamp(a.updatedAt) ?? 0))
     .slice(0, safeLimit);
 }
 
@@ -1369,17 +1379,17 @@ export function recordAiMemoryRecall(ids = [], database = db) {
 /**
  * memory_sleep 记忆维护(借鉴 OneSSH engine.Sleep,纯确定性,无 LLM):
  *  1) 去重:同 value(同银行)保留重要度最高/最早一条,合并 recall_count;
- *  2) 衰减:COALESCE(last_recalled_at, updated_at) 早于 decayDays 的记忆 importance×0.9(地板 0.05);
- *  3) 清理:创建超 pruneDays、importance≤0.1 且从未被召回的记忆删除。
+ *  2) 衰减:内容更新与最近召回均早于 decayDays 的记忆 importance×0.9(地板 0.05);
+ *  3) 清理:创建与更新均超 pruneDays、importance≤0.1 且从未被召回的记忆删除。
  */
 export function sleepAiMemories({ decayDays = 30, pruneDays = 90, decayFactor = 0.9, importanceFloor = 0.05, database = db } = {}) {
   const report = { deduped: 0, decayed: 0, pruned: 0 };
   const sqliteDate = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
   const sleep = database.transaction(() => {
-    const rows = database.prepare('SELECT id, scope, scope_id, value, importance, recall_count FROM ai_memories ORDER BY id ASC').all();
+    const rows = database.prepare('SELECT id, scope, scope_id, value, importance, recall_count, last_recalled_at, created_at, updated_at FROM ai_memories ORDER BY id ASC').all();
     const groups = new Map();
     for (const row of rows) {
-      const groupKey = `${row.scope}\u0000${row.scopeId}\u0000${row.value}`;
+      const groupKey = JSON.stringify([row.scope, row.scope_id, row.value]);
       if (!groups.has(groupKey)) groups.set(groupKey, []);
       groups.get(groupKey).push(row);
     }
@@ -1388,19 +1398,27 @@ export function sleepAiMemories({ decayDays = 30, pruneDays = 90, decayFactor = 
       const keeper = group.reduce((best, item) => (Number(item.importance) > Number(best.importance) ? item : best), group[0]);
       const totalRecalls = group.reduce((sum, item) => sum + Number(item.recall_count || 0), 0);
       const maxImportance = Math.max(...group.map((item) => Number(item.importance || 0)));
-      database.prepare(`UPDATE ai_memories SET importance = ?, recall_count = ?, updated_at = datetime('now') WHERE id = ?`)
-        .run(maxImportance, totalRecalls, keeper.id);
+      const dates = field => group.map(item => item[field]).filter(Boolean)
+        .sort((a, b) => (aiMemoryTimestamp(a) ?? 0) - (aiMemoryTimestamp(b) ?? 0));
+      // Maintenance is not a new user fact or recall. Preserve the group's real
+      // history, including a recent recall belonging to a lower-ranked duplicate.
+      database.prepare('UPDATE ai_memories SET importance = ?, recall_count = ?, last_recalled_at = ?, created_at = ?, updated_at = ? WHERE id = ?')
+        .run(maxImportance, totalRecalls, dates('last_recalled_at').at(-1) ?? null,
+          dates('created_at')[0], dates('updated_at').at(-1), keeper.id);
       const drop = database.prepare('DELETE FROM ai_memories WHERE id = ?');
       for (const item of group) if (item.id !== keeper.id) report.deduped += drop.run(item.id).changes;
     }
     const decayCutoff = sqliteDate(Date.now() - (Number(decayDays) || 30) * 86400000);
     report.decayed = database.prepare(
-      'UPDATE ai_memories SET importance = MAX(?, importance * ?) WHERE importance > ? AND COALESCE(last_recalled_at, updated_at) < ?'
-    ).run(importanceFloor, decayFactor, importanceFloor, decayCutoff).changes;
+      `UPDATE ai_memories SET importance = MAX(?, importance * ?) WHERE importance > ?
+       AND julianday(updated_at) < julianday(?)
+       AND (last_recalled_at IS NULL OR julianday(last_recalled_at) < julianday(?))`
+    ).run(importanceFloor, decayFactor, importanceFloor, decayCutoff, decayCutoff).changes;
     const pruneCutoff = sqliteDate(Date.now() - (Number(pruneDays) || 90) * 86400000);
     report.pruned = database.prepare(
-      "DELETE FROM ai_memories WHERE importance <= 0.1 AND recall_count = 0 AND created_at < ?"
-    ).run(pruneCutoff).changes;
+      `DELETE FROM ai_memories WHERE importance <= 0.1 AND recall_count = 0
+       AND julianday(created_at) < julianday(?) AND julianday(updated_at) < julianday(?)`
+    ).run(pruneCutoff, pruneCutoff).changes;
   });
   sleep();
   return report;
@@ -1437,7 +1455,8 @@ export function upsertAiMemory(memoryKey, value, source = 'conversation', confid
     importanceValue,
     veracityValue,
   );
-  return listAiMemories(1, key)[0] || null;
+  const saved = db.prepare(`${AI_MEMORY_SELECT} WHERE scope = 'global' AND scope_id = '' AND memory_key = ?`).get(key);
+  return saved ? rankAiMemory(saved) : null;
 }
 
 export function deleteAiMemory(memoryKey) {
