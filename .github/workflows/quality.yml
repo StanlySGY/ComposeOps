@@ -93,7 +93,11 @@ jobs:
           load: true
           tags: composeops:ci-test
           labels: org.opencontainers.image.revision=${{ github.sha }}
-          build-args: NPM_REGISTRY=https://registry.npmjs.org
+          # Hosted runners use Debian's global CDN; the regional mirror can
+          # return 403 to these runners even when local builds succeed.
+          build-args: |
+            NPM_REGISTRY=https://registry.npmjs.org
+            APT_MIRROR=deb.debian.org
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Install browser
@@ -150,7 +154,11 @@ jobs:
           load: true
           tags: composeops:ci-arm64
           labels: org.opencontainers.image.revision=${{ github.sha }}
-          build-args: NPM_REGISTRY=https://registry.npmjs.org
+          # Hosted runners use Debian's global CDN; the regional mirror can
+          # return 403 to these runners even when local builds succeed.
+          build-args: |
+            NPM_REGISTRY=https://registry.npmjs.org
+            APT_MIRROR=deb.debian.org
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: ARM64 installation, online backup and encrypted restore
