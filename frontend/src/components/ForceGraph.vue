@@ -292,7 +292,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
 import { Compass, Layers, Maximize2, RotateCw, ZoomIn, ZoomOut } from 'lucide-vue-next';
 import { createGraphModel, tickModel, applySeedPositions, deOverlap } from '../lib/force-graph.js';
 import { assignLevels } from '../lib/topology-layout.js';
@@ -325,6 +325,7 @@ const layoutMode = ref(props.defaultLayout);
 function setLayoutMode(mode) {
   layoutMode.value = mode;
   if (mode === 'dag') {
+    stopFrames();
     applyDagLayout();
   } else {
     // 只解重叠、不跑任何力:手动布局原样保留(重力/斥力都会把卡片拉离原位);
@@ -360,7 +361,8 @@ const ty = ref(0);
 const scale = ref(1);
 const hoverKey = ref('');
 const dragKey = ref('');
-let rafId = 0;
+let rafId = 0, fitRafId = 0;
+let active = false;
 let viewTouched = false;
 let pendingFit = false;
 let resizeObserver = null;
@@ -526,7 +528,7 @@ function applyDagLayout() {
 
   dagColumns.value = columns;
   pendingFit = true;
-  requestAnimationFrame(() => fitView());
+  scheduleFit();
 }
 
 // ---- 优雅 S 型 Bezier 连线计算 ----
@@ -622,15 +624,12 @@ watch(graphSignature, () => {
 
 // ---- 物理循环 (自由画布模式下使用) ----
 function ensureLoop() {
-  if (layoutMode.value === 'dag') return;
-  if (rafId) return;
+  if (!active || layoutMode.value === 'dag' || rafId) return;
   const step = () => {
-    const alive = tickModel(model);
-    if (alive) {
-      rafId = requestAnimationFrame(step);
-      return;
-    }
     rafId = 0;
+    if (!active || layoutMode.value === 'dag') return;
+    const alive = tickModel(model);
+    if (alive) { rafId = requestAnimationFrame(step); return; }
     if (pendingFit) {
       pendingFit = false;
       if (!viewTouched) fitView();
@@ -638,24 +637,46 @@ function ensureLoop() {
   };
   rafId = requestAnimationFrame(step);
 }
-
-onMounted(() => {
+function scheduleFit() {
+  if (!active || fitRafId) return;
+  fitRafId = requestAnimationFrame(() => {
+    fitRafId = 0;
+    if (!active) return;
+    pendingFit = false;
+    fitView();
+  });
+}
+function stopFrames() {
+  if (rafId) cancelAnimationFrame(rafId);
+  if (fitRafId) cancelAnimationFrame(fitRafId);
+  rafId = fitRafId = 0;
+}
+function resumeGraph() {
+  if (active) return;
+  active = true;
   resizeObserver = new ResizeObserver(() => {
-    if (!viewTouched && !pendingFit) fitView();
+    if (active && !viewTouched && !pendingFit) fitView();
   });
   if (svgEl.value) resizeObserver.observe(svgEl.value);
-  if (layoutMode.value === 'dag') applyDagLayout();
+  if (layoutMode.value === 'dag') { if (!viewTouched) scheduleFit(); }
   else ensureLoop();
-});
-
-onBeforeUnmount(() => {
+}
+function pauseGraph() {
+  active = false;
+  stopFrames();
   resizeObserver?.disconnect();
   resizeObserver = null;
-  if (rafId) cancelAnimationFrame(rafId);
-});
+  cancelDrag();
+  hoverKey.value = '';
+}
+onMounted(resumeGraph);
+onActivated(resumeGraph);
+onDeactivated(pauseGraph);
+onBeforeUnmount(pauseGraph);
 
 // ---- 视口缩放与自适应 (iOS Pan & Zoom) ----
 function fitView() {
+  if (!active) return;
   if (!svgEl.value || !displayNodes.value.length) {
     tx.value = 0;
     ty.value = 0;
@@ -712,6 +733,8 @@ function toWorld(clientX, clientY) {
 }
 
 function onNodePointerDown(node, event) {
+  if (!active) return;
+  cancelDrag();
   if (event.button !== 0 && event.pointerType === 'mouse') return;
   event.stopPropagation();
   const world = toWorld(event.clientX, event.clientY);
@@ -730,17 +753,23 @@ function onNodePointerDown(node, event) {
   event.currentTarget.setPointerCapture?.(event.pointerId);
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp, { once: true });
+  window.addEventListener('pointercancel', cancelDrag, { once: true });
+  window.addEventListener('blur', cancelDrag, { once: true });
 }
 
 function onPointerDown(event) {
+  if (!active) return;
+  cancelDrag();
   if (event.button !== 0 && event.pointerType === 'mouse') return;
   dragState = { kind: 'pan', startX: event.clientX, startY: event.clientY, tx0: tx.value, ty0: ty.value, moved: false };
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp, { once: true });
+  window.addEventListener('pointercancel', cancelDrag, { once: true });
+  window.addEventListener('blur', cancelDrag, { once: true });
 }
 
 function onPointerMove(event) {
-  if (!dragState) return;
+  if (!active || !dragState) return;
   const dx = event.clientX - dragState.startX;
   const dy = event.clientY - dragState.startY;
   if (Math.abs(dx) + Math.abs(dy) > 4) dragState.moved = true;
@@ -771,16 +800,18 @@ function onPointerMove(event) {
   }
 }
 
-function onPointerUp() {
+function cancelDrag() {
   window.removeEventListener('pointermove', onPointerMove);
-  const state = dragState;
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', cancelDrag);
+  window.removeEventListener('blur', cancelDrag);
   dragState = null;
   dragKey.value = '';
-  if (!state) return;
-
-  if (state.kind === 'node' && !state.moved) {
-    emit('node-click', state.key);
-  }
+}
+function onPointerUp() {
+  const state = dragState;
+  cancelDrag();
+  if (active && state?.kind === 'node' && !state.moved) emit('node-click', state.key);
 }
 
 function reseed() {
