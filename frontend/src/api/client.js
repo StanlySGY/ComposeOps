@@ -278,7 +278,7 @@ export const api = {
   getProjectWebUiSettings: (id) => request(`/projects/${id}/webui-settings`, { force: true }),
   saveProjectWebUiSettings: (id, data) => request(`/projects/${id}/webui-settings`, { method: 'PUT', body: JSON.stringify(data) }),
   getProjectWebUi: (projectId) => request(`/projects/${projectId}/webui`),
-  listDbDumpTargets: (projectId) => request(`/projects/${projectId}/db-dump`),
+  listDbDumpTargets: (projectId, signal) => request(`/projects/${projectId}/db-dump`, { signal }),
   listCronJobs: (force = false) => request('/cron', { force, fresh: true }),
   previewCronSchedule: (cron) => request(`/cron/preview?${new URLSearchParams({ cron })}`),
   createCronJob: (payload) => request('/cron', { method: 'POST', body: JSON.stringify(payload) }),
@@ -296,11 +296,12 @@ export const api = {
   getGitOpsHistory: (id, limit = 50) => request(`/gitops/${id}/history?limit=${limit}`),
   rollbackGitOpsRepo: (id, commitHash) => request(`/gitops/${id}/rollback`, { method: 'POST', body: JSON.stringify({ commitHash }) }),
   // db dump
-  streamDbDump: (projectId, containerId, dbName = '') =>
+  streamDbDump: (projectId, containerId, dbName = '', signal) =>
     fetch(`${BASE}/projects/${projectId}/db-dump`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ containerId, dbName }),
+      signal,
     }),
   streamUpgrade: (projectId, services, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/upgrade`, { services }, signal),
   streamRollback: (projectId, onFrame, signal) => streamComposeControl(projectId, null, onFrame, `/projects/${projectId}/rollback`, {}, signal),
