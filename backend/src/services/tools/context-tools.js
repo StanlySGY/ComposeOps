@@ -11,11 +11,11 @@ export function registerContextTools(agent) {
       requiredPermission: 'readonly',
       confirmationRequired: false,
       requiresProject: false,
-      parameters: { type: 'object', properties: {} },
-      execute: async () => {
-        const projects = await scanProjects();
+      parameters: { type: 'object', properties: { hostId: { type: 'string', minLength: 1, maxLength: 160 } } },
+      execute: async (params) => {
+        const projects = await scanProjects(params.hostId);
         return projects.filter((project) => project.managed).map((project) => ({
-          id: project.id,
+          id: project.id, hostId: project.hostId, groupId: project.groupId, groupName: project.groupName,
           name: project.projectName,
           composeMode: project.composeMode,
           editable: !!project.editable,

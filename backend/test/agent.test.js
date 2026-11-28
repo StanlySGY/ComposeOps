@@ -31,10 +31,10 @@ const {
 } = await import('../src/lib/db.js');
 const { observeAgentAlertState, readAgentAlertRules } = await import('../src/services/alert-monitor.js');
 
-test('agent: 注册 68 个工具并暴露元数据(含风险等级)', () => {
+test('agent: 注册 95 个工具并暴露元数据(含风险等级)', () => {
   const agent = getAgent();
   const tools = agent.listTools();
-  assert.equal(tools.length, 68);
+  assert.equal(tools.length, 95);
   const names = new Set(tools.map((tool) => tool.name));
   for (const expected of [
     'compose.up', 'compose.restart', 'config.edit', 'diagnostic.probe', 'maintenance.clean', 'maintenance.inspect', 'metrics.query',

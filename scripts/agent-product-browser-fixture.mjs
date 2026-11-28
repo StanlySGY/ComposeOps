@@ -1,0 +1,26 @@
+// Local, disposable UI fixture. No Docker or model I/O is allowed.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import Docker from 'dockerode';
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-agent-ui-'));
+process.env.DB_PATH = path.join(directory, 'db.sqlite'); process.env.DISABLE_BACKGROUND_JOBS = '1'; process.env.SERVE_FRONTEND = '1'; process.env.ENABLE_SHELL = '0';
+delete process.env.DB_ENCRYPTION_KEY; delete process.env.DB_ENCRYPTION_KEY_FILE;
+const { default: db, setProjectPreference, createAiSession, addAiMessage, createAgentPlan, recordAgentExecution, updateAgentExecution } = await import('../backend/src/lib/db.js');
+const { getDockerForHost } = await import('../backend/src/services/docker-hosts.js');
+Object.getPrototypeOf(getDockerForHost('local').modem).dial = () => { throw new Error('UI fixture cannot access Docker'); };
+Docker.prototype.listContainers = async () => [];
+const sessionId = createAiSession(), now = Date.now();
+addAiMessage('user', '查看我的业务发布是否完成', {}, sessionId);
+addAiMessage('assistant', '发布已提交到持久队列，等待执行与业务验收。刷新页面后仍可核对任务状态。', {}, sessionId);
+setProjectPreference('ui-project', { managed: true });
+db.prepare('INSERT INTO sre_profiles(id,host_id,project_id,project_name,service_name,host_revision,engine_id,config_json,enabled,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run('ui-profile', 'local', 'ui-project', '我的业务', 'api', 'fixture', 'fixture', JSON.stringify({ url: 'http://127.0.0.1/health', targetPercent: 99.9, windowDays: 7, expectedStatus: 200, maxLatencyMs: 1000, failureThreshold: 3 }), 1, now, now, 'fixture');
+db.prepare('INSERT INTO sre_changes(id,status,host_id,project_id,profile_id,review_json,created_at,updated_at,expires_at,reviewed_by) VALUES(?,?,?,?,?,?,?,?,?,?)').run('ui-release', 'queued', 'local', 'ui-project', 'ui-profile', JSON.stringify({ recipe: 'application-release-v1', projectName: '我的业务', services: [], order: [], graph: { order: [], edges: [] } }), now, now, now + 600000, 'fixture');
+const planId = createAgentPlan(sessionId, '发布', {}), execId = recordAgentExecution(planId, 'sre.release.apply', {}, 'success');
+updateAgentExecution(execId, { result: { operation: { kind: 'change', id: 'ui-release', hostId: 'local', projectId: 'ui-project' } } });
+const { buildApp } = await import('../backend/src/app.js');
+const app = await buildApp({ logger: false });
+await app.inject({ method: 'POST', url: '/api/v1/auth/setup', payload: { password: 'isolated-ui-test-password' } });
+const address = await app.listen({ host: '127.0.0.1', port: Number(process.env.UI_FIXTURE_PORT || 3019) });
+console.log(JSON.stringify({ ready: true, address, sessionId, directory }));
+process.on('SIGTERM', async () => { await app.close(); await import('../backend/src/services/workflow-engine.js'); await new Promise(resolve => setImmediate(resolve)); db.close(); fs.rmSync(directory, { recursive: true, force: true }); process.exit(0); });

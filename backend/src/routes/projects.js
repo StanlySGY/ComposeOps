@@ -22,6 +22,7 @@ import { getProjectDocker } from '../services/docker-hosts.js';
 import { listProjectDbContainers, runDbDump } from '../services/db-dumper.js';
 import { registerProjectWebUiRoutes } from './project-webui-settings.js';
 import { registerProjectGroupRoutes, groupAssignmentsSchema } from './project-groups.js';
+import { updateManagedProject, projectManagementSchema } from '../services/project-management.js';
 import { applyProjectManagement } from '../services/project-groups.js';
 import { listStandaloneContainers, runStandaloneContainerAction, runComposeServiceAction } from '../services/container-management.js';
 import {
@@ -195,6 +196,8 @@ export default async function projectRoutes(fastify, { imageUpgrade = upgradePro
 
 
   fastify.get('/mount-plan', async () => buildMountPlan(await scanProjects()));
+
+  fastify.patch('/management', { schema: { body: projectManagementSchema } }, async request => updateManagedProject(request.body));
 
   fastify.get('/management', async () => buildMountPlan(await scanProjects()));
 

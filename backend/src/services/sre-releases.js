@@ -38,7 +38,7 @@ export function releaseOrder(services) {
   names.forEach(visit); return { order, edges };
 }
 function policy(review, actor, id) {
-  for (const step of review.services) for (const toolName of ['sre.release', 'sre.change', 'compose.up', 'compose.upgrade']) {
+  for (const step of review.services) for (const toolName of ['sre.release', 'sre.release.apply', 'sre.change', 'compose.up', 'compose.upgrade']) {
     const decision = evaluateAgentPolicy({ toolName, projectId: review.projectId, params: { hostId: review.hostId, projectId: review.projectId, serviceName: step.serviceName } });
     if (id) recordAgentAuditEvent({ executionId: id, eventType: 'release_policy', actor, toolName, decision: decision.decision, reason: decision.reason, details: { serviceName: step.serviceName } });
     if (decision.decision === 'deny') throw incidentError('多服务发布被拒绝策略阻止：' + decision.reason, 403);

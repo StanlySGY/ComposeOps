@@ -4,13 +4,13 @@
     <p v-if="error" class="alert-error" role="alert">{{ error }}<button class="text-link" @click="load">刷新数据</button></p>
     <p v-if="notice" class="text-sm text-status-ok" role="status">{{ notice }}</p>
     <nav class="flex flex-wrap gap-2" aria-label="可靠性功能"><button v-for="item in tabs" :key="item.key" class="btn-secondary" :class="{ 'border-emerald-500 text-emerald-300': tab === item.key }" :aria-current="tab === item.key ? 'page' : undefined" @click="router.replace({ query: { ...route.query, tab: item.key } })">{{ item.label }}</button></nav>
-    <ApplicationOnboarding v-if="tab === 'onboarding'" />
-    <ReliabilityReleases v-else-if="tab === 'releases'" :profiles="profiles" />
-    <ReliabilityBusiness v-else-if="tab === 'business'" />
+    <ApplicationOnboarding :operation-id="operationId" v-if="tab === 'onboarding'" />
+    <ReliabilityReleases :operation-id="operationId" v-else-if="tab === 'releases'" :profiles="profiles" />
+    <ReliabilityBusiness :operation-id="operationId" v-else-if="tab === 'business'" />
     <ReliabilityTelemetry v-else-if="tab === 'telemetry'" />
     <ReliabilityEvaluations v-else-if="tab === 'evaluations'" />
     <ReliabilityHealth v-else-if="['platform', 'alerts'].includes(tab)" :key="tab" :tab="tab" :profiles="profiles" />
-    <ReliabilityOperations v-else-if="tab !== 'targets'" :tab="tab" :profiles="profiles" />
+    <ReliabilityOperations :operation-id="operationId" v-else-if="tab !== 'targets'" :tab="tab" :profiles="profiles" />
     <template v-else>
     <section class="section-panel p-4" aria-label="最近 30 天处置效果">
       <h2 class="text-sm font-semibold">最近 30 天处置效果</h2>
@@ -28,7 +28,7 @@
         <p class="mt-3 text-xs leading-5 text-surface-400">缺测 {{ duration(profile.statistics.unknownMs) }} · {{ profile.statistics.samples }} 个样本。覆盖率不足时，已观测可用率不能代表整个窗口。</p>
         <p v-if="profile.latest?.reason" class="mt-2 text-xs text-status-warn">{{ profile.latest.reason }}</p>
         <div class="mt-4 border-t border-surface-800 pt-4"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="text-sm font-semibold">有界自动修复</h3><span class="text-xs" :class="policyActive(profile) ? 'text-status-ok' : 'text-surface-400'">{{ policyLabel(profile) }}</span></div><p class="mt-2 text-xs leading-5 text-surface-400">仅对持续探针失败的单副本服务重启一次；每个故障最多一次，结果不明时停止。多副本服务保留人工处置。</p><p v-if="profile.policy" class="mt-2 text-xs text-surface-400">每 24 小时最多 {{ profile.policy.maxDaily }} 次 · 冷却 {{ duration(profile.policy.cooldownMs) }} · 授权至 {{ time(profile.policy.expiresAt) }}</p></div>
-        <div class="mt-4 flex flex-wrap gap-2"><button class="btn-secondary btn-sm" :disabled="busy" @click="edit(profile)">编辑目标</button><button class="btn-secondary btn-sm" :disabled="busy || !profile.enabled" @click="authorize(profile)">审阅自动授权</button><button v-if="profile.policy?.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="disablePolicy(profile)">停止自动处置</button><button v-if="profile.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="pause(profile)">暂停探针与授权</button><button class="btn-secondary btn-sm" :disabled="busy" @click="archiveTarget = profile">归档目标</button></div>
+        <div class="mt-4 flex flex-wrap gap-2"><button class="btn-secondary btn-sm" @click="askAgent(profile)">交给 AI 分析与操作</button><button class="btn-secondary btn-sm" :disabled="busy" @click="edit(profile)">编辑目标</button><button class="btn-secondary btn-sm" :disabled="busy || !profile.enabled" @click="authorize(profile)">审阅自动授权</button><button v-if="profile.policy?.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="disablePolicy(profile)">停止自动处置</button><button v-if="profile.enabled" class="btn-secondary btn-sm" :disabled="busy" @click="pause(profile)">暂停探针与授权</button><button class="btn-secondary btn-sm" :disabled="busy" @click="archiveTarget = profile">归档目标</button></div>
       </section>
     </div>
     </template>
@@ -51,6 +51,14 @@
   </div>
 </template>
 <script setup>
+import { useAgentConsole } from '../composables/useAgentConsole.js';
+const { openAgent } = useAgentConsole();
+function askAgent(profile) {
+  openAgent({ page: '应用可靠性', hostId: profile.hostId, projectId: profile.projectId, projectName: profile.projectName, serviceName: profile.serviceName, containerId: '',
+    summary: `健康目标：${profile.projectName} / ${profile.serviceName}`,
+    state: JSON.stringify({ resource: { type: 'sre-profile', id: profile.id, version: profile.version }, hostId: profile.hostId, projectId: profile.projectId, serviceName: profile.serviceName, enabled: profile.enabled }) });
+}
+
 import { computed, ref, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ReliabilityOperations from '../components/ReliabilityOperations.vue';
@@ -67,6 +75,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 const route = useRoute(), router = useRouter();
 const tabs = [{ key: 'onboarding', label: '接入向导' }, { key: 'targets', label: '应用目标' }, { key: 'releases', label: '应用发布' }, { key: 'changes', label: '单服务变更' }, { key: 'business', label: '业务恢复' }, { key: 'recovery', label: '恢复演练' }, { key: 'alerts', label: '可靠性告警' }, { key: 'platform', label: '平台健康' }, { key: 'telemetry', label: '遥测接入' }, { key: 'evaluations', label: '诊断评测' }, { key: 'reports', label: '效果复盘' }];
 const tab = computed(() => tabs.some(item => item.key === route.query.tab) ? route.query.tab : 'targets');
+const operationId = computed(() => typeof route.query.operationId === 'string' ? route.query.operationId : '');
 const archiveTarget = ref(null);
 const profiles = ref([]), targets = ref([]), insights = ref({}), error = ref(''), notice = ref(''), formError = ref('');
 const loading = ref(false), loaded = ref(false), busy = ref(false), draft = ref(null), policyDraft = ref(null), confirmPolicy = ref(false), targetKey = ref(''), checkedNow = ref(Date.now());

@@ -116,6 +116,7 @@ export function toPublicAgentEvent(event) {
       success: !!event.result?.success,
       durationMs: Number(event.result?.durationMs || 0),
       summary,
+      ...(event.result?.postconditionStatus ? { verification: { status: String(event.result.postconditionStatus).slice(0, 32), reason: cleanText(event.result.postconditionReason).slice(0, 600) } } : {}),
       error: event.result?.success ? '' : cleanError(event.result?.error || result?.error || ''),
     };
   }

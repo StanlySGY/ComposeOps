@@ -215,7 +215,7 @@ test('真实 SSE: 成功与失败执行都写入完成和后置检查审计事�
   const successExecution = successAudit.find(event => event.eventType === 'execution_completed');
   const successPostcondition = successAudit.find(event => event.eventType === 'postcondition_completed');
   assert.equal(successExecution.decision, 'success');
-  assert.equal(successPostcondition.decision, 'passed');
+  assert.equal(successPostcondition.decision, 'not_configured', '执行成功不能冒充未配置的业务验收通过');
   assert.equal(successExecution.parametersHash, successPostcondition.parametersHash);
 
   const { sessionId: failedSession } = await request('/agent/sessions', {});

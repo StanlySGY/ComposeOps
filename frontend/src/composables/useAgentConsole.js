@@ -12,6 +12,8 @@ const SENSITIVE_FIELD_RE = /(SECRET|TOKEN|PASSWORD|PASSWD|\bPASS\b|(?:API|PRIVAT
 const SENSITIVE_VALUE_RE = /(ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/;
 
 const PAGE_LABELS = {
+  '/reliability': '应用可靠性',
+  '/dashboard': '运维总览',
   '/services': '服务',
   '/compose': 'Compose 编辑器',
   '/logs': '日志',
@@ -98,6 +100,7 @@ function scheduleSync() {
 export function useAgentConsole() {
   function openAgent(nextContext = {}) {
     syncPageContext();
+    manualContextRoute.value = currentRoute();
     manualContext.value = { ...manualContext.value, ...nextContext };
     context.value = { ...autoContext.value, ...manualContext.value };
     if (currentRoute() === '/agent') {

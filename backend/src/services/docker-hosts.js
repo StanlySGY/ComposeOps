@@ -1,4 +1,11 @@
 import Docker from 'dockerode';
+import { AsyncLocalStorage } from 'node:async_hooks';
+const executionHost = new AsyncLocalStorage();
+/** Pin legacy helpers to an execution-local node without changing the user's selection. */
+export function withDockerHostScope(hostId, action) {
+  if (!getHost(hostId)) throw Object.assign(new Error('Docker 节点不存在'), { statusCode: 404 });
+  return executionHost.run(hostId, action);
+}
 import { createHash, randomUUID } from 'node:crypto';
 import { getSetting, setSetting } from '../lib/db.js';
 import { createSshHostVerifier, normalizeSshFingerprint } from '../lib/ssh-fingerprint.js';
@@ -103,7 +110,7 @@ export function hostConnectionRevision(id) {
 }
 
 export function getActiveHostId() {
-  return getSetting(ACTIVE_KEY, 'local') || 'local';
+  return executionHost.getStore() || getSetting(ACTIVE_KEY, 'local') || 'local';
 }
 
 export function getActiveHost() {

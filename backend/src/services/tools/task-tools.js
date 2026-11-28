@@ -4,7 +4,14 @@
  * 长构建/拉取转后台立即返回,用 task.output 等待或读取,
  * 任务完成后同会话下一轮也会自动搭车提醒。
  */
-import { listBackgroundTasks, stopBackgroundTask, waitForTaskOutput } from '../agent/background-tasks.js';
+import { getBackgroundTask, listBackgroundTasks, stopBackgroundTask, waitForTaskOutput } from '../agent/background-tasks.js';
+
+function assertTaskOwner(taskId, context) {
+  const task = getBackgroundTask(taskId);
+  if (!task) throw new Error('后台任务不存在');
+  if (context.sessionId && Number(task.sessionId) !== Number(context.sessionId)) throw new Error('后台任务不属于当前会话');
+  return task;
+}
 
 export function registerTaskTools(agent) {
   agent
@@ -31,7 +38,8 @@ export function registerTaskTools(agent) {
         },
         required: ['taskId'],
       },
-      execute: async (params) => {
+      execute: async (params, context) => {
+        assertTaskOwner(params.taskId, context);
         const waitMs = Math.min(Math.max(Number(params.waitMs ?? 120000), 0), 300000);
         return waitForTaskOutput(params.taskId, waitMs);
       },
@@ -44,10 +52,12 @@ export function registerTaskTools(agent) {
       requiresProject: false,
       parameters: {
         type: 'object',
-        properties: { taskId: { type: 'string', description: '后台任务 ID' } },
-        required: ['taskId'],
+        properties: { taskId: { type: 'string', description: '后台任务 ID' }, projectId: { type: 'string', minLength: 1, description: 'task.list 返回的项目 ID' } },
+        required: ['taskId', 'projectId'],
       },
-      execute: async (params) => {
+      execute: async (params, context) => {
+        const task = assertTaskOwner(params.taskId, context);
+        if (task.projectId !== context.projectId || task.hostId !== context.hostId) throw new Error('后台任务不属于指定项目或节点');
         const result = stopBackgroundTask(params.taskId);
         return { ...result, taskId: params.taskId };
       },

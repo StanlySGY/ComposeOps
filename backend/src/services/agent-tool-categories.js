@@ -141,9 +141,9 @@ export class PostconditionValidator {
   static async validate(toolName, params, result, context) {
     // 后台任务(compose.up/pull background=true)尚未产生最终效果,
     // 此刻的容器状态不代表动作结果,客观验收改由任务完成后的通知环节承担。
-    if (result && typeof result === 'object' && result.background === true) return { valid: true };
+    if (result && typeof result === 'object' && result.background === true) return { valid: true, status: 'pending' };
     const checks = POSTCONDITIONS[toolName];
-    if (!checks) return { valid: true };
+    if (!checks) return { valid: true, status: 'not_configured', reason: '此工具未配置独立后置验收；返回成功仅表示调用完成。' };
 
     for (const condition of checks) {
       try {
@@ -166,7 +166,7 @@ const PRECONDITIONS = {
     {
       check: async (params, context) => {
         if (!params.service) return false;
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return false;
         
         // 检查服务是否存在且运行中
@@ -188,7 +188,7 @@ const PRECONDITIONS = {
     {
       check: async (params, context) => {
         // 建议：配置修改前服务应处于停止状态
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return true; // 项目不存在时跳过检查
         
         const docker = getProjectDocker(project);
@@ -214,7 +214,7 @@ const PRECONDITIONS = {
         if (!params.source) return false;
         
         // 安全检查：路径必须在项目目录内
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return false;
         
         const { resolve, relative } = await import('path');
@@ -239,7 +239,7 @@ const POSTCONDITIONS = {
         if (params.replicas === undefined || params.replicas === null) return true;
         
         // 验证实际副本数是否符合预期
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return false;
         
         const docker = getProjectDocker(project);
@@ -262,7 +262,7 @@ const POSTCONDITIONS = {
   'compose.restart': [
     {
       check: async (params, result, context) => {
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return false;
         const docker = getProjectDocker(project);
         const containers = await docker.listContainers({
@@ -277,7 +277,7 @@ const POSTCONDITIONS = {
     {
       check: async (params, result, context) => {
         // 验证容器是否成功启动
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return false;
         
         const docker = getProjectDocker(project);
@@ -296,7 +296,7 @@ const POSTCONDITIONS = {
       check: async (params, result, context) => {
         // 配置修改后应该能通过校验
         const { validateComposeSemantics } = await import('./compose-validator.js');
-        const project = await findProject(context.projectId);
+        const project = context.project || await findProject(context.projectId);
         if (!project) return false;
         
         const content = project.mounted

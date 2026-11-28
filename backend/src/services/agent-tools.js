@@ -7,6 +7,8 @@
  * 只读探测与容器日志读取统一走 ../lib/docker-exec.js(白名单单一事实来源)。
  */
 
+import { registerManagementTools } from './tools/management-tools.js';
+import { registerReliabilityTools } from './tools/reliability-tools.js';
 import { registerComposeTools } from './tools/compose-tools.js';
 import { registerConfigTools } from './tools/config-tools.js';
 import { registerMaintenanceTools } from './tools/maintenance-tools.js';
@@ -27,6 +29,34 @@ import { MACRO_TOOLS } from './agent-tool-categories.js';
  * 缺少条目会在注册阶段失败，不能因遗漏元数据而静默落到 low。
  */
 export const RISK_LEVELS = {
+  'host.list': 'low',
+  'host.ping': 'low',
+  'host.save': 'critical',
+  'host.delete': 'critical',
+  'project.discover': 'low',
+  'project.manage': 'critical',
+  'group.list': 'low',
+  'group.save': 'medium',
+  'group.delete': 'high',
+  'group.assign': 'medium',
+  'sre.context': 'low',
+  'sre.profile.save': 'high',
+  'sre.profile.pause': 'high',
+  'sre.onboarding.save': 'medium',
+  'sre.onboarding.apply': 'critical',
+  'sre.change.review': 'medium',
+  'sre.release.review': 'medium',
+  'sre.change.apply': 'critical',
+  'sre.release.apply': 'critical',
+  'sre.change.cancel': 'high',
+  'sre.business.candidates': 'low',
+  'sre.business.plan': 'critical',
+  'sre.business.pause': 'high',
+  'sre.business.backup': 'high',
+  'sre.business.restore': 'critical',
+  'sre.operation': 'low',
+  'sre.business.list': 'low',
+
   'compose.up': 'high',
   'compose.stop': 'high',
   'compose.restart': 'medium',
@@ -124,6 +154,8 @@ export function assessRisk(toolName, params, context) {
 
 /** 注册全部域工具到 agent。 */
 export function registerAgentTools(agent) {
+  registerManagementTools(agent);
+  registerReliabilityTools(agent);
   registerComposeTools(agent);
   registerConfigTools(agent);
   registerMaintenanceTools(agent);

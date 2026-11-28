@@ -78,10 +78,11 @@ describe('InteractiveChart.vue', () => {
       expect(stats.text()).toContain('60.0MB');
     });
 
-    it('displays current value', async () => {
+    it('labels the last plotted point without implying a current live measurement', async () => {
       await wrapper.vm.$nextTick();
       const stats = wrapper.find('.chart-stats');
-      expect(stats.text()).toContain('当前');
+      expect(stats.text()).toContain('末点');
+      expect(stats.text()).not.toContain('当前');
       expect(stats.text()).toContain('65.0MB');
     });
   });

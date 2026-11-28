@@ -6,7 +6,7 @@
     <template v-if="tab === 'changes'">
       <section class="section-panel p-4"><div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="font-semibold">可靠变更</h2><p class="mt-2 text-sm text-surface-400">固定完整配置及新旧镜像，审批后执行单服务更新，用 HTTP 验收。回退范围仅限镜像。</p></div><button class="btn-primary" :disabled="busy || !profiles.some(p => p.enabled)" @click="changeDraft = { profileId: profiles.find(p => p.enabled)?.id, image: '' }">评审镜像变更</button></div><p class="mt-3 text-xs text-surface-400">目标镜像需先在对应节点准备好。执行使用解析后的独立配置快照，保留在应用目录；后续部署继续使用固定镜像。快照含展开的环境变量，仅限宿主文件权限保护。每次评审有效 15 分钟。</p></section>
       <EmptyState v-if="loaded && !data.changes.length" icon="GitBranch" title="尚无可靠变更" description="先配置应用目标和 HTTP 健康检查，再审阅准备好的镜像。" />
-      <section v-for="change in data.changes" :key="change.id" class="section-panel p-4 min-w-0" :aria-label="'变更 ' + change.review.projectName">
+      <section v-for="change in data.changes" :key="change.id" v-focus-operation="operationId === change.id" :data-operation-id="change.id" class="section-panel p-4 min-w-0" :aria-label="'变更 ' + change.review.projectName">
         <div class="flex flex-wrap justify-between gap-2"><h3 class="font-semibold">{{ change.review.projectName }} / {{ change.review.serviceName }}</h3><span class="text-sm" :class="tone(change.status)">{{ label(change.status) }}</span></div>
         <p class="mt-2 text-xs text-surface-400">{{ change.hostId }} · {{ time(change.createdAt) }} · {{ change.approvedBy ? `批准人 ${change.approvedBy}` : '尚未批准' }}</p>
         <dl class="mt-3 space-y-2 text-xs break-all"><div><dt class="text-surface-400">原镜像 ID</dt><dd class="mt-1 font-mono">{{ change.review.old.imageId }}</dd></div><div><dt class="text-surface-400">新镜像 ID（{{ change.review.next.requested }}）</dt><dd class="mt-1 font-mono">{{ change.review.next.imageId }}</dd></div></dl>
@@ -39,10 +39,11 @@
 <script setup>
 import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
 import { api } from '../api/client.js';
+import vFocusOperation from '../directives/focusOperation.js';
 import BaseModal from './common/BaseModal.vue';
 import ConfirmDialog from './common/ConfirmDialog.vue';
 import EmptyState from './common/EmptyState.vue';
-defineProps({ tab: { type: String, required: true }, profiles: { type: Array, default: () => [] } });
+defineProps({ operationId: { type: String, default: '' }, tab: { type: String, required: true }, profiles: { type: Array, default: () => [] } });
 const data = ref({ changes: [], recoveryPlans: [], recoveryRuns: [], retrospectives: [], insights: {} });
 const error = ref(''), notice = ref(''), formError = ref(''), loading = ref(false), loaded = ref(false), busy = ref(false);
 const acknowledgement = ref(null);

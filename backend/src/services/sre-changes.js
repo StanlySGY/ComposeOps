@@ -30,7 +30,7 @@ function update(id, status, result = {}, error = '') {
   return getSreChange(id);
 }
 function policy(profile, id, actor) {
-  for (const toolName of ['sre.change', 'compose.up', 'compose.upgrade']) {
+  for (const toolName of ['sre.change.apply', 'sre.change', 'compose.up', 'compose.upgrade']) {
     const decision = evaluateAgentPolicy({ toolName, projectId: profile.projectId, params: { hostId: profile.hostId, projectId: profile.projectId, serviceName: profile.serviceName } });
     if (id) recordAgentAuditEvent({ executionId: id, eventType: 'policy_decision', actor, toolName, decision: decision.decision, reason: decision.reason });
     if (decision.decision === 'deny') throw incidentError('变更被拒绝策略阻止：' + decision.reason, 403);

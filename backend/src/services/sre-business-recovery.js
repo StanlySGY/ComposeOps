@@ -32,8 +32,11 @@ export function getBusinessRun(id) { const row = jobRow(db.prepare('SELECT * FRO
 export function listBusinessRecovery() { return { protection: businessBackupProtectionStatus(), plans: db.prepare('SELECT * FROM sre_business_plans ORDER BY updated_at DESC LIMIT 100').all().map(planRow),
   backups: db.prepare('SELECT * FROM sre_business_backups ORDER BY created_at DESC LIMIT 100').all().map(jobRow), runs: db.prepare('SELECT * FROM sre_business_runs ORDER BY created_at DESC LIMIT 100').all().map(jobRow) }; }
 function policy(plan, action) {
-  const decision = evaluateAgentPolicy({ toolName: 'sre.business.' + action, projectId: plan.projectId, params: { hostId: plan.hostId, projectId: plan.projectId, dbService: plan.config.dbService } });
-  if (decision.decision === 'deny') throw incidentError('业务恢复被拒绝策略阻止：' + decision.reason, 403);
+  const names = action === 'drill' ? ['sre.business.drill', 'sre.business.restore'] : ['sre.business.' + action];
+  for (const toolName of names) {
+    const decision = evaluateAgentPolicy({ toolName, projectId: plan.projectId, params: { hostId: plan.hostId, projectId: plan.projectId, planId: plan.id, version: plan.version, dbService: plan.config.dbService } });
+    if (decision.decision === 'deny') throw incidentError('业务恢复被拒绝策略阻止：' + decision.reason, 403);
+  }
 }
 async function sourceFor(docker, project, service) {
   const rows = await withReadTimeout(docker.listContainers({ all: true, filters: { label: [`${PROJECT_LABEL}=${project.projectName}`, `${SERVICE_LABEL}=${service}`] } }));
@@ -192,8 +195,14 @@ export async function executeBusinessBackup(id, options = {}) {
   } catch (error) { failure = error.message; await rm(businessBackupFile(id), { force: true }).catch(() => {}); }
   finish('sre_business_backups', job, status, result, failure);
   if (status === 'verified') {
+    // Publish the child before yielding, so polling cannot observe a finished
+    // backup and stop before its requested recovery has been enqueued.
+    if (job.snapshot.drillAfter) { try { queueBusinessRun(plan.id, id, job.requestedBy); } catch (error) {
+      result.recoveryQueueError = String(safeIncidentData(error.message)).slice(0, 1000);
+      db.prepare('UPDATE sre_business_backups SET result_json=? WHERE id=?').run(json(result), id);
+      recordEvent({ source: 'sre', eventType: 'backup', severity: 'warning', title: '业务备份完成但演练未入队', detail: error.message });
+    } }
     await pruneBackups(plan.id).catch(() => {});
-    if (job.snapshot.drillAfter) { try { queueBusinessRun(plan.id, id, job.requestedBy); } catch (error) { recordEvent({ source: 'sre', eventType: 'backup', severity: 'warning', title: '业务备份完成但演练未入队', detail: error.message }); } }
   }
   return getBusinessBackup(id);
 }

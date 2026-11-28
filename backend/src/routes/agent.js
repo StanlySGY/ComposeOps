@@ -1,3 +1,4 @@
+import { listSessionOperations } from '../services/agent/operations.js';
 /**
  * AI Agent 路由(/agent/*)。
  *
@@ -59,6 +60,7 @@ function aiRateLimit(limit, windowMs = 60000) {
   };
 }
   // Worker 配置只暴露给已认证的管理端；工具权限与审批仍由后端注册表和策略引擎决定。
+  fastify.get('/agent/sessions/:sessionId/operations', { schema: { params: { type: 'object', required: ['sessionId'], properties: { sessionId: { type: 'integer', minimum: 1 } } } } }, async request => listSessionOperations(request.params.sessionId));
   fastify.get('/agent/roles', async () => ({ roles: listAgentRoles() }));
   // 持久化 Agent 策略组（单管理员 API，由 app.js 的会话鉴权与 Origin 检查保护）。
   fastify.get('/agent/policy-groups', async () => ({ groups: listAgentPolicyGroups() }));

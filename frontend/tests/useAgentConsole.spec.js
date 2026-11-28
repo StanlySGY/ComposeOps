@@ -47,3 +47,13 @@ describe('useAgentConsole', () => {
     observe.mockRestore();
   });
 });
+
+it('openAgent 的结构化目标随页面切换清空，不把旧节点带到新页面', () => {
+  window.location.hash = '#/reliability';
+  const agent = useAgentConsole(); agent.startPageTracking();
+  agent.openAgent({ hostId: 'node-a', projectId: 'p1', state: JSON.stringify({ resource: { type: 'sre-profile', id: 'health-1', version: 2 } }) });
+  expect(agent.context.value.hostId).toBe('node-a');
+  window.location.hash = '#/services'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  expect(agent.context.value.hostId).not.toBe('node-a'); expect(agent.context.value.state).not.toContain('health-1');
+  agent.stopPageTracking(); agent.resetAgentContext(); agent.closeAgent();
+});

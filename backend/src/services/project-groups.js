@@ -47,7 +47,7 @@ export function validateGroupAssignments(projects, assignments = []) {
     seen.add(row.projectId);
   }
 }
-function writeAssignments(projects, assignments) {
+export function writeAssignments(projects, assignments) {
   const byId = new Map(projects.map(p => [p.id, p]));
   for (const row of assignments) {
     setProjectPreference(row.projectId, {});

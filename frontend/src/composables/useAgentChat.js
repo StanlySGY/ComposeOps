@@ -306,7 +306,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     } else if (event.type === 'tool_result') {
       const status = event.success ? 'done' : 'failed';
       // 结果摘要/错误只在后端透出的脱敏字段里,不再假设前端持有完整结果体。
-      const detail = { durationMs: event.durationMs, summary: event.summary || '', error: event.error || '' };
+      const detail = { durationMs: event.durationMs, summary: event.summary || '', error: event.error || '', verification: event.verification || null };
       if (pending) Object.assign(pending, detail, { status });
       else assistant.tools.push({ tool: event.tool, status, ...detail });
     } else if (event.type === 'tool_error') {

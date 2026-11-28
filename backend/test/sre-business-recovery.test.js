@@ -93,6 +93,18 @@ test('重复入队和并发执行不重复创建，计划变更与拒绝策略�
   try { createAgentPolicyRule({ groupId: group.id, name: '禁止备份', toolName: 'sre.business.backup', projectId: h.project.id, effect: 'deny' }); assert.throws(() => queueBusinessBackup(h.plan.id), /拒绝/); }
   finally { deleteAgentPolicyGroup(group.id); }
 });
+test('Agent 恢复工具的拒绝策略同时约束入队和已排队任务的执行', async () => {
+  const f = await fixture(), backup = await f.backup(), queued = queueBusinessRun(f.plan.id, backup.id);
+  const group = createAgentPolicyGroup({ name: 'restore-deny', enabled: true });
+  try {
+    createAgentPolicyRule({ groupId: group.id, name: '禁止指定恢复计划', toolName: 'sre.business.restore', projectId: f.project.id, parameters: { planId: f.plan.id }, effect: 'deny' });
+    const finished = await executeBusinessRun(queued.id, f.opts);
+    assert.equal(finished.status, 'failed'); assert.match(finished.error, /拒绝/);
+    assert.equal(f.created.length, 0);
+    assert.throws(() => queueBusinessRun(f.plan.id, backup.id), /拒绝/);
+    assert.throws(() => queueBusinessBackup(f.plan.id, 'tester', true), /拒绝/);
+  } finally { deleteAgentPolicyGroup(group.id); }
+});
 test('进程中断与清理失败保留未知状态；仍有资源时不能核对关闭', async () => {
   const f = await fixture(), backup = await f.backup(), run = queueBusinessRun(f.plan.id, backup.id);
   const getVolume = f.docker.getVolume; f.docker.getVolume = id => ({ ...getVolume(id), remove: async () => { throw new Error('disk busy'); } });

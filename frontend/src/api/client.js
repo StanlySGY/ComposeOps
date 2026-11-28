@@ -159,6 +159,7 @@ export function bumpHostEpoch() {
 }
 
 export const api = {
+  getAgentSessionOperations: (sessionId, signal) => request('/ai/agent/sessions/' + encodeURIComponent(sessionId) + '/operations', { signal }),
   getSreResource: (path, signal) => request('/sre/' + path, { signal }),
   getSreOperations: (signal) => request('/sre/operations', { signal }),
   sreOperation: (path, data = {}, method = 'POST') => request('/sre/' + path, { method, body: JSON.stringify(data) }),
