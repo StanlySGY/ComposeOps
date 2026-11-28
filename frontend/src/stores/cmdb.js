@@ -61,7 +61,7 @@ export const useCmdbStore = defineStore('cmdb', () => {
       await loadTopology(true, { throwOnError: true });
     } catch (e) {
       if (e.name === 'AbortError') throw e;
-      throw new Error(`${message}，但清单刷新失败：${e.message}。请刷新查看结果，无需重复提交。`);
+      throw new Error(`${message}，但清单刷新失败：${e.message}。请刷新查看结果，无需重复提交。`, { cause: e });
     }
   }
 
