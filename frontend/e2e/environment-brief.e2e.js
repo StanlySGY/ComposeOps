@@ -32,9 +32,9 @@ test('手机、平板和桌面都有状态摘要及可触达的项目入口', as
   }
 });
 
-test('总览指标在新标签打开后仍能返回来源页面', async ({ page }) => {
+test('总览项目在新标签打开后仍能返回来源页面', async ({ page }) => {
   await page.goto('./#/dashboard');
-  const href = await page.getByRole('link', { name: '查看 CPU 实时监控' }).getAttribute('href');
+  const href = await page.getByRole('link', { name: '定位项目 knowledge-base：部分运行' }).getAttribute('href');
   const tab = await page.context().newPage();
   await tab.goto(new URL(href, page.url()).href);
   await tab.getByRole('navigation', { name: '页面导航' }).getByRole('button', { name: '返回运维总览' }).click();

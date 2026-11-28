@@ -1,10 +1,11 @@
 import { notifyDataChanged } from '../lib/data-changes.js';
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useEscapeKey } from './useEscapeKey.js';
 import { api } from '../api/client.js';
 import { stripAgentProtocol } from '../lib/agent-text.js';
+import { onAuthEpochChange } from '../lib/auth-context.js';
 
-/** 抽屉与工作台共享会话、输入草稿和执行状态；只有显式新建会话才重置。 */
+/** 抽屉与工作台共享会话、输入草稿和执行状态；新建会话或认证变化时重置。 */
 export const WORKBENCH_CHANNEL = 'workbench';
 export const PAGE_DRAWER_CHANNEL = WORKBENCH_CHANNEL;
 
@@ -48,6 +49,19 @@ function channelState(name) {
 }
 
 function resetChannel(state) {
+  ++state.generation;
+  ++state.approvalVersion;
+  state.controller?.abort();
+  state.controller = null;
+  state.activeRun = null;
+  state.sessionPromise = null;
+  state.running.value = false;
+  state.operation.value = '';
+  state.modeBusy.value = false;
+  state.historyLoading.value = false;
+  state.historyError.value = '';
+  state.queuePaused.value = false;
+  state.approvalMode.value = 'ask';
   state.messages.value = [];
   state.input.value = '';
   state.sessionId.value = null;
@@ -57,7 +71,11 @@ function resetChannel(state) {
   state.bufferingAssistant = null;
   if (state.tokenTimer) clearTimeout(state.tokenTimer);
   state.tokenTimer = null;
+  for (const subscriber of state.subscribers) subscriber.onReset?.();
 }
+
+// Detach the browser only. Durable work remains on the server for its owner to inspect.
+onAuthEpochChange(() => { for (const state of channels.values()) resetChannel(state); });
 
 export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null, onApproval = null } = {}) {
   const instance = getCurrentInstance();
@@ -76,11 +94,12 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   const sendingBlocked = computed(() => !!operation.value || modeBusy.value || historyLoading.value || !!historyError.value);
   const busy = computed(() => running.value || !!operation.value || modeBusy.value);
   const scrollEl = ref(null);
-  const subscriber = { onEventExtra, onApproval, onContent: () => scrollBottom() };
+  const subscriber = { onEventExtra, onApproval, onContent: () => scrollBottom(), onReset: () => { closeZoom(); atBottom.value = true; } };
   if (instance) state.subscribers.add(subscriber);
   function setSubscriberActive(active) { subscriber.active = active !== false; }
   // 滚动跟随:用户向上回看时暂停自动滚底,回到底部(或手动点"回到底部")后恢复。
   const atBottom = ref(true);
+  let lastScrollTop = 0;
   // token 节流:SSE 仍按真实模型分片接收；仅合并极短时间内的 DOM 更新，
   // 60ms 约 16fps，避免 120ms 带来的明显块状跳字，同时控制 Markdown 重渲染成本。
   function flushTokens() {
@@ -107,12 +126,21 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   }
 
   function onScroll() {
-    atBottom.value = isNearBottom();
+    const top = scrollEl.value?.scrollTop || 0;
+    // A delayed scroll event can arrive after panels resize the viewport.
+    // Only actual upward movement leaves follow mode; layout growth does not.
+    if (isNearBottom()) atBottom.value = true;
+    else if (top < lastScrollTop) atBottom.value = false;
+    lastScrollTop = top;
   }
 
   function scrollBottom(force = false) {
     if (!force && !atBottom.value) return; // 用户在回看历史,不打断
-    void nextTick(() => { if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight; });
+    void nextTick(() => {
+      if ((!force && !atBottom.value) || subscriber.active === false || !scrollEl.value?.clientHeight) return;
+      scrollEl.value.scrollTop = scrollEl.value.scrollHeight;
+      lastScrollTop = scrollEl.value.scrollTop;
+    });
   }
 
   function scrollToBottom() {
@@ -141,19 +169,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   function nextMessageId() { return ++state.nextId; }
 
   function resetSession() {
-    ++state.generation;
-    state.controller?.abort();
-    state.controller = null;
-    state.activeRun = null;
-    state.sessionPromise = null;
-    running.value = false;
-    operation.value = '';
-    modeBusy.value = false;
-    historyLoading.value = false;
-    historyError.value = '';
-    queuePaused.value = false;
     resetChannel(state);
-    approvalMode.value = 'ask';
   }
 
   /** 页面历史写入也使用此锁，让抽屉不能同时发送或切换会话。 */
@@ -171,10 +187,12 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
 
   async function resumeQueue() {
     if (busy.value || sendingBlocked.value || !pendingQueue.value.length) return false;
+    const generation = state.generation;
     queuePaused.value = false;
     const next = pendingQueue.value.shift();
     try { return await sendMessage(next.text, next.extraPayload); }
     catch (error) {
+      if (generation !== state.generation) return false;
       pendingQueue.value.unshift(next); queuePaused.value = true;
       throw error;
     }
@@ -274,7 +292,7 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
         if (!run.stopped && !queuePaused.value && pendingQueue.value.length) {
           const next = pendingQueue.value.shift();
           try { await sendMessage(next.text, next.extraPayload); }
-          catch { pendingQueue.value.unshift(next); queuePaused.value = true; }
+          catch { if (state.generation === run.generation) { pendingQueue.value.unshift(next); queuePaused.value = true; } }
         }
       }
     }
@@ -297,10 +315,21 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     const last = [...messages.value].reverse().find(m => m.role === 'assistant' && m.interrupted && (!messageId || m.id === messageId));
     if (!last) return false;
     if (last.durableRunId) {
-      const { run } = await api.getAgentRun(last.durableRunId);
-      await api.resumeAgentRun(run.id, run.revision);
-      last.interrupted = false;
-      return true;
+      const generation = state.generation, id = sessionId.value;
+      const current = () => generation === state.generation && id === sessionId.value && messages.value.includes(last);
+      const unlock = lockSession('正在恢复任务');
+      if (!unlock) return false;
+      try {
+        const { run } = await api.getAgentRun(last.durableRunId);
+        if (!current()) return false;
+        await api.resumeAgentRun(run.id, run.revision);
+        if (!current()) return false;
+        last.interrupted = false;
+        return true;
+      } catch (error) {
+        if (!current()) return false;
+        throw error;
+      } finally { unlock(); }
     }
     const accepted = await sendMessage('请继续刚才被中断的任务，先核对已执行步骤的结果，避免重复修改，再完成剩余部分。', { ...extraPayload, ...last.requestContext }, { immediate: true });
     if (accepted) last.interrupted = false;
@@ -568,6 +597,17 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
   // Esc 关闭放大浮层,并锁定背景滚动(复用全局弹层 Esc 分层体系)。
   // 非组件调用不具备 router 注入和卸载生命周期,跳过 DOM 生命周期绑定。
   if (instance) {
+    watch(scrollEl, (element, _previous, cleanup) => {
+      lastScrollTop = element?.scrollTop || 0;
+      if (!element || typeof ResizeObserver === 'undefined') return;
+      let frame;
+      const observer = new ResizeObserver(() => {
+        if (frame != null) cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => { frame = null; scrollBottom(); });
+      });
+      observer.observe(element);
+      cleanup(() => { observer.disconnect(); if (frame != null) cancelAnimationFrame(frame); });
+    }, { flush: 'post' });
     useEscapeKey({ active: zoomOpen, layer: 'modal', onClose: closeZoom, lockBody: true });
     onBeforeUnmount(() => state.subscribers.delete(subscriber));
   }

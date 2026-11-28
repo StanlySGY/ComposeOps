@@ -16,7 +16,7 @@ const commandDefinitions = [
   { to: '/topology', label: '服务拓扑', description: '查看服务依赖、端口和数据卷关系', icon: Layers, category: 'topology dependencies graph 拓扑 依赖' },
   { to: '/agent/history', label: 'Agent 执行历史', description: '查看工具调用、执行结果与 token 用量', icon: History, category: 'agent history usage 历史 用量' },
   { to: '/ops-center', label: '任务中心', description: '统一查看 Agent、后台任务、工作流、事件、审批和执行结果', icon: Play, category: 'operations command center jobs tasks 运维 任务 agent approval' },
-  { to: '/tickets', label: '工单', description: '跟踪持续排障、处置进度和任务记录', icon: Clock3, category: 'ticket task 长期 任务 跟进 工单' },
+  { to: '/tickets', label: '工单', description: '跟踪持续排障、处置进度和任务记录', icon: Clock3, category: 'ticket task 长期任务 长期 任务 跟进 工单' },
   { to: '/maintenance-plan', label: '运维计划', description: '创建并管理可复用的定时备份、镜像更新和 AI 巡检计划', icon: Clock3, category: 'maintenance schedule 运维 计划 backup images inspection' },
   { to: '/workflows', label: '工作流', description: '创建可复用流程并处理待审批任务', icon: Layers, category: 'workflow automation 自动化 审批' },
   { to: '/cron', label: '定时任务', description: '自动备份、清理与镜像检查', icon: History, category: 'cron schedule 定时 计划 备份' },

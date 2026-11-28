@@ -5,7 +5,7 @@ async function install(page, existing = false) {
   await page.goto('./#/dashboard'); await expect(page.getByRole('heading', { name: '运维总览', exact: true })).toBeVisible();
   await page.evaluate(existing => {
     const original = window.fetch;
-    const f = window.agentStreamFixture = { calls: [], streams: [], rows: existing ? [{ sessionId: 5, title: '排障与恢复', messageCount: 4 }] : [], mode: 'ask', holdCreate: false, failCreate: false, failTruncate: false, failMode: false, failApprove: false };
+    const f = window.agentStreamFixture = { calls: [], streams: [], runs: [], resumed: [], rows: existing ? [{ sessionId: 5, title: '排障与恢复', messageCount: 4 }] : [], mode: 'ask', holdCreate: false, failCreate: false, failTruncate: false, failMode: false, failApprove: false };
     const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
     window.fetch = async (input, init = {}) => {
       const url = new URL(typeof input === 'string' ? input : input.url, location.href), path = url.pathname, method = init.method || 'GET';
@@ -13,6 +13,18 @@ async function install(page, existing = false) {
       const body = init.body ? JSON.parse(init.body) : {}; f.calls.push({ path, method, body });
       if (method === 'GET' && path === '/api/v1/ai/sessions') return json({ sessions: f.rows });
       if (method === 'GET' && path === '/api/v1/ai/agent/memories') return json({ memories: [] });
+      if (method === 'GET' && /\/agent\/sessions\/\d+\/runs$/.test(path)) return json({ runs: f.runs });
+      const runPath = path.match(/^\/api\/v1\/ai\/agent\/runs\/([^/]+)(\/stop|\/resume)?$/);
+      if (runPath) {
+        const run = f.runs.find(run => run.id === runPath[1]);
+        if (!run) return json({ message: 'fixture task not found' }, 404);
+        if (method === 'GET') return json({ run, effects: [], events: [] });
+        if (runPath[2] === '/stop') { run.status = 'interrupted'; run.revision++; return json({ run }); }
+        if (runPath[2] === '/resume') {
+          if (body.revision !== run.revision) return json({ message: 'fixture revision conflict' }, 409);
+          run.status = 'running'; run.revision++; f.resumed.push({ id: run.id, context: run.context }); return json({ run });
+        }
+      }
       if (method === 'GET' && path === '/api/v1/ai/history') return json({ approvalMode: f.mode, hasMore: false, messages: [
         { id: 101, role: 'user', content: '检查备份完整性' }, { id: 102, role: 'assistant', content: '备份文件校验完成。' },
         { id: 103, role: 'user', content: '核对恢复步骤' }, { id: 104, role: 'assistant', content: '先准备隔离环境，再核对恢复结果。' },
@@ -26,8 +38,11 @@ async function install(page, existing = false) {
         let controller, ended = false;
         const stream = new ReadableStream({ start(value) { controller = value; } });
         const item = { payload: body, emit(event) { if (!ended) controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(event) + '\n\n')); }, close() { if (!ended) { ended = true; controller.close(); } }, fail() { if (!ended) { ended = true; controller.error(new Error('模拟网络断开')); } } };
-        init.signal?.addEventListener('abort', () => { if (!ended) { ended = true; controller.error(new DOMException('已中断', 'AbortError')); } });
-        f.streams.push(item); item.emit({ type: 'session_meta', userMessageId: 200 + f.streams.length });
+        init.signal?.addEventListener('abort', () => { item.aborted = true; if (!ended) { ended = true; controller.error(new DOMException('已中断', 'AbortError')); } });
+        f.streams.push(item);
+        const run = { id: 'fixture-run-' + f.streams.length, status: 'running', revision: 1, goal: body.message, context: { role: body.role, hostId: 'local' } };
+        f.runs.push(run); item.emit({ type: 'durable_run', runId: run.id, status: run.status });
+        item.emit({ type: 'session_meta', userMessageId: 200 + f.streams.length });
         return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
       }
       if (path === '/api/v1/ai/history/truncate') return f.failTruncate ? json({ message: '历史同步暂时失败' }, 503) : json({ ok: true });
@@ -65,8 +80,9 @@ test('停止暂停后续队列，移除和恢复均作用于正确消息', async
 });
 test('继续中断任务沿用角色上下文并保持剩余队列暂停', async ({ page }) => {
   await install(page); if (await page.getByRole('button', { name: '会话设置', exact: true }).isVisible()) await page.getByRole('button', { name: '会话设置', exact: true }).click(); await page.getByRole('combobox', { name: '选择本轮 Agent Worker' }).selectOption('validator'); if (await page.getByRole('button', { name: '会话设置', exact: true }).isVisible()) await page.getByRole('button', { name: '会话设置', exact: true }).click(); await send(page); await count(page, 1); await send(page, '稍后核对资源'); await stop(page);
-  await page.getByRole('button', { name: '继续执行', exact: true }).click(); await count(page, 2);
-  expect(await page.evaluate(() => window.agentStreamFixture.streams[1].payload.role)).toBe('validator'); await done(page, 1); await count(page, 2); await expect(page.getByRole('region', { name: '待发送消息' })).toContainText('队列已暂停');
+  await page.getByRole('button', { name: '继续执行', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.agentStreamFixture.resumed)).toEqual([{ id: 'fixture-run-1', context: { role: 'validator', hostId: 'local' } }]);
+  await count(page, 1); await expect(page.getByRole('region', { name: '待发送消息' })).toContainText('队列已暂停');
 });
 test('网络断开保留部分回答并提供独立恢复入口', async ({ page }, info) => {
   await install(page); await send(page); await count(page, 1); await emit(page, { type: 'token', content: '已确认备份文件存在。' }); await send(page, '检查校验和');
@@ -131,3 +147,56 @@ test('切换到抽屉后新分片继续滚底，向上阅读时保持当前位�
   await emit(page, { type: 'token', content: '新到达的结果。\n\n'.repeat(12) }); await expect(drawer.locator('.agent-drawer-markdown')).toContainText('新到达的结果');
   expect(await log.evaluate(el => el.scrollTop)).toBe(0); await drawer.getByRole('button', { name: '中断执行', exact: true }).click();
 });
+
+for (const action of ['logout', 'expire']) {
+  test(`${action === 'logout' ? '主动退出' : '登录失效'}清理 Agent 草稿和队列，重新登录不显示或续发旧任务`, async ({ page }) => {
+    await install(page); await send(page, '旧账号未完成任务'); await count(page, 1);
+    await emit(page, { type: 'token', content: '旧账号已收到的结果' });
+    await expect(page.locator('.agent-message.assistant')).toContainText('旧账号已收到的结果');
+    await send(page, '旧账号待发动作');
+    await page.evaluate(() => {
+      const original = window.fetch, f = window.agentStreamFixture;
+      let authenticated = true;
+      const json = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+      window.fetch = async (input, init = {}) => {
+        const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+        if (path === '/api/v1/auth/logout') { authenticated = false; return json({ ok: true }); }
+        if (path === '/api/v1/auth/login') { authenticated = true; f.rows = []; f.runs = []; return json({ ok: true }); }
+        if (path === '/api/v1/auth/status') return json({ authenticated, setupRequired: false,
+          principal: authenticated ? { id: 'second', username: 'second', role: 'admin', enabled: true } : null });
+        return original(input, init);
+      };
+      location.hash = '#/services';
+    });
+    await expect(page.locator('.agent-chat')).toHaveCount(0);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: {
+      prompt: '旧账号未提交草稿', context: { projectId: 'old-private-project', summary: '旧账号私有上下文' },
+    } })));
+    const drawer = page.getByRole('dialog', { name: '页面 Agent', exact: true });
+    await expect(drawer.getByRole('textbox', { name: '给页面 Agent 发送消息', exact: true })).toHaveValue('旧账号未提交草稿');
+    if (action === 'logout') {
+      await drawer.getByRole('button', { name: '关闭 Agent', exact: true }).last().click();
+      await page.getByRole('button', { name: '退出登录', exact: true }).click();
+    } else await page.evaluate(() => window.dispatchEvent(new Event('composeops:unauthorized')));
+    await expect(page.getByRole('heading', { name: '欢迎回来', exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.agentStreamFixture.streams[0].aborted)).toBe(true);
+    expect(await page.evaluate(() => window.agentStreamFixture.calls.filter(call => call.path.endsWith('/stop')))).toHaveLength(0);
+    await page.getByLabel('账号', { exact: true }).fill('second');
+    await page.getByLabel('密码', { exact: true }).fill('fictional-second-password');
+    await page.getByRole('button', { name: '安全登录', exact: true }).click();
+    await expect(page.locator('.app-header')).toBeVisible();
+    await expect(drawer).toHaveCount(0);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('composeops:agent-prompt', { detail: { prompt: '新账号草稿' } })));
+    await expect(drawer).toBeVisible();
+    await expect(drawer).not.toContainText('旧账号');
+    await expect(drawer.getByRole('region', { name: '待发送消息' })).toHaveCount(0);
+    await emit(page, { type: 'token', content: '旧连接迟到的结果' });
+    await drawer.getByRole('button', { name: '发送', exact: true }).click();
+    await count(page, 2);
+    const payload = await page.evaluate(() => window.agentStreamFixture.streams[1].payload);
+    expect(payload.message).toBe('新账号草稿'); expect(JSON.stringify(payload)).not.toContain('old-private-project');
+    await done(page, 1, '新账号检查完成');
+    await expect(drawer).toContainText('新账号检查完成'); await expect(drawer).not.toContainText('旧连接');
+    await count(page, 2);
+  });
+}

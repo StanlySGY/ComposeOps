@@ -41,7 +41,7 @@ test('AI 配置失败只影响本面板，通知与维护仍可操作且草稿�
   await page.evaluate(() => window.dispatchEvent(new Event('composeops:refresh')));
   await page.getByRole('button', { name: '维护', exact: true }).click();
   await expect(page.getByRole('spinbutton', { name: '镜像更新检查间隔（小时）' })).toHaveValue('72');
-  await page.getByRole('button', { name: '通知', exact: true }).click();
+  await page.getByLabel('设置分类导航').getByRole('button', { name: '通知', exact: true }).click();
   await expect(exit).not.toBeChecked();
   await page.getByRole('button', { name: 'AI', exact: true }).click();
   await expect(page.locator('[data-settings-load="ai"]')).toContainText('AI 配置暂时不可用');
@@ -75,7 +75,7 @@ test('MCP 深链直接加载，错误可重试，复制失败如实反馈且窄�
   await page.evaluate(() => { window.settingsFixture.mcpFailure = false; });
   await page.getByRole('button', { name: '重新读取MCP 配置' }).click();
   await expect(page.getByRole('checkbox', { name: '启用 MCP 服务' })).toBeChecked();
-  await expect(page.getByRole('combobox', { name: '暴露范围' })).toHaveValue('all');
+  await expect(page.getByRole('combobox', { name: 'MCP 工具模式' })).toHaveValue('all');
   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('剪贴板权限未开放'); } } }));
   await page.getByRole('button', { name: '复制 Token', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('剪贴板权限未开放');
@@ -94,7 +94,7 @@ test('MCP 即时设置保存失败后恢复已确认值', async ({ page }) => {
   await enabled.click();
   await expect(page.getByRole('alert')).toContainText('MCP 设置保存失败');
   await expect(enabled).toBeChecked();
-  const mode = page.getByRole('combobox', { name: '暴露范围' });
+  const mode = page.getByRole('combobox', { name: 'MCP 工具模式' });
   await mode.selectOption('readonly');
   await expect(mode).toHaveValue('all');
   expect(await page.evaluate(() => window.settingsFixture.writes.filter(call => call.path === '/api/v1/system/mcp').map(call => JSON.parse(call.body)))).toEqual([

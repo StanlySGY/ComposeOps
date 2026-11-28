@@ -90,12 +90,12 @@ test('总览在窄屏、平板和宽屏下保持可操作，减少动态效果�
   for (const width of [320, 768, 1024, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto('./#/dashboard');
-    await expect(page.getByRole('link', { name: '查看全部项目', exact: true })).toBeVisible();
+    await expect(page.locator('.environment-brief').getByRole('link', { name: '全部 4 个', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const logLink = page.getByRole('link', { name: '查看 knowledge-base 异常日志' });
     await logLink.scrollIntoViewIfNeeded();
     await expect(logLink).toBeInViewport();
-    const transition = await page.locator('.dashboard-view .metric-tile').first().evaluate(el => getComputedStyle(el).transitionDuration);
+    const transition = await page.getByRole('region', { name: '服务器驾驶舱' }).getByRole('button', { name: /^CPU / }).evaluate(el => getComputedStyle(el).transitionDuration);
     expect(parseFloat(transition)).toBeLessThanOrEqual(0.001);
   }
 });

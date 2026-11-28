@@ -28,7 +28,7 @@ async function installOperationFixture(page, { code = 0, health = 'healthy', omi
   }, { code, health, omitExit });
 }
 async function services(page, fixture = {}) {
-  await page.goto('./#/services');
+  await page.goto('./#/services?focus=cache');
   await expect(page.locator('#project-cache .project-detail')).toBeVisible();
   await installOperationFixture(page, fixture);
 }

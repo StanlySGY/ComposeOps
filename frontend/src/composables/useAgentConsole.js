@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue';
+import { onAuthEpochChange } from '../lib/auth-context.js';
 
 const open = ref(false);
 const context = ref({});
@@ -97,8 +98,25 @@ function scheduleSync() {
   syncTimer = setTimeout(syncPageContext, 120);
 }
 
+function stopPageTracking() {
+  window.removeEventListener('hashchange', syncPageContext);
+  observer?.disconnect();
+  observer = null;
+  clearTimeout(syncTimer);
+}
+
+onAuthEpochChange(() => {
+  stopPageTracking();
+  open.value = false;
+  context.value = {};
+  autoContext.value = {};
+  manualContext.value = {};
+  manualContextRoute.value = '';
+});
+
 export function useAgentConsole() {
   function openAgent(nextContext = {}) {
+    startPageTracking();
     syncPageContext();
     manualContextRoute.value = currentRoute();
     manualContext.value = { ...manualContext.value, ...nextContext };
@@ -129,13 +147,6 @@ export function useAgentConsole() {
     window.addEventListener('hashchange', syncPageContext);
     observer = new MutationObserver(scheduleSync);
     observer.observe(document.querySelector('.app-main') || document.body, { childList: true, subtree: true, characterData: true });
-  }
-
-  function stopPageTracking() {
-    window.removeEventListener('hashchange', syncPageContext);
-    observer?.disconnect();
-    observer = null;
-    clearTimeout(syncTimer);
   }
 
   return { open: computed(() => open.value), context, openAgent, updateAgentContext, closeAgent, resetAgentContext, startPageTracking, stopPageTracking };

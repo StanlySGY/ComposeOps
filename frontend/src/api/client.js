@@ -1,5 +1,5 @@
 import { userError } from '../lib/user-error.js';
-import { advanceAuthEpoch, assertAuthEpoch, getAuthEpoch } from '../lib/auth-context.js';
+import { advanceAuthEpoch, assertAuthEpoch, getAuthEpoch, onAuthEpochChange } from '../lib/auth-context.js';
 import { notifyDataChanged, DATA_CHANGED_EVENT } from '../lib/data-changes.js';
 // 统一 API 客户端,基于 fetch 封装
 import { normalizeBackgroundJob, normalizeCostReport, normalizeDockerUsage, normalizeJobsResponse, normalizeMetrics, normalizeMountPlan, normalizeStorageDf } from '../lib/api-normalizers.js';
@@ -607,49 +607,80 @@ export function normalizeAgUiEvent(event) {
 }
 
 export async function streamSse(path, body, onFrame, signal, protocol = 'native') {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok || !res.body) throw await streamError(res, 'AI 请求失败');
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  const dispatchFrame = (frame) => {
-    const lines = frame.split(/\r?\n/);
-    const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
-    if (!data) return;
-    let event;
-    try { event = JSON.parse(data); } catch { return; }
-    if (protocol === 'ag-ui') {
-      const normalized = normalizeAgUiEvent(event);
-      if (normalized) onFrame(normalized);
-      return;
-    }
-    onFrame(event);
+  const authEpoch = getAuthEpoch(), controller = new AbortController();
+  let res, reader, ended = false, cancellation;
+  const cancelReader = () => {
+    if (reader && !cancellation) cancellation = reader.cancel().catch(() => {});
+    return cancellation;
   };
-  const drainFrames = (final = false) => {
-    buf = buf.replace(/\r\n/g, '\n');
-    let boundary = buf.indexOf('\n\n');
-    while (boundary >= 0) {
-      dispatchFrame(buf.slice(0, boundary));
-      buf = buf.slice(boundary + 2);
-      boundary = buf.indexOf('\n\n');
+  const abort = () => { controller.abort(signal?.reason); void cancelReader(); };
+  const unsubscribe = onAuthEpochChange(abort);
+  signal?.addEventListener('abort', abort, { once: true });
+  const current = () => { assertAuthEpoch(authEpoch); controller.signal.throwIfAborted(); };
+  try {
+    if (signal?.aborted) abort();
+    current();
+    res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    current();
+    if (!res.ok || !res.body) {
+      const error = await streamError(res, 'AI 请求失败');
+      current();
+      if (res.status === 401) window.dispatchEvent(new Event('composeops:unauthorized'));
+      throw error;
     }
-    if (final && buf.trim()) dispatchFrame(buf);
-    if (final) buf = '';
-  };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      buf += decoder.decode();
-      drainFrames(true);
-      break;
+    reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const maxFrameChars = 1024 * 1024;
+    let buf = '';
+    const dispatchFrame = (frame) => {
+      current();
+      if (frame.length > maxFrameChars) throw new Error('AI 消息帧过大，已中断接收；请核对实际任务状态');
+      const lines = frame.split(/\r?\n/);
+      const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+      if (!data) return;
+      let event;
+      try { event = JSON.parse(data); } catch { return; }
+      if (protocol === 'ag-ui') {
+        const normalized = normalizeAgUiEvent(event);
+        if (normalized) onFrame(normalized);
+      } else onFrame(event);
+    };
+    const drainFrames = (final = false) => {
+      buf = buf.replace(/\r\n/g, '\n');
+      let boundary = buf.indexOf('\n\n');
+      while (boundary >= 0) {
+        dispatchFrame(buf.slice(0, boundary));
+        buf = buf.slice(boundary + 2);
+        boundary = buf.indexOf('\n\n');
+      }
+      if (buf.length > maxFrameChars) throw new Error('AI 消息帧超过接收上限，已中断接收；请核对实际任务状态');
+      if (final && buf.trim()) dispatchFrame(buf);
+      if (final) buf = '';
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      current();
+      if (done) {
+        buf += decoder.decode();
+        drainFrames(true);
+        ended = true;
+        break;
+      }
+      buf += decoder.decode(value, { stream: true });
+      drainFrames();
     }
-    buf += decoder.decode(value, { stream: true });
-    drainFrames();
+  } finally {
+    unsubscribe();
+    signal?.removeEventListener('abort', abort);
+    if (reader) {
+      if (!ended) await cancelReader();
+      reader.releaseLock();
+    } else if (res?.body) await res.body.cancel().catch(() => {});
   }
 }
 

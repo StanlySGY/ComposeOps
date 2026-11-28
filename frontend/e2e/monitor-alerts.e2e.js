@@ -66,7 +66,14 @@ test('历史入口可创建规则，键盘返回并恢复触发焦点', async ({
 
 test('指标失败不隐藏规则，列表失败保留旧规则且可独立重试', async ({ page }) => {
   await install(page, { metricsFailure: true });
-  await expect(page.getByText(/加载指标失败/)).toContainText('指标源暂不可用');
+  await expect(page.getByRole('alert').filter({ hasText: '部分指标暂不可用' })).toContainText('指标源暂不可用');
+  await expect(page.locator('.metric-card')).toHaveCount(4);
+  for (const card of await page.locator('.metric-card').all()) {
+    await expect(card).toContainText('指标源暂不可用');
+    await expect(card.locator('strong')).toHaveText('—');
+  }
+  await expect(page.locator('.history-chart-frame')).toBeVisible();
+  await expect(page.getByText('当前时间范围暂无历史数据', { exact: true })).toHaveCount(0);
   await expect(rules(page)).toContainText('阈值：80%');
   await page.evaluate(() => { window.monitorFixture.listFailure = true; });
   await rules(page).getByRole('button', { name: '刷新告警规则', exact: true }).click();
@@ -178,8 +185,13 @@ test('320px 规则卡和表单无横向溢出，减少动画与自动动作解�
   expect(layout.documentWidth <= layout.viewport && layout.mainScrollWidth <= layout.mainWidth, JSON.stringify(layout)).toBe(true);
   await configure(page);
   await modal(page).getByLabel('触发后执行', { exact: true }).selectOption('scale');
-  await expect(modal(page)).toContainText('需要项目支持 Compose 编辑');
-  await expect(modal(page).getByRole('button', { name: '创建规则', exact: true })).toBeInViewport();
+  await expect(modal(page)).toContainText('项目须支持 Compose 编辑');
+  await expect(modal(page)).toContainText('不得有挂载或固定宿主端口');
+  const submit = modal(page).getByRole('button', { name: '创建规则', exact: true });
+  await expect(submit).toBeDisabled();
+  await modal(page).getByRole('checkbox', { name: /我确认授权 7 天/ }).check();
+  await expect(submit).toBeEnabled();
+  await expect(submit).toBeInViewport();
   expect(await modal(page).evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('alert-form-mobile.png') });
 });
