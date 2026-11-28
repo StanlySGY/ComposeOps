@@ -94,6 +94,7 @@ Use CodeGraph to understand or locate code BEFORE grep/find or reading files, wh
 **Other useful commands:** `codegraph query` (symbol search), `codegraph node` (one symbol's source + caller/callee trail), `codegraph callers` / `codegraph callees` / `codegraph impact` (dependency analysis), `codegraph files` (project structure).
 
 ## Agent 预算与长期维护（v37）
+- 技能激活按名字定向读取，不能通过 readAllSkills 预读全部正文。技能文件 96 KiB、YAML 头 8 KiB、正文 20000 字符；使用受限读取器与 Linux 目录句柄固定路径，不跟随符号链接或硬链接。目录发现最多枚举每根 2048 项、尝试 256 份文件，保留内置目录预算；部分结果必须返回 partial，不得据此断言技能不存在。详见 `docs/public/AGENT_SKILLS.md`。
 - 发版备份保留使用宿主脚本 `scripts/release-retention.mjs`，先生成一小时有效的精确清单再 apply；默认保留最近两份和七天内备份，`.retain` 固定保留。只处理带匹配成功凭据的 `deploy-*/database-before.tar`，删除前核验保留副本 SHA-256；不清理业务卷、回滚镜像或完整卷归档。详见 `docs/public/RELEASE_RETENTION.md`。发版成功后应执行预览并处理容量，不再无限累积完整数据库快照。
 - Agent 可通过运行内 `tool.search` 按需加载已有工具，目录先按角色与联网开关过滤；成员执行器不开放全局搜索。发现状态为单次执行局部闭包，不注册到全局/MCP，不绕过策略、审批或项目权限。每次最多 5 项，每轮任务最多追加 12 项 / 24000 UTF-8 字节定义。
 - 预算结算只接受非负安全整数；分量不完整、非法或缺失 usage 保留预留，重复 settle 不重复退款，总量与分量冲突时取较大值。

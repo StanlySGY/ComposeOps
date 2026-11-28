@@ -4,10 +4,11 @@
  * 只处理每个技能目录下的 SKILL.md 元数据和正文,不执行 scripts/ 或读取其它附件。
  * 自定义技能放在 backend/data/skills(可用 AGENT_SKILLS_DIR 覆盖),内置技能随代码发布。
  */
-import { promises as fs } from 'node:fs';
+import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { readHostConfigFile } from '../../lib/config-file-read.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUILTIN_SKILLS_DIR = path.resolve(__dirname, '../../data/skills');
@@ -15,6 +16,11 @@ const DEFAULT_CUSTOM_SKILLS_DIR = path.resolve(__dirname, '../../../data/skills'
 const SKILL_NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_SKILL_BODY_LENGTH = 20000;
+export const MAX_SKILL_FILE_BYTES = 96 * 1024;
+export const MAX_SKILL_FRONTMATTER_BYTES = 8 * 1024;
+export const MAX_SKILL_DIRECTORY_ENTRIES = 2048;
+export const MAX_SKILL_SCAN_FILES = 256;
+const CUSTOM_SCAN_RESERVE = 32; // Leave room for builtin skills and exact custom overrides.
 
 function error(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
@@ -56,14 +62,20 @@ function childPath(root, name) {
 function parseSkillDocument(raw, directoryName, source) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(raw);
   if (!match) throw error('SKILL.md 缺少 YAML frontmatter');
+  if (Buffer.byteLength(match[1], 'utf8') > MAX_SKILL_FRONTMATTER_BYTES) {
+    throw error(`SKILL.md frontmatter 超过 ${MAX_SKILL_FRONTMATTER_BYTES} 字节上限`);
+  }
   let frontmatter;
   try {
     frontmatter = YAML.parse(match[1]) || {};
   } catch (cause) {
     throw error(`SKILL.md frontmatter 无法解析: ${cause.message}`);
   }
-  const name = String(frontmatter.name || '').trim();
-  const description = String(frontmatter.description || '').replace(/\s+/g, ' ').trim();
+  if (typeof frontmatter.name !== 'string' || typeof frontmatter.description !== 'string') {
+    throw error('技能 name 与 description 必须是字符串');
+  }
+  const name = frontmatter.name.trim();
+  const description = frontmatter.description.replace(/\s+/g, ' ').trim();
   if (!SKILL_NAME.test(name) || name !== directoryName) {
     throw error('技能 name 必须是小写字母/数字/连字符,且与目录名一致');
   }
@@ -83,51 +95,97 @@ function parseSkillDocument(raw, directoryName, source) {
 
 async function readSkill(root, directoryName, source) {
   const directoryPath = childPath(root, directoryName);
-  const directoryStat = await fs.lstat(directoryPath).catch(() => null);
-  if (!directoryStat?.isDirectory() || directoryStat.isSymbolicLink()) return null;
-  const filePath = path.join(directoryPath, 'SKILL.md');
-  const fileStat = await fs.lstat(filePath).catch(() => null);
-  if (!fileStat?.isFile() || fileStat.isSymbolicLink()) return null;
-  const raw = await fs.readFile(filePath, 'utf8');
-  return parseSkillDocument(raw, directoryName, source);
+  let rootHandle, directoryHandle;
+  try {
+    const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+    rootHandle = await fs.open(root, flags);
+    // Linux production uses directory descriptors so a renamed directory or a
+    // symlink swapped into an ancestor cannot redirect the subsequent file read.
+    const anchoredRoot = process.platform === 'linux' ? `/proc/self/fd/${rootHandle.fd}` : root;
+    directoryHandle = await fs.open(path.join(anchoredRoot, directoryName), flags);
+    const directoryStat = await directoryHandle.stat();
+    if (!directoryStat.isDirectory()) return null;
+    const anchoredDirectory = process.platform === 'linux' ? `/proc/self/fd/${directoryHandle.fd}` : directoryPath;
+    const filePath = path.join(anchoredDirectory, 'SKILL.md');
+    const before = await fs.lstat(filePath);
+    if (!before.isFile() || before.nlink !== 1) return null;
+    const { content, stat } = await readHostConfigFile(filePath, { maxBytes: MAX_SKILL_FILE_BYTES });
+    if (stat.nlink !== 1 || stat.ino !== before.ino || stat.dev !== before.dev) throw error('读取期间技能文件发生变化，请重新读取', 409);
+    if (process.platform !== 'linux') {
+      const after = await fs.lstat(directoryPath);
+      if (!after.isDirectory() || after.ino !== directoryStat.ino || after.dev !== directoryStat.dev) throw error('读取期间技能目录发生变化，请重新读取', 409);
+    }
+    return parseSkillDocument(content, directoryName, source);
+  } finally {
+    try { await directoryHandle?.close(); }
+    finally { await rootHandle?.close(); }
+  }
 }
 
 async function readRoot(rootConfig) {
-  const entries = await fs.readdir(rootConfig.root, { withFileTypes: true }).catch(() => []);
-  const skills = [];
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory() || entry.isSymbolicLink() || !SKILL_NAME.test(entry.name)) continue;
-    try {
-      const skill = await readSkill(rootConfig.root, entry.name, rootConfig.source);
-      if (skill) skills.push(skill);
-    } catch {
-      // 单个技能损坏时跳过,不让一个用户文件阻断 Agent 其它能力。
+  const entries = [];
+  let scanned = 0, partial = false;
+  try {
+    const directory = await fs.opendir(rootConfig.root);
+    for await (const entry of directory) {
+      if (++scanned > MAX_SKILL_DIRECTORY_ENTRIES) { partial = true; break; }
+      if (entry.isDirectory() && !entry.isSymbolicLink() && SKILL_NAME.test(entry.name)) entries.push(entry.name);
     }
+  } catch (cause) {
+    // A missing custom root is normal; unreadable/incomplete scans are not proof
+    // that no additional skills exist.
+    if (cause.code !== 'ENOENT') partial = true;
   }
-  return skills;
+  return { names: entries.sort((a, b) => a.localeCompare(b)), partial };
 }
 
-async function readAllSkills() {
-  const byName = new Map();
-  for (const root of skillRoots()) {
-    for (const skill of await readRoot(root)) {
-      // custom 在前,同名自定义技能覆盖内置版本,便于用户针对环境调整流程。
-      if (!byName.has(skill.metadata.name)) byName.set(skill.metadata.name, skill);
+export async function listSkillCatalog(limit = 100) {
+  const safeLimit = Math.max(1, Math.min(Math.floor(Number(limit) || 100), 100));
+  const byName = new Map(), attemptedCustom = new Set(), roots = skillRoots();
+  let scanned = 0, customScanned = 0, skipped = 0, partial = false;
+  async function read(root, name) {
+    if (scanned >= MAX_SKILL_SCAN_FILES) { partial = true; return null; }
+    scanned++;
+    if (root.source === 'custom') attemptedCustom.add(name);
+    try { return await readSkill(root.root, name, root.source); }
+    catch (cause) { if (cause.code !== 'ENOENT') skipped++; return null; }
+  }
+  for (const root of roots) {
+    const catalog = await readRoot(root);
+    partial ||= catalog.partial;
+    for (const name of catalog.names) {
+      if (byName.has(name)) continue;
+      if (byName.size >= safeLimit || scanned >= MAX_SKILL_SCAN_FILES
+        || (root.source === 'custom' && customScanned >= MAX_SKILL_SCAN_FILES - CUSTOM_SCAN_RESERVE)) { partial = true; break; }
+      // Even a truncated custom directory cannot make builtin metadata disagree
+      // with the higher-priority custom skill that activation would actually use.
+      let skill = root.source === 'builtin' && !attemptedCustom.has(name)
+        ? await read(roots[0], name) : null;
+      if (root.source === 'custom') customScanned++;
+      skill ||= await read(root, name);
+      if (skill) byName.set(name, { ...skill.metadata });
     }
   }
-  return [...byName.values()];
+  return { skills: [...byName.values()], partial, scanned, skipped };
 }
 
 export async function listSkills(limit = 100) {
-  const safeLimit = Math.max(1, Math.min(Math.floor(Number(limit) || 100), 100));
-  return (await readAllSkills()).slice(0, safeLimit).map(({ metadata }) => ({ ...metadata }));
+  return (await listSkillCatalog(limit)).skills;
 }
 
 export async function loadSkill(name) {
   const requested = assertSkillName(name);
-  const skill = (await readAllSkills()).find((item) => item.metadata.name === requested);
-  if (!skill) throw error(`未找到技能: ${requested}`, 404);
-  return skill;
+  let invalid;
+  for (const root of skillRoots()) {
+    try {
+      const skill = await readSkill(root.root, requested, root.source);
+      if (skill) return skill;
+    } catch (cause) {
+      if (cause.statusCode) invalid ||= cause;
+    }
+  }
+  if (invalid) throw invalid;
+  throw error(`未找到可读取的技能: ${requested}`, 404);
 }
 
 export { MAX_SKILL_BODY_LENGTH, SKILL_NAME };

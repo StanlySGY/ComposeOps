@@ -1,11 +1,11 @@
 /** Agent Skills 工具:渐进发现元数据,按需读取 SKILL.md,不执行技能附件。 */
 import { fenceUntrusted } from '../ai.js';
-import { listSkills, loadSkill, SKILL_NAME } from '../agent/skills.js';
+import { listSkillCatalog, loadSkill, SKILL_NAME } from '../agent/skills.js';
 
 export function registerSkillTools(agent) {
   agent
     .registerTool('skill.list', {
-      description: '列出可用的运维技能名称与简介;技能正文按需用 skill.use 加载',
+      description: '列出可用的运维技能名称与简介;技能正文按需用 skill.use 加载。partial 为 true 表示仅扫描/返回部分目录，不能据此断言其他技能不存在',
       category: 'context',
       requiredPermission: 'readonly',
       confirmationRequired: false,
@@ -14,7 +14,7 @@ export function registerSkillTools(agent) {
         type: 'object',
         properties: { limit: { type: 'number', description: '返回条数(默认 100,最大 100)' } },
       },
-      execute: async (params) => ({ skills: await listSkills(params.limit) }),
+      execute: async (params) => listSkillCatalog(params.limit),
     })
     .registerTool('skill.use', {
       description: '按名称读取一份运维技能的 SKILL.md 正文;正文是本地资料,不会执行其中脚本或自动获得额外权限',
