@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { registerFrontendStatic } from './lib/frontend-static.js';
 import serviceRoutes from './routes/services.js';
 import maintenanceRoutes from './routes/maintenance.js';
 import fullBackupRoutes from './routes/full-backup.js';
@@ -212,22 +213,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   if (process.env.SERVE_FRONTEND !== '0') {
     const staticRoot = path.join(__dirname, '../../frontend/dist');
     try {
-      const fastifyStatic = (await import('@fastify/static')).default;
-      // decorateReply 保持默认 true:下方 SPA fallback 依赖 reply.sendFile。
-      // preCompressed:前端构建已为文本产物写出 .br/.gz 同名兄弟文件(见 frontend/vite.config.js),
-      // 这里按 Accept-Encoding 依次选 brotli → gzip → 原文件,并补 Vary: Accept-Encoding。
-      await fastify.register(fastifyStatic, {
-        root: staticRoot,
-        prefix: '/',
-        preCompressed: true,
-      });
-      // SPA fallback
-      fastify.setNotFoundHandler((request, reply) => {
-        if (request.url.startsWith('/api') || request.url.startsWith('/ws')) {
-          return reply.code(404).send({ error: 'not_found' });
-        }
-        return reply.sendFile('index.html');
-      });
+      await registerFrontendStatic(fastify, staticRoot);
     } catch {
       fastify.log.warn('frontend dist not found, skipping static serving');
     }
