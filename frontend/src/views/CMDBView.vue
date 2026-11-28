@@ -6,8 +6,8 @@
         <p class="page-subtitle">统一管理主机、项目、容器等资产及其依赖关系,作为知识图谱与事件中心的单一事实来源</p>
       </div>
       <div class="page-actions">
-        <button class="btn-secondary" :disabled="syncing" @click="sync"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': syncing }" />{{ syncing ? '同步中…' : '同步资产' }}</button>
-        <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
+        <button class="btn-secondary" :disabled="operationBusy" @click="sync"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': syncing }" />{{ syncing ? '同步中…' : '同步资产' }}</button>
+        <button class="btn-secondary" :disabled="loading || operationBusy" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
       </div>
     </div>
 
@@ -18,7 +18,8 @@
 
     <section id="cmdb-panel" role="tabpanel" :aria-labelledby="`cmdb-tab-${tab}`" tabindex="0">
     <template v-if="tab === 'assets'">
-    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="alert-error" role="alert"><span class="min-w-0 flex-1">{{ error }}<span v-if="cmdb.assets.length"> · 以下保留上次读取的资产。</span></span><button class="text-link shrink-0" :disabled="loading || operationBusy" @click="load">重新读取资产</button></p>
+    <p v-if="loading" class="mb-3 text-muted" role="status">正在读取资产与关系…</p>
 
     <!-- 概览统计 -->
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -43,9 +44,9 @@
     <!-- 资产列表 -->
     <section class="section-panel">
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div><h2 class="section-title">资产清单</h2><p class="mt-1 text-muted">按类型过滤,查看资产状态与归属</p></div>
+        <div><h2 class="section-title">资产清单</h2><p class="mt-1 text-muted">按类型过滤，查看资产状态与归属。当前展示最近同步的最多 500 项资产与 500 条关系。</p></div>
         <div class="flex flex-wrap gap-2">
-          <button v-for="k in kinds" :key="k.value" class="btn-secondary btn-sm" :class="{ 'border-accent! text-status-info!': kindFilter === k.value }" @click="kindFilter = k.value">{{ k.label }}</button>
+          <button v-for="k in kinds" :key="k.value" class="btn-secondary btn-sm" :class="{ 'border-accent! text-status-info!': kindFilter === k.value }" :aria-pressed="kindFilter === k.value" @click="kindFilter = k.value">{{ k.label }}</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -53,15 +54,15 @@
           <thead><tr><th>资产</th><th>类型</th><th>状态</th><th>环境</th><th>负责人</th><th>来源</th><th></th></tr></thead>
           <tbody>
             <tr v-for="asset in filteredAssets" :key="asset.id" class="hover:bg-surface-800/25">
-              <td class="font-medium text-surface-100">{{ asset.displayName || asset.name }}<span class="ml-2 font-mono text-[10px] text-surface-400">{{ asset.id }}</span></td>
+              <td class="max-w-xs break-all font-medium text-surface-100">{{ asset.displayName || asset.name }}<span class="ml-2 font-mono text-[10px] text-surface-400">{{ asset.id }}</span></td>
               <td><span class="count-badge" :class="kindTone(asset.kind)">{{ kindLabel(asset.kind) }}</span></td>
               <td><span class="status-badge" :class="statusTone(asset.status)">{{ statusLabel(asset.status) }}</span></td>
               <td class="text-xs text-surface-400">{{ asset.environment || '—' }}</td>
               <td class="text-xs text-surface-400">{{ asset.owner || '—' }}</td>
               <td class="text-xs text-surface-400">{{ sourceLabel(asset.source) }}</td>
-              <td><button class="icon-btn" title="删除资产" aria-label="删除资产" @click="deleteTarget = asset"><Trash2 class="w-4 h-4" /></button></td>
+              <td><button class="icon-btn" :title="`删除资产 ${asset.displayName || asset.name}`" :aria-label="`删除资产 ${asset.displayName || asset.name}`" :disabled="operationBusy" @click="openRemove(asset)"><Trash2 class="w-4 h-4" /></button></td>
             </tr>
-            <tr v-if="!filteredAssets.length"><td colspan="7" class="py-8 text-center text-sm text-surface-400"><EmptyState compact title="暂无资产" description="同步当前 Docker 节点，建立资产与关系清单。" action-label="同步资产" @action="sync" /></td></tr>
+            <tr v-if="!loading && !error && !filteredAssets.length"><td colspan="7" class="py-8 text-center text-sm text-surface-400"><EmptyState v-if="cmdb.assets.length" compact icon="Search" title="此类型下暂无资产" description="可切换到全部类型查看已有资产。" action-label="查看全部资产" @action="kindFilter = ''" /><EmptyState v-else compact title="暂无资产" description="同步当前 Docker 节点，建立资产与关系清单。" action-label="同步资产" @action="sync" /></td></tr>
           </tbody>
         </table>
       </div>
@@ -69,13 +70,13 @@
     </template>
     <KnowledgeGraphView v-else embedded />
     </section>
-    <ConfirmDialog :show="!!deleteTarget" title="删除资产" aria-label="删除资产" :message="`确认删除资产「${deleteTarget?.displayName || deleteTarget?.name}」?`" tone="danger" confirm-text="删除" @confirm="confirmRemove" @cancel="deleteTarget = null" />
+    <ConfirmDialog :show="!!deleteTarget" title="删除资产" :message="`确认删除资产「${deleteTarget?.displayName || deleteTarget?.name}」？将移除台账记录及其关联关系，Docker 资源仍会保留，下次同步可能重新发现。`" tone="danger" :busy="deleteBusy" :confirm-text="deleteBusy ? '删除中…' : '删除'" @confirm="confirmRemove" @cancel="!deleteBusy && (deleteTarget = null)"><p v-if="deleteError" role="alert" class="break-words text-xs text-status-error">{{ deleteError }}</p></ConfirmDialog>
   </div>
 </template>
 
 <script setup>
 import EmptyState from '../components/common/EmptyState.vue';
-import { computed, onActivated, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { useRoute, useRouter } from 'vue-router';
 import { Boxes, Container, RefreshCw, Server, Trash2, Waypoints } from 'lucide-vue-next';
@@ -84,6 +85,7 @@ import { useToastStore } from '../stores/toast.js';
 import KnowledgeGraphView from './KnowledgeGraphView.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import { handleTablistKeydown } from '../lib/tablist-keyboard.js';
+import { onAuthEpochChange } from '../lib/auth-context.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -100,6 +102,12 @@ watch(() => route.query.tab, (value) => { tab.value = value === 'graph' ? 'graph
 const cmdb = useCmdbStore();
 const toast = useToastStore();
 const kindFilter = ref('');
+const deleteTarget = ref(null);
+const deleteBusy = ref(false);
+const deleteError = ref('');
+const operationBusy = computed(() => syncing.value || deleteBusy.value);
+let active = true, contextVersion = 0;
+const current = version => active && version === contextVersion;
 
 const kinds = [
   { value: '', label: '全部' },
@@ -145,33 +153,59 @@ function sourceLabel(source) {
 }
 
 async function load() {
-  await cmdb.loadTopology();
+  if (active) await cmdb.loadTopology(true);
 }
 async function sync() {
+  if (!active || operationBusy.value) return;
+  const version = contextVersion;
   try {
     await cmdb.sync();
-    toast.success('资产同步完成');
+    if (current(version)) toast.success('资产与关系同步完成');
   } catch (e) {
-    toast.error(e);
+    if (current(version)) toast.error(e);
   }
 }
-const deleteTarget = ref(null);
+function openRemove(asset) {
+  if (!active || operationBusy.value) return;
+  deleteTarget.value = asset;
+  deleteError.value = '';
+}
 async function confirmRemove() {
   const asset = deleteTarget.value;
-  deleteTarget.value = null;
-  if (!asset) return;
+  if (!active || !asset || operationBusy.value) return;
+  const version = contextVersion;
+  deleteBusy.value = true;
+  deleteError.value = '';
   try {
     await cmdb.remove(asset.id);
-    toast.success('资产已删除');
+    if (!current(version)) return;
+    deleteTarget.value = null;
+    toast.success('资产记录与关联关系已删除');
   } catch (e) {
-    toast.error(e);
+    if (current(version)) deleteError.value = e.message || '删除失败，请重试';
+  } finally {
+    if (current(version)) deleteBusy.value = false;
   }
 }
+function invalidateContext() {
+  ++contextVersion;
+  deleteTarget.value = null;
+  deleteBusy.value = false;
+  deleteError.value = '';
+}
+function onHostChanged() { invalidateContext(); if (active) void load(); }
+const stopAuthListener = onAuthEpochChange(invalidateContext);
+watch(tab, invalidateContext);
 
-// 只在「资产清单」tab 响应:知识图谱 tab 由嵌入的 KnowledgeGraphView 自己刷新。
+// 只在资产清单响应下拉刷新；离开缓存页面后关闭 Teleport 弹窗并忽略迟到反馈。
 usePullRefresh(load, { keepAlive: true, enabled: () => tab.value === 'assets' });
-onMounted(load);
+onMounted(() => { window.addEventListener('composeops:host-changed', onHostChanged); void load(); });
 let activatedOnce = false;
-onActivated(() => { if (activatedOnce) void load(); activatedOnce = true; });
+onActivated(() => { active = true; if (activatedOnce) void load(); activatedOnce = true; });
+onDeactivated(() => { active = false; invalidateContext(); });
+onBeforeUnmount(() => {
+  active = false; invalidateContext(); stopAuthListener();
+  window.removeEventListener('composeops:host-changed', onHostChanged);
+});
 
 </script>

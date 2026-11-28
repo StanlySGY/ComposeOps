@@ -435,10 +435,10 @@ export const api = {
   updateMarketplaceTemplate: (id, payload) => request(`/marketplace/templates/custom/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteMarketplaceTemplate: (id) => request(`/marketplace/templates/custom/${id}`, { method: 'DELETE' }),
   // CMDB 统一资产中心
-  getCmdbAssets: (params = {}) => request(`/cmdb/assets?${new URLSearchParams(params)}`, { cacheable: true }),
+  getCmdbAssets: (params = {}) => request(`/cmdb/assets?${new URLSearchParams(params)}`, { cacheable: true, fresh: true }),
   deleteCmdbAsset: (id) => request(`/cmdb/assets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   syncCmdbAssets: () => request('/cmdb/assets/sync', { method: 'POST' }),
-  getCmdbTopology: () => request('/cmdb/topology', { cacheable: true }),
+  getCmdbTopology: () => request('/cmdb/topology', { cacheable: true, fresh: true }),
   addCmdbRelation: (payload) => request('/cmdb/relations', { method: 'POST', body: JSON.stringify(payload) }),
   deleteCmdbRelation: (id) => request(`/cmdb/relations/${id}`, { method: 'DELETE' }),
   // 统一事件中心

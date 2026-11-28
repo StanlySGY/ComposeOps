@@ -118,4 +118,13 @@ describe('API 缓存刷新', () => {
     fetchMock.mockResolvedValueOnce(response('new'));
     expect((await read()).projects[0].id).toBe('new');
   });
+  it.each(['getCmdbAssets', 'getCmdbTopology'])('%s 刷新返回真实新数据并暴露读取失败', async (method) => {
+    fetchMock.mockResolvedValueOnce(response('old'));
+    await api[method]();
+    fetchMock.mockResolvedValueOnce(response('new'));
+    expect((await api[method]()).projects[0].id).toBe('new');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'CMDB 暂不可用' }), { status: 503, headers: { 'content-type': 'application/json' } }));
+    await expect(api[method]()).rejects.toThrow('CMDB 暂不可用');
+  });
+
 });
