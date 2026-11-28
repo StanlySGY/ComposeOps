@@ -28,71 +28,21 @@
  * 还没实现新头的旧客户端也能连上现代服务端。
  */
 
-import { createInterface } from 'node:readline';
+import { runBridge } from './stdio-transport.mjs';
 
-const BASE = (process.env.COMPOSEOPS_URL || '').replace(/\/+$/, '');
-const TOKEN = process.env.COMPOSEOPS_TOKEN || '';
-const PROTOCOL_VERSION = process.env.COMPOSEOPS_MCP_VERSION || '2026-07-28';
-const META_VERSION_KEY = 'io.modelcontextprotocol/protocolVersion';
+const baseUrl = process.env.COMPOSEOPS_URL || '';
+const token = process.env.COMPOSEOPS_TOKEN || '';
+const protocolVersion = process.env.COMPOSEOPS_MCP_VERSION || '2026-07-28';
+const timeoutMs = Number(process.env.COMPOSEOPS_MCP_TIMEOUT_MS || 120000);
 
-if (!BASE || !TOKEN) {
-  console.error('[composeops-bridge] 缺少环境变量:COMPOSEOPS_URL 与 COMPOSEOPS_TOKEN 必须同时提供');
-  process.exit(1);
-}
-
-/** 按 2026-07-28 规范补齐请求元数据(已声明的字段不覆盖)。 */
-function withRequestMeta(message) {
-  if (!message || typeof message !== 'object' || Array.isArray(message)) return message;
-  if (!message.method || String(message.method).startsWith('notifications/')) return message;
-  const params = message.params && typeof message.params === 'object' && !Array.isArray(message.params) ? { ...message.params } : {};
-  const meta = params._meta && typeof params._meta === 'object' ? { ...params._meta } : {};
-  if (!meta[META_VERSION_KEY]) meta[META_VERSION_KEY] = PROTOCOL_VERSION;
-  params._meta = meta;
-  return { ...message, params };
-}
-
-/** 规范要求的标准头:与请求体保持一致,避免 -32020 HeaderMismatch。 */
-function requestHeaders(message, body) {
-  const headers = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${TOKEN}`,
-    'MCP-Protocol-Version': message?.params?._meta?.[META_VERSION_KEY] || PROTOCOL_VERSION,
-  };
-  if (message?.method) headers['Mcp-Method'] = String(message.method);
-  const name = message?.params?.name;
-  if (name !== undefined && name !== null && String(name)) headers['Mcp-Name'] = String(name);
-  return { headers, body };
-}
-
-const rl = createInterface({ input: process.stdin });
-
-for await (const line of rl) {
-  const trimmed = line.trim();
-  if (!trimmed) continue;
-  let message;
-  try {
-    message = JSON.parse(trimmed);
-  } catch {
-    console.error('[composeops-bridge] 忽略非 JSON 行');
-    continue;
-  }
-  try {
-    const prepared = withRequestMeta(message);
-    const { headers, body } = requestHeaders(prepared, JSON.stringify(prepared));
-    const res = await fetch(`${BASE}/mcp`, { method: 'POST', headers, body });
-    if (res.status === 202) continue; // 通知:无响应体
-    const text = await res.text();
-    if (!res.ok) {
-      if (message?.id !== undefined) {
-        process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: `HTTP ${res.status}: ${text.slice(0, 300)}` } })}\n`);
-      }
-      continue;
-    }
-    const data = JSON.parse(text);
-    if (message?.id !== undefined) process.stdout.write(`${JSON.stringify(data)}\n`);
-  } catch (error) {
-    if (message?.id !== undefined) {
-      process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: `桥接失败:${error.message}` } })}\n`);
-    }
-  }
+try {
+  await runBridge({ baseUrl, token, protocolVersion, timeoutMs });
+  // Reaching here means the client closed the channel or requested shutdown.
+  // Node's special stdout pipe can keep a blocked write alive after destroy();
+  // there is no remaining response to flush to a disconnected client.
+  process.exit(0);
+} catch {
+  // Transport failures may include credential-bearing URLs or upstream bodies.
+  console.error('[composeops-bridge] 接入配置或通道无效，请检查 URL、Token 和超时设置');
+  process.exitCode = 1;
 }
