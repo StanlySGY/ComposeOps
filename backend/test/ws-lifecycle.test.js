@@ -14,6 +14,8 @@ const { default: wsRoutes, activeExecSessions, teardownExecSession, MAX_EXEC_SES
 const { getActivityDocker } = await import('../src/services/docker-hosts.js');
 const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
 const { setProjectPreference } = await import('../src/lib/db.js');
+const { issueSession } = await import('../src/lib/auth.js');
+let cookie; issueSession({ header: (_name, value) => { cookie = value.split(';')[0]; } });
 const docker = getActivityDocker();
 const routes = new Map();
 await wsRoutes({ get: (path, _, handler) => routes.set(path, handler) });
@@ -31,7 +33,7 @@ async function fixture(t) {
   const [project] = await scanProjects();
   setProjectPreference(project.id, { managed: true });
   invalidateScanCache();
-  return { query: { projectId: project.id, containerId: row.Id } };
+  return { headers: { cookie }, query: { projectId: project.id, containerId: row.Id } };
 }
 test.afterEach(() => { for (const socket of activeExecSessions.keys()) { socket.close?.(); teardownExecSession(socket); } invalidateScanCache(); });
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
@@ -105,7 +107,7 @@ test('两种日志路由按精确容器身份补读，忽略其他容器游标',
   for (const route of ['/logs', '/aggregated-logs']) {
     for (const [resume, since] of [[{ [row.Id]: 1793966399 }, 1793966399], [{ 'test': 1793966300 }, undefined]]) {
       const socket = new Socket();
-      await routes.get(route)(socket, { query: { ...request.query, tail: 200, resume: JSON.stringify(resume) } });
+      await routes.get(route)(socket, { headers: request.headers, query: { ...request.query, tail: 200, resume: JSON.stringify(resume) } });
       assert.equal(options.at(-1).since, since);
       assert.equal(options.at(-1).tail, since ? '5000' : '200');
       socket.close();
@@ -117,7 +119,7 @@ test('无效续读参数关闭日志连接并提供可见错误', async (t) => {
   const request = await fixture(t);
   for (const resume of ['bad', '[]', 'null', '{"a":-1}', '{"a":"1"}', '{"a":1.5}', ' '.repeat(8193)]) {
     const socket = new Socket();
-    await routes.get('/logs')(socket, { query: { ...request.query, resume } });
+    await routes.get('/logs')(socket, { headers: request.headers, query: { ...request.query, resume } });
     assert.equal(socket.readyState, 3);
     assert.match(socket.messages.join(''), /日志续读参数无效/);
   }

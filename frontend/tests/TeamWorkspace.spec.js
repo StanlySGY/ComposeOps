@@ -1,0 +1,13 @@
+import { mount, flushPromises } from '@vue/test-utils';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const { api, auth } = vi.hoisted(() => ({ api: Object.fromEntries(['getTeamProjects','getTeamLogs','teamContainerAction','changePassword'].map(key => [key, vi.fn()])), auth: { principal: { id: 'a', role: 'viewer', displayName: '测试成员' }, logout: vi.fn() } }));
+vi.mock('../src/api/client.js', () => ({ api })); vi.mock('../src/stores/auth.js', () => ({ useAuthStore: () => auth }));
+import TeamWorkspace from '../src/views/TeamWorkspace.vue';
+let wrapper;
+const project = { id: 'p', hostId: 'h', hostName: '节点', projectName: '应用', containers: [{ id: 'c', service: 'web', state: 'running', status: 'Up' }] };
+beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); auth.principal.role = 'viewer'; api.getTeamProjects.mockResolvedValue({ projects: [project], unavailable: [] }); });
+afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); });
+const options = { global: { stubs: { BaseModal: true, ConfirmDialog: { props: ['show'], template: '<button v-if="show" @click="$emit(\'confirm\')">确认执行</button>' } } } };
+it('viewer sees only logs, no write controls', async () => { wrapper = mount(TeamWorkspace, options); await flushPromises(); expect(wrapper.text()).toContain('只读成员'); expect(wrapper.text()).toContain('日志'); expect(wrapper.text()).not.toContain('重启'); expect(wrapper.text()).not.toContain('停止'); });
+it('operator must confirm exact target before mutating', async () => { auth.principal.role = 'operator'; api.teamContainerAction.mockResolvedValue({ verification: '容器状态已核对' }); wrapper = mount(TeamWorkspace, options); await flushPromises(); await wrapper.findAll('button').find(b => b.text() === '重启').trigger('click'); expect(api.teamContainerAction).not.toHaveBeenCalled(); await wrapper.findAll('button').find(b => b.text() === '确认执行').trigger('click'); await flushPromises(); expect(api.teamContainerAction).toHaveBeenCalledWith('h','p','c','restart'); });
+it('unmount stops polling and cancels requests', async () => { wrapper = mount(TeamWorkspace, options); await flushPromises(); wrapper.unmount(); wrapper = null; const count = api.getTeamProjects.mock.calls.length; await vi.advanceTimersByTimeAsync(30000); expect(api.getTeamProjects).toHaveBeenCalledTimes(count); expect(api.getTeamProjects.mock.calls[0][0].aborted).toBe(true); });

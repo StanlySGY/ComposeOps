@@ -1,5 +1,7 @@
+import db from './db.js';
+import { accountById, legacyAdmin } from './accounts.js';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-import { clearSessions, createSession, deleteSession, getSetting, hasSession, setSetting } from './db.js';
+import { clearSessions, createSession, deleteSession, getSetting, setSetting } from './db.js';
 
 const COOKIE_NAME = 'composeops_session';
 const SESSION_DAYS = 30;
@@ -60,10 +62,10 @@ export function changePassword(currentPassword, nextPassword) {
  */
 const embedMode = () => process.env.EMBED_MODE === '1';
 
-export function issueSession(reply, secure = false) {
+export function issueSession(reply, secure = false, accountId = null) {
   const token = randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
-  createSession(tokenHash(token), expires.toISOString());
+  createSession(tokenHash(token), expires.toISOString(), accountId);
   // HTTPS 下始终设置 Secure；只有启用跨站嵌入且请求确为 HTTPS 时才使用 SameSite=None。
   const sameSite = embedMode() && secure
     ? 'SameSite=None; Partitioned'
@@ -86,7 +88,7 @@ export function clearSession(request, reply) {
 
 export function isAuthenticated(request) {
   const token = parseCookies(request.headers.cookie)[COOKIE_NAME];
-  return !!token && hasSession(tokenHash(token));
+  return !!token && !!getPrincipal(request);
 }
 
 export function validateOrigin(request) {
@@ -108,4 +110,13 @@ export function validateOrigin(request) {
   } catch {
     return false;
   }
+}
+
+export function getPrincipal(request) {
+  const token = parseCookies(request.headers.cookie)[COOKIE_NAME];
+  if (!token) return null;
+  const row = db.prepare("SELECT account_id FROM sessions WHERE token_hash=? AND julianday(expires_at)>julianday('now')").get(tokenHash(token));
+  if (!row) return null;
+  const principal = row.account_id ? accountById(row.account_id) : legacyAdmin;
+  return principal?.enabled ? principal : null;
 }

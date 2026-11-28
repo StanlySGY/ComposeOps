@@ -1,4 +1,6 @@
 import './helpers/isolated-db.js';
+import { issueSession as issueHealthSession } from '../src/lib/auth.js';
+function healthHeaders() { let cookie; issueHealthSession({ header: (_name, value) => { cookie = value.split(';')[0]; } }); return { cookie }; }
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate as settle } from 'node:timers/promises';
@@ -115,7 +117,7 @@ test('远端失联不影响面板健康，全部节点指标接口保留来源',
   t.mock.method(getDockerForHost('local'), 'ping', async () => 'OK');
   t.mock.method(getDockerForHost(remote.id), 'ping', async () => { throw new Error('offline'); });
   setActiveHost(remote.id);
-  const health = await app.inject({ url: '/health' });
+  const health = await app.inject({ url: '/health', headers: await healthHeaders() });
   assert.equal(health.statusCode, 200);
   assert.equal(health.json().status, 'ok');
   assert.equal(health.json().hosts.find(host => host.id === remote.id).ok, false);

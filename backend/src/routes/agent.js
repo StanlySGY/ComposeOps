@@ -1,3 +1,7 @@
+import { onAuthRevoked } from '../lib/auth-revocations.js';
+import { getPrincipal } from '../lib/auth.js';
+import { startAgentRun, resumeAgentRun, stopAgentRun, approveAgentRun, findRunByPlan } from '../services/agent/runs.js';
+import { listRuns, runEvents, runEffects, resolveRunEffect, refreshRunState } from '../services/agent/run-store.js';
 import { listSessionOperations } from '../services/agent/operations.js';
 /**
  * AI Agent 路由(/agent/*)。
@@ -256,6 +260,7 @@ function aiRateLimit(limit, windowMs = 60000) {
           role: { type: 'string', maxLength: 32 },
           webSearchEnabled: { type: 'boolean' },
           protocol: { type: 'string', enum: ['native', 'ag-ui'] },
+          durable: { type: 'boolean' },
           attachedLogs: { type: 'string', maxLength: 50000 },
           history: {
             type: 'array',
@@ -287,9 +292,16 @@ function aiRateLimit(limit, windowMs = 60000) {
       },
     },
   }, async (request, reply) => {
-    const { message, projectId, containerId, sessionId, role, webSearchEnabled = true, attachedLogs = '', history = [], pageContext = {}, protocol = 'native' } = request.body || {};
+    const { message, projectId, containerId, sessionId, role, webSearchEnabled = true, attachedLogs = '', history = [], pageContext = {}, protocol = 'native', durable = false } = request.body || {};
     if (!message || !String(message).trim()) {
       return reply.code(400).send({ error: 'missing_message', message: '缺少 message' });
+    }
+
+    let durableExecution;
+    const durableListener = event => send(event);
+    if (durable) {
+      try { durableExecution = startAgentRun(message, { projectId, containerId, sessionId, gateKey: String(sessionId), role, initiator: request.principal?.id || 'admin', webSearchEnabled, attachedLogs, pageContext }, request.principal?.id || 'admin', durableListener); }
+      catch (error) { return reply.code(error.statusCode || 500).send({ error: 'run_start_failed', message: error.message }); }
     }
 
     // 设置 SSE 响应头
@@ -306,7 +318,7 @@ function aiRateLimit(limit, windowMs = 60000) {
     const abortController = new AbortController();
     const streamWriter = createBoundedSseWriter(reply.raw, {
       maxQueuedBytes: 256 * 1024,
-      onOverflow: () => abortController.abort(new DOMException('客户端接收速度过慢，执行已中断', 'AbortError')),
+      onOverflow: () => { if (durableExecution) { durableExecution.detach(); reply.raw.destroy(); } else abortController.abort(new DOMException('客户端接收速度过慢，执行已中断', 'AbortError')); },
     });
     const agUi = protocol === 'ag-ui' ? createAgUiAdapter({ threadId: sessionId ? String(sessionId) : 'anonymous', runId: randomUUID() }) : null;
     const send = (event) => {
@@ -321,11 +333,14 @@ function aiRateLimit(limit, windowMs = 60000) {
     // 审批门会话键:无 sessionId 的直连流每次生成独立键,防止"本会话不再询问"
     // 授权经由共享 default 桶泄漏到其他匿名流。
     const gateKey = sessionId != null && sessionId !== '' ? String(sessionId) : `stream-${randomUUID()}`;
-    const context = { projectId, containerId, sessionId, gateKey, role, initiator: 'authenticated-user', webSearchEnabled, attachedLogs, history, pageContext };
+    const context = { projectId, containerId, sessionId, gateKey, role, authorizationAccountId: request.principal?.id || 'admin', initiator: request.principal?.id || 'admin', webSearchEnabled, attachedLogs, history, pageContext };
 
+    const unsubscribeAuth = onAuthRevoked(() => { if (!durableExecution && getPrincipal(request)?.role !== 'admin') abortController.abort(new Error('登录或管理员权限已撤销')); });
     // 客户端断开时中断执行
     let completed = false;
     reply.raw.on('close', () => {
+      unsubscribeAuth();
+      if (durableExecution) { durableExecution.detach(); return; }
       if (!completed) {
         console.log('[agent:execute-stream] Client disconnected, aborting execution');
         abortController.abort();
@@ -334,7 +349,8 @@ function aiRateLimit(limit, windowMs = 60000) {
 
     try {
       // 调用 executeWithLoop,事件通过 onEvent 回调推送
-      await agent.executeWithLoop(message, context, send, abortController.signal);
+      if (durableExecution) await durableExecution.finished;
+      else await agent.executeWithLoop(message, context, send, abortController.signal);
     } catch (error) {
       if (error.name === 'AbortError') {
         send({ type: 'interrupted', content: '执行已被用户中断' });
@@ -349,6 +365,16 @@ function aiRateLimit(limit, windowMs = 60000) {
       await streamWriter.end();
     }
   });
+
+  fastify.get('/agent/sessions/:sessionId/runs', async request => ({ runs: listRuns(request.params.sessionId) }));
+  fastify.get('/agent/runs/:runId', async (request, reply) => {
+    const run = refreshRunState(request.params.runId);
+    if (!run) return reply.code(404).send({ error: 'run_not_found', message: '任务不存在' });
+    return { run, effects: runEffects(run.id), events: runEvents(run.id, request.query?.after) };
+  });
+  fastify.post('/agent/runs/:runId/resume', { schema: { body: { type: 'object', additionalProperties: false, required: ['revision'], properties: { revision: { type: 'integer', minimum: 0 } } } } }, async request => ({ run: resumeAgentRun(request.params.runId, request.body.revision).run }));
+  fastify.post('/agent/runs/:runId/stop', async request => ({ run: stopAgentRun(request.params.runId) }));
+  fastify.post('/agent/runs/:runId/reconcile/:effectId', { schema: { body: { type: 'object', additionalProperties: false, required: ['outcome', 'evidence'], properties: { outcome: { type: 'string', enum: ['applied', 'not_applied', 'failed'] }, evidence: { type: 'string', minLength: 10, maxLength: 4000 } } } } }, async request => ({ run: resolveRunEffect(request.params.runId, request.params.effectId, request.body, request.principal?.id || 'admin') }));
 
   // POST /api/v1/ai/agent/feedback —— 对某次执行点赞/点踩(写回 agent_plans.rating)
   // rating 1 = 点踩(需改进),5 = 点赞;反馈文本可选,用于沉淀失败样本。
@@ -392,7 +418,8 @@ function aiRateLimit(limit, windowMs = 60000) {
   }, async (request, reply) => {
     const { executionId, toolCallId, approved, input, remember } = request.body || {};
     const agent = getAgent();
-    const success = agent.approveToolCall(executionId, toolCallId, approved, input, remember);
+    const run = findRunByPlan(executionId);
+    const success = run ? approveAgentRun(run.id, { executionId, toolCallId, approved, input, remember }) : agent.approveToolCall(executionId, toolCallId, approved, input, remember);
     if (!success) {
       return reply.code(404).send({ error: 'execution_not_found', message: '执行会话不存在或已完成' });
     }

@@ -11,7 +11,8 @@
         <div class="flex items-center gap-1"><button class="icon-btn" title="新建会话(清空当前上下文)" aria-label="新建会话" :disabled="busy" @click="startFreshSession"><MessageSquarePlus class="h-4 w-4" /></button><button class="icon-btn" title="中断执行" aria-label="中断执行" :disabled="!running" @click="interrupt"><Square class="h-4 w-4" /></button><button class="icon-btn" title="关闭 Agent" aria-label="关闭 Agent" @click="closeAgent"><X class="h-4 w-4" /></button></div>
       </header>
       <div class="agent-drawer-context"><span>已携带当前页面上下文</span><small>{{ contextSummary }}</small></div>
-      <AgentOperationsPanel :session-id="sessionId" :running="running" />
+      <AgentRunsPanel :session-id="sessionId" :running="running" />
+<AgentOperationsPanel :session-id="sessionId" :running="running" />
       <div ref="scrollEl" class="agent-drawer-messages" @scroll="onScroll" @click="handleRichBlockClick">
         <p v-if="running && !messages.length" class="agent-drawer-status" role="status">正在准备会话…</p><div v-else-if="!messages.length" class="agent-drawer-empty"><SceneIllustration kind="assistant" class="drawer-welcome-art" sizes="180px" /><p>可以询问当前页面的数据、状态或操作方式。</p><button class="preset-chip" @click="input = defaultPrompt; focusInput()">{{ defaultPrompt }}</button></div>
         <article v-for="message in messages" :key="message.id" class="agent-drawer-message" :class="message.role">
@@ -37,6 +38,7 @@
 
 <script setup>
 import AgentOperationsPanel from './agent/AgentOperationsPanel.vue';
+import AgentRunsPanel from './agent/AgentRunsPanel.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Bot, MessageSquarePlus, Play, Send, Square, UserRound, X } from 'lucide-vue-next';
 import { useAgentConsole } from '../composables/useAgentConsole.js';

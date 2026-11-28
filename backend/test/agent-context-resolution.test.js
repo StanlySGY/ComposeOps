@@ -50,3 +50,11 @@ test('explicit projectId wins over page inference and unresolved matches remain 
   assert.equal(unresolved.projectId, null);
   assert.equal(unresolved.confidence, 'none');
 });
+
+test('short service mentions and bystanders remain ambiguous instead of binding worker', () => {
+  const rows = [{ id: 'one', projectName: 'one', containers: [{ id: 'a', name: 'fixture-api', service: 'api' }, { id: 'w', name: 'fixture-worker', service: 'worker' }] }];
+  const result = resolveImplicitContextFromProjects('重启 api，保持 worker 不动', {}, 'one', rows);
+  assert.equal(result.container, null);
+  assert.equal(resolveImplicitContextFromProjects('查看 api 日志', {}, 'one', rows).container.id, 'a');
+  assert.equal(resolveImplicitContextFromProjects('capital worker', {}, 'one', rows).container.id, 'w');
+});

@@ -32,7 +32,7 @@
         </div>
         <div class="mt-7 flex items-center gap-2 text-xs text-surface-400">
           <ShieldCheck class="h-4 w-4 text-status-ok" />
-          <span>个人运维控制台 · 管理员身份验证</span>
+          <span>团队运维控制台 · 独立账号验证</span>
         </div>
       </section>
 
@@ -42,11 +42,11 @@
             <BrandMark class="login-brand-mark login-brand-mark-small" />
             <p class="text-xl font-semibold tracking-tight">ComposeOps</p>
           </div>
-          <p class="mt-2 text-sm text-surface-400">个人 Docker 运维控制台</p>
+          <p class="mt-2 text-sm text-surface-400">Docker 运维控制台</p>
         </div>
         <div class="mb-6 flex items-start justify-between gap-4">
           <div>
-            <p class="login-form-eyebrow"><span aria-hidden="true"></span>安全访问 · 私人工作区</p>
+            <p class="login-form-eyebrow"><span aria-hidden="true"></span>安全访问 · 授权工作区</p>
             <h1 id="login-title" class="mt-2 text-2xl font-semibold tracking-tight text-surface-50">{{ auth.setupRequired ? '创建管理员' : '欢迎回来' }}</h1>
             <p class="mt-2 text-sm leading-6 text-surface-400">
               {{ auth.setupRequired ? '设置管理员密码，完成控制台初始化。' : '验证身份后，继续管理你的容器服务。' }}
@@ -55,9 +55,10 @@
           <span class="login-lock-icon grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-surface-700/70 bg-surface-950/70 text-surface-300"><ShieldCheck class="h-5 w-5" /></span>
         </div>
         <form class="space-y-5" :aria-busy="loading" @submit.prevent="submit">
+          <label v-if="!auth.setupRequired" class="block text-sm">账号<input v-model="username" class="input mt-1 w-full" autocomplete="username" required maxlength="40" placeholder="admin 或管理员分配的账号" /></label>
           <div>
-            <label for="admin-password" class="mb-1.5 block text-xs font-medium text-surface-300">管理员密码</label>
-            <div class="password-field"><input id="admin-password" v-model="password" class="input w-full" :type="showPassword ? 'text' : 'password'" :autocomplete="auth.setupRequired ? 'new-password' : 'current-password'" :aria-invalid="!!error" :aria-describedby="error ? 'login-error' : capsLock ? 'caps-lock-hint' : undefined" required minlength="10" autofocus :placeholder="auth.setupRequired ? '至少 10 个字符' : '输入管理员密码'" @keydown="updateCapsLock" @keyup="updateCapsLock" @blur="capsLock = false" /><button type="button" class="password-visibility" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :aria-pressed="showPassword" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" /><Eye v-else :size="17" /></button></div>
+            <label for="admin-password" class="mb-1.5 block text-xs font-medium text-surface-300">密码</label>
+            <div class="password-field"><input id="admin-password" v-model="password" class="input w-full" :type="showPassword ? 'text' : 'password'" :autocomplete="auth.setupRequired ? 'new-password' : 'current-password'" :aria-invalid="!!error" :aria-describedby="error ? 'login-error' : capsLock ? 'caps-lock-hint' : undefined" required minlength="10" autofocus :placeholder="auth.setupRequired ? '至少 10 个字符' : '输入账号密码'" @keydown="updateCapsLock" @keyup="updateCapsLock" @blur="capsLock = false" /><button type="button" class="password-visibility" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :aria-pressed="showPassword" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" /><Eye v-else :size="17" /></button></div>
             <p v-if="capsLock" id="caps-lock-hint" class="mt-2 flex items-center gap-1.5 text-xs text-status-warn" role="status"><ArrowUp :size="13" />大写锁定已开启</p>
           </div>
           <label v-if="auth.setupRequired" class="block">
@@ -76,7 +77,7 @@
             {{ loading ? '正在验证…' : (auth.setupRequired ? '完成初始化' : '安全登录') }}
           </button>
         </form>
-        <p class="mt-6 border-t border-surface-800 pt-4 text-center text-[11px] leading-5 text-surface-400">访问受管理员密码保护。请勿在共享设备上保存凭据。</p>
+        <p class="mt-6 border-t border-surface-800 pt-4 text-center text-[11px] leading-5 text-surface-400">每个成员使用独立账号。请勿在共享设备上保存凭据。</p>
       </section>
     </div>
     <p class="absolute bottom-3 left-0 right-0 px-4 text-center text-[10px] tracking-wide text-surface-400">COMPOSEOPS <span class="mx-1.5">·</span> DOCKER COMPOSE WORKSPACE</p>
@@ -97,6 +98,7 @@ const features = [
   { icon: FileCode2, title: '配置管理', description: '变更前校验与预览' },
   { icon: ScrollText, title: '日志追踪', description: '快速定位异常线索' },
 ];
+const username = ref('admin');
 const password = ref('');
 const confirm = ref('');
 const setupToken = ref('');
@@ -112,7 +114,7 @@ async function submit() {
   if (password.value.length < 10) return (error.value = '密码至少需要 10 个字符');
   if (auth.setupRequired && password.value !== confirm.value) return (error.value = '两次输入的密码不一致');
   loading.value = true;
-  try { await auth.submit(password.value, setupToken.value.trim()); }
+  try { await auth.submit(password.value, setupToken.value.trim(), username.value.trim()); }
   catch (e) { error.value = e.message; }
   finally { loading.value = false; }
 }

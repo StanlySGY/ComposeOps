@@ -36,12 +36,14 @@ export function resolveImplicitContextFromProjects(userMessage = '', pageContext
   const source = [userMessage, page.summary, page.state, page.projectName, page.serviceName].filter(Boolean).join(' ').toLocaleLowerCase();
   if (!source.trim()) return { project: null, projectId: null, container: null, serviceName: '', confidence: 'none' };
 
+  // Service mentions are bounded tokens, including short names such as api/db.
+  const mentionsService = service => service.length >= 2 && new RegExp('(^|[^a-z0-9_.-])' + service.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[^a-z0-9_.-])', 'i').test(userText);
   const explicitContainerHits = [];
   for (const project of projects) {
     for (const container of project.containers || []) {
       const name = String(container.name || '').trim().toLocaleLowerCase();
       const service = String(container.service || '').trim().toLocaleLowerCase();
-      if ((name.length >= 5 && userText.includes(name)) || (service.length >= 4 && userText.includes(service))) {
+      if ((name.length >= 5 && userText.includes(name)) || mentionsService(service)) {
         explicitContainerHits.push({ project, container });
       }
     }

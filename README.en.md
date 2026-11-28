@@ -474,3 +474,10 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 If this project helps you, please consider giving it a ⭐ Star
 
 </div>
+
+
+### Durable Agent tasks and team access
+
+The Agent UI keeps server-side tasks running across browser disconnects. After a server restart, review recorded effects and resume explicitly; unknown effects are never replayed automatically. Pending executor results and business verification remain distinct from the model round completing.
+
+Administrators can create independent administrator, operator, and viewer accounts in Settings. Members see only explicitly granted host/project pairs; operators may start, stop, or restart existing containers. Global Agent, Shell, credentials, and arbitrary Compose editing remain administrator-only. These grants do not provide Docker kernel tenant isolation. See the Chinese [Agent guide](docs/public/AGENT_OPERATIONS.md) and [team access guide](docs/public/TEAM_ACCESS.md).

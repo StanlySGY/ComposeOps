@@ -1,3 +1,5 @@
+import { getPrincipal } from '../lib/auth.js';
+import { onAuthRevoked } from '../lib/auth-revocations.js';
 import { createTerminalInput } from '../lib/terminal-input.js';
 import { WebSocket } from 'ws';
 import { findProjectContainer } from '../services/scanner.js';
@@ -46,9 +48,23 @@ export function teardownExecSession(socket) {
  * 这些路由挂在 /ws 前缀（不经过 /api/v1），方便 nginx 反代区分。
  * 另有 /ws/containers、/ws/events、/ws/jobs 分别推送容器状态、告警事件与任务进度。
  */
+function protectSocket(socket, request) {
+  const allowed = () => getPrincipal(request)?.role === 'admin';
+  const check = () => { if (!allowed()) { socket.close(1008, '登录或管理员权限已失效'); return false; } return true; };
+  if (!check()) return false;
+  const send = socket.send.bind(socket), emit = socket.emit.bind(socket);
+  socket.send = (...args) => { if (check()) return send(...args); };
+  socket.emit = (event, ...args) => { if (event === 'message' && !check()) return false; return emit(event, ...args); };
+  const timer = setInterval(check, 5000); timer.unref?.();
+  const unsubscribe = onAuthRevoked(check);
+  socket.once('close', () => { clearInterval(timer); unsubscribe(); });
+  return true;
+}
+
 export default async function wsRoutes(fastify) {
   // ---- 容器状态实时推送 ----
-  fastify.get('/containers', { websocket: true }, async (socket) => {
+  fastify.get('/containers', { websocket: true }, async (socket, request) => {
+    if (!protectSocket(socket, request)) return;
     if (socket.readyState !== WebSocket.OPEN) return;
     const unsubscribe = subscribeContainerEvents(event => safeSend(socket, event));
     socket.once('close', unsubscribe);
@@ -63,7 +79,8 @@ export default async function wsRoutes(fastify) {
   });
 
   // ---- 告警事件实时流 ----
-  fastify.get('/events', { websocket: true }, async (socket) => {
+  fastify.get('/events', { websocket: true }, async (socket, request) => {
+    if (!protectSocket(socket, request)) return;
     const unsubscribe = subscribeEvents((event) => {
       safeSend(socket, { type: 'event', data: event });
     });
@@ -72,6 +89,7 @@ export default async function wsRoutes(fastify) {
 
   // ---- 批量任务进度推送 ----
   fastify.get('/jobs', { websocket: true }, async (socket, request) => {
+    if (!protectSocket(socket, request)) return;
     const { jobId } = request.query;
     if (jobId) {
       const job = getBackgroundJob(String(jobId));
@@ -93,6 +111,7 @@ export default async function wsRoutes(fastify) {
 
   // ---- 实时日志流 ----
   fastify.get('/logs', { websocket: true }, async (socket, request) => {
+    if (!protectSocket(socket, request)) return;
     const controller = socketAbortController(socket);
     const { projectId, containerId, tail = 200 } = request.query;
     try {
@@ -123,6 +142,7 @@ export default async function wsRoutes(fastify) {
 
   // ---- 多容器聚合日志流 ----
   fastify.get('/aggregated-logs', { websocket: true }, async (socket, request) => {
+    if (!protectSocket(socket, request)) return;
     const controller = socketAbortController(socket);
     const { projectId, containers, tail = 200 } = request.query;
     try {
@@ -155,6 +175,7 @@ export default async function wsRoutes(fastify) {
 
   // ---- 容器 Web Shell ----
   fastify.get('/exec', { websocket: true }, async (socket, request) => {
+    if (!protectSocket(socket, request)) return;
     if (process.env.ENABLE_SHELL !== '1') {
       socket.send(JSON.stringify({ type: 'error', data: 'Web Shell 未启用' }));
       return socket.close();

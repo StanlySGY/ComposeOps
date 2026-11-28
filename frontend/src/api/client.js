@@ -186,7 +186,7 @@ export const api = {
   getAuthStatus: (signal) => request('/auth/status', { signal }),
   // setupToken:服务端设置 SETUP_TOKEN 环境变量时,首次初始化必须携带该引导令牌
   setup: (password, setupToken = '') => request('/auth/setup', { notify: false, method: 'POST', body: JSON.stringify({ password, setupToken }) }),
-  login: (password) => request('/auth/login', { notify: false, method: 'POST', body: JSON.stringify({ password }) }),
+  login: (password, username = 'admin') => request('/auth/login', { notify: false, method: 'POST', body: JSON.stringify({ password, username }) }),
   logout: () => request('/auth/logout', { notify: false, method: 'POST' }),
   changePassword: (payload) => request('/auth/password', { notify: false, method: 'POST', body: JSON.stringify(payload) }),
   getProjects: (force = false) => request('/projects', { force, fresh: true }),
@@ -355,6 +355,17 @@ export const api = {
   truncateAiHistory: (sessionId, fromMessageId) => request('/ai/history/truncate', { method: 'POST', body: JSON.stringify({ sessionId, fromMessageId }) }),
   // ai agent:执行已收敛为 Tool Loop 流式通道;会话/记忆/审计见上方与下方的端点
   agentExecuteStream: (payload, onEvent, signal) => streamSse('/ai/agent/execute-stream', { ...payload, protocol: 'ag-ui' }, onEvent, signal, 'ag-ui'),
+  getAgentRuns: (sessionId, signal) => request('/ai/agent/sessions/' + encodeURIComponent(sessionId) + '/runs', { signal }),
+  getAgentRun: (id, signal) => request('/ai/agent/runs/' + encodeURIComponent(id), { signal }),
+  resumeAgentRun: (id, revision) => request('/ai/agent/runs/' + encodeURIComponent(id) + '/resume', { method: 'POST', body: JSON.stringify({ revision }) }),
+  stopAgentRun: id => request('/ai/agent/runs/' + encodeURIComponent(id) + '/stop', { method: 'POST', body: '{}' }),
+  reconcileAgentEffect: (id, effectId, payload) => request('/ai/agent/runs/' + encodeURIComponent(id) + '/reconcile/' + encodeURIComponent(effectId), { method: 'POST', body: JSON.stringify(payload) }),
+  getTeamAccounts: () => request('/team/accounts'),
+  saveTeamAccount: payload => request('/team/accounts', { method: 'PUT', body: JSON.stringify(payload) }),
+  getTeamCatalog: () => request('/team/catalog'),
+  getTeamProjects: signal => request('/team/projects', { signal }),
+  getTeamLogs: (host, project, container, signal) => request('/team/projects/' + encodeURIComponent(host) + '/' + encodeURIComponent(project) + '/containers/' + encodeURIComponent(container) + '/logs', { signal }),
+  teamContainerAction: (host, project, container, action) => request('/team/projects/' + encodeURIComponent(host) + '/' + encodeURIComponent(project) + '/containers/' + encodeURIComponent(container) + '/action', { method: 'POST', body: JSON.stringify({ action, confirmContainerId: container }) }),
   getAgentRoles: () => request('/ai/agent/roles'),
   getAgentTasks: (limit = 50, filters = {}) => request('/ai/agent/tasks?' + new URLSearchParams({ limit: String(limit), ...(filters.status ? { status: filters.status } : {}), ...(filters.sessionId ? { sessionId: String(filters.sessionId) } : {}) })),
   getAgentTask: (id, waitMs = 0) => request('/ai/agent/tasks/' + encodeURIComponent(id) + '?waitMs=' + encodeURIComponent(waitMs)),
@@ -541,7 +552,7 @@ const NATIVE_AGENT_EVENT_TYPES = new Set([
   'tool_requested', 'tool_executing', 'tool_result', 'tool_error', 'tool_rejected',
   'context_resolved', 'context_ambiguous', 'context_data', 'action_completed',
   'channel_selected', 'channel_failed', 'channel_unavailable', 'task_notice', 'compaction',
-  'max_loops_reached', 'ui_present', 'thinking', 'reasoning', 'trace',
+  'durable_run', 'max_loops_reached', 'ui_present', 'thinking', 'reasoning', 'trace',
 ]);
 
 export function normalizeAgUiEvent(event) {

@@ -16,6 +16,7 @@ describe('useAuthStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    api.getAuthStatus.mockResolvedValue({ authenticated: true, setupRequired: false, principal: { id: 'admin', role: 'admin' } });
   });
 
   describe('initial state', () => {
@@ -100,7 +101,7 @@ describe('useAuthStore', () => {
       
       await store.submit('password123');
       
-      expect(api.login).toHaveBeenCalledWith('password123');
+      expect(api.login).toHaveBeenCalledWith('password123', 'admin');
       expect(api.setup).not.toHaveBeenCalled();
       expect(store.authenticated).toBe(true);
     });
@@ -131,4 +132,19 @@ describe('useAuthStore', () => {
       expect(api.logout).not.toHaveBeenCalled();
     });
   });
+});
+
+it('unknown identity never exposes administrator UI and failed status cannot fake successful login', async () => {
+  setActivePinia(createPinia());
+  const store = useAuthStore(); expect(store.isAdmin).toBe(false);
+  api.login.mockResolvedValue({ ok: true }); api.getAuthStatus.mockRejectedValue(new Error('offline'));
+  await expect(store.submit('password123', '', 'operator')).rejects.toThrow();
+  expect(store.authenticated).toBe(false); expect(store.isAdmin).toBe(false);
+});
+it('named member login preserves its role, logout clears the principal', async () => {
+  setActivePinia(createPinia());
+  api.getAuthStatus.mockResolvedValue({ authenticated: true, setupRequired: false, principal: { id: 'operator-id', role: 'operator' } });
+  const store = useAuthStore(); await store.submit('password123', '', 'operator');
+  expect(store.isAdmin).toBe(false); expect(store.principal.id).toBe('operator-id');
+  await store.logout(); expect(store.principal).toBe(null);
 });

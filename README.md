@@ -22,7 +22,7 @@
 <img src="docs/screenshots/agent.png" alt="AI 运维 Agent：Tool Loop + 确认门" width="98.8%">
 </div>
 
-> **这是什么**：给自己服务器用的单用户运维面板。Docker Socket 等价 root，界面为中文（英文界面在规划中）。
+> **这是什么**：面向自有服务器与小团队的运维面板，支持独立成员账号和项目授权。管理员持有的 Docker Socket 等价 root，界面为中文（英文界面在规划中）。
 > **这不是什么**：不支持多租户与团队协作（多人请用 Portainer）；不是 CI/CD 平台，不提供流水线和无人值守发布。纳管项目可手动拉取源码并在目标节点执行 Compose 构建，详见 [GitOps 与源码部署说明](docs/public/USE_CASE_GITOPS.md)。
 > **定位**：在这类工具里，ComposeOps 的差异点是 **AI 运维 Agent**——不止能看，还能在你确认后替你动手排障。
 
@@ -173,6 +173,8 @@ ComposeOps 面向个人服务器上的 Compose 运维，重点是可审核的 AI
 
 ### 🤖 AI 运维 Agent
 
+支持断线继续的持久任务、重启后核对恢复和未知副作用防重放，详见 [Agent 驱动运维流程](docs/public/AGENT_OPERATIONS.md)。
+
 单一对话入口（原独立 AI 诊断页已合并），原生 Tool Loop 执行引擎：
 
 - 🛠️ **50 个工具 + 4 个组合宏**：项目识别 / 启停 / 配置读写与回滚 / 网络与卷 / 安全审计 / 诊断探针 / 维护清理 / 定时任务 / 长期记忆
@@ -279,7 +281,7 @@ docker compose up -d --build
 
 打开浏览器访问 **http://<宿主机IP>:28765**（`docker-compose.yml` 默认映射 `0.0.0.0:28765 -> 3001`，可按需改为 `127.0.0.1:28765:3001` 仅本机访问）。
 
-首次访问需设置管理员密码（最少 10 个字符），之后使用 Session Cookie 登录。
+首次访问需设置管理员密码（最少 10 个字符），之后使用 `admin` 和原密码登录。可在设置页创建独立成员账号并分配项目，详见[成员与项目权限](docs/public/TEAM_ACCESS.md)。
 
 配置 AI 能力：进入 **设置 → AI**，添加一个或多个 OpenAI 兼容渠道，每条独立填写 Base URL / API Key / 模型名，按优先级排序。支持故障自动切换、冷却恢复和工具调用测试；也可直接把 New API 配置为渠道。详见[多渠道配置与 New API 接入](docs/ai-channels.md)。
 
@@ -326,7 +328,7 @@ tailscale serve --bg http://127.0.0.1:28765
 
 ### 威胁模型
 
-**假设信任**：单用户管理员 + 本地/VPN 部署 + Docker Socket 等价 root
+**假设信任**：完全可信的管理员 + 本地/VPN 部署 + Docker Socket 等价 root。受限成员只可查看授权项目及执行许可的现有容器操作，不能进入全局 Agent/Shell；项目授权不等于 Docker 内核多租户隔离。
 
 **防护范围**：路径穿越 / 任意命令执行 / 未授权项目访问 / Session 劫持 / AI 提示注入
 

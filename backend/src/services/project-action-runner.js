@@ -21,7 +21,16 @@ export function assertProjectActionAllowed(project, action) {
 
 // Track explicit whole-project lifecycle requests after confirmed success only.
 // A maintenance label remains deliberate until the user changes it.
-export async function prepareProjectAction(project, action) {
+export async function prepareProjectAction(project, action, { services = [] } = {}) {
+  if (services.length) {
+    assertProjectHostUnchanged(project);
+    assertProjectActionAllowed(project, action);
+    if (!['up', 'stop', 'restart'].includes(action) || services.some(name => typeof name !== 'string' || !project.containers.some(container => container.service === name))) {
+      throw Object.assign(new Error('指定服务必须是项目中已有容器对应的服务；新增或发布服务请使用可靠发布流程'), { statusCode: 400 });
+    }
+    const selected = { ...project, containers: project.containers.filter(container => services.includes(container.service)) };
+    return { mode: 'containers', run: (onOutput = () => {}) => withProjectOperationLock(project.id, () => runContainerAction(selected, action, onOutput)).finally(invalidateScanCache) };
+  }
   const prepared = await prepareAction(project, action);
   const run = prepared.run;
   return { ...prepared, run(...args) {

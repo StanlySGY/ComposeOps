@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 
-const api = vi.hoisted(() => Object.fromEntries(['createAgentSession', 'agentExecuteStream', 'setAgentApprovalMode', 'truncateAiHistory', 'agentApprove'].map(key => [key, vi.fn()])));
+const api = vi.hoisted(() => Object.fromEntries(['createAgentSession', 'agentExecuteStream', 'setAgentApprovalMode', 'truncateAiHistory', 'agentApprove','stopAgentRun'].map(key => [key, vi.fn()])));
 vi.mock('../src/api/client.js', () => ({ api }));
 const { useAgentChat } = await import('../src/composables/useAgentChat.js');
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
@@ -10,6 +10,7 @@ beforeEach(() => {
   vi.resetAllMocks(); chat = useAgentChat({ channel: `stream-resilience-${++nextChannel}` }); chat.resetSession(); streams = [];
   api.createAgentSession.mockResolvedValue({ sessionId: 8 });
   api.setAgentApprovalMode.mockResolvedValue({ success: true });
+  api.stopAgentRun.mockResolvedValue({});
   api.truncateAiHistory.mockResolvedValue({ success: true });
   api.agentExecuteStream.mockImplementation((payload, emit, signal) => {
     const task = deferred(); streams.push({ ...task, payload, emit, signal }); return task.promise;
@@ -70,7 +71,7 @@ describe('共享 Agent 异步状态隔离', () => {
     const first = await start('旧任务'); chat.resetSession(); const second = await start('新任务');
     first.stream.emit({ type: 'session_meta', userMessageId: 101 }); first.stream.emit({ type: 'token', content: '旧内容' }); first.stream.resolve(); await first.task;
     expect(chat.running.value).toBe(true); expect(chat.messages.value[0].persistedId).toBe(0); expect(chat.messages.value[1].content).toBe('');
-    chat.interrupt(); expect(second.stream.signal.aborted).toBe(true); second.stream.resolve(); await second.task;
+    second.stream.emit({ type: 'durable_run', runId: 'second-run' }); chat.interrupt(); await flushPromises(); expect(api.stopAgentRun).toHaveBeenCalledWith('second-run'); expect(second.stream.signal.aborted).toBe(true); second.stream.resolve(); await second.task;
   });
   it('恢复中断任务沿用该轮项目、角色和日志，不携带DOM事件', async () => {
     const { task, stream } = await start('排障', { role: 'validator', projectId: 'p1', attachedLogs: '证据' });

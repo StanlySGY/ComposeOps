@@ -38,6 +38,7 @@ export function toPublicAgentEvent(event) {
     return { type: event.type, channelId: String(event.channelId || '').slice(0, 64),
       channelName: cleanText(event.channelName).slice(0, 80), model: cleanText(event.model).slice(0, 200), content: cleanText(event.content).slice(0, 400) };
   }
+  if (event.type === 'durable_run') return { type: 'durable_run', runId: String(event.runId || '').slice(0, 128), status: String(event.status || '').slice(0, 32) };
   if (event.type === 'done') {
     // planId 是本次执行的审计主键,供前端把"点赞/点踩"精确写回对应计划。
     const publicEvent = { type: event.type, content: cleanText(event.content), planId: event.planId ? String(event.planId) : '' };

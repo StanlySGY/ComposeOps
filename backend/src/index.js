@@ -1,3 +1,4 @@
+import { recoverAgentRuns } from './services/agent/run-store.js';
 import { buildApp } from './app.js';
 import { startAlertMonitor } from './services/alert-monitor.js';
 
@@ -56,6 +57,7 @@ let stopCostWarmup = null;
 
 const start = async () => {
   try {
+    recoverAgentRuns();
     recoverSreRuntime();
     const interruptedJobs = initializeBackgroundJobs();
     if (interruptedJobs.length) fastify.log.warn({ jobs: interruptedJobs }, 'marked unfinished background jobs as interrupted');

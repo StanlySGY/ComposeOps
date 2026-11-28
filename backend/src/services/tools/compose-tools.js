@@ -100,7 +100,7 @@ export function registerComposeTools(agent) {
   const BACKGROUND_TIMEOUT_MS = 15 * 60 * 1000;
   const lifecycleAction = (action) => async (params, context) => {
     const project = context.project;
-    const prepared = await prepareProjectAction(project, action);
+    const prepared = await prepareProjectAction(project, action, { services: params.services || [] });
     if (params.background === true) {
       const taskId = createBackgroundTask({
         sessionId: context.sessionId,
@@ -124,7 +124,7 @@ export function registerComposeTools(agent) {
 
   agent
     .registerTool('compose.up', {
-      description: '启动 Compose 项目,可指定服务(仅整个项目级启动);构建耗时长时可 background=true 转后台',
+      description: '启动 Compose 项目；指定 services 时仅启动这些服务已有的容器，不重建也不影响依赖；构建耗时长时可 background=true 转后台',
       category: 'compose',
       requiredPermission: 'managed',
       confirmationRequired: true,
@@ -214,8 +214,9 @@ export function registerComposeTools(agent) {
           targets = match?.container ? [match.container] : [];
         } else if (Array.isArray(params.services) && params.services.length) {
           const wanted = params.services.map((s) => String(s).toLowerCase());
-          targets = targets.filter((c) => wanted.some((s) => c.name.toLowerCase().includes(s)));
+          targets = targets.filter(c => wanted.includes(String(c.service || '').toLowerCase()));
         }
+        if (params.containerId && params.services?.length && !targets.every(c => params.services.includes(c.service))) throw Object.assign(new Error('指定容器与服务不匹配，请重新核对目标'), { statusCode: 400 });
         const lines = [];
         for (const item of targets) {
           const logs = await readContainerLogs(docker.getContainer(item.id), tail);

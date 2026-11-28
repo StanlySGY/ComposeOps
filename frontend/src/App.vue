@@ -11,6 +11,7 @@
     </div>
   </main>
   <LoginView v-else-if="!auth.authenticated" />
+  <TeamWorkspace v-else-if="!auth.isAdmin" :key="auth.principal?.id" />
   <div v-else class="h-dvh min-h-0 flex flex-col overflow-hidden relative">
     <button class="skip-link" @click="focusMainContent">跳到主要内容</button>
     <AppHeader @logout="auth.logout" @open-agent="openAgent" />
@@ -60,6 +61,7 @@ import { RefreshCw, WifiOff } from 'lucide-vue-next';
 import CheatSheetModal from './components/common/CheatSheetModal.vue';
 import AgentDrawer from './components/AgentDrawer.vue';
 import OnboardingGuide from './components/common/OnboardingGuide.vue';
+import TeamWorkspace from './views/TeamWorkspace.vue';
 import LoginView from './views/LoginView.vue';
 import { useAuthStore } from './stores/auth.js';
 import { useServicesStore } from './stores/services.js';
@@ -84,7 +86,7 @@ const route = useRoute();
 const router = useRouter();
 const servicesStore = useServicesStore();
 const toast = useToastStore();
-usePullRefresh(() => auth.authenticated && servicesStore.refresh(true));
+usePullRefresh(() => auth.authenticated && auth.isAdmin && servicesStore.refresh(true));
 const { openAgent, startPageTracking, stopPageTracking } = useAgentConsole();
 const cheatSheet = ref(false);
 function focusMainContent() { document.getElementById('main-content')?.focus({ preventScroll: true }); }

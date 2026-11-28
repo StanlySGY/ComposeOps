@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { api } from '../api/client.js';
 
 export const useAuthStore = defineStore('auth', () => {
+  const principal = ref(null);
+  const isAdmin = computed(() => principal.value?.role === 'admin');
   const ready = ref(false);
   const authenticated = ref(false);
   const setupRequired = ref(false);
@@ -22,6 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
           throw new Error('认证状态响应无效');
         }
         authenticated.value = status.authenticated;
+        principal.value = status.principal || null;
         setupRequired.value = status.setupRequired;
         connectionError.value = '';
       } catch {
@@ -37,17 +40,18 @@ export const useAuthStore = defineStore('auth', () => {
     })();
     return checkPromise;
   }
-  async function submit(password, setupToken = '') {
+  async function submit(password, setupToken = '', username = 'admin') {
     if (setupRequired.value) await api.setup(password, setupToken);
-    else await api.login(password);
-    authenticated.value = true;
+    else await api.login(password, username);
+    await check();
+    if (connectionError.value || !authenticated.value || !principal.value) throw new Error(connectionError.value || '登录状态未确认，请重试。');
     setupRequired.value = false;
   }
   async function logout() {
     await api.logout();
-    authenticated.value = false;
+    authenticated.value = false; principal.value = null;
   }
-  function expire() { authenticated.value = false; }
+  function expire() { authenticated.value = false; principal.value = null; }
 
-  return { ready, authenticated, setupRequired, checking, connectionError, check, submit, logout, expire };
+  return { principal, isAdmin, ready, authenticated, setupRequired, checking, connectionError, check, submit, logout, expire };
 });

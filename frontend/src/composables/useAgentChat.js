@@ -205,8 +205,10 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       const userMessage = reactive({ id: nextMessageId(), role: 'user', content: text, persistedId: 0 });
       messages.value.push(userMessage, assistant);
       atBottom.value = true; scrollBottom(true);
-      await api.agentExecuteStream({ role: 'auto', ...extraPayload, message: text, sessionId: id }, event => {
-        if (!current() || run.stopped) return;
+      await api.agentExecuteStream({ durable: true, role: 'auto', ...extraPayload, message: text, sessionId: id }, event => {
+        if (!current()) return;
+        if (event.type === 'durable_run') { run.durableRunId = event.runId; assistant.durableRunId = event.runId; if (run.stopped) void api.stopAgentRun(event.runId).catch(() => {}); return; }
+        if (run.stopped) return;
         if (event.type === 'session_meta') { userMessage.persistedId = event.userMessageId; return; }
         if (event.type === 'approval_mode' && run.approvalVersion !== state.approvalVersion) return;
         if (['done', 'error', 'interrupted', 'max_loops_reached'].includes(event.type)) run.terminal = true;
@@ -260,6 +262,12 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     if (busy.value || sendingBlocked.value) return false;
     const last = [...messages.value].reverse().find(m => m.role === 'assistant' && m.interrupted && (!messageId || m.id === messageId));
     if (!last) return false;
+    if (last.durableRunId) {
+      const { run } = await api.getAgentRun(last.durableRunId);
+      await api.resumeAgentRun(run.id, run.revision);
+      last.interrupted = false;
+      return true;
+    }
     const accepted = await sendMessage('请继续刚才被中断的任务，先核对已执行步骤的结果，避免重复修改，再完成剩余部分。', { ...extraPayload, ...last.requestContext }, { immediate: true });
     if (accepted) last.interrupted = false;
     return accepted;
@@ -465,7 +473,12 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     queuePaused.value = true;
     const run = state.activeRun;
     if (run) run.stopped = true;
-    state.controller?.abort();
+    if (run?.durableRunId) {
+      void api.stopAgentRun(run.durableRunId).then(() => state.controller?.abort()).catch(error => { if (run.assistant) run.assistant.error = `停止请求未确认：${error.message}。请到任务进度中核对。`; });
+    } else if (run?.assistant) {
+      // Keep the connection until the durable id arrives, so stop cannot become a silent detach.
+      return;
+    } else state.controller?.abort();
     // 会话创建还没有发出执行流，立即恢复输入。迟到创建由 promise 身份丢弃。
     if (run && !run.assistant) {
       state.sessionPromise = null; state.activeRun = null; state.controller = null; running.value = false;

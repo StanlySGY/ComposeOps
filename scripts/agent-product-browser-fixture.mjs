@@ -9,7 +9,15 @@ delete process.env.DB_ENCRYPTION_KEY; delete process.env.DB_ENCRYPTION_KEY_FILE;
 const { default: db, setProjectPreference, createAiSession, addAiMessage, createAgentPlan, recordAgentExecution, updateAgentExecution } = await import('../backend/src/lib/db.js');
 const { getDockerForHost } = await import('../backend/src/services/docker-hosts.js');
 Object.getPrototypeOf(getDockerForHost('local').modem).dial = () => { throw new Error('UI fixture cannot access Docker'); };
-Docker.prototype.listContainers = async () => [];
+const fixtures = ['team-one', 'team-hidden'].map(project => ({ Id: project + '-api', Names: ['/' + project + '-api'], Image: 'fixture:v1', State: 'running', Status: 'Up', Labels: { 'com.docker.compose.project': project, 'com.docker.compose.service': 'api' } }));
+Docker.prototype.listContainers = async () => fixtures;
+Docker.prototype.info = async () => ({ ID: 'fixture-engine' });
+Docker.prototype.getContainer = id => ({ inspect: async () => { const row = fixtures.find(row => row.Id === id); if (!row) throw new Error('unknown fixture'); return { Id: id, Config: { Labels: row.Labels, Tty: true }, State: { Running: row.State === 'running', Status: row.State } }; },
+  logs: async () => Buffer.from('service ready\nPASSWORD=fixture-private-password'), restart: async () => {}, stop: async () => { fixtures.find(row => row.Id === id).State = 'exited'; }, start: async () => { fixtures.find(row => row.Id === id).State = 'running'; } });
+const { scanProjects } = await import('../backend/src/services/scanner.js');
+const projects = await scanProjects('local'); for (const project of projects) setProjectPreference(project.id, { managed: true });
+const { saveAccount } = await import('../backend/src/lib/accounts.js');
+for (const role of ['operator','viewer']) saveAccount({ username: role, displayName: role === 'operator' ? '演示运维成员' : '演示只读成员', password: 'isolated-ui-test-password', role, grants: [{ hostId: 'local', projectId: projects.find(row => row.projectName === 'team-one').id }] }, 'admin');
 const sessionId = createAiSession(), now = Date.now();
 addAiMessage('user', '查看我的业务发布是否完成', {}, sessionId);
 addAiMessage('assistant', '发布已提交到持久队列，等待执行与业务验收。刷新页面后仍可核对任务状态。', {}, sessionId);
@@ -21,6 +29,17 @@ updateAgentExecution(execId, { result: { operation: { kind: 'change', id: 'ui-re
 const { buildApp } = await import('../backend/src/app.js');
 const app = await buildApp({ logger: false });
 await app.inject({ method: 'POST', url: '/api/v1/auth/setup', payload: { password: 'isolated-ui-test-password' } });
+const { getAgent } = await import('../backend/src/services/agent/engine.js');
+const { startAgentRun } = await import('../backend/src/services/agent/runs.js');
+const agent = getAgent();
+agent.executeWithLoop = async (message, context, emit, signal) => {
+  emit({ type: 'confirmation_required', tool: 'group.save', description: '保存演示分组', params: { name: '浏览器验收组' }, executionId: context.planId, toolCallId: 'ui-approval', risk: 'medium' });
+  const result = await agent._waitForApproval(context.planId, 'ui-approval', signal);
+  emit({ type: 'tool_executing', tool: 'group.save' });
+  emit({ type: 'done', content: '审批流程已完成', usage: { total_tokens: 10 } });
+  return { success: result.approved, interrupted: signal.aborted, finalContent: '审批流程已完成' };
+};
+startAgentRun('浏览器刷新后恢复审批验收', { sessionId, hostId: 'local' }, 'admin', null, agent);
 const address = await app.listen({ host: '127.0.0.1', port: Number(process.env.UI_FIXTURE_PORT || 3019) });
 console.log(JSON.stringify({ ready: true, address, sessionId, directory }));
 process.on('SIGTERM', async () => { await app.close(); await import('../backend/src/services/workflow-engine.js'); await new Promise(resolve => setImmediate(resolve)); db.close(); fs.rmSync(directory, { recursive: true, force: true }); process.exit(0); });

@@ -1,6 +1,6 @@
 # ComposeOps 环境与操作备忘
 
-单用户 Docker Compose 运维台(工作区名 `ComposeOps`,镜像/容器有时沿用旧名 `OpsDash`)。所有 UI 文案为中文,暗色工业风 + emerald 状态色系。
+支持管理员和受限成员的 Docker Compose 运维台(工作区名 `ComposeOps`,镜像/容器有时沿用旧名 `OpsDash`)。所有 UI 文案为中文,暗色工业风 + emerald 状态色系。
 
 ## 基本状态
 - Monorepo:`frontend/`(Vue 3 + Vite + Pinia + Tailwind + lucide-vue-next + Monaco + xterm)与 `backend/`(Fastify + Node.js `node:sqlite` 默认明文存储/可选 `better-sqlite3-multiple-ciphers` 静态加密 + dockerode + ssh2)。
@@ -10,6 +10,12 @@
 - 端口映射 `0.0.0.0:28765:3001` 为用户明确配置,勿改。
 - 敏感识别正则:`/(SECRET|TOKEN|PASSWORD|PASSWD|\bPASS\b|(?:API|PRIVATE|ACCESS|SECRET|AUTH|SIGNING)[_-]?KEY)/i`。
 - 镜像必须保持字节一致:`backend/src/lib/dotenv.js` ⇄ `frontend/src/lib/dotenv.js`;`backend/src/lib/agent-protocol-core.js` ⇄ `frontend/src/lib/agent-protocol-core.js`(改一处就同步另一处,两侧 sync 测试会比对字节兜底)。
+
+## 持久任务与成员（v35–36）
+- v35 `agent_runs/events/effects` 保存目标、审批与副作用证据；新前端 `durable: true`，断线继续。重启只标中断/未知，续跑前刷新关联执行器记录、重置审批，不重放未知写入。只读工具以 `readOnly === true || READ_ONLY_TOOLS.has(name)` 判断；不能把旧工具缺少 readOnly 视为可缓存读取。
+- v36 独立账号 admin/operator/viewer，按节点+项目授权；全局 API/WS 默认仅管理员，成员专用 `/team/*` 有二次资源鉴权。分组不是 ACL，成员不得进入全局 Agent/Shell/任意 Compose 编辑。
+- 登录兼容原 admin；权限/密码变更撤销会话与存量 WS。任务发起者被降权/停用时终止后续执行。`/health` 未登录仅存活信息。
+- `compose.up/stop/restart` 指定 services 只控制相应已有容器，不修改整个项目意图。显式服务不能被页面 containerId 覆盖，日志按 service 标签精确匹配。
 
 ## AI Agent
 - AI 助手已**单页化**到 `/agent`(原 `/ai` 页面已删除并重定向):会话、日志挂载(LogContextPicker → execute-stream `attachedLogs`)、确认门、长期记忆都在这一页;`/ai/chat` 与 `/ai/exec` 路由已删,`/ai/diagnose` 仍供日志页诊断弹窗使用。

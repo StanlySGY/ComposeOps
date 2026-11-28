@@ -1,4 +1,7 @@
+import { notifyAuthRevoked } from './auth-revocations.js';
 import Database from './sqlite.js';
+import { installAccountsSchema } from './accounts-schema.js';
+import { installAgentRunsSchema } from './agent-runs-schema.js';
 import { chmodSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -982,6 +985,8 @@ const MIGRATIONS = [
     addColumn(database, 'project_preferences', 'host_id', 'TEXT');
     database.exec('CREATE INDEX IF NOT EXISTS idx_project_preferences_group ON project_preferences(group_id)');
   } },
+  { version: 35, name: 'Agent 持久目标与副作用核对', up: installAgentRunsSchema },
+  { version: 36, name: '成员账号与精确项目授权', up: installAccountsSchema },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1262,7 +1267,13 @@ export function renameAiSession(sessionId, title) {
   return result.changes > 0;
 }
 
+function assertNoRunningChat(sessionIds = null) {
+  const active = db.prepare("SELECT session_id FROM agent_runs WHERE status IN ('running','waiting_approval','stopping')").all();
+  if (active.some(row => !sessionIds || sessionIds.includes(row.session_id))) throw Object.assign(new Error('会话仍有持久任务运行，请先停止并等待任务结束'), { statusCode: 409 });
+}
+
 export function clearAiSession(sessionId) {
+  assertNoRunningChat([Number(sessionId)]);
   db.prepare('DELETE FROM ai_history WHERE session_id = ?').run(sessionId);
   db.prepare('DELETE FROM ai_usage WHERE session_id = ?').run(toSessionId(sessionId));
   db.prepare('DELETE FROM ai_sessions WHERE session_id = ?').run(sessionId);
@@ -1271,6 +1282,7 @@ export function clearAiSession(sessionId) {
 export function clearAiSessions(sessionIds = []) {
   const ids = [...new Set(sessionIds.map((value) => Number(value)).filter((value) => Number.isSafeInteger(value) && value > 0))];
   if (!ids.length) return 0;
+  assertNoRunningChat(ids);
   const remove = db.transaction((values) => {
     const deleteHistory = db.prepare('DELETE FROM ai_history WHERE session_id = ?');
     const deleteUsage = db.prepare('DELETE FROM ai_usage WHERE session_id = ?');
@@ -1289,6 +1301,7 @@ export function clearAiSessions(sessionIds = []) {
 
 /** 删除某会话中 id >= fromMessageId 的全部消息 —— 用于"编辑并重发"时让持久化历史与前端保持一致。 */
 export function truncateAiHistoryFrom(sessionId, fromMessageId) {
+  assertNoRunningChat([Number(sessionId)]);
   const id = Number(sessionId);
   const fromId = Number(fromMessageId);
   if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(fromId) || fromId <= 0) return 0;
@@ -1296,6 +1309,7 @@ export function truncateAiHistoryFrom(sessionId, fromMessageId) {
 }
 
 export function clearAiHistory() {
+  assertNoRunningChat();
   db.prepare('DELETE FROM ai_history').run();
   db.prepare('DELETE FROM ai_usage').run();
   db.prepare('DELETE FROM ai_sessions').run();
@@ -1607,9 +1621,9 @@ export function setAlertEventDiagnosis(id, diagnosis) {
     .run(String(diagnosis || '').slice(0, 20000), Number(id)).changes > 0;
 }
 
-export function createSession(tokenHash, expiresAt) {
+export function createSession(tokenHash, expiresAt, accountId = null) {
   db.prepare("DELETE FROM sessions WHERE julianday(expires_at) <= julianday('now')").run();
-  db.prepare('INSERT INTO sessions(token_hash, expires_at) VALUES(?, ?)').run(tokenHash, expiresAt);
+  db.prepare('INSERT INTO sessions(token_hash, expires_at, account_id) VALUES(?, ?, ?)').run(tokenHash, expiresAt, accountId);
 }
 
 export function hasSession(tokenHash) {
@@ -1620,10 +1634,12 @@ export function hasSession(tokenHash) {
 
 export function deleteSession(tokenHash) {
   db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+  notifyAuthRevoked();
 }
 
 export function clearSessions() {
   db.prepare('DELETE FROM sessions').run();
+  notifyAuthRevoked();
 }
 
 export function getProjectPreference(projectId) {

@@ -1,3 +1,5 @@
+import { authenticateAccount, changeAccountPassword } from '../lib/accounts.js';
+import { getPrincipal } from '../lib/auth.js';
 import {
   changePassword,
   clearSession,
@@ -60,6 +62,7 @@ export default async function authRoutes(fastify) {
   fastify.get('/status', async (request) => ({
     setupRequired: !isConfigured(),
     authenticated: isAuthenticated(request),
+    principal: getPrincipal(request),
   }));
 
   fastify.post('/setup', {
@@ -97,7 +100,7 @@ export default async function authRoutes(fastify) {
       body: {
         type: 'object',
         additionalProperties: false,
-        properties: { password: passwordField },
+        properties: { password: passwordField, username: { type: 'string', maxLength: 40 } },
       },
     },
   }, async (request, reply) => {
@@ -111,7 +114,9 @@ export default async function authRoutes(fastify) {
     if (now > globalEntry.resetAt) { globalEntry.count = 0; globalEntry.resetAt = now + windowMs; }
     if (entry.count >= 5) return reply.code(429).send({ error: 'too_many_attempts', message: '登录失败次数过多，请稍后再试' });
     if (globalEntry.count >= GLOBAL_MAX_FAILURES) return reply.code(429).send({ error: 'too_many_attempts', message: '登录失败次数过多(全站)，请稍后再试' });
-    if (!verifyPassword(request.body?.password)) {
+    const username = String(request.body?.username || 'admin').trim().toLowerCase();
+    const account = username === 'admin' ? null : authenticateAccount(username, request.body?.password);
+    if (username === 'admin' ? !verifyPassword(request.body?.password) : !account) {
       entry.count += 1;
       attempts.set(key, entry);
       globalEntry.count += 1;
@@ -119,7 +124,7 @@ export default async function authRoutes(fastify) {
       return reply.code(401).send({ error: 'invalid_credentials', message: '密码错误' });
     }
     attempts.delete(key);
-    issueSession(reply, isSecure(request));
+    issueSession(reply, isSecure(request), account?.id || null);
     return { ok: true };
   });
 
@@ -138,8 +143,11 @@ export default async function authRoutes(fastify) {
     },
   }, async (request, reply) => {
     try {
-      changePassword(request.body?.currentPassword, request.body?.nextPassword);
-      issueSession(reply, isSecure(request));
+      const principal = getPrincipal(request);
+      if (!principal) return reply.code(401).send({ error: 'unauthorized', message: '请先登录' });
+      if (principal.id === 'admin') changePassword(request.body?.currentPassword, request.body?.nextPassword);
+      else changeAccountPassword(principal.id, request.body?.currentPassword, request.body?.nextPassword);
+      issueSession(reply, isSecure(request), principal.id === 'admin' ? null : principal.id);
       return { ok: true };
     } catch (error) {
       return reply.code(400).send({ error: 'password_change_failed', message: error.message });

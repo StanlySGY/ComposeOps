@@ -24,7 +24,13 @@ Agent 先发现真实节点和项目，再申请纳管。增量授权不会取�
 - 业务验收通过：专用执行器满足对应发布或恢复验收条件。
 - 需要核对：结果未知或记录不可读取，不自动重放；请核对实际资源。
 
-已开始的聊天工具循环不会因为刷新而自动恢复执行；后台持久任务按原 ID 查询。工具调用成功与业务验收分开记录，未配置独立后置检查的工具不会宣称验收通过。
+新界面默认创建持久会话任务。刷新、关闭页面或 SSE 断线不会取消服务端执行；“停止任务”才会显式请求停止。刷新后可以在“任务进度与恢复”查看状态并批准原步骤。每个会话同时只有一个正在执行的任务，全局最多 4 个，每次执行最长 30 分钟。
+
+服务重启后不会自动重新执行：任务转为“可继续”或“需要核对”，原审批作废。点击“核对并继续”会重新读取关联发布、恢复及后台操作记录，再开启新的审批门。关联操作仍在执行时不能续跑；结果未知时禁止后续写入。请检查真实资源并记录证据及“已生效 / 未生效 / 已失败”结论。相同任务内已完成的同参数步骤不会再次派发；明确未生效的步骤才可以重新审批执行。
+
+“本轮完成”仅指模型对话轮次结束；后台提交、容器运行、备份校验与业务验收仍分别显示。后台记录缺失、非零命令结果或异常断流不能被当作成功。副作用台账保存脱敏参数、结果和 HMAC 指纹；用量保存数值计数。已开始的 Docker 操作可能无法撤销，停止后必须依据实际资源核对。
+
+旧 API 客户端未传 `durable: true` 时保留旧断线行为。公司成员账号的权限和能力范围见 [成员与项目权限](TEAM_ACCESS.md)。
 
 ## 可复现检查
 
@@ -32,6 +38,14 @@ Agent 先发现真实节点和项目，再申请纳管。增量授权不会取�
 # 真实模型 + 真实 Agent 工具循环和审批 + 临时数据库；Docker 为合成适配器
 node scripts/agent-product-eval.mjs --real-model \
   --config-file=/outside/repo/model.json --report=/tmp/agent-model-report.json
+
+# 真实模型 + 真实 Docker 双服务项目，含纳管分组/单服务操作/健康目标
+node scripts/agent-docker-eval.mjs --real-model --run-isolated-fixtures \
+  --config-file=/outside/repo/model.json --report=/tmp/agent-docker-report.json
+
+# 持久任务断线、慢客户端、并发持续测试（合成模型，临时 DB）
+node scripts/agent-soak.mjs --durable --duration-seconds=900 --workers=4 \
+  --requests-per-minute=100 --report-file=/tmp/agent-soak.json
 
 # 独立的真实 Docker 发布与数据库恢复验收
 SRE_EVIDENCE_DIR=/tmp/release-evidence node scripts/release-acceptance.mjs --run-isolated-fixtures

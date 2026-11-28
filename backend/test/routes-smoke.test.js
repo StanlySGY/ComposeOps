@@ -78,7 +78,7 @@ test('routes: 所有响应都带上安全响应头', async () => {
 });
 
 test('routes: /health 保持面板存活并分别报告节点健康', async () => {
-  const response = await app.inject({ method: 'GET', url: '/health' });
+  const response = await app.inject({ method: 'GET', url: '/health', headers: await healthHeaders() });
   assert.equal(response.statusCode, 200);
   const body = response.json();
   assert.equal(body.status, 'ok');
@@ -190,3 +190,5 @@ test('routes: 未注册路径返回 404 而不是 401', async () => {
   const response = await app.inject({ method: 'GET', url: '/definitely-not-a-route' });
   assert.equal(response.statusCode, 404);
 });
+
+async function healthHeaders() { const { issueSession } = await import('../src/lib/auth.js'); let cookie; issueSession({ header: (_name, value) => { cookie = value.split(';')[0]; } }); return { cookie }; }

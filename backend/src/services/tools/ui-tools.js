@@ -32,7 +32,7 @@ function normalizeUiBlock(block) {
   }
   const items = Array.isArray(block.items) ? block.items.slice(0, 8) : [];
   return { type: 'steps', title, items: items.map((item) => ({
-    title: cleanText(item?.title, 120), detail: cleanText(item?.detail, 300),
+    title: cleanText(item?.title || item?.label, 120), detail: cleanText(item?.detail, 300),
     status: ['done', 'active', 'pending', 'error'].includes(item?.status) ? item.status : 'pending',
   })) };
 }
@@ -48,6 +48,7 @@ export function registerUiTools(agent) {
   agent.registerTool('ui.present', {
     description: '向用户展示安全的结构化运维 UI。适用于状态摘要、指标卡、对比表、步骤进度和提醒；只允许 notice/status/metrics/table/steps 组件，禁止 HTML/JS/CSS/任意组件名。每次最多 8 个组件。',
     category: 'context',
+    readOnly: true,
     requiredPermission: 'readonly',
     confirmationRequired: false,
     requiresProject: false,

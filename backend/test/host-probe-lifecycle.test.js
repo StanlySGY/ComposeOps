@@ -1,7 +1,9 @@
+import './helpers/isolated-db.js';
+import { issueSession as issueHealthSession } from '../src/lib/auth.js';
+function healthHeaders() { let cookie; issueHealthSession({ header: (_name, value) => { cookie = value.split(';')[0]; } }); return { cookie }; }
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
-import './helpers/isolated-db.js';
 import { upsertHost, deleteHost, getHost, listHosts, pingHost } from '../src/services/docker-hosts.js';
 
 async function fixture(t, handler) {
@@ -100,7 +102,7 @@ test('platform health degrades for an unresponsive node and closes the probe soc
   await fixture(t, req => req.on('close', () => { closed = true; }));
   const { buildApp } = await import('../src/app.js');
   const app = await buildApp({ logger: false }); t.after(() => app.close());
-  const response = await app.inject({ url: '/health' });
+  const response = await app.inject({ url: '/health', headers: await healthHeaders() });
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().docker, 'degraded');
   await new Promise(resolve => setTimeout(resolve, 30));

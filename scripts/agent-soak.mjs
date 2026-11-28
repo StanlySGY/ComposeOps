@@ -14,7 +14,7 @@ const DEFAULTS = {
 };
 
 function parseArgs(argv) {
-  const config = { ...DEFAULTS, reportFile: null };
+  const config = { ...DEFAULTS, reportFile: null, durable: false };
   const keys = {
     'duration-seconds': 'durationSeconds', workers: 'workers',
     'sample-interval-ms': 'sampleIntervalMs', 'warmup-seconds': 'warmupSeconds',
@@ -31,6 +31,7 @@ function parseArgs(argv) {
         '',
         '  --duration-seconds=N       Duration, default 300; maximum 43200',
         '  --workers=N                Concurrent clients, default 4',
+        '  --durable                  Continue and verify completion after disconnect',
         '  --sample-interval-ms=N     Resource sampling interval, default 5000',
         '  --warmup-seconds=N         Warmup ignored for growth limits, default 10',
         '  --requests-per-minute=N    Global request-start budget, default 120',
@@ -48,6 +49,7 @@ function parseArgs(argv) {
       ].join('\n'));
       process.exit(0);
     }
+    if (raw === '--durable') { config.durable = true; continue; }
     if (raw.startsWith('--report-file=')) {
       const reportFile = raw.slice('--report-file='.length).trim();
       if (!reportFile || reportFile.includes('\0')) throw new Error('--report-file requires a valid path');
@@ -188,7 +190,9 @@ async function newSession() {
   return response.json().sessionId;
 }
 
+const requestDurations = [];
 async function consumeOne(sequence) {
+  const requestStarted = performance.now();
   const disconnect = config.cancelEvery > 0 && (sequence === 3 || (sequence > 3 && sequence % config.cancelEvery === 0));
   const slow = !disconnect && config.slowEvery > 0 && (sequence === 2 || (sequence > 3 && sequence % config.slowEvery === 0));
   const sessionId = await newSession();
@@ -198,7 +202,7 @@ async function consumeOne(sequence) {
     method: 'POST',
     signal: controller.signal,
     headers: { cookie, 'content-type': 'application/json', 'x-forwarded-for': syntheticClientIp(sequence) },
-    body: JSON.stringify({ sessionId, message: 'ComposeOps 长期稳定性测试 ' + marker + ' #' + sequence }),
+    body: JSON.stringify({ sessionId, durable: config.durable, message: 'ComposeOps 长期稳定性测试 ' + marker + ' #' + sequence }),
   });
   assert.equal(response.status, 200, 'Agent SSE returned HTTP ' + response.status);
   const reader = response.body.getReader();
@@ -206,6 +210,7 @@ async function consumeOne(sequence) {
   let buffer = '';
   let completed = false;
   let disconnected = false;
+  let runId;
   const readFrames = async () => {
     while (true) {
       const item = await reader.read();
@@ -220,6 +225,7 @@ async function consumeOne(sequence) {
         let event;
         try { event = JSON.parse(frame.slice(6)); } catch { throw new Error('Agent SSE emitted invalid JSON'); }
         counters.streamedEvents++;
+        if (event.type === 'durable_run') runId = event.runId;
         if (event.type === 'done') completed = true;
         if (disconnect && event.type === 'token') {
           disconnected = true;
@@ -242,12 +248,20 @@ async function consumeOne(sequence) {
   }
   if (disconnect) {
     assert.ok(disconnected, 'disconnect probe did not receive a token before stream completion');
+    if (config.durable) {
+      assert.ok(runId, 'durable run id missing');
+      const deadline = Date.now() + 30000;
+      let run;
+      do { await delay(50); const res = await app.inject({ url: '/api/v1/ai/agent/runs/' + runId, headers: { cookie } }); run = res.json().run; } while (['running','waiting_approval'].includes(run?.status) && Date.now() < deadline);
+      assert.equal(run?.status, 'completed', 'detached durable run failed to finish');
+    }
     counters.clientDisconnects++;
   } else {
     assert.ok(completed, 'Agent SSE stream ended without a done event');
     counters.completed++;
     if (slow) counters.slowClients++;
   }
+  requestDurations.push(performance.now() - requestStarted);
 }
 
 async function sampleResources() {
@@ -301,6 +315,7 @@ function writeCheckpoint(finalSample, elapsedSeconds) {
     configuredDurationSeconds: config.durationSeconds,
     elapsedSeconds: Number(elapsedSeconds.toFixed(1)),
     configuration: config,
+    latencyMs: Object.fromEntries([['p50', .5], ['p95', .95], ['p99', .99]].map(([name, percentile]) => [name, Math.round([...requestDurations].sort((a,b) => a-b)[Math.max(0, Math.ceil(requestDurations.length * percentile)-1)] || 0)])),
     requests: {
       scheduled: counters.scheduled, completed: counters.completed,
       clientDisconnects: counters.clientDisconnects, slowClients: counters.slowClients,
@@ -429,6 +444,7 @@ async function main() {
     interrupted: Boolean(stopReason),
     stopReason,
     configuration: config,
+    latencyMs: Object.fromEntries([['p50', .5], ['p95', .95], ['p99', .99]].map(([name, percentile]) => [name, Math.round([...requestDurations].sort((a,b) => a-b)[Math.max(0, Math.ceil(requestDurations.length * percentile)-1)] || 0)])),
     requests: {
       scheduled: counters.scheduled, completed: counters.completed,
       clientDisconnects: counters.clientDisconnects, slowClients: counters.slowClients,

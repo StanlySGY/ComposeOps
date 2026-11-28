@@ -1,3 +1,6 @@
+import teamRoutes from './routes/team.js';
+import { getPrincipal } from './lib/auth.js';
+import { stopAllAgentRuns } from './services/agent/runs.js';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import path from 'path';
@@ -108,6 +111,12 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
     if (protectedPath && !publicAuthPath && !gitopsWebhookPath && !isAuthenticated(request)) {
       return reply.code(401).send({ error: 'unauthorized', message: '请先登录' });
     }
+    request.principal = getPrincipal(request);
+    if (protectedPath && !publicAuthPath && !gitopsWebhookPath && request.principal?.role !== 'admin') {
+      const routePath = request.routeOptions?.url || pathname;
+      const memberAllowed = routePath.startsWith('/api/v1/team/') || ['/api/v1/auth/logout', '/api/v1/auth/password'].includes(routePath);
+      if (!memberAllowed) return reply.code(403).send({ error: 'admin_required', message: '该功能仅管理员可用，请在成员工作台管理授权项目' });
+    }
     if (request.url.startsWith('/ws/') && !validateOrigin(request)) {
       return reply.code(403).send({ error: 'origin_rejected', message: 'WebSocket 请求来源不可信' });
     }
@@ -145,6 +154,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   await fastify.register(
     async (api) => {
       await api.register(authRoutes, { prefix: '/auth' });
+      await api.register(teamRoutes, { prefix: '/team' });
       await api.register(serviceRoutes, { prefix: '/services' });
       await api.register(projectRoutes, { prefix: '/projects' });
       await api.register(aiRoutes, { prefix: '/ai' });
@@ -182,7 +192,8 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   await fastify.register(telemetryRoutes, { prefix: '/otlp/v1' });
 
   // 面板自身存活与节点健康分开，远端不可达不能触发面板重启。
-  fastify.get('/health', async () => {
+  fastify.get('/health', async request => {
+    if (getPrincipal(request)?.role !== 'admin') return { status: 'ok', ts: Date.now() };
     const started = Date.now();
     const hosts = await Promise.all(listHosts().map(async host => {
       const started = Date.now();
@@ -223,6 +234,7 @@ export async function buildApp({ logger = { level: process.env.LOG_LEVEL || 'inf
   }
 
   fastify.addHook('onClose', async () => {
+    await stopAllAgentRuns();
     stopAlertMonitor();
     stopHealthAlerter();
     stopCronScheduler();

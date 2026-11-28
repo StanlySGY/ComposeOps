@@ -63,3 +63,31 @@ test('compose save: 原文件恢复失败时返回明确错误代码', async () 
     rollback: async () => { throw new Error('disk unavailable'); },
   }), (error) => error.code === 'COMPOSE_SAVE_ROLLBACK_FAILED' && error.statusCode === 500 && /disk unavailable/.test(error.message));
 });
+
+test('selected services never fall back to whole project and preserve whole-project intent', async t => {
+  const { prepareProjectAction } = await import('../src/services/project-action-runner.js');
+  const { getDockerForHost } = await import('../src/services/docker-hosts.js');
+  const { setProjectPreference, getProjectPreference } = await import('../src/lib/db.js');
+  const calls = [], project = { id: 'selective', hostId: 'local', managed: true, editable: true, mounted: true, mountEnabled: true, containers: [{ id: 'api', service: 'api' }, { id: 'worker', service: 'worker' }] };
+  t.mock.method(getDockerForHost('local'), 'getContainer', id => ({ inspect: async () => ({ State: { Status: 'running' } }), stop: async () => calls.push(id) }));
+  setProjectPreference(project.id, { operationalIntent: 'running' });
+  const action = await prepareProjectAction(project, 'stop', { services: ['worker'] });
+  assert.equal(await action.run(), 0); assert.deepEqual(calls, ['worker']); assert.equal(getProjectPreference(project.id).operationalIntent, 'running');
+  await assert.rejects(prepareProjectAction(project, 'stop', { services: ['missing'] }), /指定服务/);
+});
+test('log service selection overrides page container and rejects contradictory explicit identifiers', async t => {
+  const { OperationsAgent } = await import('../src/services/agent/engine.js');
+  const { getDockerForHost } = await import('../src/services/docker-hosts.js');
+  const { scanProjects, invalidateScanCache } = await import('../src/services/scanner.js');
+  const { setProjectPreference } = await import('../src/lib/db.js');
+  const docker = getDockerForHost('local'), reads = [];
+  t.mock.method(docker, 'listContainers', async () => ['api','worker','api-helper'].map(service => ({ Id: service, Names: ['/logs-' + service], State: 'running', Labels: { 'com.docker.compose.project': 'log-target', 'com.docker.compose.service': service } })));
+  t.mock.method(docker, 'getContainer', id => ({ inspect: async () => ({ Config: { Tty: true } }), logs: async () => { reads.push(id); return Buffer.from('hello'); } }));
+  invalidateScanCache(); t.after(invalidateScanCache);
+  const [project] = await scanProjects(); setProjectPreference(project.id, { managed: true });
+  const agent = new OperationsAgent();
+  const result = await agent.executeTool('compose.logs', { projectId: project.id, services: ['api'] }, { containerId: 'worker', hostId: 'local' });
+  assert.equal(result.success, true); assert.deepEqual(reads, ['api']);
+  const mismatch = await agent.executeTool('compose.logs', { projectId: project.id, services: ['api'], containerId: 'worker' });
+  assert.equal(mismatch.success, false); assert.deepEqual(reads, ['api']);
+});
