@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">Agent 执行历史</h1>
-        <p class="page-subtitle">查看 Agent 的计划、工具调用与执行结果</p>
+        <p class="page-subtitle">查看最近 100 个计划；展开后读取该计划最多 500 条工具调用</p>
       </div>
       <div class="flex items-center gap-3">
         <button class="btn-secondary" :disabled="loading" @click="load">
@@ -12,7 +12,15 @@
       </div>
     </div>
 
-    <div v-if="error" class="card border-status-error/20 bg-status-error/5 p-4 text-status-error" role="alert">{{ error }}</div>
+    <div v-if="error" class="card flex flex-wrap items-center gap-3 border-status-error/20 bg-status-error/5 p-4 text-status-error" role="alert">
+      <span class="min-w-0 flex-1">{{ error }}{{ executions.length ? '；以下保留上次读取的历史。' : '' }}</span>
+      <button class="btn-secondary btn-sm" :disabled="loading" @click="load">重新读取历史</button>
+    </div>
+    <div v-if="usageError" class="card flex flex-wrap items-center gap-3 p-4 text-status-warn" role="alert">
+      <span class="min-w-0 flex-1">用量读取失败：{{ usageError }}{{ usage ? '；以下用量为上次读取结果。' : '' }}</span>
+      <button class="btn-secondary btn-sm" :disabled="loading" @click="load">重新读取用量</button>
+    </div>
+    <p v-if="loading" class="text-sm text-surface-400" role="status">正在读取执行历史与用量…</p>
 
     <section v-if="usage" class="space-y-3">
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -60,14 +68,14 @@
         </select>
         <button v-if="searchQuery || statusFilter !== 'all' || roleFilter !== 'all'" class="btn-secondary btn-sm" @click="resetFilters">清除筛选</button>
       </div>
-      <div class="mt-2 flex items-center justify-between text-xs text-surface-400">
+      <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-surface-400">
         <span>显示 {{ filteredExecutions.length }} / {{ executions.length }} 次执行</span>
         <span>按计划记录聚合 · 展开查看步骤、结果与轨迹</span>
       </div>
     </section>
 
-    <HistoryControls v-model:page="page" v-model:sort-key="sortKey" v-model:descending="descending" :total="total" :page-size="pageSize" :options="sortOptions" label="执行历史" />
-    <div v-if="!loading && !executions.length" class="card p-8">
+    <HistoryControls v-if="executions.length" v-model:page="page" v-model:sort-key="sortKey" v-model:descending="descending" :total="total" :page-size="pageSize" :options="sortOptions" label="执行历史" />
+    <div v-if="loaded && !loading && !error && !executions.length" class="card p-8">
       <EmptyState icon="history" title="暂无执行记录" description="Agent 工作流执行后会在此显示" />
     </div>
 
@@ -80,34 +88,42 @@
       <div v-for="exec in pagedRows" :key="exec.planId" class="card p-4">
         <div class="mb-3 flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
-            <div class="mb-1 flex items-center gap-2">
-              <h3 class="truncate text-base font-semibold text-surface-200">{{ exec.message || '工作流执行' }}</h3>
+            <div class="mb-1 flex flex-wrap items-center gap-2">
+              <h3 class="min-w-0 break-words text-base font-semibold text-surface-200">{{ exec.message || '工作流执行' }}</h3>
               <span :class="statusClass(exec.status)" class="status-badge">{{ statusLabel(exec.status) }}</span>
             </div>
             <p class="text-sm text-surface-400">计划 ID: {{ exec.planId }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-surface-400">
               <span>角色: {{ roleLabel(exec.role) }}</span>
-              <span>步骤: {{ exec.stepCount }}</span>
+              <span>已载入工具调用: {{ exec.results.length }}</span>
               <span v-if="exec.createdAt">创建: {{ formatTime(exec.createdAt) }}</span>
               <span v-if="exec.executedAt">执行: {{ formatTime(exec.executedAt) }}</span>
             </div>
           </div>
-          <button class="btn-secondary btn-sm" @click="toggleDetail(exec.planId)">
+          <button class="btn-secondary btn-sm shrink-0" :aria-expanded="expandedPlan === exec.planId" :aria-controls="`agent-plan-detail-${exec.planId}`" @click="toggleDetail(exec.planId)">
             <ChevronDown :class="{ 'rotate-180': expandedPlan === exec.planId }" class="h-3.5 w-3.5 transition-transform" />
             {{ expandedPlan === exec.planId ? '收起' : '详情' }}
           </button>
         </div>
 
-        <div v-if="expandedPlan === exec.planId" class="space-y-4 border-t border-surface-800 pt-4">
+        <div v-if="expandedPlan === exec.planId" :id="`agent-plan-detail-${exec.planId}`" class="space-y-4 border-t border-surface-800 pt-4" :aria-busy="detailLoading">
+          <p v-if="detailLoading" class="text-sm text-surface-400" role="status">正在读取该计划的工具调用…</p>
+          <div v-else-if="detailError" class="flex flex-wrap items-center gap-3 text-sm text-status-error" role="alert">
+            <span class="min-w-0 flex-1">{{ detailError }}</span>
+            <button class="btn-secondary btn-sm" @click="loadDetail(exec.planId)">重试详情</button>
+          </div>
+          <template v-else>
+          <p class="text-xs text-surface-400">按调用顺序展示该计划前 500 条工具记录；历史列表中的数量可能因读取上限而不完整。</p>
+          <p v-if="!exec.steps.length && !exec.results.length && !exec.thoughts.length" class="text-sm text-surface-400">此计划尚无工具调用记录。</p>
           <!-- 工作流步骤 -->
           <div v-if="exec.steps && exec.steps.length">
             <h4 class="mb-2 text-sm font-medium text-surface-300">工作流步骤</h4>
             <div class="space-y-2">
               <div v-for="(step, idx) in exec.steps" :key="idx" class="rounded-sm border border-surface-800 bg-surface-900/40 p-3">
                 <div class="mb-2 flex items-start justify-between">
-                  <div class="flex items-center gap-2">
+                  <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-800 text-xs font-medium text-surface-400">{{ idx + 1 }}</span>
-                    <span class="font-mono text-sm text-surface-300">{{ step.tool }}</span>
+                    <span class="break-all font-mono text-sm text-surface-300">{{ step.tool }}</span>
                     <RiskBadge v-if="step.risk" :risk="step.risk" />
                   </div>
                   <span v-if="step.confirmationRequired" class="text-xs text-status-warn">需确认</span>
@@ -115,7 +131,7 @@
                 <div v-if="step.reason" class="mb-2 text-xs text-surface-400">{{ step.reason }}</div>
                 <div v-if="step.params && Object.keys(step.params).length" class="text-xs">
                   <span class="text-surface-400">参数:</span>
-                  <code class="ml-2 rounded-sm bg-surface-800 px-1.5 py-0.5 font-mono text-surface-300">{{ formatParams(step.params) }}</code>
+                  <code class="ml-2 break-all rounded-sm bg-surface-800 px-1.5 py-0.5 font-mono text-surface-300">{{ formatParams(step.params) }}</code>
                 </div>
               </div>
             </div>
@@ -126,16 +142,16 @@
             <h4 class="mb-2 text-sm font-medium text-surface-300">执行结果</h4>
             <div class="space-y-2">
               <div v-for="(result, idx) in exec.results" :key="idx" class="rounded-sm border p-3" :class="resultBorderClass(result.status)">
-                <div class="mb-2 flex items-start justify-between">
-                  <div class="flex items-center gap-2">
-                    <component :is="resultIcon(result.status)" :class="resultIconClass(result.status)" class="h-4 w-4 shrink-0" />
-                    <span class="font-mono text-sm text-surface-300">{{ result.tool }}</span>
+                <div class="mb-2 flex flex-wrap items-start justify-between gap-2">
+                  <div class="flex min-w-0 flex-1 items-start gap-2">
+                    <component :is="resultIcon(result.status)" :class="resultIconClass(result.status)" class="mt-0.5 h-4 w-4 shrink-0" />
+                    <span class="min-w-0 break-all font-mono text-sm text-surface-300">{{ result.tool }}</span>
                   </div>
-                  <span v-if="result.durationMs" class="text-xs text-surface-400">{{ result.durationMs }}ms</span>
+                  <span v-if="result.durationMs != null" class="shrink-0 text-xs text-surface-400">{{ result.durationMs }}ms</span>
                 </div>
-                <div v-if="result.error" class="mb-2 text-sm text-status-error">{{ result.error }}</div>
-                <div v-if="result.result" class="max-h-32 overflow-auto rounded-sm bg-surface-900 p-2 text-xs">
-                  <pre class="whitespace-pre-wrap text-surface-400">{{ stringifyResult(result.result) }}</pre>
+                <div v-if="result.error" class="mb-2 break-words text-sm text-status-error">{{ result.error }}</div>
+                <div v-if="result.result != null && result.result !== ''" class="max-h-32 overflow-auto rounded-sm bg-surface-900 p-2 text-xs">
+                  <pre class="whitespace-pre-wrap break-all text-surface-400">{{ stringifyResult(result.result) }}</pre>
                 </div>
               </div>
             </div>
@@ -147,10 +163,11 @@
             <div class="space-y-1.5">
               <div v-for="(thought, idx) in exec.thoughts" :key="idx" class="flex gap-3 text-xs">
                 <span :class="phaseColor(thought.phase)" class="w-16 shrink-0 font-medium">{{ phaseLabel(thought.phase) }}</span>
-                <span class="flex-1 text-surface-400">{{ thought.content }}</span>
+                <span class="min-w-0 flex-1 break-words text-surface-400">{{ thought.content }}</span>
               </div>
             </div>
           </div>
+          </template>
         </div>
       </div>
     </div>
@@ -161,18 +178,26 @@
 import RiskBadge from '../components/common/RiskBadge.vue';
 import { usePagedRows } from '../composables/usePagedRows.js';
 import HistoryControls from '../components/common/HistoryControls.vue';
-import { computed, onActivated, onMounted, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { api } from '../api/client.js';
 import { RefreshCw, ChevronDown, CircleCheck, CircleX, Clock, AlertCircle, Search } from 'lucide-vue-next';
 import MetricTile from '../components/common/MetricTile.vue';
 import EmptyState from '../components/common/EmptyState.vue';
+import { onAuthEpochChange } from '../lib/auth-context.js';
+import { formatTimestamp, parseTimestamp } from '../lib/date-time.js';
 
 const loading = ref(false);
 const error = ref('');
+const usageError = ref('');
+const loaded = ref(false);
 const executions = ref([]);
 const usage = ref(null);
 const expandedPlan = ref(null);
+const detailLoading = ref(false);
+const detailError = ref('');
+let active = false, generation = 0, detailGeneration = 0;
+let loadController = null, detailController = null;
 const searchQuery = ref('');
 const statusFilter = ref('all');
 const roleFilter = ref('all');
@@ -192,16 +217,22 @@ function resetFilters() {
 }
 
 async function load() {
+  if (!active) return;
+  invalidate();
+  const current = generation;
+  const controller = loadController = new AbortController();
   loading.value = true;
   error.value = '';
-  usage.value = null;
+  usageError.value = '';
   try {
     const [executionResult, usageResult] = await Promise.allSettled([
-      api.getAgentExecutions('', 500),
-      api.getAgentUsage(30),
+      api.getAgentExecutions('', 500, controller.signal),
+      api.getAgentUsage(30, controller.signal),
     ]);
-    if (executionResult.status === 'rejected') throw executionResult.reason;
+    if (!active || current !== generation || controller.signal.aborted) return;
     if (usageResult.status === 'fulfilled') usage.value = usageResult.value;
+    else usageError.value = usageResult.reason?.message || '暂时无法读取模型用量';
+    if (executionResult.status === 'rejected') throw executionResult.reason;
     const response = executionResult.value;
     const rowsByPlan = new Map();
     for (const row of response.executions || []) {
@@ -210,10 +241,42 @@ async function load() {
       rowsByPlan.set(row.plan_id, rows);
     }
     executions.value = (response.plans || []).map((plan) => mapPlan(plan, rowsByPlan.get(plan.id) || []));
+    loaded.value = true;
   } catch (e) {
-    error.value = e.message;
+    if (active && current === generation && !controller.signal.aborted) error.value = e.message || '暂时无法读取执行历史';
   } finally {
-    loading.value = false;
+    if (current === generation) { loading.value = false; loadController = null; }
+  }
+}
+
+function cancelDetail() {
+  detailGeneration++;
+  detailController?.abort(); detailController = null;
+  detailLoading.value = false; detailError.value = ''; expandedPlan.value = null;
+}
+function invalidate(clearData = false) {
+  generation++;
+  loadController?.abort(); loadController = null;
+  loading.value = false;
+  cancelDetail();
+  if (clearData) { executions.value = []; usage.value = null; error.value = ''; usageError.value = ''; loaded.value = false; resetFilters(); }
+}
+
+async function loadDetail(planId) {
+  if (!active || expandedPlan.value !== planId) return;
+  detailController?.abort();
+  const current = ++detailGeneration, context = generation;
+  const controller = detailController = new AbortController();
+  detailLoading.value = true; detailError.value = '';
+  try {
+    const result = await api.getAgentExecutions(planId, 500, controller.signal);
+    if (!active || current !== detailGeneration || context !== generation || controller.signal.aborted) return;
+    if (!result?.plan || String(result.plan.id) !== String(planId)) throw new Error('执行计划已不可用，请刷新历史后核对。');
+    executions.value = executions.value.map(item => item.planId === planId ? mapPlan(result.plan, result.executions || []) : item);
+  } catch (e) {
+    if (active && current === detailGeneration && context === generation && !controller.signal.aborted) detailError.value = e.message || '暂时无法读取详情';
+  } finally {
+    if (current === detailGeneration) { detailLoading.value = false; detailController = null; }
   }
 }
 
@@ -222,19 +285,13 @@ function formatNumber(value) {
 }
 
 function toggleDetail(planId) {
-  expandedPlan.value = expandedPlan.value === planId ? null : planId;
+  const close = expandedPlan.value === planId;
+  cancelDetail();
+  if (!close) { expandedPlan.value = planId; void loadDetail(planId); }
 }
 
 function formatTime(isoString) {
-  if (!isoString) return '';
-  return new Date(isoString).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  return formatTimestamp(isoString);
 }
 
 function formatParams(params) {
@@ -367,11 +424,20 @@ function resultBorderClass(status) {
 }
 
 usePullRefresh(load, { keepAlive: true });
-onMounted(() => load());
-let historyActivatedOnce = false;
-onActivated(() => { if (historyActivatedOnce) void load(); historyActivatedOnce = true; });
+function activate() { if (active) return; active = true; void load(); }
+function deactivate() { active = false; invalidate(); }
+function hostChanged() { invalidate(true); if (active) void load(); }
+const stopAuth = onAuthEpochChange((_epoch, { identityChanged } = {}) => {
+  invalidate(true);
+  if (!identityChanged && active) void load();
+});
+window.addEventListener('composeops:host-changed', hostChanged);
+onMounted(activate);
+onActivated(activate);
+onDeactivated(deactivate);
+onBeforeUnmount(() => { deactivate(); stopAuth(); window.removeEventListener('composeops:host-changed', hostChanged); });
 
-const { rows: pagedRows, page, pageSize, total, sortKey, descending } = usePagedRows(filteredExecutions, { createdAt: item => Date.parse(item.createdAt) || 0, status: item => item.status, message: item => item.message }, 'createdAt');
+const { rows: pagedRows, page, pageSize, total, sortKey, descending } = usePagedRows(filteredExecutions, { createdAt: item => parseTimestamp(item.createdAt)?.getTime() || 0, status: item => item.status, message: item => item.message }, 'createdAt');
 const sortOptions = [{ key: 'createdAt', label: '创建时间' }, { key: 'status', label: '状态' }, { key: 'message', label: '任务名称' }];
 </script>
 
