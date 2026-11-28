@@ -15,19 +15,37 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { metricValue, trendSegments } from '../../lib/infrastructure.js';
 const props = defineProps({ points: { type: Array, default: () => [] }, interval: { type: Number, default: 10000 }, start: Number, end: Number, label: String, unit: { type: String, default: '%' } });
 const element = ref(null), width = ref(640), selected = ref(null);
-let observer;
+let observer, resizeFrame = 0, nextWidth = width.value, disposed = false;
 const chart = computed(() => trendSegments(props.points, props.interval, props.start, props.end, width.value, 180));
 const singles = computed(() => chart.value.segments.filter(segment => segment.length === 1).flat());
 const axisMax = computed(() => props.unit === '%' ? `${Math.ceil(chart.value.max)}%` : metricValue(chart.value.max, props.unit));
 const unitLabel = computed(() => props.unit === '%' ? '百分比' : props.unit === 'bytes/s' ? '每秒速率' : '实际用量');
 function time(value) { return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
-function hover(event) { const x = event.clientX - event.currentTarget.ownerSVGElement.getBoundingClientRect().left; selected.value = chart.value.segments.flat().reduce((best, p) => !best || Math.abs(p.x - x) < Math.abs(best.x - x) ? p : best, null); }
-onMounted(() => { if (typeof ResizeObserver === 'undefined') return; observer = new ResizeObserver(entries => { width.value = Math.max(240, entries[0].contentRect.width); }); observer.observe(element.value); });
-onBeforeUnmount(() => observer?.disconnect());
+function hover(event) {
+  const bounds = event.currentTarget.ownerSVGElement.getBoundingClientRect();
+  if (!(bounds.width > 0)) return;
+  const x = (event.clientX - bounds.left) * width.value / bounds.width;
+  selected.value = chart.value.segments.flat().reduce((best, p) => !best || Math.abs(p.x - x) < Math.abs(best.x - x) ? p : best, null);
+}
+function resize(entries) {
+  const measured = entries[0]?.contentRect.width;
+  if (disposed || !Number.isFinite(measured) || measured <= 0) return;
+  nextWidth = Math.max(240, measured);
+  if (resizeFrame || nextWidth === width.value) return;
+  // Changing viewBox changes the SVG's intrinsic height. Leave the observer's
+  // delivery phase before changing the dimensions of its own target.
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0;
+    if (!disposed && width.value !== nextWidth) { width.value = nextWidth; selected.value = null; }
+  });
+}
+watch([() => props.points, () => props.start, () => props.end, () => props.interval, () => props.unit], () => { selected.value = null; });
+onMounted(() => { if (typeof ResizeObserver === 'undefined') return; observer = new ResizeObserver(resize); observer.observe(element.value); });
+onBeforeUnmount(() => { disposed = true; observer?.disconnect(); if (resizeFrame) cancelAnimationFrame(resizeFrame); });
 </script>
 <style scoped>
 .resource-trend svg { width: 100%; display: block; overflow: visible; }
