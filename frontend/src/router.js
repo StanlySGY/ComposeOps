@@ -70,7 +70,7 @@ router.beforeEach(async (to) => {
   if (id === store.activeHostId && store.hosts.length) return;
   await store.load(true);
   if (id === store.activeHostId) return;
-  if (!store.hosts.some(host => host.id === id)) { useToastStore().error('目标节点已移除，请返回事件中心核对'); return false; }
+  if (!store.hosts.some(host => host.id === id)) { useToastStore().error('目标节点已移除，请返回来源页面核对'); return false; }
   try { await store.switchHost(id); }
   catch (error) { useToastStore().error(`无法切换到目标节点：${error.message}`); return false; }
 });

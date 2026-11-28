@@ -1,6 +1,7 @@
 /** 资源深链只在此编码：projectId/containerId/hostId/from/tab/job。 */
 export const RETURN_ROUTES = {
   oncall: ['AI 值守', '/oncall'],
+  cmdb: ['资产中心', '/cmdb?tab=graph'],
   reliability: ['应用可靠性', '/reliability'],
   dashboard: ['总览', '/dashboard'], services: ['服务列表', '/services'],
   topology: ['服务拓扑', '/topology'], events: ['事件中心', '/events'],

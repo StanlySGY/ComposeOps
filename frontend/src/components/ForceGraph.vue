@@ -28,11 +28,12 @@
       </div>
 
       <div class="flex items-center gap-2 text-xs text-surface-400">
-        <span class="ios-stat-chip">
+        <span v-if="showHealthSummary" class="ios-stat-chip">
           <span class="w-2 h-2 rounded-full bg-status-ok"></span>
           {{ activeNodesCount }} 正常
         </span>
-        <span v-if="alertNodesCount" class="ios-stat-chip text-status-error">
+        <span v-else class="ios-stat-chip">{{ nodes.length }} 个实体</span>
+        <span v-if="showHealthSummary && alertNodesCount" class="ios-stat-chip text-status-error">
           <span class="w-2 h-2 rounded-full bg-status-error"></span>
           {{ alertNodesCount }} 告警/异常
         </span>
@@ -309,6 +310,7 @@ const props = defineProps({
   /** 可选:key → {x,y} 的初始坐标 */
   seedPositions: { type: Object, default: null },
   ariaLabel: { type: String, default: '服务拓扑与关系图' },
+  showHealthSummary: { type: Boolean, default: true },
   defaultLayout: { type: String, default: 'dag' }, // 'dag' | 'force'
   /** 分层架构各列的语义标题(按业务域定制,默认是服务拓扑话术) */
   laneTitles: {

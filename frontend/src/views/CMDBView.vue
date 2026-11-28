@@ -97,7 +97,9 @@ function setTab(next) {
   if (next === 'graph') query.tab = 'graph'; else delete query.tab;
   router.replace({ query });
 }
-watch(() => route.query.tab, (value) => { tab.value = value === 'graph' ? 'graph' : 'assets'; });
+watch([() => route.name, () => route.query.tab], ([name, value]) => {
+  if (name === 'cmdb') tab.value = value === 'graph' ? 'graph' : 'assets';
+});
 
 const cmdb = useCmdbStore();
 const toast = useToastStore();

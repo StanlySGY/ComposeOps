@@ -14,4 +14,10 @@ describe('资源深链与返回约定', () => {
     expect(eventContainerLink(event, '/monitor')).toContain('containerId=c1');
     for (const to of ['//evil.test', '/\\evil.test', 'javascript:alert(1)', 'https://evil.test']) expect(eventDestination({ target: to })).toBe('');
   });
+  it('资产图谱深链保留节点、项目和返回的图谱页签', () => {
+    const query = new URLSearchParams(deepLink('/services', { hostId: 'remote', focus: 'project-remote', from: 'cmdb' }).split('?')[1]);
+    expect(query.get('hostId')).toBe('remote'); expect(query.get('focus')).toBe('project-remote');
+    expect(returnTarget(query.get('from'))).toEqual({ label: '返回资产中心', path: '/cmdb?tab=graph' });
+  });
+
 });
