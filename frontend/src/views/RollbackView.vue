@@ -10,7 +10,7 @@
           <option value="">全部项目</option>
           <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
         </select>
-        <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
+        <button class="btn-secondary" :disabled="loading || busy" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
       </div>
     </div>
     <!-- embedded 模式(变更与回滚页 tab)没有页头,单独保留选择项目的工具条 -->
@@ -19,11 +19,15 @@
         <option value="">全部项目</option>
         <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.projectName }}</option>
       </select>
-      <button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
+      <button class="btn-secondary" :disabled="loading || busy" @click="load"><RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />刷新</button>
     </div>
 
     <p v-if="loading" class="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载回滚中心数据</p>
     <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+    <div v-if="feedback" ref="feedbackEl" class="section-panel space-y-3 text-sm" role="status" tabindex="-1">
+      <p>{{ feedback.text }}</p>
+      <router-link v-if="feedback.projectId" class="btn-primary btn-sm inline-flex" :to="{ path: '/services', query: { focus: feedback.projectId, from: 'review' } }">检查并应用配置</router-link>
+    </div>
 
     <div v-if="selectedProject" class="section-panel mb-4 space-y-2 text-sm">
       <p>目标节点：{{ selectedProject.hostName || selectedProject.hostId || 'local' }} · 项目：{{ selectedProject.projectName }}</p>
@@ -126,19 +130,21 @@
     </section>
 
     <!-- GitOps 历史弹窗 -->
-    <BaseModal :show="showGitopsHistory" :title="`提交历史 · ${currentGitopsRepo?.name || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex-1 overflow-auto p-4 space-y-2" @close="showGitopsHistory = false">
-      <EmptyState v-if="!gitopsCommits.length" compact title="暂无提交历史" description="关闭弹窗后检查仓库连接与同步状态。" action-label="关闭历史" @action="showGitopsHistory = false" />
+    <BaseModal :show="showGitopsHistory" :title="`提交历史 · ${currentGitopsRepo?.name || ''}`" size-class="max-w-[calc(100vw-2rem)] sm:max-w-2xl flex max-h-[80vh] flex-col" body-class="flex-1 overflow-auto p-4 space-y-2" :close-disabled="busy" @close="closeGitopsHistory">
+      <p v-if="historyLoading" role="status" aria-live="polite" class="text-sm text-surface-400">正在读取提交历史…</p>
+      <p v-if="historyError" class="alert-error" role="alert">{{ historyError }}<button class="text-link ml-2" @click="openGitopsHistory(currentGitopsRepo)">重试</button></p>
+      <EmptyState v-if="!historyLoading && !historyError && !gitopsCommits.length" compact title="暂无提交历史" description="关闭弹窗后检查仓库连接与同步状态。" action-label="关闭历史" @action="closeGitopsHistory" />
       <div v-for="commit in gitopsCommits" :key="commit.hash" class="flex items-start gap-3 rounded-xl border border-surface-800 bg-surface-950/40 p-3">
         <code class="shrink-0 rounded-sm bg-surface-800 px-2 py-0.5 font-mono text-xs text-sky-300">{{ commit.hash.substring(0, 7) }}</code>
         <div class="min-w-0 flex-1">
-          <p class="text-sm text-surface-200">{{ commit.message }}</p>
+          <p class="text-sm text-surface-200 break-words">{{ commit.message }}</p>
           <p class="mt-0.5 text-xs text-surface-400">{{ commit.author }} · {{ commit.date }}</p>
         </div>
         <button v-if="commit.hash !== currentGitopsRepo?.lastCommit" class="btn-secondary btn-sm" :disabled="busy" @click="rollbackGitops(commit.hash)"><RotateCcw class="h-3.5 w-3.5" />回滚</button>
         <span v-else class="count-badge text-status-ok">当前</span>
       </div>
       <template #footer>
-        <button class="btn-secondary" @click="showGitopsHistory = false">关闭</button>
+        <button class="btn-secondary" :disabled="busy" @click="closeGitopsHistory">关闭</button>
       </template>
     </BaseModal>
 
@@ -154,7 +160,7 @@
       </template>
     </BaseModal>
 
-    <ConfirmDialog :show="!!confirmTarget" :title="confirmTarget?.title" :message="confirmTarget?.message" :tone="confirmTarget?.tone || 'warning'" :confirm-text="confirmTarget?.confirmText || '确认'" @confirm="confirmAction" @cancel="cancelConfirmation" />
+    <ConfirmDialog :show="!!confirmTarget" :title="confirmTarget?.title" :message="confirmTarget?.message" :tone="confirmTarget?.tone || 'warning'" :busy="busy" :confirm-text="busy ? '执行中…' : confirmTarget?.confirmText || '确认'" @confirm="confirmAction" @cancel="!busy && cancelConfirmation()"><p v-if="confirmError" class="text-status-error text-xs" role="alert">{{ confirmError }}。目标已保留，请核对实际状态后重试。</p></ConfirmDialog>
   </div>
 </template>
 
@@ -163,7 +169,7 @@ import MetricTile from '../components/common/MetricTile.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 // embedded 模式供 ReleaseView 的 tab 复用,隐藏独立页头
 const props = defineProps({ embedded: { type: Boolean, default: false }, projectId: { type: String, default: '' } });
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { usePullRefresh } from '../composables/usePullRefresh.js';
 import { FileCode2, GitBranch, HardDrive, History, RefreshCw, RotateCcw } from 'lucide-vue-next';
 import { api } from '../api/client.js';
@@ -172,6 +178,7 @@ import { getRollbackableProjects } from '../lib/rollback-projects.js';
 import { useServicesStore } from '../stores/services.js';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 import BaseModal from '../components/common/BaseModal.vue';
+import { onAuthEpochChange } from '../lib/auth-context.js';
 
 const emit = defineEmits(['busy', 'project-change']);
 const store = useServicesStore();
@@ -186,6 +193,10 @@ const gitopsRepos = ref([]);
 const showGitopsHistory = ref(false);
 const currentGitopsRepo = ref(null);
 const gitopsCommits = ref([]);
+const historyLoading = ref(false), historyError = ref(''), confirmError = ref('');
+const feedback = ref(null), feedbackEl = ref(null);
+let historyController, contextVersion = 0;
+const currentContext = version => active && !disposed && version === contextVersion;
 const output = ref({ open: false, text: '', title: '', running: false, status: 'completed' });
 const loadErrors = ref({ compose: '', volume: '', gitops: '' });
 let loadRequestId = 0;
@@ -198,7 +209,7 @@ let needsReload = false;
 let mountedReady = false;
 let historyVersion = 0;
 watch(busy, value => emit('busy', value), { flush: 'sync' });
-function cancelConfirmation() { pendingAction = null; confirmTarget.value = null; }
+function cancelConfirmation() { pendingAction = null; confirmTarget.value = null; confirmError.value = ''; }
 
 
 const rollbackableProjects = computed(() => getRollbackableProjects(store.projects, composeBackups.value));
@@ -224,7 +235,7 @@ function formatBytes(value = 0) {
 async function load() {
   if (!active || disposed || busy.value) return;
   needsReload = false;
-  cancelConfirmation();
+  cancelConfirmation(); closeGitopsHistory();
   const requestId = ++loadRequestId;
   const requestedProjectId = selectedProjectId.value;
   loading.value = true;
@@ -239,13 +250,7 @@ async function load() {
   try {
     const [volumeData, gitopsData] = await Promise.allSettled([
       api.getVolumeBackups(requestedProjectId),
-      fetch('/api/v1/gitops').then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.message || `HTTP ${res.status}`);
-        }
-        return res.json();
-      }),
+      api.getGitOpsRepos(),
     ]);
     if (requestId !== loadRequestId) return;
     if (volumeData.status === 'fulfilled') volumeBackups.value = volumeData.value.backups || [];
@@ -309,22 +314,24 @@ function restoreCompose(backup) {
   pendingAction = () => doRestoreCompose(backup);
 }
 async function doRestoreCompose(backup) {
+  const context = contextVersion;
   busy.value = true;
   output.value = { open: true, text: '', title: `恢复配置 · ${backup.projectName}`, running: true, status: 'running' };
   try {
     const result = await api.restoreBackup(backup.projectId, backup.id);
+    if (!currentContext(context)) return;
     if (result?.ok !== true) throw new Error('未收到配置恢复成功确认，请核对文件后重试');
     output.value.text = `已恢复所选备份：${backup.filePath}（${formatTime(backup.createdAt)}）。\n运行中的容器保持当前配置。请点击“评审并发布此配置”检查完整文件组，再确认发布。`;
     const project = store.projects.find(item => item.id === backup.projectId);
     output.value.reviewLocation = { path: '/review', query: { projectId: backup.projectId, ...(project?.hostId ? { hostId: project.hostId } : {}) } };
     output.value.status = 'completed';
-    try { await store.refresh(true); } catch (refreshError) { output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
+    try { await store.refresh(true); } catch (refreshError) { if (currentContext(context)) output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
   } catch (e) {
+    if (!currentContext(context)) return;
     output.value.status = e.name === 'AbortError' ? 'cancelled' : 'failed';
     output.value.text += `\n[失败] ${e.message}`;
   } finally {
-    busy.value = false;
-    output.value.running = false;
+    if (currentContext(context)) { busy.value = false; output.value.running = false; }
   }
 }
 
@@ -338,63 +345,73 @@ function restoreVolume(backup) {
   pendingAction = () => doRestoreVolume(backup);
 }
 async function doRestoreVolume(backup) {
+  const context = contextVersion;
   busy.value = true;
   output.value = { open: true, text: '', title: `恢复卷 · ${backup.volume}`, running: true, status: 'running' };
   try {
     const result = await api.restoreVolumeBackup(backup.id);
+    if (!currentContext(context)) return;
     output.value.status = 'completed';
     output.value.text += result?.message || '数据卷恢复完成\n';
   } catch (e) {
+    if (!currentContext(context)) return;
     output.value.status = 'failed';
     output.value.text += `\n[失败] ${e.message}`;
   } finally {
-    busy.value = false;
-    output.value.running = false;
+    if (currentContext(context)) { busy.value = false; output.value.running = false; }
   }
 }
 
+function closeGitopsHistory() {
+  if (busy.value) return;
+  historyVersion++; historyController?.abort(); historyController = null;
+  showGitopsHistory.value = false; historyLoading.value = false; historyError.value = '';
+  gitopsCommits.value = []; currentGitopsRepo.value = null;
+}
 async function openGitopsHistory(repo) {
-  const version = ++historyVersion;
-  currentGitopsRepo.value = repo;
+  if (!active || disposed || busy.value || !repo) return;
+  cancelConfirmation(); historyController?.abort();
+  const controller = historyController = new AbortController();
+  const version = ++historyVersion, context = contextVersion;
+  currentGitopsRepo.value = { ...repo }; gitopsCommits.value = [];
+  historyError.value = ''; historyLoading.value = true; showGitopsHistory.value = true;
   try {
-    const res = await fetch(`/api/v1/gitops/${repo.id}/history?limit=50`);
-    if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.message || `HTTP ${res.status}`); }
-    const data = await res.json();
-    if (!active || disposed || version !== historyVersion) return;
+    const data = await api.getGitOpsHistory(repo.id, 50, controller.signal);
+    if (!currentContext(context) || version !== historyVersion || !showGitopsHistory.value) return;
     gitopsCommits.value = data.commits || [];
-    showGitopsHistory.value = true;
   } catch (e) {
-    if (active && !disposed && version === historyVersion) error.value = e.message;
+    if (currentContext(context) && version === historyVersion) historyError.value = e.message || '历史读取失败';
+  } finally {
+    if (version === historyVersion) historyLoading.value = false;
+    if (historyController === controller) historyController = null;
   }
 }
 function rollbackGitops(commitHash) {
+  if (!active || disposed || busy.value || !currentGitopsRepo.value) return;
+  const repo = { ...currentGitopsRepo.value };
+  confirmError.value = '';
   confirmTarget.value = {
     title: '回滚 GitOps 仓库',
-    message: `确认将仓库「${currentGitopsRepo.value.name}」回滚到提交 ${commitHash.substring(0, 7)}?工作区会重置到该版本。`,
-    tone: 'warning',
-    confirmText: '确认回滚',
+    message: `确认将仓库「${repo.name}」回滚到提交 ${commitHash.substring(0, 7)}？这会更新工作区文件，不会应用到容器。之后手动或自动同步会恢复配置分支版本。`,
+    tone: 'warning', confirmText: '确认回滚', keepOpen: true,
   };
-  pendingAction = () => doRollbackGitops(commitHash);
+  pendingAction = () => doRollbackGitops(repo, commitHash);
 }
-async function doRollbackGitops(commitHash) {
-  busy.value = true;
+async function doRollbackGitops(repo, commitHash) {
+  const context = contextVersion;
+  busy.value = true; confirmError.value = ''; feedback.value = null;
   try {
-    const res = await fetch(`/api/v1/gitops/${currentGitopsRepo.value.id}/rollback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commitHash }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.message || '回滚失败');
-    }
-    showGitopsHistory.value = false;
-    needsReload = true;
+    const result = await api.rollbackGitOpsRepo(repo.id, commitHash);
+    if (!currentContext(context)) return;
+    if (result?.ok !== true) throw new Error('未收到回滚成功确认');
+    gitopsRepos.value = gitopsRepos.value.map(item => item.id === repo.id ? { ...item, lastCommit: commitHash, status: 'rolled_back' } : item);
+    showGitopsHistory.value = false; cancelConfirmation(); needsReload = true;
+    feedback.value = { text: `「${repo.name}」工作区已回滚到 ${commitHash.slice(0, 7)}；运行中的容器尚未应用此配置。`, projectId: repo.projectId };
+    await nextTick(); if (currentContext(context)) feedbackEl.value?.focus();
   } catch (e) {
-    error.value = e.message;
+    if (currentContext(context)) confirmError.value = e.message || '回滚失败';
   } finally {
-    busy.value = false;
-    if (needsReload && active) void load();
+    if (currentContext(context)) { busy.value = false; if (needsReload) void load(); }
   }
 }
 
@@ -408,14 +425,16 @@ function rollbackUpgrade(project) {
   pendingAction = () => doRollbackUpgrade(project);
 }
 async function doRollbackUpgrade(project) {
+  const context = contextVersion;
   busy.value = true;
   output.value = { open: true, text: '', title: '恢复升级前配置 · ' + project.projectName, running: true, status: 'running' };
   rollbackController?.abort();
-  rollbackController = new AbortController();
+  const controller = rollbackController = new AbortController();
   try {
     let exitCode = null;
     let streamReportedError = false, confirmed = false;
     await api.streamRollback(project.id, (frame) => {
+      if (!currentContext(context)) return;
       if (frame.type === 'stdout' || frame.type === 'stderr') output.value.text = appendOperationOutput(output.value.text, frame.data);
       else if (frame.type === 'error') { streamReportedError = true; output.value.text += `\n[错误] ${frame.data}`; }
       else if (frame.type === 'exit' && Number.isInteger(frame.data?.code)) { exitCode = frame.data.code; output.value.text += `\n[退出码 ${frame.data.code}]`; }
@@ -424,7 +443,8 @@ async function doRollbackUpgrade(project) {
         if (frame.data?.ok === false) { streamReportedError = true; output.value.text += `\n[失败] ${frame.data.message || '配置恢复未成功完成'}`; }
       }
       output.value.text = boundOperationOutput(output.value.text);
-    }, rollbackController.signal);
+    }, controller.signal);
+    if (!currentContext(context)) return;
     if (streamReportedError || exitCode !== 0 || !confirmed) {
       output.value.status = streamReportedError || (exitCode !== null && exitCode !== 0) ? 'failed' : 'unknown';
       if (output.value.status === 'unknown') output.value.text += exitCode === null
@@ -432,26 +452,28 @@ async function doRollbackUpgrade(project) {
       return;
     }
     output.value.status = 'completed';
-    try { await store.refresh(true); } catch (refreshError) { output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
+    try { await store.refresh(true); } catch (refreshError) { if (currentContext(context)) output.value.text += `\n[恢复已完成，但刷新项目状态失败] ${refreshError.message}`; }
   } catch (e) {
+    if (!currentContext(context)) return;
     output.value.status = e.name === 'AbortError' ? 'cancelled' : 'failed';
     if (e.name !== 'AbortError') output.value.text += `\n[失败] ${e.message}`;
   } finally {
-    rollbackController = null;
-    busy.value = false;
-    output.value.running = false;
+    if (rollbackController === controller) rollbackController = null;
+    if (currentContext(context)) { busy.value = false; output.value.running = false; }
   }
 }
 
 function confirmAction() {
   if (!active || disposed || busy.value) return;
   const action = pendingAction;
-  pendingAction = null;
-  confirmTarget.value = null;
+  if (!confirmTarget.value?.keepOpen) cancelConfirmation();
   if (action) void action();
 }
 
 function deactivate() {
+  if (busy.value) needsReload = true;
+  contextVersion++; busy.value = false; feedback.value = null;
+  closeGitopsHistory();
   active = false;
   rollbackController?.abort();
   loadRequestId += 1;
@@ -463,6 +485,8 @@ function deactivate() {
   output.value.open = false;
 }
 function onHostChanged() {
+  contextVersion++; busy.value = false; feedback.value = null;
+  closeGitopsHistory();
   rollbackController?.abort();
   output.value.open = false;
   loadRequestId += 1;
@@ -477,10 +501,22 @@ function onHostChanged() {
   needsReload = true;
   if (active && !busy.value) void load();
 }
+const stopAuthListener = onAuthEpochChange((_epoch, { identityChanged = true } = {}) => {
+  const wasActive = active;
+  deactivate();
+  if (!identityChanged) {
+    active = wasActive; needsReload = true;
+    if (active && mountedReady) void load();
+    return;
+  }
+  composeBackups.value = []; volumeBackups.value = []; gitopsRepos.value = []; error.value = '';
+  loadErrors.value = { compose: '', volume: '', gitops: '' }; selectedProjectId.value = '';
+});
 onActivated(() => { active = true; if (mountedReady && needsReload && !loading.value) void load(); });
 onDeactivated(deactivate);
 onBeforeUnmount(() => {
   disposed = true;
+  stopAuthListener();
   deactivate();
   rollbackController?.abort();
   window.removeEventListener('composeops:host-changed', onHostChanged);

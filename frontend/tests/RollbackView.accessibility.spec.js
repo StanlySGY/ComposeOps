@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, h, KeepAlive, ref } from 'vue';
+import { advanceAuthEpoch } from '../src/lib/auth-context.js';
 
 const getVolumeBackups = vi.hoisted(() => vi.fn());
 const getBackups = vi.hoisted(() => vi.fn());
@@ -15,13 +16,18 @@ const store = vi.hoisted(() => ({
   refresh: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../src/api/client.js', () => ({
-  api: { getVolumeBackups, getBackups, restoreBackup, restoreVolumeBackup, streamRollback },
+  api: { getVolumeBackups, getBackups, restoreBackup, restoreVolumeBackup, streamRollback,
+    getGitOpsRepos: () => gitRequest('/api/v1/gitops'),
+    getGitOpsHistory: (id, limit, signal) => gitRequest(`/api/v1/gitops/${id}/history?limit=${limit}`, { signal }),
+    rollbackGitOpsRepo: (id, commitHash) => gitRequest(`/api/v1/gitops/${id}/rollback`, { method: 'POST', body: JSON.stringify({ commitHash }) }),
+  },
 }));
 vi.mock('../src/stores/services.js', () => ({ useServicesStore: () => store }));
 vi.mock('../src/composables/usePullRefresh.js', () => ({ usePullRefresh: vi.fn() }));
 
 import RollbackView from '../src/views/RollbackView.vue';
 
+async function gitRequest(url, init) { const response = await fetch(url, init); const data = await response.json(); if (!response.ok) throw new Error(data.message || '请求失败'); return data; }
 let wrapper;
 beforeEach(() => {
   getVolumeBackups.mockReset();
@@ -49,7 +55,7 @@ function mountView() {
         BaseModal: { props: ['show', 'title', 'sizeClass', 'bodyClass'], template: '<div v-if="show" class="modal-stub"><slot name="header-actions"/><slot/><slot name="footer"/></div>' },
         ConfirmDialog: {
           props: ['show', 'confirmText', 'title', 'message'],
-          template: '<div v-if="show" class="confirm-stub"><p>{{ title }} {{ message }}</p><button @click="$emit(\'confirm\')">{{ confirmText }}</button><button @click="$emit(\'cancel\')">取消</button></div>',
+          template: '<div v-if="show" class="confirm-stub"><p>{{ title }} {{ message }}</p><slot/><button @click="$emit(\'confirm\')">{{ confirmText }}</button><button @click="$emit(\'cancel\')">取消</button></div>',
         },
       },
     },
@@ -195,4 +201,86 @@ it('首次项目刷新期间离开标签，回来后仍加载备份', async () =
   expect(getVolumeBackups).not.toHaveBeenCalled();
   visible.value = true; await flushPromises();
   expect(getVolumeBackups).toHaveBeenCalledTimes(1);
+});
+
+
+const gitRepo = { id: 'repo-a', name: '仓库 A', projectId: 'a', lastCommit: 'a'.repeat(40) };
+const gitCommit = { hash: 'b'.repeat(40), message: '合成历史提交', author: '测试', date: '2026-11-28' };
+function mockGitops({ heldHistory = false, rollbackFailure = false } = {}) {
+  let releaseHistory;
+  const requests = [];
+  vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+    requests.push({ url, init });
+    let body = { repositories: [gitRepo] }, status = 200;
+    if (url.includes('/history')) {
+      if (heldHistory) await new Promise(resolve => { releaseHistory = resolve; });
+      body = { commits: [gitCommit] };
+    }
+    if (url.endsWith('/rollback')) { body = rollbackFailure ? { message: '仓库暂时忙碌' } : { ok: true, commit: gitCommit.hash }; status = rollbackFailure ? 409 : 200; }
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  }));
+  return { requests, release: () => releaseHistory() };
+}
+async function openHistory() { await wrapper.findAll('button').find(button => button.text() === '历史').trigger('click'); await flushPromises(); }
+
+it('历史请求立即显示加载状态，关闭后迟到结果不重新打开', async () => {
+  const fixture = mockGitops({ heldHistory: true }); wrapper = mountView(); await flushPromises(); await openHistory();
+  expect(wrapper.text()).toContain('正在读取提交历史');
+  const modal = wrapper.findAll('.modal-stub').find(item => item.text().includes('正在读取提交历史'));
+  await modal.findAll('button').find(button => button.text() === '关闭').trigger('click'); fixture.release(); await flushPromises();
+  expect(wrapper.text()).not.toContain('合成历史提交'); expect(wrapper.findAll('.modal-stub')).toHaveLength(0);
+});
+
+it('GitOps 回滚失败保留确认框并在框内显示错误', async () => {
+  mockGitops({ rollbackFailure: true }); wrapper = mountView(); await flushPromises(); await openHistory();
+  await wrapper.findAll('button').find(button => button.text() === '回滚').trigger('click');
+  await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises();
+  expect(wrapper.find('.confirm-stub').exists()).toBe(true);
+  expect(wrapper.get('.confirm-stub').text()).toContain('仓库暂时忙碌');
+});
+
+it('GitOps 回滚成功明确说明工作区变化，保留后续检查入口', async () => {
+  mockGitops(); wrapper = mountView(); await flushPromises(); await openHistory();
+  await wrapper.findAll('button').find(button => button.text() === '回滚').trigger('click');
+  await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises();
+  expect(wrapper.text()).toContain('工作区已回滚'); expect(wrapper.text()).toContain('运行中的容器尚未应用');
+});
+
+it('身份变化后迟到的 GitOps 历史不能继续显示', async () => {
+  const fixture = mockGitops({ heldHistory: true }); wrapper = mountView(); await flushPromises(); await openHistory();
+  advanceAuthEpoch(); fixture.release(); await flushPromises();
+  expect(wrapper.text()).not.toContain('合成历史提交'); expect(wrapper.text()).not.toContain('仓库 A');
+});
+
+it('旧节点配置恢复完成后不能刷新新节点或覆盖其输出', async () => {
+  let finish; restoreBackup.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  wrapper = mountView(); await flushPromises();
+  await wrapper.findAll('button').find(button => button.text() === '恢复').trigger('click');
+  await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises();
+  window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises(); const refreshes = store.refresh.mock.calls.length;
+  finish({ ok: true }); await flushPromises();
+  expect(store.refresh).toHaveBeenCalledTimes(refreshes); expect(wrapper.text()).not.toContain('已恢复所选备份');
+});
+
+
+it('本人密码轮换后恢复读取，保留项目选择且仍可打开历史', async () => {
+  mockGitops(); wrapper = mountView(); await flushPromises();
+  await wrapper.get('select').setValue('b'); await flushPromises();
+  advanceAuthEpoch({ identityChanged: false }); await flushPromises();
+  expect(wrapper.get('select').element.value).toBe('b');
+  await openHistory(); expect(wrapper.text()).toContain('合成历史提交');
+});
+
+it('旧节点操作 finally 不得结束新节点正在执行的恢复', async () => {
+  let oldFinish, newFinish;
+  restoreBackup.mockReturnValueOnce(new Promise(resolve => { oldFinish = resolve; })).mockReturnValueOnce(new Promise(resolve => { newFinish = resolve; }));
+  wrapper = mountView(); await flushPromises();
+  const restore = async () => { await wrapper.findAll('button').find(button => button.text() === '恢复').trigger('click'); await wrapper.get('.confirm-stub button').trigger('click'); await flushPromises(); };
+  await restore(); window.dispatchEvent(new Event('composeops:host-changed')); await flushPromises(); await restore();
+  oldFinish({ ok: true }); await flushPromises();
+  expect(wrapper.find('.page-shell').attributes('aria-busy')).toBe('true');
+  expect(wrapper.get('[aria-label="回滚执行输出"]').text()).not.toContain('已恢复所选备份');
+  newFinish({ ok: true }); await flushPromises();
+  expect(wrapper.find('.page-shell').attributes('aria-busy')).toBe('false');
+  expect(wrapper.get('[aria-label="回滚执行输出"]').text()).toContain('已恢复所选备份');
 });
