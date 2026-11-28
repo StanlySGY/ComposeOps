@@ -33,6 +33,7 @@ function previewEnv(projectId, file) {
   return envFiles.get(key);
 }
 const pending = new Map();
+const agentRuns = new Map();
 const deploymentReviews = new Map();
 let aiRetentionDays = 90;
 let lastAiRetention = null;
@@ -48,35 +49,48 @@ function repair() {
 }
 function broadcast() { for (const socket of sockets) if (socket.url.includes('/ws/containers')) socket.message({ type: 'snapshot', projects }); }
 function eventStream(frames) { return new Response(frames.map(frame => 'data: ' + JSON.stringify(frame) + '\n\n').join(''), { headers: { 'Content-Type': 'text/event-stream' } }); }
-function agentStream(body, signal) {
-  const executionId = 'preview-' + serial++;
+function agentStream(body, signal, existingRun = null) {
+  const executionId = existingRun?.id || 'preview-' + serial++;
+  const run = existingRun || { id: executionId, sessionId: body.sessionId, goal: body.message, revision: 0, context: { hostId: 'local', role: body.role || 'auto' } };
+  Object.assign(run, { status: 'waiting_approval', revision: run.revision + 1, result: null, checkpoint: { content: '离线模拟任务，等待确认；刷新预览会重置。' } });
+  agentRuns.set(executionId, run);
   const history = histories.get(body.sessionId) || [];
   const user = { id: serial++, role: 'user', content: body.message, created_at: at };
-  history.push(user); histories.set(body.sessionId, history);
-  let close;
+  if (!existingRun) history.push(user);
+  histories.set(body.sessionId, history);
+  let close, abort;
   const stream = new ReadableStream({
     start(controller) {
       let finished = false;
       const emit = frame => { if (!finished) controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(frame) + '\n\n')); };
-      close = () => { if (!finished) { finished = true; pending.delete(executionId); controller.close(); } };
+      close = () => { if (!finished) { finished = true; pending.delete(executionId); signal?.removeEventListener('abort', abort); controller.close(); } };
       const intro = '这是离线预设排障演示，不会调用模型或连接服务器。\n\n示例日志显示 `getaddrinfo ENOTFOUND db-old`。Compose 中数据库服务名为 `postgres`，建议将 `DB_HOST` 修正为 `postgres` 并重建 wiki-api。请确认下面的模拟操作。';
+      emit({ type: 'durable_run', runId: run.id, status: run.status });
       emit({ type: 'session_meta', userMessageId: user.id });
       emit({ type: 'tool_executing', tool: 'container.logs', paramsText: '{"containerId":"demo-wiki-api"}' });
       emit({ type: 'tool_result', tool: 'container.logs', success: true, summary: '示例日志：ENOTFOUND db-old', durationMs: 12 });
       emit({ type: 'token', content: intro });
-      emit({ type: 'confirmation_required', executionId, toolCallId: 'demo-repair', tool: 'compose.up', risk: 'critical', description: '模拟修正 knowledge-base 的 DB_HOST 并重建 wiki-api。仅更新演示数据。', params: { projectId: 'knowledge-base', services: ['wiki-api'] } });
-      pending.set(executionId, approved => {
-        if (approved) { repair(); emit({ type: 'action_completed', kind: 'mutation', tool: 'compose.up', projectId: projects[0].id, hostId: 'local' }); }
-        const ending = approved ? '\n\n模拟修复完成：wiki-api 已恢复运行，数据库连接检查通过。' : '\n\n已拒绝模拟操作，配置与服务状态保持原样。';
+      run.approval = { type: 'confirmation_required', executionId, toolCallId: 'demo-repair', tool: 'compose.up', risk: 'critical', description: '模拟修正 knowledge-base 的 DB_HOST 并重建 wiki-api。仅更新演示数据。', params: { projectId: 'knowledge-base', services: ['wiki-api'] } };
+      emit(run.approval);
+      const finish = (status, ending) => {
+        if (finished) return;
+        run.status = status; run.revision++; run.approval = null; run.result = { finalContent: intro + ending };
         emit({ type: 'token', content: ending });
-        emit({ type: 'done', status: approved ? 'completed' : 'cancelled' });
+        emit({ type: 'done', status });
         history.push({ id: serial++, role: 'assistant', content: intro + ending, created_at: at });
         close();
-      });
-      signal?.addEventListener('abort', close, { once: true });
-      if (signal?.aborted) close();
+      };
+      const approve = approved => {
+        if (approved) { repair(); emit({ type: 'action_completed', kind: 'mutation', tool: 'compose.up', projectId: projects[0].id, hostId: 'local' }); }
+        const ending = approved ? '\n\n模拟修复完成：wiki-api 已恢复运行，数据库连接检查通过。' : '\n\n已拒绝模拟操作，配置与服务状态保持原样。';
+        finish(approved ? 'completed' : 'interrupted', ending);
+      };
+      abort = () => finish('interrupted', '\n\n离线模拟任务已停止，没有执行真实操作。');
+      pending.set(executionId, { approve, stop: abort });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
     },
-    cancel() { pending.delete(executionId); signal?.removeEventListener('abort', close); },
+    cancel() { run.status = 'interrupted'; run.approval = null; pending.delete(executionId); signal?.removeEventListener('abort', abort); },
   });
   return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
 }
@@ -253,10 +267,31 @@ export async function previewFetch(input, options = {}) {
     return json({ ok: true, removed: true, kind, id });
   }
   if (path === '/ai/agent/execute-stream' && method === 'POST') return agentStream(body, options.signal);
+  const sessionTaskMatch = path.match(/^\/ai\/agent\/sessions\/(\d+)\/(runs|operations)$/);
+  if (sessionTaskMatch && method === 'GET') {
+    return json(sessionTaskMatch[2] === 'operations' ? { operations: [] } : { runs: [...agentRuns.values()].filter(run => Number(run.sessionId) === Number(sessionTaskMatch[1])) });
+  }
+  const agentRunMatch = path.match(/^\/ai\/agent\/runs\/([^/]+)(\/stop|\/resume)?$/);
+  if (agentRunMatch) {
+    const run = agentRuns.get(agentRunMatch[1]);
+    if (!run) return json({ message: '该模拟任务不存在，预览刷新后会重置。' }, 404);
+    if (method === 'GET' && !agentRunMatch[2]) return json({ run, effects: [], events: [] });
+    if (method === 'POST' && agentRunMatch[2] === '/resume') {
+      if (run.revision !== body.revision || !['failed', 'interrupted'].includes(run.status)) return json({ message: '模拟任务状态已变化，请刷新后重试。' }, 409);
+      // Detached simulated execution waits for a fresh approval in the task panel.
+      void agentStream({ sessionId: run.sessionId, message: run.goal, role: run.context.role }, null, run).arrayBuffer().catch(() => {});
+      return json({ run });
+    }
+    if (method === 'POST' && agentRunMatch[2] === '/stop') {
+      const controls = pending.get(run.id);
+      if (!controls) return json({ message: '该模拟任务已经结束，请刷新状态。' }, 409);
+      controls.stop(); return json({ run });
+    }
+  }
   if (path === '/ai/agent/approve' && method === 'POST') {
     const respond = pending.get(body.executionId);
     if (!respond) return json({ message: '该演示审批已结束，请重新发起。' }, 409);
-    respond(body.approved === true); return json({ ok: true });
+    respond.approve(body.approved === true); return json({ ok: true });
   }
   if (path === '/ai/agent/sessions' && method === 'POST') {
     const sessionId = serial++; sessions.unshift({ sessionId, title: '新的演示会话', kind: 'agent', createdAt: at, updatedAt: at });

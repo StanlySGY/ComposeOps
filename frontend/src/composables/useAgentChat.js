@@ -180,6 +180,25 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     }
   }
 
+  async function requestRunStop(run) {
+    if (!run?.durableRunId || run.stopPending || run.stopConfirmed || run.terminal || run.durableTerminal) return;
+    const current = () => state.activeRun === run && state.generation === run.generation;
+    run.stopPending = true;
+    try {
+      await api.stopAgentRun(run.durableRunId);
+      if (!current()) return;
+      run.stopConfirmed = true;
+      if (run.assistant?.error === run.stopError) delete run.assistant.error;
+      // The response belongs to this run, never to a newly installed controller.
+      run.controller.abort();
+    } catch (error) {
+      if (!current() || run.terminal || run.durableTerminal) return;
+      run.stopped = false;
+      run.stopError = `停止请求未确认：${error.message}。请重试停止，或到任务进度中核对。`;
+      if (run.assistant) run.assistant.error = run.stopError;
+    } finally { run.stopPending = false; }
+  }
+
   async function sendMessage(text, extraPayload = {}, { immediate = false } = {}) {
     if (!String(text || '').trim()) return false;
     if (sendingBlocked.value) throw new Error(historyError.value || '会话正在同步，请稍后发送');
@@ -207,11 +226,26 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
       atBottom.value = true; scrollBottom(true);
       await api.agentExecuteStream({ durable: true, role: 'auto', ...extraPayload, message: text, sessionId: id }, event => {
         if (!current()) return;
-        if (event.type === 'durable_run') { run.durableRunId = event.runId; assistant.durableRunId = event.runId; if (run.stopped) void api.stopAgentRun(event.runId).catch(() => {}); return; }
-        if (run.stopped) return;
+        if (event.type === 'durable_run') {
+          run.durableRunId = event.runId; assistant.durableRunId = event.runId;
+          if (['completed', 'failed', 'interrupted', 'needs_reconciliation', 'awaiting_results'].includes(event.status)) {
+            run.durableTerminal = true;
+            if (assistant.error === run.stopError) delete assistant.error;
+          }
+          if (run.stopped) {
+            if (run.terminal || run.durableTerminal) run.controller.abort();
+            else void requestRunStop(run);
+          }
+          return;
+        }
+        // Until stop is acknowledged, retain the server's actual progress.
+        if (run.stopped && event.type === 'confirmation_required') return;
         if (event.type === 'session_meta') { userMessage.persistedId = event.userMessageId; return; }
         if (event.type === 'approval_mode' && run.approvalVersion !== state.approvalVersion) return;
-        if (['done', 'error', 'interrupted', 'max_loops_reached'].includes(event.type)) run.terminal = true;
+        if (['done', 'error', 'interrupted', 'max_loops_reached'].includes(event.type)) {
+          run.terminal = true;
+          if (assistant.error === run.stopError) delete assistant.error;
+        }
         if (['error', 'interrupted', 'max_loops_reached'].includes(event.type)) queuePaused.value = true;
         handleEvent(event, assistant);
       }, run.controller.signal);
@@ -474,7 +508,8 @@ export function useAgentChat({ channel = WORKBENCH_CHANNEL, onEventExtra = null,
     const run = state.activeRun;
     if (run) run.stopped = true;
     if (run?.durableRunId) {
-      void api.stopAgentRun(run.durableRunId).then(() => state.controller?.abort()).catch(error => { if (run.assistant) run.assistant.error = `停止请求未确认：${error.message}。请到任务进度中核对。`; });
+      if (run.terminal || run.durableTerminal) run.controller.abort();
+      else void requestRunStop(run);
     } else if (run?.assistant) {
       // Keep the connection until the durable id arrives, so stop cannot become a silent detach.
       return;

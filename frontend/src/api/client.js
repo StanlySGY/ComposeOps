@@ -131,8 +131,11 @@ async function request(path, opts = {}) {
       invalidateSwr('/');
       // 保留部署预览/校验等只读推演端点的刷新隔离，同时允许调用方显式关闭通知。
       const suppressedPrefixes = ['/auth', '/ai/agent/sessions', '/ai/agent/approval', '/ai/agent/feedback', '/ai/agent/compact'];
-      const suppressedSegments = ['/ping', '/check', '/preview', '/deploy-preview', '/validate', '/anomalies', '/test'];
-      const suppressNotify = opts.notify === false || suppressedPrefixes.some(prefix => path.startsWith(prefix)) || suppressedSegments.some(segment => path.includes(segment));
+      const suppressedActions = ['ping', 'check', 'preview', 'deploy-preview', 'validate', 'anomalies', 'test'];
+      // Resource identifiers may themselves start with "preview" or "test".
+      // Only the operation at the end of the path defines a read-only check.
+      const action = path.split('?')[0].split('/').at(-1);
+      const suppressNotify = opts.notify === false || suppressedPrefixes.some(prefix => path.startsWith(prefix)) || suppressedActions.includes(action);
       if (!suppressNotify) notifyDataChanged({ source: 'api', path });
     }
     return data;
