@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 // Auth stays inside the fictional preview transport, including submitted passwords.
-async function loginFixture(page, { setup = false, failFirst = false, pauseLogin = false, missingPrincipal = false } = {}) {
-  await page.addInitScript(({ setup, failFirst, pauseLogin, missingPrincipal }) => {
+async function loginFixture(page, { setup = false, failFirst = false, pauseLogin = false, missingPrincipal = false, holdOldRequest = false } = {}) {
+  await page.addInitScript(({ setup, failFirst, pauseLogin, missingPrincipal, holdOldRequest }) => {
     let transport = window.fetch;
     let authenticated = false;
     window.loginAttempts = 0;
@@ -11,6 +11,10 @@ async function loginFixture(page, { setup = false, failFirst = false, pauseLogin
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
     const intercepted = async (input, options) => {
       const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+      if (path === '/api/v1/system/infrastructure' && holdOldRequest && !window.releaseOldRequest) {
+        await new Promise(resolve => { window.releaseOldRequest = resolve; });
+        return json({ message: '上一次会话已经过期' }, 401);
+      }
       if (path === '/api/v1/auth/status') return json({
         authenticated, setupRequired: setup && !authenticated,
         principal: authenticated && window.confirmIdentity ? { id: 'admin', username: 'admin', displayName: '预览管理员', role: 'admin', enabled: true } : null,
@@ -25,7 +29,7 @@ async function loginFixture(page, { setup = false, failFirst = false, pauseLogin
       return transport(input, options);
     };
     Object.defineProperty(window, 'fetch', { configurable: true, get: () => intercepted, set: next => { transport = next; } });
-  }, { setup, failFirst, pauseLogin, missingPrincipal });
+  }, { setup, failFirst, pauseLogin, missingPrincipal, holdOldRequest });
 }
 
 test('登录视觉按屏幕加载，密码显示与失败后键盘重试连贯', async ({ page, isMobile }) => {
@@ -138,4 +142,22 @@ test('会话失效后迟到的初始化身份不会重新打开工作台', async
   await page.evaluate(async () => { window.releaseStatus(); await new Promise(resolve => setTimeout(resolve, 100)); });
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();
   await expect(page.locator('.app-header')).toHaveCount(0);
+});
+
+test('重新登录后旧页面的迟到 401 不会再次退出新会话', async ({ page }) => {
+  await loginFixture(page, { holdOldRequest: true });
+  await page.goto('./#/dashboard');
+  await page.getByLabel('密码', { exact: true }).fill('fictional-password-123');
+  await page.getByRole('button', { name: '安全登录', exact: true }).click();
+  await expect(page.locator('.app-header')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => typeof window.releaseOldRequest)).toBe('function');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('composeops:unauthorized')));
+  await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();
+  await page.getByLabel('密码', { exact: true }).fill('new-fictional-password');
+  await page.getByRole('button', { name: '安全登录', exact: true }).click();
+  await expect(page.locator('.app-header')).toBeVisible();
+  await page.evaluate(async () => { window.releaseOldRequest(); await new Promise(resolve => setTimeout(resolve, 100)); });
+  await expect(page.locator('.app-header')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '欢迎回来' })).toHaveCount(0);
+  expect(await page.evaluate(() => window.loginAttempts)).toBe(2);
 });

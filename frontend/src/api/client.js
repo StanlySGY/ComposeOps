@@ -1,4 +1,5 @@
 import { userError } from '../lib/user-error.js';
+import { advanceAuthEpoch, assertAuthEpoch, getAuthEpoch } from '../lib/auth-context.js';
 import { notifyDataChanged, DATA_CHANGED_EVENT } from '../lib/data-changes.js';
 // 统一 API 客户端,基于 fetch 封装
 import { normalizeBackgroundJob, normalizeCostReport, normalizeDockerUsage, normalizeJobsResponse, normalizeMetrics, normalizeMountPlan, normalizeStorageDf } from '../lib/api-normalizers.js';
@@ -13,6 +14,7 @@ const BASE = '/api/v1';
 const swrCache = new Map(); // key -> { data, hasData, inflight, promise }
 const CACHEABLE_PATHS = ['/projects', '/hosts', '/personal/preferences', '/system/capabilities', '/ops/blueprints', '/cron'];
 let hostEpoch = 0;
+let cacheAuthEpoch = getAuthEpoch();
 
 function isGet(opts) {
   return !opts?.method || opts.method.toUpperCase() === 'GET';
@@ -44,12 +46,19 @@ async function doFetch(path, opts = {}) {
     headers,
   };
   const epoch = hostEpoch;
+  const authEpoch = getAuthEpoch();
   // One bounded recovery for transport failures only. Never replay a write or a
   // request whose node/abort context changed while the browser was reconnecting.
   for (let attempt = 0; ; attempt++) {
+    let unauthorizedDelivered = false;
     try {
+      assertAuthEpoch(authEpoch);
       if (opts.signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
       const res = await fetch(`${BASE}${path}`, init);
+      if (authEpoch !== getAuthEpoch()) {
+        try { await res.body?.cancel(); } catch { /* The old body may already be closed. */ }
+        assertAuthEpoch(authEpoch);
+      }
       if (!res.ok) {
         let msg = res.statusText;
         let code;
@@ -60,23 +69,32 @@ async function doFetch(path, opts = {}) {
         } catch {
           // 错误响应可能不是 JSON,保留 HTTP 状态文本作为兜底。
         }
+        assertAuthEpoch(authEpoch);
         const err = userError(msg, { status: res.status, code });
         err.status = res.status;
-        if (res.status === 401) window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
+        if (res.status === 401) {
+          unauthorizedDelivered = true;
+          window.dispatchEvent(new CustomEvent('composeops:unauthorized'));
+        }
         throw err;
       }
       if (res.status === 204) return null;
       const ct = res.headers.get('content-type') || '';
       if (ct.includes('application/json')) {
         const text = await res.text();
+        assertAuthEpoch(authEpoch);
         try { return text ? JSON.parse(text) : null; }
         catch { return text; }
       }
-      return await res.text();
+      const text = await res.text();
+      assertAuthEpoch(authEpoch);
+      return text;
     } catch (cause) {
+      if (!unauthorizedDelivered) assertAuthEpoch(authEpoch);
       const transient = cause?.name === 'TypeError' && /Failed to fetch|NetworkError|Load failed|fetch failed/i.test(cause.message);
       if (attempt || !isGet(opts) || !transient || opts.signal?.aborted || epoch !== hostEpoch) throw userError(cause);
       await waitForReadRecovery(opts.signal);
+      assertAuthEpoch(authEpoch);
       if (epoch !== hostEpoch) throw new DOMException('节点已切换', 'AbortError');
     }
   }
@@ -101,8 +119,13 @@ async function streamError(res, fallback) {
   return userError(payload.message || payload.error || fallback, { status: res.status, code: payload.code || payload.error });
 }
 async function request(path, opts = {}) {
+  const authEpoch = getAuthEpoch();
+  if (cacheAuthEpoch !== authEpoch) { swrCache.clear(); cacheAuthEpoch = authEpoch; }
   if (!isGet(opts)) {
     const data = await doFetch(path, opts);
+    assertAuthEpoch(authEpoch);
+    // Password changes revoke the old cookie and return a new session.
+    if (path === '/auth/password') advanceAuthEpoch();
     // 写入可能同时影响列表、事件和操作记录,统一失效避免新增资源遗漏。
     if (!opts.readOnly) {
       invalidateSwr('/');

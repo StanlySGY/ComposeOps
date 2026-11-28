@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '../api/client.js';
+import { advanceAuthEpoch } from '../lib/auth-context.js';
 
 export const useAuthStore = defineStore('auth', () => {
   const principal = ref(null);
@@ -60,6 +61,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
   async function submit(password, setupToken = '', username = 'admin') {
     const epoch = ++identityEpoch;
+    advanceAuthEpoch();
     cancelCheck();
     if (setupRequired.value) await api.setup(password, setupToken);
     else await api.login(password, username);
@@ -73,12 +75,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
   async function logout() {
     const epoch = ++identityEpoch;
+    advanceAuthEpoch();
     cancelCheck();
     await api.logout();
     if (epoch === identityEpoch) expire();
   }
   function expire() {
     identityEpoch++;
+    advanceAuthEpoch();
     cancelCheck();
     authenticated.value = false; principal.value = null; connectionError.value = '';
     ready.value = true;
