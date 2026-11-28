@@ -10,48 +10,79 @@ export const useAuthStore = defineStore('auth', () => {
   const setupRequired = ref(false);
   const checking = ref(false);
   const connectionError = ref('');
-  let checkPromise = null;
+  let pendingCheck = null;
+  let identityEpoch = 0;
+
+  function cancelCheck() {
+    const previous = pendingCheck;
+    pendingCheck = null;
+    if (previous) { clearTimeout(previous.timeout); previous.controller.abort(); }
+    checking.value = false;
+  }
 
   function check() {
-    if (checkPromise) return checkPromise;
+    if (pendingCheck) return pendingCheck.promise;
     checking.value = true;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12_000);
-    checkPromise = (async () => {
+    const current = { controller, timeout: setTimeout(() => controller.abort(), 12_000), promise: null };
+    pendingCheck = current;
+    current.promise = (async () => {
       try {
         const status = await api.getAuthStatus(controller.signal);
-        if (typeof status?.authenticated !== 'boolean' || typeof status?.setupRequired !== 'boolean') {
+        if (pendingCheck !== current) return;
+        const identity = status?.principal;
+        if (typeof status?.authenticated !== 'boolean' || typeof status?.setupRequired !== 'boolean' ||
+          (status.authenticated && (status.setupRequired || typeof identity?.id !== 'string' || !identity.id ||
+            !['admin', 'operator', 'viewer'].includes(identity.role) || identity.enabled !== true))) {
           throw new Error('认证状态响应无效');
         }
         authenticated.value = status.authenticated;
-        principal.value = status.principal || null;
+        principal.value = status.authenticated ? identity : null;
         setupRequired.value = status.setupRequired;
         connectionError.value = '';
       } catch {
+        if (pendingCheck !== current) return;
+        authenticated.value = false;
+        principal.value = null;
         connectionError.value = controller.signal.aborted
           ? '连接超时，请检查网络或服务状态后重试。'
           : '无法连接服务器，请检查网络或服务状态后重试。';
       } finally {
-        clearTimeout(timeout);
-        ready.value = true;
-        checking.value = false;
-        checkPromise = null;
+        clearTimeout(current.timeout);
+        if (pendingCheck === current) {
+          ready.value = true;
+          checking.value = false;
+          pendingCheck = null;
+        }
       }
     })();
-    return checkPromise;
+    return current.promise;
   }
   async function submit(password, setupToken = '', username = 'admin') {
+    const epoch = ++identityEpoch;
+    cancelCheck();
     if (setupRequired.value) await api.setup(password, setupToken);
     else await api.login(password, username);
+    if (epoch !== identityEpoch) throw new Error('登录状态已变化，请重试。');
+    // A read started before the login response does not yet confirm its cookie.
+    cancelCheck();
     await check();
+    if (epoch !== identityEpoch) throw new Error('登录状态已变化，请重试。');
     if (connectionError.value || !authenticated.value || !principal.value) throw new Error(connectionError.value || '登录状态未确认，请重试。');
     setupRequired.value = false;
   }
   async function logout() {
+    const epoch = ++identityEpoch;
+    cancelCheck();
     await api.logout();
-    authenticated.value = false; principal.value = null;
+    if (epoch === identityEpoch) expire();
   }
-  function expire() { authenticated.value = false; principal.value = null; }
+  function expire() {
+    identityEpoch++;
+    cancelCheck();
+    authenticated.value = false; principal.value = null; connectionError.value = '';
+    ready.value = true;
+  }
 
   return { principal, isAdmin, ready, authenticated, setupRequired, checking, connectionError, check, submit, logout, expire };
 });

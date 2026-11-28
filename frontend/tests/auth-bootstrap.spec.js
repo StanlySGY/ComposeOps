@@ -15,7 +15,7 @@ describe('认证初始化连接恢复', () => {
     expect(store.ready).toBe(true);
     expect(store.connectionError).toContain('无法连接服务器');
     expect(store.checking).toBe(false);
-    getAuthStatus.mockResolvedValueOnce({ authenticated: true, setupRequired: false });
+    getAuthStatus.mockResolvedValueOnce({ authenticated: true, setupRequired: false, principal: { id: 'admin', role: 'admin', enabled: true } });
     await store.check();
     expect(store.connectionError).toBe('');
     expect(store.authenticated).toBe(true);

@@ -27,4 +27,17 @@ describe('登录密码输入体验', () => {
     expect(auth.submit).not.toHaveBeenCalled();
     expect(wrapper.get('#admin-password').attributes('autocomplete')).toBe('new-password');
   });
+  it('密码请求未结束时重复提交只发起一次，失败后仍可重试', async () => {
+    let reject;
+    auth.submit.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    wrapper = mount(LoginView);
+    await wrapper.get('#admin-password').setValue('example-password');
+    await wrapper.get('form').trigger('submit');
+    await wrapper.get('form').trigger('submit');
+    expect(auth.submit).toHaveBeenCalledTimes(1);
+    reject(new Error('密码错误')); await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain('密码错误');
+    await wrapper.get('form').trigger('submit'); await flushPromises();
+    expect(auth.submit).toHaveBeenCalledTimes(2);
+  });
 });

@@ -110,6 +110,7 @@ const illustrationFailed = ref(false);
 function updateCapsLock(event) { capsLock.value = event.getModifierState?.('CapsLock') || false; }
 
 async function submit() {
+  if (loading.value) return;
   error.value = '';
   if (password.value.length < 10) return (error.value = '密码至少需要 10 个字符');
   if (auth.setupRequired && password.value !== confirm.value) return (error.value = '两次输入的密码不一致');
