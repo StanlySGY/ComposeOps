@@ -1,4 +1,5 @@
 import { userError } from '../lib/user-error.js';
+import { streamJsonEvents } from './sse.js';
 import { advanceAuthEpoch, assertAuthEpoch, getAuthEpoch, onAuthEpochChange } from '../lib/auth-context.js';
 import { notifyDataChanged, DATA_CHANGED_EVENT } from '../lib/data-changes.js';
 // 统一 API 客户端,基于 fetch 封装
@@ -112,11 +113,6 @@ function revalidate(key, path, opts) {
     })
     .finally(() => { if (swrCache.get(key) === entry) { entry.inflight = false; entry.promise = null; } });
   return entry.promise;
-}
-/** SSE/流式响应的非 2xx 错误统一解析为 Error。 */
-async function streamError(res, fallback) {
-  const payload = await res.json().catch(() => ({}));
-  return userError(payload.message || payload.error || fallback, { status: res.status, code: payload.code || payload.error });
 }
 async function request(path, opts = {}) {
   const authEpoch = getAuthEpoch();
@@ -237,32 +233,10 @@ export const api = {
   getProjectActivity: (id) => request(`/projects/${id}/activity`),
   listJobs: async (limit = 20) => normalizeJobsResponse(await request(`/jobs?limit=${limit}`, { cacheable: true })),
   getJob: async (id) => normalizeBackgroundJob(await request(`/jobs/${id}`)),
-  streamJobUpdates: (jobId, onFrame, signal) => {
-    return fetch(`${BASE}/jobs/${jobId}/stream`, { signal }).then(async (res) => {
-      if (!res.ok || !res.body) throw await streamError(res, '任务流请求失败');
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split('\n\n');
-        buf = parts.pop();
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith('data:')) continue;
-          try {
-            const frame = JSON.parse(line.slice(5).trim());
-            if (frame?.job) frame.job = normalizeBackgroundJob(frame.job);
-            onFrame(frame);
-          } catch {
-            // 单个坏帧不应阻断后续任务事件。
-          }
-        }
-      }
-    });
-  },
+  streamJobUpdates: (jobId, onFrame, signal) => streamJsonEvents(`${BASE}/jobs/${encodeURIComponent(jobId)}/stream`, {}, frame => {
+    if (frame?.job) frame.job = normalizeBackgroundJob(frame.job);
+    onFrame(frame);
+  }, signal),
   createProjectBatchJob: async (projectIds, action) => normalizeBackgroundJob(await request('/jobs', { method: 'POST', body: JSON.stringify({ projectIds, action }) })),
   saveProjectPreference: (id, payload) => request(`/projects/${id}/preferences`, { method: 'PATCH', body: JSON.stringify(payload) }),
   reviewDeployment: (projectId) => request(`/projects/${projectId}/deployment-review`, { readOnly: true, method: 'POST' }),
@@ -508,23 +482,36 @@ export const api = {
 
 /** 断线后只查询既有任务，绝不重新 POST 部署请求。 */
 export async function followDeploymentJob(jobId, onFrame, signal) {
-  while (!signal?.aborted) {
-    const job = normalizeBackgroundJob(await request('/jobs/' + encodeURIComponent(jobId), { signal }));
-    onFrame({ type: 'output', data: job.items[0]?.output || '' });
-    if (job.result?.phase) onFrame({ type: 'phase', data: job.result });
-    if (!['queued', 'running'].includes(job.status)) {
-      onFrame({ type: 'result', data: job.result });
-      onFrame({ type: 'exit', data: { code: job.status === 'success' ? 0 : 1 } });
-      return job;
+  const epoch = getAuthEpoch(), controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  const unsubscribe = onAuthEpochChange(abort);
+  signal?.addEventListener('abort', abort, { once: true });
+  const current = () => { assertAuthEpoch(epoch); controller.signal.throwIfAborted(); };
+  const dispatch = frame => { current(); onFrame(frame); };
+  try {
+    if (signal?.aborted) abort();
+    while (true) {
+      current();
+      const job = normalizeBackgroundJob(await request('/jobs/' + encodeURIComponent(jobId), { signal: controller.signal }));
+      dispatch({ type: 'output', data: job.items[0]?.output || '' });
+      if (job.result?.phase) dispatch({ type: 'phase', data: job.result });
+      if (!['queued', 'running'].includes(job.status)) {
+        dispatch({ type: 'result', data: job.result });
+        dispatch({ type: 'exit', data: { code: job.status === 'success' ? 0 : 1 } });
+        current();
+        return job;
+      }
+      await new Promise((resolve, reject) => {
+        const stop = () => {
+          clearTimeout(timer); controller.signal.removeEventListener('abort', stop);
+          reject(new DOMException('请求已取消', 'AbortError'));
+        };
+        const timer = setTimeout(() => { controller.signal.removeEventListener('abort', stop); resolve(); }, 1200);
+        controller.signal.addEventListener('abort', stop, { once: true });
+        if (controller.signal.aborted) stop();
+      });
     }
-    await new Promise((resolve, reject) => {
-      const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
-      const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, 1200);
-      signal?.addEventListener('abort', abort, { once: true });
-      if (signal?.aborted) abort();
-    });
-  }
-  throw new DOMException('Aborted', 'AbortError');
+  } finally { unsubscribe(); signal?.removeEventListener('abort', abort); }
 }
 
 /**
@@ -535,48 +522,18 @@ export async function followDeploymentJob(jobId, onFrame, signal) {
  */
 export async function streamComposeControl(projectId, action, onFrame, path = null, body = null, signal = undefined) {
   const endpoint = path || `/projects/${projectId}/actions`;
-  const res = await fetch(`${BASE}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  return streamJsonEvents(`${BASE}${endpoint}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : JSON.stringify({ action }),
-    signal,
+  }, onFrame, signal, {
+    label: '控制',
+    frameError: '单条控制消息超过处理上限，已中断接收；请核对实际执行状态',
+    bufferError: '控制消息持续未结束，已中断接收；请核对实际执行状态',
+    onConnected: () => invalidateSwr('/projects'),
+    // Refresh any snapshots read while containers were being replaced, but do
+    // not invalidate a new identity's cache from an old connection's finally.
+    onSettled: () => invalidateSwr('/'),
   });
-  if (!res.ok || !res.body) throw await streamError(res, '控制请求失败');
-  invalidateSwr('/projects');
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  const maxFrameChars = 2 * 1024 * 1024;
-  let ended = false;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) { ended = true; break; }
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split(/\r?\n\r?\n/);
-      buf = parts.pop();
-      for (const part of parts) {
-        if (part.length > maxFrameChars) throw new Error('单条控制消息超过处理上限，已中断接收；请核对实际执行状态');
-        const line = part.trim();
-        if (!line.startsWith('data:')) continue;
-        let frame;
-        try {
-          frame = JSON.parse(line.slice(5).trim());
-        } catch {
-          // 跳过无法解析的控制流帧,让连接继续接收后续事件。
-          continue;
-        }
-        onFrame(frame);
-      }
-      if (buf.length > maxFrameChars) throw new Error('控制消息持续未结束，已中断接收；请核对实际执行状态');
-    }
-  } finally {
-    // Polling during a long command can cache containers that are being replaced.
-    // Clear them again on completion or interruption before callers refresh.
-    invalidateSwr('/');
-    if (!ended) await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
 }
 
 /**
@@ -607,81 +564,16 @@ export function normalizeAgUiEvent(event) {
 }
 
 export async function streamSse(path, body, onFrame, signal, protocol = 'native') {
-  const authEpoch = getAuthEpoch(), controller = new AbortController();
-  let res, reader, ended = false, cancellation;
-  const cancelReader = () => {
-    if (reader && !cancellation) cancellation = reader.cancel().catch(() => {});
-    return cancellation;
-  };
-  const abort = () => { controller.abort(signal?.reason); void cancelReader(); };
-  const unsubscribe = onAuthEpochChange(abort);
-  signal?.addEventListener('abort', abort, { once: true });
-  const current = () => { assertAuthEpoch(authEpoch); controller.signal.throwIfAborted(); };
-  try {
-    if (signal?.aborted) abort();
-    current();
-    res = await fetch(`${BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    current();
-    if (!res.ok || !res.body) {
-      const error = await streamError(res, 'AI 请求失败');
-      current();
-      if (res.status === 401) window.dispatchEvent(new Event('composeops:unauthorized'));
-      throw error;
-    }
-    reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    const maxFrameChars = 1024 * 1024;
-    let buf = '';
-    const dispatchFrame = (frame) => {
-      current();
-      if (frame.length > maxFrameChars) throw new Error('AI 消息帧过大，已中断接收；请核对实际任务状态');
-      const lines = frame.split(/\r?\n/);
-      const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
-      if (!data) return;
-      let event;
-      try { event = JSON.parse(data); } catch { return; }
-      if (protocol === 'ag-ui') {
-        const normalized = normalizeAgUiEvent(event);
-        if (normalized) onFrame(normalized);
-      } else onFrame(event);
-    };
-    const drainFrames = (final = false) => {
-      buf = buf.replace(/\r\n/g, '\n');
-      let boundary = buf.indexOf('\n\n');
-      while (boundary >= 0) {
-        dispatchFrame(buf.slice(0, boundary));
-        buf = buf.slice(boundary + 2);
-        boundary = buf.indexOf('\n\n');
-      }
-      if (buf.length > maxFrameChars) throw new Error('AI 消息帧超过接收上限，已中断接收；请核对实际任务状态');
-      if (final && buf.trim()) dispatchFrame(buf);
-      if (final) buf = '';
-    };
-    while (true) {
-      const { value, done } = await reader.read();
-      current();
-      if (done) {
-        buf += decoder.decode();
-        drainFrames(true);
-        ended = true;
-        break;
-      }
-      buf += decoder.decode(value, { stream: true });
-      drainFrames();
-    }
-  } finally {
-    unsubscribe();
-    signal?.removeEventListener('abort', abort);
-    if (reader) {
-      if (!ended) await cancelReader();
-      reader.releaseLock();
-    } else if (res?.body) await res.body.cancel().catch(() => {});
-  }
+  return streamJsonEvents(`${BASE}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }, event => {
+    if (protocol === 'ag-ui') {
+      const normalized = normalizeAgUiEvent(event);
+      if (normalized) onFrame(normalized);
+    } else onFrame(event);
+  // Existing AI providers may finish a valid final JSON event at EOF. Preserve
+  // that compatibility only here; operation streams require the SSE delimiter.
+  }, signal, { label: 'AI', maxFrameChars: 1024 * 1024, acceptFinalFrame: true });
 }
 
 export { streamProjectStats } from './project-stats-stream.js';

@@ -1,4 +1,5 @@
 // 所有可见项目共用一条 SSE；订阅变化合并重连，取消最后一个订阅立即释放。
+import { onAuthEpochChange } from '../lib/auth-context.js';
 const subscribers = new Set();
 let controller = null;
 let timer = null;
@@ -47,6 +48,12 @@ async function connect(version) {
     }
     if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => {});
+      if (version !== generation || current.signal.aborted) return;
+      if (response.status === 401) {
+        cancelSubscriptions();
+        window.dispatchEvent(new Event('composeops:unauthorized'));
+        return;
+      }
       throw new Error('指标暂不可用，正在重新连接');
     }
     reader = response.body.getReader();
@@ -133,7 +140,13 @@ export function streamProjectStats(projectId, onFrame, signal, interval = 2500) 
   });
 }
 
-if (typeof window !== 'undefined') window.addEventListener('composeops:host-changed', () => {
-  // 旧节点的订阅身份不能复用到新节点，视图刷新后会重新订阅。
+function cancelSubscriptions() {
   for (const item of [...subscribers]) item.cancel();
+}
+if (typeof window !== 'undefined') window.addEventListener('composeops:host-changed', cancelSubscriptions);
+onAuthEpochChange((_epoch, { identityChanged }) => {
+  // New identities need new subscriptions. A password rotation preserves the
+  // same view and projects, but must reconnect using its replacement cookie.
+  if (identityChanged) cancelSubscriptions();
+  else reconnect();
 });

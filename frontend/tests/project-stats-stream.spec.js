@@ -143,3 +143,41 @@ it('处理帧期间切换订阅，旧连接的帧不送入新订阅', async () =
   await vi.waitFor(() => expect(replacement).toBeDefined());
   expect(replacement.callback).not.toHaveBeenCalled();
 });
+
+it('退出登录取消共享指标连接与全部订阅，旧订阅不以新 Cookie 自动重连', async () => {
+  vi.useFakeTimers();
+  const { advanceAuthEpoch } = await import('../src/lib/auth-context.js');
+  const cancel = vi.fn(), fetchMock = vi.fn(async () => ({ ok: true, body: new ReadableStream({ cancel }) }));
+  vi.stubGlobal('fetch', fetchMock); const a = subscribe('old-a'), b = subscribe('old-b');
+  await vi.advanceTimersByTimeAsync(1); advanceAuthEpoch(); await vi.advanceTimersByTimeAsync(65_000);
+  expect(cancel).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(await Promise.all(pending)).toEqual([expect.objectContaining({ name: 'AbortError' }), expect.objectContaining({ name: 'AbortError' })]);
+  expect(a.callback).not.toHaveBeenCalled(); expect(b.callback).not.toHaveBeenCalled();
+  subscribe('new'); await vi.advanceTimersByTimeAsync(1);
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body).projectIds).toEqual(['new']);
+});
+
+it('本人修改密码时指标订阅重新建连且仍可接收，不复用旧认证连接', async () => {
+  vi.useFakeTimers();
+  const { advanceAuthEpoch } = await import('../src/lib/auth-context.js');
+  const bodies = [], send = [];
+  const fetchMock = vi.fn(async () => {
+    const body = new ReadableStream({ start(controller) { send.push(frame => controller.enqueue(encoder.encode('data: ' + JSON.stringify(frame) + '\n\n'))); } });
+    bodies.push(body); return { ok: true, body };
+  });
+  vi.stubGlobal('fetch', fetchMock); const view = subscribe('kept');
+  await vi.advanceTimersByTimeAsync(1); advanceAuthEpoch({ identityChanged: false }); await vi.advanceTimersByTimeAsync(1);
+  expect(fetchMock).toHaveBeenCalledTimes(2); expect(bodies[0].locked).toBe(false);
+  send[1]({ type: 'stats', projectId: 'kept', data: [{ cpuPercent: 12 }] }); await vi.advanceTimersByTimeAsync(1);
+  expect(view.callback).toHaveBeenCalledWith({ type: 'stats', projectId: 'kept', data: [{ cpuPercent: 12 }] });
+});
+
+it('当前指标 401 通知登录失效并停止重连', async () => {
+  vi.useFakeTimers(); const unauthorized = vi.fn(); window.addEventListener('composeops:unauthorized', unauthorized);
+  const fetchMock = vi.fn(async () => new Response('{}', { status: 401 })); vi.stubGlobal('fetch', fetchMock);
+  try {
+    subscribe('a'); await vi.advanceTimersByTimeAsync(10_000);
+    expect(unauthorized).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
+    expect(await pending.at(-1)).toMatchObject({ name: 'AbortError' });
+  } finally { window.removeEventListener('composeops:unauthorized', unauthorized); }
+});
