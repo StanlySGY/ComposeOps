@@ -345,10 +345,11 @@ export function callOpenAI(options) {
 }
 
 /** 单次传输不执行重试，响应完整后才把工具调用交还引擎。 */
-async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stream = false, streamToolCalls = true, onToken, onReasoning, onActivity, signal, requiredTool, probe }) {
+async function callSingleChannel({ baseUrl, apiKey, model, messages, tools, stream = false, streamToolCalls = true, onToken, onReasoning, onActivity, signal, requiredTool, probe, maxTokens }) {
   const bufferedTools = stream && tools?.length && !streamToolCalls;
   if (bufferedTools) stream = false;
   const body = { model, messages, stream };
+  if (Number.isInteger(maxTokens) && maxTokens > 0) body.max_tokens = maxTokens;
   if (stream) body.stream_options = { include_usage: true };
   if (tools?.length) body.tools = tools;
   const resp = await fetch(baseUrl.replace(/\/+$/, '') + '/chat/completions', {

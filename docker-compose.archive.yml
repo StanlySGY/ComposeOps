@@ -1,0 +1,7 @@
+# Optional encrypted Agent event archive. Keep the directory outside project and database volumes.
+services:
+  opsdash:
+    environment:
+      AGENT_ARCHIVE_DIR: /var/lib/composeops-agent-archive
+    volumes:
+      - ${COMPOSEOPS_AGENT_ARCHIVE_DIR:?Set an external archive directory}:/var/lib/composeops-agent-archive

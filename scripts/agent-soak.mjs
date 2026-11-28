@@ -29,7 +29,7 @@ function parseArgs(argv) {
       console.log([
         'Usage: npm run test:agent-soak -- [options]',
         '',
-        '  --duration-seconds=N       Duration, default 300; maximum 43200',
+        '  --duration-seconds=N       Duration, default 300; maximum 259200',
         '  --workers=N                Concurrent clients, default 4',
         '  --durable                  Continue and verify completion after disconnect',
         '  --sample-interval-ms=N     Resource sampling interval, default 5000',
@@ -66,7 +66,7 @@ function parseArgs(argv) {
     'requestsPerMinute', 'slowEvery', 'cancelEvery', 'slowPayloadKiB', 'slowDelayMs',
     'maxRssGrowthMiB', 'maxFdGrowth', 'maxEventLoopP95Ms'];
   for (const key of integerKeys) assert.ok(Number.isInteger(config[key]), key + ' must be an integer');
-  assert.ok(config.durationSeconds >= 5 && config.durationSeconds <= 43200, 'duration-seconds must be in 5..43200');
+  assert.ok(config.durationSeconds >= 5 && config.durationSeconds <= 259200, 'duration-seconds must be in 5..259200');
   assert.ok(config.workers >= 1 && config.workers <= 32, 'workers must be in 1..32');
   assert.ok(config.sampleIntervalMs >= 250 && config.sampleIntervalMs <= 60000, 'sample-interval-ms must be in 250..60000');
   assert.ok(config.warmupSeconds < config.durationSeconds, 'warmup-seconds must be shorter than duration-seconds');

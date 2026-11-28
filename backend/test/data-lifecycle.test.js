@@ -1,0 +1,32 @@
+import './helpers/isolated-db.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import db, { createAiSession, addAiMessage, setSetting, pruneAiData } from '../src/lib/db.js';
+import { createRun, patchRun, appendRunEvent } from '../src/services/agent/run-store.js';
+import { archiveCompletedRunEvents, readRunArchive, dataLifecycleStatus } from '../src/services/data-lifecycle.js';
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'event-archive-')); fs.chmodSync(root, 0o700);
+process.env.AGENT_ARCHIVE_DIR = root;
+test('retention preserves active/interrupted/unknown task histories', () => {
+ const session = createAiSession(); addAiMessage('user', 'recovery evidence', {}, session);
+ db.prepare("UPDATE ai_history SET created_at='2000-01-01' WHERE session_id=?").run(session);
+ const run = createRun('unfinished', { sessionId: session }); patchRun(run.id, { status: 'interrupted' });
+ pruneAiData(7); assert.equal(db.prepare('SELECT count(*) AS n FROM ai_history WHERE session_id=?').get(session).n, 1);
+});
+test('archive verifies authenticated encryption before pruning and leaves unresolved evidence intact', () => {
+ process.env.DB_ENCRYPTION_KEY = 'a'.repeat(64); setSetting('retention.run_archive_enabled','1');
+ const done = createRun('old completed', { sessionId: createAiSession() }); appendRunEvent(done.id, { type: 'trace', content: 'private evidence' }); patchRun(done.id, { status: 'completed' });
+ const unfinished = createRun('unfinished', { sessionId: createAiSession() }); appendRunEvent(unfinished.id, { type: 'trace', content: 'keep' });
+ db.prepare('UPDATE agent_runs SET updated_at=1').run(); db.prepare('UPDATE agent_run_events SET created_at=1').run();
+ const result = archiveCompletedRunEvents(); assert.equal(result.archived, 1);
+ const file = path.join(root, result.file); assert.equal(readRunArchive(file).events.length, 1); assert.equal(fs.readFileSync(file).includes(Buffer.from('private evidence')), false);
+ assert.equal(db.prepare('SELECT count(*) AS n FROM agent_run_events WHERE run_id=?').get(unfinished.id).n, 1);
+ const tampered = fs.readFileSync(file); tampered[tampered.length - 1] ^= 1; fs.writeFileSync(file, tampered); assert.throws(() => readRunArchive(file));
+ delete process.env.DB_ENCRYPTION_KEY;
+ appendRunEvent(done.id, { type: 'trace', content: 'must keep without key' }); db.prepare('UPDATE agent_run_events SET created_at=1').run();
+ assert.throws(() => archiveCompletedRunEvents(), /密钥/); assert.ok(db.prepare('SELECT count(*) AS n FROM agent_run_events WHERE run_id=?').get(done.id).n);
+ assert.ok(dataLifecycleStatus().databaseBytes > 0);
+});
+test.after(() => { fs.rmSync(root, { recursive: true, force: true }); delete process.env.AGENT_ARCHIVE_DIR; delete process.env.DB_ENCRYPTION_KEY; });

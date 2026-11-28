@@ -1,3 +1,4 @@
+import { archiveCompletedRunEvents } from './data-lifecycle.js';
 import { getActiveHostId, getDockerForHost, listHosts } from './docker-hosts.js';
 import { readDockerDiskUsage, diskUsageFailure } from './docker-disk-usage.js';
 import { sendNotification } from './notifications.js';
@@ -122,6 +123,7 @@ export function pruneComposeBackups(keep = DATA_DEFAULTS.composeBackupKeep) {
 
 /** 执行全部数据清理,返回各表删除行数。 */
 export function runDataMaintenance(options) {
+  try { archiveCompletedRunEvents(); } catch (error) { console.error('[archive] 保留源数据：', error.message); }
   const history = pruneDataHistory(options);
   const backups = pruneComposeBackups();
   // event_records 此前无任何调度方调用,只增不删;纳入周期清理。

@@ -13,7 +13,7 @@
 
 ## 持久任务与成员（v35–36）
 - v35 `agent_runs/events/effects` 保存目标、审批与副作用证据；新前端 `durable: true`，断线继续。重启只标中断/未知，续跑前刷新关联执行器记录、重置审批，不重放未知写入。只读工具以 `readOnly === true || READ_ONLY_TOOLS.has(name)` 判断；不能把旧工具缺少 readOnly 视为可缓存读取。
-- v36 独立账号 admin/operator/viewer，按节点+项目授权；全局 API/WS 默认仅管理员，成员专用 `/team/*` 有二次资源鉴权。分组不是 ACL，成员不得进入全局 Agent/Shell/任意 Compose 编辑。
+- v36 独立账号 admin/operator/viewer，按节点+项目授权；全局 API/WS 默认仅管理员，成员专用 `/team/*` 有二次资源鉴权。分组不是 ACL，成员不得进入全局 Agent/Shell/任意 Compose 编辑。成员专用 `/team/agent/runs` 使用 MemberAgent 独立工具表，只能访问固定授权项目；每次调用、审批、恢复均复核账号版本与节点连接版本。禁止把成员任务交给全局 OperationsAgent。
 - 登录兼容原 admin；权限/密码变更撤销会话与存量 WS。任务发起者被降权/停用时终止后续执行。`/health` 未登录仅存活信息。
 - `compose.up/stop/restart` 指定 services 只控制相应已有容器，不修改整个项目意图。显式服务不能被页面 containerId 覆盖，日志按 service 标签精确匹配。
 
@@ -59,7 +59,7 @@
 - 仓库 .env 中 COMPOSEOPS_HTTP_PROXY 和 COMPOSEOPS_HTTPS_PROXY 指向网桥，COMPOSEOPS_NODE_USE_ENV_PROXY=1 启用 Node 22 内置 fetch 的环境代理支持，COMPOSEOPS_NO_PROXY 保留本机与内网直连。
 - 检查用户服务可运行 systemctl --user status composeops-proxy-bridge.service；检查监听可运行 ss -ltnp 并确认只出现 172.18.0.1:7898。
 - 若 composeops_default 网桥网关变化，需要同步修改用户级 unit 的监听地址与 .env 代理地址。验证容器能成功获取 Docker Hub token 和 manifest 后，才把远端镜像探测判为通过。
-- 任何 Compose 重建仍必须同时使用 docker-compose.yml 与 docker-compose.encrypted.yml，并设置外置数据库密钥文件路径；严禁删除或重建 composeops_opsdash-data。
+- 任何 Compose 重建仍必须同时使用 docker-compose.yml 与 docker-compose.encrypted.yml，并设置外置数据库密钥文件路径；当前生产还使用 docker-compose.business-encrypted.yml、docker-compose.metrics.yml 与 docker-compose.archive.yml。归档目录环境变量 COMPOSEOPS_AGENT_ARCHIVE_DIR 固定为仓库外 /home/sgy/.local/state/composeops/agent-event-archive（0700），部署时必须保留该挂载；严禁删除或重建 composeops_opsdash-data。
 
 ## Git 操作经验
 - 沙箱内 `.git` 只读:commit 需 `sandbox_permissions=require_escalated`,`prefix_rule:["git","commit","-m"]` 已批准。
@@ -92,3 +92,8 @@ Use CodeGraph to understand or locate code BEFORE grep/find or reading files, wh
 - **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
 
 **Other useful commands:** `codegraph query` (symbol search), `codegraph node` (one symbol's source + caller/callee trail), `codegraph callers` / `codegraph callees` / `codegraph impact` (dependency analysis), `codegraph files` (project structure).
+
+## Agent 预算与长期维护（v37）
+- 请求预算在每次渠道调用前预留；无 usage/失败尝试保守计账。任务恢复继承 checkpoint.budget，trace 更新不得覆盖预算。模型回喂禁止包含 thoughts 全量轨迹。
+- 未完成/结果未知任务的历史不参与 AI 定期清理。已完成任务过期事件只能在外置目录加密归档、fsync、解密核对后删除精确行；不能清理任务结果/副作用证据来缩小数据库。
+- `scripts/agent-long-observation.mjs --hours=24 --output=/outside/path --health=http://127.0.0.1:28765/health`：合成模型隔离负载与线上只读存活观察。未跑满实际时间不得记录 passed。

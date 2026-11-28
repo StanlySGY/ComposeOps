@@ -6,7 +6,7 @@ import Docker from 'dockerode';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composeops-agent-ui-'));
 process.env.DB_PATH = path.join(directory, 'db.sqlite'); process.env.DISABLE_BACKGROUND_JOBS = '1'; process.env.SERVE_FRONTEND = '1'; process.env.ENABLE_SHELL = '0';
 delete process.env.DB_ENCRYPTION_KEY; delete process.env.DB_ENCRYPTION_KEY_FILE;
-const { default: db, setProjectPreference, createAiSession, addAiMessage, createAgentPlan, recordAgentExecution, updateAgentExecution } = await import('../backend/src/lib/db.js');
+const { default: db, setSetting, setProjectPreference, createAiSession, addAiMessage, createAgentPlan, recordAgentExecution, updateAgentExecution } = await import('../backend/src/lib/db.js');
 const { getDockerForHost } = await import('../backend/src/services/docker-hosts.js');
 Object.getPrototypeOf(getDockerForHost('local').modem).dial = () => { throw new Error('UI fixture cannot access Docker'); };
 const fixtures = ['team-one', 'team-hidden'].map(project => ({ Id: project + '-api', Names: ['/' + project + '-api'], Image: 'fixture:v1', State: 'running', Status: 'Up', Labels: { 'com.docker.compose.project': project, 'com.docker.compose.service': 'api' } }));
@@ -26,6 +26,13 @@ db.prepare('INSERT INTO sre_profiles(id,host_id,project_id,project_name,service_
 db.prepare('INSERT INTO sre_changes(id,status,host_id,project_id,profile_id,review_json,created_at,updated_at,expires_at,reviewed_by) VALUES(?,?,?,?,?,?,?,?,?,?)').run('ui-release', 'queued', 'local', 'ui-project', 'ui-profile', JSON.stringify({ recipe: 'application-release-v1', projectName: '我的业务', services: [], order: [], graph: { order: [], edges: [] } }), now, now, now + 600000, 'fixture');
 const planId = createAgentPlan(sessionId, '发布', {}), execId = recordAgentExecution(planId, 'sre.release.apply', {}, 'success');
 updateAgentExecution(execId, { result: { operation: { kind: 'change', id: 'ui-release', hostId: 'local', projectId: 'ui-project' } } });
+setSetting('ai.api_key', 'isolated-browser-model'); setSetting('ai.base_url', 'http://fixture-model.test/v1');
+globalThis.fetch = async (url, options) => {
+  if (!String(url).startsWith('http://fixture-model.test/')) throw new Error('UI fixture cannot access external network');
+  const body = JSON.parse(options.body), done = body.messages.some(m => m.role === 'tool');
+  const delta = done ? { content: '项目范围验收完成，容器状态已核对。' } : { tool_calls: [{ index: 0, id: 'member-ui', type: 'function', function: { name: 'compose.restart', arguments: JSON.stringify({ containerId: 'team-one-api' }) } }] };
+  return new Response('data: ' + JSON.stringify({ choices: [{ delta, finish_reason: done ? 'stop' : 'tool_calls' }], usage: { prompt_tokens: 200, completion_tokens: 50, total_tokens: 250 } }) + '\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+};
 const { buildApp } = await import('../backend/src/app.js');
 const app = await buildApp({ logger: false });
 await app.inject({ method: 'POST', url: '/api/v1/auth/setup', payload: { password: 'isolated-ui-test-password' } });

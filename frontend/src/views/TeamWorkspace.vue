@@ -10,6 +10,7 @@
       <section v-for="project in projects" :key="project.id" class="panel overflow-hidden"><header class="border-b border-surface-700 p-4"><h2 class="font-semibold">{{ project.projectName }}</h2><p class="text-sm text-muted">{{ project.hostName }}<span v-if="project.groupName"> · {{ project.groupName }}</span></p></header>
         <div class="space-y-3 p-4 pl-6 sm:pl-9"><article v-for="container in project.containers" :key="container.id" class="flex flex-wrap items-center gap-3 rounded-lg border border-surface-700 p-3"><div class="min-w-0 flex-1"><h3 class="break-all font-medium">{{ container.service || container.name }}</h3><p class="break-all text-xs text-muted">{{ container.image }}</p><p class="mt-1 text-xs" :class="container.state === 'running' ? 'text-status-ok' : 'text-status-warn'">{{ container.status || container.state }}</p></div><div class="flex flex-wrap gap-2"><button class="btn-secondary" @click="showLogs(project, container)">日志</button><template v-if="auth.principal?.role === 'operator'"><button class="btn-secondary" :disabled="busy" @click="confirm = { project, container, action: container.state === 'running' ? 'restart' : 'start' }">{{ container.state === 'running' ? '重启' : '启动' }}</button><button v-if="container.state === 'running'" class="btn-danger" :disabled="busy" @click="confirm = { project, container, action: 'stop' }">停止</button></template></div></article></div>
       </section>
+      <MemberAgentPanel :projects="projects" :can-write="auth.principal?.role === 'operator'" />
       <BaseModal :show="!!logTarget" :title="logTarget ? `${logTarget.container.service || logTarget.container.name} 日志` : '日志'" size-class="max-w-4xl" @close="closeLogs"><pre class="max-h-[65vh] overflow-auto whitespace-pre-wrap break-all p-4 text-xs">{{ logs || '读取中…' }}</pre></BaseModal>
       <ConfirmDialog :show="!!confirm" title="确认容器操作" :message="confirm ? `对 ${confirm.project.hostName} / ${confirm.project.projectName} 的 ${confirm.container.service || confirm.container.name} 执行${actionLabel[confirm.action]}？` : ''" :confirm-text="confirm ? actionLabel[confirm.action] : '确认'" :busy="busy" @confirm="perform" @cancel="confirm = null" />
     </div>
@@ -19,6 +20,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { api } from '../api/client.js';
 import { useAuthStore } from '../stores/auth.js';
+import MemberAgentPanel from '../components/agent/MemberAgentPanel.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import ConfirmDialog from '../components/common/ConfirmDialog.vue';
 const auth = useAuthStore(), projects = ref([]), unavailable = ref([]), loading = ref(false), busy = ref(false), error = ref(''), message = ref(''), confirm = ref(null), logs = ref(''), logTarget = ref(null), passwordOpen = ref(false), password = ref({ currentPassword: '', nextPassword: '' });

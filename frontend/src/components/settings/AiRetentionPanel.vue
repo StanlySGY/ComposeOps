@@ -1,4 +1,5 @@
 <template>
+  <DataLifecyclePanel />
   <section class="space-y-3 border-t border-surface-800 pt-4">
     <h2 class="section-title">AI 历史保留</h2>
     <p class="text-sm text-muted">对话、用量、Agent 计划与执行记录共用此期限。启动后及每 6 小时清理一次；边界时刻的记录保留。</p>
@@ -19,6 +20,7 @@
   </section>
 </template>
 <script setup>
+import DataLifecyclePanel from './DataLifecyclePanel.vue';
 import { computed, onMounted, ref } from 'vue';
 import { api } from '../../api/client.js';
 import ConfirmDialog from '../common/ConfirmDialog.vue';

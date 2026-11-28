@@ -1,3 +1,4 @@
+import memberAgentRoutes from './member-agent.js';
 import { collectDockerOutput } from '../lib/docker-streams.js';
 import { listAccounts, saveAccount, grantsFor, assertProjectGrant, accountAudit } from '../lib/accounts.js';
 import { getHost, getDockerForHost, hostConnectionRevision } from '../services/docker-hosts.js';
@@ -9,6 +10,7 @@ import db from '../lib/db.js';
 const fail = (message, statusCode = 403) => Object.assign(new Error(message), { statusCode });
 const admin = request => { if (request.principal?.role !== 'admin') throw fail('仅管理员可管理成员'); };
 export default async function teamRoutes(app) {
+  await app.register(memberAgentRoutes);
   app.get('/accounts', async request => { admin(request); return { accounts: listAccounts() }; });
   app.put('/accounts', { schema: { body: { type: 'object', additionalProperties: false, required: ['username', 'role', 'grants'], properties: {
     id: { type: 'string', maxLength: 128 }, revision: { type: 'integer', minimum: 1 }, username: { type: 'string', maxLength: 40 }, displayName: { type: 'string', maxLength: 80 },

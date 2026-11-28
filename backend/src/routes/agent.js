@@ -1,3 +1,4 @@
+import { readAgentBudget, saveAgentBudget } from '../services/agent/budget.js';
 import { onAuthRevoked } from '../lib/auth-revocations.js';
 import { getPrincipal } from '../lib/auth.js';
 import { startAgentRun, resumeAgentRun, stopAgentRun, approveAgentRun, findRunByPlan } from '../services/agent/runs.js';
@@ -49,6 +50,8 @@ import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
 import { listBackgroundTasks, waitForTaskOutput, stopBackgroundTask } from '../services/agent/background-tasks.js';
 
 export default async function agentRoutes(fastify) {
+  fastify.get('/agent/budget', async () => ({ limits: readAgentBudget() }));
+  fastify.put('/agent/budget', async request => ({ limits: saveAgentBudget(request.body) }));
 
 /** AI 端点进程内限流(单用户宽配额,防手滑重放与失控循环刷爆上游)。 */
 function aiRateLimit(limit, windowMs = 60000) {

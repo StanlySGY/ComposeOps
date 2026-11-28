@@ -56,6 +56,7 @@
     <TeamAccountsPanel v-if="tab === 'team'" />
     <section v-if="tab === 'agent-policy'" class="settings-section">
       <AgentPoliciesPanel />
+      <AgentBudgetPanel />
     </section>
 
     <section v-if="tab === 'personal'" class="settings-section">
@@ -311,6 +312,7 @@
 </template>
 
 <script setup>
+import AgentBudgetPanel from '../components/settings/AgentBudgetPanel.vue';
 import TeamAccountsPanel from '../components/settings/TeamAccountsPanel.vue';
 import ProjectGroupPicker from '../components/services/ProjectGroupPicker.vue';
 import { useProjectGroupsStore } from '../stores/project-groups.js';

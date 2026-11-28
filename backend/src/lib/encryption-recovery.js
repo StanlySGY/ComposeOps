@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import Database, { getDatabaseEncryptionStatus, readDatabaseEncryptionKey } from './sqlite.js';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../');
-const CORE_TABLES = ['settings', 'ai_history', 'ai_sessions', 'ai_memories', 'sessions', 'project_preferences', 'operation_history'];
+const CORE_TABLES = ['settings', 'ai_history', 'ai_sessions', 'ai_memories', 'sessions', 'project_preferences', 'operation_history', 'agent_runs', 'agent_run_events', 'agent_run_effects', 'accounts', 'account_grants', 'account_audit'];
 const KEY_PATTERN = /^[a-f0-9]{64}$/i;
 
 function isWithin(parent, candidate) {
@@ -94,6 +94,15 @@ export async function runEncryptionRecoveryDrill({ backupPath, keyFilePath, repo
   if ((statSync(keyDir).mode & 0o077) !== 0) throw new Error('Encryption key directory permissions must be 0700 or stricter');
   verifyKeyFile(realKey);
 
+  if (reportPath) {
+      const report = path.resolve(reportPath);
+      if (isWithin(repoRoot, report)) throw new Error('The recovery report must be outside the repository');
+      if (report === realBackup || report === realKey) throw new Error('The report path must not overwrite the backup or key');
+      mkdirSync(path.dirname(report), { recursive: true, mode: 0o700 });
+      const parentStat = statSync(path.dirname(report));
+      if ((parentStat.mode & 0o077) !== 0) throw new Error('Recovery report directory permissions must be 0700 or stricter');
+  }
+
   const previous = {
     key: process.env.DB_ENCRYPTION_KEY,
     keyFile: process.env.DB_ENCRYPTION_KEY_FILE,
@@ -156,11 +165,6 @@ export async function runEncryptionRecoveryDrill({ backupPath, keyFilePath, repo
 
     if (reportPath) {
       const report = path.resolve(reportPath);
-      if (isWithin(repoRoot, report)) throw new Error('The recovery report must be outside the repository');
-      if (report === realBackup || report === realKey) throw new Error('The report path must not overwrite the backup or key');
-      mkdirSync(path.dirname(report), { recursive: true, mode: 0o700 });
-      const parentStat = statSync(path.dirname(report));
-      if ((parentStat.mode & 0o077) !== 0) throw new Error('Recovery report directory permissions must be 0700 or stricter');
       result.reportFile = report;
       writeFileSync(report, JSON.stringify(result, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
       chmodSync(report, 0o600);

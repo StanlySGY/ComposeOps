@@ -1,3 +1,4 @@
+import { dataLifecycleStatus, archiveCompletedRunEvents } from '../services/data-lifecycle.js';
 import { addOperation, exportUserData, getSetting, getAiRetentionStatus, pruneAiData, importUserData, listOperations, setSetting } from '../lib/db.js';
 import { getNotificationConfig, saveNotificationConfig, sendNotification } from '../services/notifications.js';
 import { checkImageUpdates, getDockerUsage, pruneDocker } from '../services/maintenance.js';
@@ -5,6 +6,13 @@ import { restartAlertMonitor } from '../services/alert-monitor.js';
 import { notificationConfigBody } from '../lib/schemas.js';
 
 export default async function personalRoutes(fastify) {
+  fastify.get('/maintenance/data-lifecycle', async () => dataLifecycleStatus());
+  fastify.put('/maintenance/data-lifecycle', { schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } } } }, async request => {
+    if (request.body.enabled && !process.env.AGENT_ARCHIVE_DIR) throw Object.assign(new Error('请先配置仓库外的 AGENT_ARCHIVE_DIR'), { statusCode: 400 });
+    setSetting('retention.run_archive_enabled', request.body.enabled ? '1' : '0'); return dataLifecycleStatus();
+  });
+  fastify.post('/maintenance/data-lifecycle/archive', async () => ({ result: archiveCompletedRunEvents(), ...dataLifecycleStatus() }));
+
   fastify.get('/preferences', async () => ({
     refreshInterval: Number(getSetting('ui.refresh_interval', '5')),
     logTail: Number(getSetting('ui.log_tail', '200')),

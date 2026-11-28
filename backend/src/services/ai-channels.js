@@ -157,6 +157,7 @@ export async function requestWithAiChannels(options, invoke) {
     onChannelEvent?.({ type: 'channel_selected', channelId: channel.id, channelName: channel.name, model: channel.model,
       content: `使用「${channel.name}」· ${channel.model}` });
     try {
+      options.beforeRequest?.(options);
       const result = await invoke({ ...options, ...channel, signal: attemptSignal,
         onActivity: () => { if (streaming) arm(45000); }, onToken: notify(options.onToken), onReasoning: notify(options.onReasoning) });
       combined.throwIfAborted();
@@ -164,6 +165,7 @@ export async function requestWithAiChannels(options, invoke) {
       channelAttempts.push({ channelId: channel.id, model: channel.model, status: 'completed', latencyMs: Date.now() - attemptStarted });
       return { ...result, channelAttempts, channelId: channel.id, channelName: channel.name, model: channel.model };
     } catch (caught) {
+      if (caught.code === 'agent_budget_exceeded') throw caught;
       if (signal?.aborted) throw Object.assign(signal.reason, { channelAttempts: [...channelAttempts, { channelId: channel.id, model: channel.model, status: 'cancelled', latencyMs: Date.now() - attemptStarted }] });
       const error = attemptSignal.aborted ? attemptSignal.reason : caught;
       const reason = errorDescription(error);

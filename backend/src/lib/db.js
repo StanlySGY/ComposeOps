@@ -987,6 +987,7 @@ const MIGRATIONS = [
   } },
   { version: 35, name: 'Agent 持久目标与副作用核对', up: installAgentRunsSchema },
   { version: 36, name: '成员账号与精确项目授权', up: installAccountsSchema },
+  { version: 37, name: '成员任务查询与归档索引', up: database => { database.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_owner ON agent_runs(owner_id,created_at); CREATE INDEX IF NOT EXISTS idx_agent_run_events_created ON agent_run_events(created_at);'); } },
 ];
 
 /** 幂等加列:列已存在时直接返回 false,不抛错。 */
@@ -1250,7 +1251,7 @@ export function getAiActiveMessageCount(sessionId) {
 
 export function createAiSession() {
   let sessionId = Date.now();
-  while (db.prepare('SELECT 1 FROM ai_history WHERE session_id = ? LIMIT 1').get(sessionId)) sessionId += 1;
+  while (db.prepare('SELECT 1 FROM ai_sessions WHERE session_id = ? UNION ALL SELECT 1 FROM ai_history WHERE session_id = ? LIMIT 1').get(sessionId, sessionId)) sessionId += 1;
   db.prepare('INSERT INTO ai_sessions(session_id) VALUES(?)').run(sessionId);
   return sessionId;
 }
@@ -2780,12 +2781,12 @@ function aiRetentionCutoff(days, now) {
 export function previewAiData(retentionDays, now = Date.now()) {
   const days = normalizeAiRetentionDays(retentionDays);
   const cutoff = aiRetentionCutoff(days, now);
-  const count = (table) => db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE julianday(created_at) < julianday(?)`).get(cutoff).count;
+  const count = (table) => db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE julianday(created_at) < julianday(?) AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE status != 'completed' OR id IN (SELECT run_id FROM agent_run_effects WHERE status IN ('started','unknown')))`).get(cutoff).count;
   return {
     days, cutoff,
     counts: {
       plans: count('agent_plans'), history: count('ai_history'), usage: count('ai_usage'),
-      executions: db.prepare('SELECT COUNT(*) AS count FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?))').get(cutoff).count,
+      executions: db.prepare(`SELECT COUNT(*) AS count FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?) AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE status != 'completed' OR id IN (SELECT run_id FROM agent_run_effects WHERE status IN ('started','unknown'))))`).get(cutoff).count,
     },
   };
 }
@@ -2795,10 +2796,10 @@ export function pruneAiData(retentionDays, now = Date.now()) {
   const days = normalizeAiRetentionDays(retentionDays);
   const cutoff = aiRetentionCutoff(days, now);
   return db.transaction(() => {
-    const executions = db.prepare('DELETE FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?))').run(cutoff).changes;
-    const plans = db.prepare('DELETE FROM agent_plans WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
-    const history = db.prepare('DELETE FROM ai_history WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
-    const usage = db.prepare('DELETE FROM ai_usage WHERE julianday(created_at) < julianday(?)').run(cutoff).changes;
+    const executions = db.prepare(`DELETE FROM agent_executions WHERE plan_id IN (SELECT id FROM agent_plans WHERE julianday(created_at) < julianday(?) AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE status != 'completed' OR id IN (SELECT run_id FROM agent_run_effects WHERE status IN ('started','unknown'))))`).run(cutoff).changes;
+    const plans = db.prepare(`DELETE FROM agent_plans WHERE julianday(created_at) < julianday(?) AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE status != 'completed' OR id IN (SELECT run_id FROM agent_run_effects WHERE status IN ('started','unknown')))`).run(cutoff).changes;
+    const history = db.prepare(`DELETE FROM ai_history WHERE julianday(created_at) < julianday(?) AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE status != 'completed' OR id IN (SELECT run_id FROM agent_run_effects WHERE status IN ('started','unknown')))`).run(cutoff).changes;
+    const usage = db.prepare(`DELETE FROM ai_usage WHERE julianday(created_at) < julianday(?) AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE status != 'completed' OR id IN (SELECT run_id FROM agent_run_effects WHERE status IN ('started','unknown')))`).run(cutoff).changes;
     const counts = { plans, executions, history, usage };
     const at = new Date(now).toISOString();
     setSetting('retention.ai_last_pruned_at', at);

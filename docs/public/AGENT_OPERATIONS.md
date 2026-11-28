@@ -53,3 +53,27 @@ SRE_EVIDENCE_DIR=/tmp/recovery-evidence node scripts/business-recovery-drill.mjs
 ```
 
 模型配置包含 `baseUrl`、`apiKey`、`model`，保存在仓库外并限制文件权限。模型评测只发送合成任务，报告记录逐例成败、耗时和 token；供应商未返回费用时保留未知，不估造账单。Docker 演练会创建唯一名称的临时测试资源并在结束时清理。
+
+## 任务预算与上下文
+
+设置 → Agent 策略下可配置新任务的累计预算、单次上下文字节上限、输出上限和请求次数。默认累计 160000 token、输入 64000 字节、输出 4096 token、20 次请求、单条工具结果 8000 字符。每个备用渠道尝试均预留预算；已恢复任务不重置累计数。
+
+供应商未返回用量或调用失败时，用输入 UTF-8 字节加输出上限保守估计，并在任务卡标识。供应商返回真实用量后结算。预算是调用边界控制：供应商可能报告超额，本次返回后会停止后续工具和请求；金额保持未知。
+
+上下文优先去掉早期历史，再用固定事实摘要替换完整旧工具轮次；当前目标与最新工具调用/结果配对保留。超出上限会停止，不能静默丢掉当前审批或无限扩展上下文。
+
+## 数据生命周期
+
+设置的 AI 历史保留区显示数据库/WAL/可复用空页/磁盘可用容量；既有平台健康负责增长和容量告警。待恢复和结果未知任务的历史受到保护。可选 `docker-compose.archive.yml` 配合外置 `COMPOSEOPS_AGENT_ARCHIVE_DIR`（0700）及外置数据库密钥启用归档。每批最多 100 条、每 6 小时归档一次 90 天前已完成任务事件；归档经过 AES-256-GCM 加密、落盘与解密核对，成功后才删除事件原行。任务结果与副作用证据不会删除。归档文件不会自动删除，需纳入备份及容量管理。
+
+离线解密读取可调用 `readRunArchive`，使用同一外置数据库密钥。恢复演练 `npm run recovery:drill -- --backup=/outside/encrypted.db --key-file=/outside/key --report-file=/outside/report.json`，包含成员表和持久任务表完整性与行数核对。
+
+
+成员真实链路验收（仅唯一临时项目，复核操作员审批、只读成员工具目录和其他容器未变更）：
+
+```sh
+node scripts/agent-member-docker-eval.mjs --real-model --run-isolated-fixtures \
+  --config-file=/outside/repo/model.json --report=/outside/member-eval.json
+```
+
+持续观察可由独立用户服务运行，命令为 `node scripts/agent-long-observation.mjs --hours=24 --output=/outside/observation --health=http://127.0.0.1:28765/health`。合成任务在临时数据库执行，生产仅采样公开健康接口。报告只有完整跑满时长且所有检查合格才为 `passed`，中断及失败都会保留，不会自动续跑并冒充连续观察。大库恢复和压力测试建议分开调度，组合资源争用造成的延迟失败应原样保留。

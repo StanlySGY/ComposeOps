@@ -2,7 +2,7 @@ import { randomUUID, createHmac, randomBytes } from 'node:crypto';
 import db, { getAgentBackgroundTask } from '../../lib/db.js';
 import { readDurableOperation } from './operations.js';
 import { redactSecretValue, harvestSecretValues } from '../../lib/secret-redactor.js';
-import { accountById } from '../../lib/accounts.js';
+import { assertAgentAuthority } from './scope.js';
 
 const parse = (value, fallback = null) => { try { return JSON.parse(value); } catch { return fallback; } };
 const safeJson = value => JSON.stringify(redactSecretValue(value));
@@ -34,7 +34,7 @@ export function createRun(goal, context, ownerId = 'admin') {
 export function patchRun(id, patch) {
   const row = getRun(id);
   if (!row) throw Object.assign(new Error('任务不存在'), { statusCode: 404 });
-  const next = { ...row, ...patch };
+  const next = { ...row, ...patch, checkpoint: patch.checkpoint ? { ...row.checkpoint, ...patch.checkpoint } : row.checkpoint };
   db.prepare(`UPDATE agent_runs SET status=?,plan_ids_json=?,checkpoint_json=?,approval_json=?,result_json=?,error=?,revision=revision+1,updated_at=? WHERE id=?`)
     .run(next.status, safeJson(next.planIds), safeJson(next.checkpoint), next.approval ? safeJson(next.approval) : null,
       next.result ? safeJson(next.result) : null, next.error ? String(redactSecretValue(next.error)) : null, Date.now(), id);
@@ -64,8 +64,7 @@ export async function runDurableEffect(runId, tool, params, execute) {
   const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
   let key = db.prepare("SELECT value FROM settings WHERE key='agent.effect_signing_key'").get()?.value;
   if (!key) { key = randomBytes(32).toString('hex'); db.prepare("INSERT INTO settings(key,value) VALUES('agent.effect_signing_key',?)").run(key); }
-  const owner = accountById(run.ownerId);
-  if (!owner?.enabled || owner.role !== 'admin') throw Object.assign(new Error('任务发起者已失去管理员权限'), { statusCode: 403 });
+  assertAgentAuthority(run.context, run.ownerId, params.params || params, true);
   const fingerprint = createHmac('sha256', key).update(JSON.stringify(canonical(params))).digest('hex');
   refreshLinkedEffects(runId);
   const prior = db.prepare('SELECT * FROM agent_run_effects WHERE run_id=? AND tool_name=? AND fingerprint=?').get(runId, tool, fingerprint);

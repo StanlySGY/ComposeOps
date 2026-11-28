@@ -1,5 +1,7 @@
+import { getMemberAgent } from './member-agent.js';
+import { readAgentBudget } from './budget.js';
+import { assertAgentAuthority } from './scope.js';
 import { onAuthRevoked } from '../../lib/auth-revocations.js';
-import { accountById } from '../../lib/accounts.js';
 import db, { createAgentPlan } from '../../lib/db.js';
 import { getAgent } from './engine.js';
 import { getActiveHostId } from '../docker-hosts.js';
@@ -11,7 +13,8 @@ const fail = (message, statusCode = 409) => Object.assign(new Error(message), { 
 function assertCapacity() { if (active.size >= 4) throw fail('当前运行任务已达 4 个，请等待任务完成', 429); }
 export function startAgentRun(message, context, ownerId = 'admin', listener = null, agent = getAgent()) {
   assertCapacity();
-  const frozen = { ...context, hostId: context.hostId || context.pageContext?.hostId || getActiveHostId() };
+  if (context.memberScope) agent = getMemberAgent();
+  const frozen = { budgetLimits: readAgentBudget(), ...context, hostId: context.hostId || context.pageContext?.hostId || getActiveHostId() };
   const run = createRun(message, frozen, ownerId);
   return launch(run, message, frozen, listener, agent);
 }
@@ -19,8 +22,8 @@ export function resumeAgentRun(id, revision, listener = null, agent = getAgent()
   assertCapacity();
   const run = getRun(id);
   if (!run) throw fail('任务不存在', 404);
-  const owner = accountById(run.ownerId);
-  if (!owner?.enabled || owner.role !== 'admin') throw fail('任务发起者已失去管理员权限', 403);
+  if (run.context.memberScope) agent = getMemberAgent();
+  assertAgentAuthority(run.context, run.ownerId);
   if (run.revision !== revision || active.has(id) || ACTIVE_RUN_STATES.has(run.status)) throw fail('任务状态已变化，请刷新后重试');
   const linked = refreshLinkedEffects(id);
   if (linked.pending) throw fail('关联后台操作仍在执行，请等待结果后继续');
@@ -45,11 +48,12 @@ function launch(run, message, context, listener, agent) {
     throw error;
   }
   let usage = null;
-  const unsubscribeAuth = onAuthRevoked(() => { const owner = accountById(run.ownerId); if (!owner?.enabled || owner.role !== 'admin') controller.abort(new Error('任务发起者权限已撤销')); });
+  const unsubscribeAuth = onAuthRevoked(() => { try { assertAgentAuthority(run.context, run.ownerId); } catch { controller.abort(new Error('任务发起者权限已撤销')); } });
   const entry = { controller, subscribers, agent, planId, promise: null };
   active.set(run.id, entry);
   const timer = setTimeout(() => controller.abort(new Error('任务超过 30 分钟，请核对后继续')), 30 * 60 * 1000); timer.unref?.();
   function emit(event) {
+    if (event.result?.thoughts) { const { thoughts: _thoughts, ...result } = event.result; event = { ...event, result }; }
     if (event.type === 'done' && event.usage) usage = Object.fromEntries(Object.entries({ inputCount: event.usage.prompt_tokens, outputCount: event.usage.completion_tokens, totalCount: event.usage.total_tokens, cacheCount: event.usage.prompt_tokens_details?.cached_tokens, rounds: event.usage.rounds }).filter(([, value]) => Number.isFinite(value)));
     if (!['token', 'thinking', 'reasoning'].includes(event.type)) db.transaction(() => {
       appendRunEvent(run.id, event);
@@ -88,8 +92,8 @@ export function stopAgentRun(id) {
 }
 export function approveAgentRun(id, body) {
   const run = getRun(id), entry = active.get(id);
-  const owner = run && accountById(run.ownerId);
-  if (!owner?.enabled || owner.role !== 'admin') throw fail('任务发起者已失去管理员权限', 403);
+  if (!run) throw fail('任务不存在', 404);
+  assertAgentAuthority(run.context, run.ownerId);
   if (!entry || !run?.approval || run.status !== 'waiting_approval') throw fail('审批已失效，请刷新任务');
   if (body.toolCallId !== run.approval.toolCallId || body.executionId !== run.approval.executionId) throw fail('审批不属于当前步骤');
   return entry.agent.approveToolCall(body.executionId, body.toolCallId, body.approved, body.input, body.remember);
