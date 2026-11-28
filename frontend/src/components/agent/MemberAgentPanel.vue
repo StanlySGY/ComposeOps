@@ -10,27 +10,66 @@
       <div class="flex flex-wrap gap-2"><button v-if="active(run)" class="btn-secondary" :disabled="busy" @click="act(run, 'stop')">停止任务</button><button v-if="['failed','interrupted'].includes(run.status)" class="btn-secondary" :disabled="busy" @click="act(run, 'resume', { revision: run.revision })">核对并继续</button><button class="btn-secondary" :disabled="busy" @click="inspect(run)">执行证据</button></div>
       <div v-if="run.approval" class="rounded border border-status-warn/40 p-3"><p>{{ run.approval.description }}</p><pre class="my-2 overflow-auto whitespace-pre-wrap break-all text-xs">{{ JSON.stringify(run.approval.params, null, 2) }}</pre><div class="flex gap-2"><button class="btn-primary" :disabled="busy" @click="approve(run, true)">批准此步骤</button><button class="btn-secondary" :disabled="busy" @click="approve(run, false)">拒绝</button></div></div>
     </article>
-    <BaseModal :show="!!detail" title="任务执行证据" @close="detail = null"><div v-if="detail" class="max-h-[70vh] space-y-3 overflow-auto p-4"><p class="text-sm text-muted">结果未知时请先核对实际容器；记录证据不会执行重试。</p><article v-for="effect in detail.effects" :key="effect.id" class="border-b border-surface-700 pb-3"><strong>{{ effect.tool }} · {{ effect.status }}</strong><pre class="my-2 overflow-auto whitespace-pre-wrap break-all text-xs">{{ JSON.stringify(effect, null, 2) }}</pre><form v-if="canWrite && ['unknown','started'].includes(effect.status) && !active(detail.run)" class="space-y-2" @submit.prevent="reconcile(effect)"><select v-model="outcomes[effect.id]" class="input w-full" aria-label="核对结论" required><option value="applied">确认已生效</option><option value="not_applied">确认未生效</option><option value="failed">确认失败，不再重试</option></select><textarea v-model="evidence[effect.id]" class="input w-full" aria-label="核对证据" minlength="10" maxlength="4000" required placeholder="检查时间、节点、容器及实际结果" /><button class="btn-secondary" :disabled="busy">保存证据</button></form></article><p v-if="!detail.effects.length" class="text-muted">尚无写操作</p></div></BaseModal>
+    <BaseModal :show="!!detail" title="任务执行证据" @close="closeDetail"><div v-if="detail" class="max-h-[70vh] space-y-3 overflow-auto p-4"><p class="text-sm text-muted">结果未知时请先核对实际容器；记录证据不会执行重试。</p><article v-for="effect in detail.effects" :key="effect.id" class="border-b border-surface-700 pb-3"><strong>{{ effect.tool }} · {{ effect.status }}</strong><pre class="my-2 overflow-auto whitespace-pre-wrap break-all text-xs">{{ JSON.stringify(effect, null, 2) }}</pre><form v-if="canWrite && ['unknown','started'].includes(effect.status) && !active(detail.run)" class="space-y-2" @submit.prevent="reconcile(effect)"><select v-model="outcomes[effect.id]" class="input w-full" aria-label="核对结论" required><option value="applied">确认已生效</option><option value="not_applied">确认未生效</option><option value="failed">确认失败，不再重试</option></select><textarea v-model="evidence[effect.id]" class="input w-full" aria-label="核对证据" minlength="10" maxlength="4000" required placeholder="检查时间、节点、容器及实际结果" /><button class="btn-secondary" :disabled="busy">保存证据</button></form></article><p v-if="!detail.effects.length" class="text-muted">尚无写操作</p></div></BaseModal>
   </section>
 </template>
 <script setup>
-import { ref, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
+import { ref, computed } from 'vue';
+import { useAgentTaskPanel } from '../../composables/useAgentTaskPanel.js';
 import { api } from '../../api/client.js';
 import BaseModal from '../common/BaseModal.vue';
 const props = defineProps({ projects: { type: Array, default: () => [] }, canWrite: Boolean });
-const selected = ref(''), message = ref(''), runs = ref([]), busy = ref(false), error = ref(''), detail = ref(null), outcomes = ref({}), evidence = ref({});
+const selected = ref(''), message = ref(''), runs = ref([]), detail = ref(null), outcomes = ref({}), evidence = ref({});
 const labels = { running: '执行中', waiting_approval: '等待审批', stopping: '正在停止', completed: '本轮完成', failed: '失败', interrupted: '可继续', needs_reconciliation: '需要核对', awaiting_results: '等待结果' };
 const active = run => ['running','waiting_approval','stopping'].includes(run.status);
 const activeRun = computed(() => runs.value.some(active));
-let enabled = false, timer, controller, epoch = 0;
-async function load() { if (!enabled) return; const current = ++epoch; controller?.abort(); controller = new AbortController(); try { const result = await api.getMemberRuns(controller.signal); if (enabled && current === epoch) runs.value = result.runs; } catch (e) { if (enabled && e.name !== 'AbortError') error.value = e.message; } finally { if (enabled && current === epoch) { clearTimeout(timer); timer = setTimeout(load, 3000); } } }
-async function work(fn) { busy.value = true; error.value = ''; try { await fn(); await load(); } catch (e) { error.value = e.message; } finally { busy.value = false; } }
-const startTask = () => work(async () => { const project = props.projects.find(p => p.hostId + ':' + p.id === selected.value); if (!project) throw new Error('请选择当前授权项目'); await api.createMemberRun({ hostId: project.hostId, projectId: project.id, message: message.value }); message.value = ''; });
+let detailGeneration = 0;
+const { busy, error, action: work, cancelActionRead } = useAgentTaskPanel({
+  scope: () => JSON.stringify([selected.value, props.canWrite, props.projects.map(p => [p.hostId, p.id]).sort()]),
+  read: signal => api.getMemberRuns(signal),
+  apply: result => { runs.value = result.runs || []; },
+  interval: () => runs.value.some(run => active(run) || run.status === 'awaiting_results') ? 3000 : 30000,
+  reset: () => { runs.value = []; closeDetail(); },
+});
+function closeDetail() {
+  detailGeneration++;
+  cancelActionRead();
+  detail.value = null;
+  outcomes.value = {};
+  evidence.value = {};
+}
+const startTask = () => work(async ({ isCurrent }) => {
+  const project = props.projects.find(p => p.hostId + ':' + p.id === selected.value);
+  if (!project) throw new Error('请选择当前授权项目');
+  if (activeRun.value) return;
+  const submitted = message.value, selection = selected.value;
+  await api.createMemberRun({ hostId: project.hostId, projectId: project.id, message: submitted });
+  if (isCurrent() && selection === selected.value && submitted === message.value) message.value = '';
+});
 const act = (run, action, body = {}) => work(() => api.memberRunAction(run.id, action, body));
 const approve = (run, approved) => act(run, 'approve', { executionId: run.approval.executionId, toolCallId: run.approval.toolCallId, approved });
-const inspect = run => work(async () => { detail.value = await api.getMemberRun(run.id); });
-const reconcile = effect => work(async () => { await api.memberRunAction(detail.value.run.id, 'reconcile/' + encodeURIComponent(effect.id), { outcome: outcomes.value[effect.id], evidence: evidence.value[effect.id] }); detail.value = await api.getMemberRun(detail.value.run.id); });
-function start() { if (enabled) return; enabled = true; void load(); }
-function stop() { enabled = false; epoch++; controller?.abort(); clearTimeout(timer); }
-onMounted(start); onActivated(start); onDeactivated(stop); onBeforeUnmount(stop);
+const inspect = run => work(async ({ signal, isCurrent }) => {
+  const current = ++detailGeneration;
+  const result = await api.getMemberRun(run.id, signal);
+  if (isCurrent() && current === detailGeneration) {
+    detail.value = result;
+    outcomes.value = {};
+    evidence.value = {};
+  }
+});
+function reconcile(effect) {
+  if (!detail.value) return;
+  const runId = detail.value.run.id, current = detailGeneration;
+  const payload = { outcome: outcomes.value[effect.id], evidence: evidence.value[effect.id] };
+  return work(async ({ signal, isCurrent }) => {
+    await api.memberRunAction(runId, 'reconcile/' + encodeURIComponent(effect.id), payload);
+    if (!isCurrent() || current !== detailGeneration) return;
+    const result = await api.getMemberRun(runId, signal);
+    if (isCurrent() && current === detailGeneration) {
+      detail.value = result;
+      delete outcomes.value[effect.id];
+      delete evidence.value[effect.id];
+    }
+  });
+}
 </script>

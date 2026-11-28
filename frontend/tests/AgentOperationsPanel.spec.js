@@ -7,7 +7,7 @@ import AgentOperationsPanel from '../src/components/agent/AgentOperationsPanel.v
 let wrapper;
 const queued = { operation: { kind: 'change', id: 'release-1', hostId: 'node-a', projectId: 'api', status: 'queued', running: true, businessVerified: false }, verification: { status: 'pending', reason: '已进入持久队列，尚未完成业务验收。' } };
 beforeEach(() => { vi.useFakeTimers(); getOperations.mockReset(); getOperations.mockResolvedValue({ operations: [queued] }); });
-afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); });
+afterEach(() => { wrapper?.unmount(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const options = { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } };
 it('shows submitted work honestly and recovers final status from the server', async () => {
   wrapper = mount(AgentOperationsPanel, { ...options, props: { sessionId: 1 } }); await flushPromises();
@@ -35,4 +35,21 @@ it('unavailable records remain visible as unknown, without offering replay', asy
   getOperations.mockResolvedValue({ operations: [{ ...queued, operation: { ...queued.operation, status: 'unavailable', running: false, needsReconciliation: true }, verification: { status: 'unknown', reason: '请核对，未重放任务。' } }] });
   wrapper = mount(AgentOperationsPanel, { ...options, props: { sessionId: 1 } }); await flushPromises();
   expect(wrapper.text()).toContain('需要核对'); expect(wrapper.findAll('button').map(row => row.text())).toEqual(['刷新状态']);
+});
+it('retries a failed initial read even when no running tasks are known', async () => {
+  getOperations.mockRejectedValueOnce(new Error('读取暂时失败'));
+  wrapper = mount(AgentOperationsPanel, { ...options, props: { sessionId: 1 } }); await flushPromises();
+  expect(wrapper.text()).toContain('读取暂时失败');
+  await vi.advanceTimersByTimeAsync(5000); await flushPromises();
+  expect(wrapper.text()).toContain('已排队'); expect(wrapper.text()).not.toContain('读取暂时失败');
+});
+it('suppresses timer and change-event refreshes while hidden, then refreshes once', async () => {
+  const { DATA_CHANGED_EVENT } = await import('../src/lib/data-changes.js');
+  wrapper = mount(AgentOperationsPanel, { ...options, props: { sessionId: 1 } }); await flushPromises();
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
+  await vi.advanceTimersByTimeAsync(60000); expect(getOperations).toHaveBeenCalledTimes(1);
+  hidden.mockReturnValue(false); document.dispatchEvent(new Event('visibilitychange')); await flushPromises();
+  expect(getOperations).toHaveBeenCalledTimes(2);
 });

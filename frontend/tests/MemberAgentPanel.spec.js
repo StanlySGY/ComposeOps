@@ -13,7 +13,7 @@ it('submits only selected scope and message and recovers saved approval', async 
  await wrapper.find('select').setValue('h:p'); await wrapper.find('textarea').setValue('检查日志'); await wrapper.find('form').trigger('submit'); await flushPromises();
  expect(api.createMemberRun).toHaveBeenCalledWith({ hostId: 'h', projectId: 'p', message: '检查日志' });
  api.getMemberRuns.mockResolvedValue({ runs: [{ id:'r', goal:'restart', status:'waiting_approval', approval:{ executionId:'plan-x', toolCallId:'call-x', params:{containerId:'c'} } }] });
- await vi.advanceTimersByTimeAsync(3000); await flushPromises();
+ await vi.advanceTimersByTimeAsync(30000); await flushPromises();
  await wrapper.findAll('button').find(b=>b.text()==='批准此步骤').trigger('click'); await flushPromises();
  expect(api.memberRunAction).toHaveBeenCalledWith('r','approve',{executionId:'plan-x', toolCallId:'call-x', approved:true});
 });

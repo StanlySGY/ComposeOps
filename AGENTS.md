@@ -101,3 +101,4 @@ Use CodeGraph to understand or locate code BEFORE grep/find or reading files, wh
 - 未完成/结果未知任务的历史不参与 AI 定期清理。已完成任务过期事件只能在外置目录加密归档、fsync、解密核对后删除精确行；不能清理任务结果/副作用证据来缩小数据库。
 - 归档启用前校验外置密钥、仓库/数据库外目录及 0700 权限；批次最多 100 条、约 8 MiB，单条超过 4 MiB 留源并提示离线处理。目录容量异步采样、30 秒缓存、最多检查 1000 项，部分扫描必须明示；共享采样失败不得导致并发 GET 变成 500。
 - `scripts/agent-long-observation.mjs --hours=24 --output=/outside/path --health=http://127.0.0.1:28765/health`：合成模型隔离负载与线上只读存活观察。未跑满实际时间不得记录 passed。
+- AgentRunsPanel、MemberAgentPanel、AgentOperationsPanel 共用 `useAgentTaskPanel` 管理读取与操作归属。轮询代次与操作代次必须分离；会话/成员项目范围变化和 KeepAlive 失活均丢弃迟到结果，详情关闭后不得再打开或读取其他任务。信号只取消读取，不取消/重放已提交写操作；操作错误不得被轮询成功抹掉。隐藏标签页暂停列表请求，返回立即刷新，进行中/等待后台结果 3 秒、静止任务 30 秒刷新。

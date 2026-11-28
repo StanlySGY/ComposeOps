@@ -13,33 +13,22 @@
   </section>
 </template>
 <script setup>
-import { ref, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
+import { ref, watch } from 'vue';
 import { api } from '../../api/client.js';
-import { DATA_CHANGED_EVENT } from '../../lib/data-changes.js';
+import { useAgentTaskPanel } from '../../composables/useAgentTaskPanel.js';
 const props = defineProps({ sessionId: { type: [String, Number], default: null }, running: Boolean });
-const rows = ref([]), error = ref(''), loading = ref(false);
-let active = false, disposed = false, controller, timer, epoch = 0;
+const rows = ref([]);
 const kindLabel = kind => ({ change: '应用发布', 'business-backup': '业务备份', 'business-run': '业务恢复演练', onboarding: '应用接入' })[kind] || '运维任务';
 const statusLabel = op => op.businessVerified ? '业务验收通过' : op.needsReconciliation ? '需要核对' : ({ queued: '已排队', running: '执行中', checking: '检查中', executing: '执行中', verifying: '验收中', rolling_back: '回退中', verifying_rollback: '回退验收中', verified: '备份已校验', rolled_back: '已回退', failed: '未通过', blocked: '已阻止', cancelled: '已取消', applying: '正在接入', partial: '部分接入', complete: '接入完成', closed: '已关闭' })[op.status] || '尚未验收';
 const destination = op => ({ path: '/reliability', query: { tab: ['business', 'onboarding', 'changes', 'releases'].includes(op.view) ? op.view : op.kind.startsWith('business-') ? 'business' : op.kind === 'onboarding' ? 'onboarding' : 'releases', operationId: op.id, hostId: op.hostId, projectId: op.projectId } });
-function schedule() {
-  clearTimeout(timer);
-  if (active && (props.running || rows.value.some(row => row.operation.running))) timer = setTimeout(reload, 5000);
-}
-async function reload() {
-  if (!active || !props.sessionId) return;
-  controller?.abort(); const current = ++epoch; controller = new AbortController(); loading.value = true;
-  try {
-    const result = await api.getAgentSessionOperations(props.sessionId, controller.signal);
-    if (active && current === epoch) { rows.value = result.operations || []; error.value = ''; }
-  } catch (cause) { if (active && current === epoch && cause.name !== 'AbortError') error.value = cause.message || '任务状态暂不可用，请刷新核对。'; }
-  finally { if (current === epoch) { loading.value = false; schedule(); } }
-}
-function stop() { active = false; epoch++; controller?.abort(); clearTimeout(timer); loading.value = false; window.removeEventListener(DATA_CHANGED_EVENT, reload); }
-function start() { if (active || disposed) return; active = true; window.addEventListener(DATA_CHANGED_EVENT, reload); void reload(); }
-watch(() => props.sessionId, () => { epoch++; controller?.abort(); clearTimeout(timer); rows.value = []; error.value = ''; loading.value = false; void reload(); });
-watch(() => props.running, () => { void reload(); });
-onMounted(start); onActivated(start); onDeactivated(stop); onBeforeUnmount(() => { disposed = true; stop(); });
+const { error, loading, reload } = useAgentTaskPanel({
+  scope: () => props.sessionId,
+  read: signal => api.getAgentSessionOperations(props.sessionId, signal),
+  apply: result => { rows.value = result.operations || []; },
+  interval: () => props.running || rows.value.some(row => row.operation.running) ? 5000 : 0,
+  reset: () => { rows.value = []; },
+});
+watch(() => props.running, reload);
 </script>
 <style scoped>
 .agent-operations { margin: .5rem 1rem; padding: .75rem; border: 1px solid var(--color-surface-700, #303641); border-radius: .75rem; max-height: min(16rem, 24dvh); overflow: auto; flex-shrink: 0; }
