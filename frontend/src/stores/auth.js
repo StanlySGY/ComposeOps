@@ -37,14 +37,21 @@ export const useAuthStore = defineStore('auth', () => {
             !['admin', 'operator', 'viewer'].includes(identity.role) || identity.enabled !== true))) {
           throw new Error('认证状态响应无效');
         }
+        const identityChanged = authenticated.value !== status.authenticated ||
+          (status.authenticated && (principal.value?.id !== identity.id || principal.value?.role !== identity.role));
         authenticated.value = status.authenticated;
         principal.value = status.authenticated ? identity : null;
         setupRequired.value = status.setupRequired;
         connectionError.value = '';
+        // A status refresh may observe a changed cookie or role without going
+        // through submit/expire. Shared stores and in-flight reads must follow it.
+        if (identityChanged) advanceAuthEpoch();
       } catch {
         if (pendingCheck !== current) return;
+        const hadIdentity = authenticated.value || principal.value !== null;
         authenticated.value = false;
         principal.value = null;
+        if (hadIdentity) advanceAuthEpoch();
         connectionError.value = controller.signal.aborted
           ? '连接超时，请检查网络或服务状态后重试。'
           : '无法连接服务器，请检查网络或服务状态后重试。';

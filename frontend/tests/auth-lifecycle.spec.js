@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 const { api } = vi.hoisted(() => ({ api: Object.fromEntries(['getAuthStatus', 'login', 'setup', 'logout'].map(name => [name, vi.fn()])) }));
 vi.mock('../src/api/client.js', () => ({ api }));
 import { useAuthStore } from '../src/stores/auth.js';
+import { assertAuthEpoch, getAuthEpoch } from '../src/lib/auth-context.js';
 
 const principal = { id: 'admin', role: 'admin', enabled: true };
 const signedIn = { authenticated: true, setupRequired: false, principal };
@@ -79,5 +80,30 @@ describe('认证请求生命周期', () => {
     const pending = store.check(); await vi.advanceTimersByTimeAsync(12_000); await pending;
     expect(store.authenticated).toBe(false); expect(store.isAdmin).toBe(false); expect(store.connectionError).toContain('超时');
     await store.check(); expect(store.isAdmin).toBe(true); expect(store.connectionError).toBe('');
+  });
+
+  it.each([
+    { ...signedIn, principal: { id: 'second-admin', role: 'admin', enabled: true } },
+    { ...signedIn, principal: { ...principal, role: 'viewer' } },
+    signedOut,
+  ])('重新确认身份发生变化时使旧账号请求和缓存失效：%j', async status => {
+    const store = useAuthStore(); await store.check(); const epoch = getAuthEpoch();
+    api.getAuthStatus.mockResolvedValue(status); await store.check();
+    expect(getAuthEpoch()).toBeGreaterThan(epoch);
+    expect(() => assertAuthEpoch(epoch)).toThrow('登录状态已变化');
+  });
+
+  it('身份重新确认失败清除旧请求归属，恢复后不能接受旧结果', async () => {
+    const store = useAuthStore(); await store.check(); const epoch = getAuthEpoch();
+    api.getAuthStatus.mockRejectedValueOnce(new TypeError('Failed to fetch')); await store.check();
+    expect(() => assertAuthEpoch(epoch)).toThrow('登录状态已变化');
+    await store.check(); expect(store.authenticated).toBe(true);
+    expect(() => assertAuthEpoch(epoch)).toThrow('登录状态已变化');
+  });
+
+  it('同一身份的有效重读不清空上下文或中断当前操作', async () => {
+    const store = useAuthStore(); await store.check(); const epoch = getAuthEpoch();
+    api.getAuthStatus.mockResolvedValue({ ...signedIn, principal: { ...principal, displayName: '更新显示名' } });
+    await store.check(); expect(getAuthEpoch()).toBe(epoch);
   });
 });
