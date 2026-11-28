@@ -2347,8 +2347,28 @@ export function listEventRecords({ eventType = '', severity = '', status = '', l
   if (status) { conditions.push('status = ?'); params.push(status); }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
-  const rows = db.prepare(`SELECT * FROM event_records ${where} ORDER BY id DESC LIMIT ?`).all(...params, safeLimit);
+  const rows = db.prepare(`SELECT * FROM event_records ${where} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, safeLimit);
   return rows.map(mapEventRecordRow);
+}
+
+/** 统一事件视图专用：先过滤旧告警并排除已迁移记录，再限制数量。 */
+export function listLegacyEventRecords({ severity = '', status = '', limit = 100 } = {}) {
+  // CASE protects historical malformed JSON. Exclude NULL from NOT IN so one
+  // unrelated event cannot suppress every legacy alert. SQLite builds the ID
+  // set once, rather than scanning all unified events for each candidate alert.
+  const legacyId = "json_extract(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END, '$.legacyAlertId')";
+  const conditions = [`id NOT IN (SELECT ${legacyId} FROM event_records WHERE ${legacyId} IS NOT NULL)`];
+  const params = [];
+  if (severity) {
+    conditions.push("CASE WHEN priority = 'danger' THEN 'danger' WHEN priority = 'info' THEN 'info' ELSE 'warning' END = ?");
+    params.push(severity);
+  }
+  if (status) {
+    conditions.push("CASE WHEN read = 0 THEN 'open' WHEN muted = 0 THEN 'acknowledged' ELSE 'resolved' END = ?");
+    params.push(status);
+  }
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  return db.prepare(`SELECT * FROM alert_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, safeLimit);
 }
 
 export function updateEventRecord(id, patch = {}) {
