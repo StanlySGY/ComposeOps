@@ -43,6 +43,19 @@ describe('日志页面生命周期与数据完整性', () => {
     await flushPromises();
   }
   const send = (data, aggregate = false) => channels[aggregate ? 1 : 0].options.onMessage({ data: JSON.stringify(data) });
+  it('指标流断开时清除旁栏陈旧数值，恢复后再显示', async () => {
+    api.getProjects.mockResolvedValue({ projects: [{ id: 'p', projectName: '测试', managed: true, containers: [{ id: 'c', name: 'web', state: 'running' }] }] });
+    await start();
+    const frame = api.streamProjectStats.mock.calls.at(-1)[1];
+    frame({ type: 'stats', data: [{ containerId: 'c', cpuPercent: 0, cpuReady: false, memUsageMB: 64 }] });
+    await flushPromises(); expect(wrapper.text()).toContain('— · 64MB');
+    frame({ type: 'stats', data: [{ containerId: 'c', cpuPercent: 12, memUsageMB: 64 }] });
+    await flushPromises(); expect(wrapper.text()).toContain('12% · 64MB');
+    frame({ type: 'error', data: '断线' });
+    await flushPromises(); expect(wrapper.text()).not.toContain('12% · 64MB');
+    frame({ type: 'stats', data: [{ containerId: 'c', cpuPercent: 15, memUsageMB: 32 }] });
+    await flushPromises(); expect(wrapper.text()).toContain('15% · 32MB');
+  });
   it('暂停期间的已接收日志也参与续读去重，清屏会清除位置', async () => {
     await start();
     const first = { containerId: 'c', type: 'stdout', ts: '2026-11-06T12:00:00.123456789Z', data: 'before disconnect' };

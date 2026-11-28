@@ -69,7 +69,7 @@
           <div v-if="!isServiceCollapsed(group.name)" :id="'service-containers-' + project.id + '-' + group.name" class="service-group__body">
             <div v-for="container in group.containers" :key="container.id" class="project-container-row" :class="{ 'resource-focused': focused && route.query.containerId === container.id }" :data-container="container.id" :data-container-id="container.id">
               <div class="project-container-identity"><Box :size="17" class="container-glyph" /><div class="min-w-0"><strong>{{ container.name }}</strong><span :title="container.image">{{ container.image }}</span><ContainerPorts :container="container" :links="webuiLinks.filter(link => link.containerId === container.id)" /></div></div>
-              <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]?.cpu != null" class="container-resource">CPU {{ numberValue(metrics[container.id].cpu).toFixed(1) }}% <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><span v-else-if="project.managed && container.state === 'running'" class="container-resource text-muted">{{ statsError || '等待指标采样…' }}</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
+              <div class="project-container-state"><StatusBadge :status="container.state" :health="container.health" /><span v-if="metrics[container.id]" class="container-resource">CPU {{ metrics[container.id].cpu == null ? '—' : `${metrics[container.id].cpu.toFixed(1)}%` }} <i></i> 内存 {{ numberValue(metrics[container.id].memUsageMB).toFixed(0) }} MB</span><span v-else-if="project.managed && container.state === 'running'" class="container-resource text-muted">{{ statsError || '等待指标采样…' }}</span><SparklineChart v-if="metrics[container.id]?.history?.length >= 2" :cpu="metrics[container.id].history.map(p => p.cpuPercent)" :mem="metrics[container.id].history.map(p => p.memPercent)" class="hidden lg:block" /><span v-if="containerStateHint(container)" class="container-state-hint">{{ containerStateHint(container) }}</span></div>
               <div class="project-container-actions" role="group" :aria-label="container.name + ' 容器级操作'">
                 <span class="container-action-scope">容器级</span>
                 <CapabilityLink :disabled="!project.managed" reason="项目尚未纳管" :to="toolLocation('logs', container.id)" class="container-action" aria-label="实时日志"><ScrollText :size="15" /><span>日志</span></CapabilityLink>
@@ -242,22 +242,21 @@ const webuiOpen = ref(false), webuiService = ref('');
 let webuiEpoch = 0;
 const dependencyMap = ref(new Map());
 let statsAbort = null;
-let statsTimer = null;
+let cardActive = true;
 
-watch(() => props.expanded, (expanded) => {
-  if (!expanded) { closeStats(); return; }
-  loadDependencies();
-  openStats();
-});
-watch(() => props.project.id, () => { closeStats(); loadWebUi(); if (props.expanded) { loadDependencies(); openStats(); } });
+watch(() => props.expanded, expanded => { if (expanded && cardActive) loadDependencies(); });
+watch(() => props.project.id, () => { loadWebUi(); if (props.expanded && cardActive) loadDependencies(); });
+watch([() => props.expanded, () => props.project.id, () => props.project.hostId, () => props.project.managed,
+  () => props.project.containers.filter(c => c.state === 'running').map(c => c.id).sort().join('\0')], () => { void openStats(); });
 onMounted(() => { loadWebUi(); if (props.expanded) { loadDependencies(); openStats(); } });
 let activatedBefore = false;
 onActivated(() => {
+  cardActive = true;
   if (!activatedBefore) { activatedBefore = true; return; }
   if (props.expanded) openStats();
 });
-onDeactivated(() => { closeStats(); webuiOpen.value = false; });
-onBeforeUnmount(() => { closeStats(); webuiEpoch++; });
+onDeactivated(() => { cardActive = false; closeStats(); webuiOpen.value = false; });
+onBeforeUnmount(() => { cardActive = false; closeStats(); webuiEpoch++; });
 
 
 
@@ -297,13 +296,15 @@ async function loadDependencies() {
 
 async function openStats() {
   closeStats();
-  if (!props.project.managed || !props.project.containers.some((c) => c.state === 'running')) return;
-  statsAbort = new AbortController();
+  if (!cardActive || !props.expanded || !props.project.managed || !props.project.containers.some((c) => c.state === 'running')) return;
+  const controller = new AbortController();
+  statsAbort = controller;
   try {
     await streamProjectStats(props.project.id, (frame) => {
+      if (!cardActive || statsAbort !== controller || controller.signal.aborted) return;
       if (frame.type === 'stats') { statsError.value = ''; applyStats(frame.data || []); }
-      else if (frame.type === 'error') { statsError.value = '指标暂不可用，正在重连'; metrics.value = {}; }
-    }, statsAbort.signal, 2500);
+      else if (frame.type === 'error') { statsError.value = frame.code === 'stale' ? '指标更新延迟，等待新采样' : '指标暂不可用，正在重连'; metrics.value = {}; }
+    }, controller.signal, 2500);
   } catch {
     // fetch abort 或网络错误:静默降级,不打断卡片交互
   }
@@ -312,9 +313,9 @@ function applyStats(rows) {
   const next = {};
   for (const row of rows) {
     const prev = metrics.value[row.containerId] || { history: [] };
-    const history = [...prev.history, { cpuPercent: numberValue(row.cpuPercent), memPercent: numberValue(row.memPercent) }];
-    if (history.length > 26) history.shift();
-    next[row.containerId] = { cpu: numberValue(row.cpuPercent), mem: numberValue(row.memPercent), memUsageMB: numberValue(row.memUsageMB), history };
+    const cpu = row.cpuReady === false || !Number.isFinite(row.cpuPercent) ? null : row.cpuPercent;
+    const history = cpu == null ? prev.history : [...prev.history, { cpuPercent: cpu, memPercent: numberValue(row.memPercent) }].slice(-26);
+    next[row.containerId] = { cpu, mem: numberValue(row.memPercent), memUsageMB: numberValue(row.memUsageMB), history };
   }
   metrics.value = next;
 }
@@ -326,7 +327,6 @@ function closeStats() {
     }
     statsAbort = null;
   }
-  if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
   metrics.value = {};
   statsError.value = '';
 }

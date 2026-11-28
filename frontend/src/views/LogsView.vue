@@ -529,11 +529,13 @@ function openStats() {
   statsController = controller;
   streamProjectStats(projectId.value, (frame) => {
     if (disposed || statsController !== controller) return;
+    if (frame.type === 'error') { liveStats.value = {}; return; }
     if (frame.type !== 'stats') return;
     const next = {};
     for (const row of frame.data || []) {
       if (!row?.containerId) continue;
-      next[row.containerId] = `${numberValue(row.cpuPercent)}% · ${numberValue(row.memUsageMB)}MB`;
+      const cpu = row.cpuReady === false || !Number.isFinite(row.cpuPercent) ? '—' : `${row.cpuPercent}%`;
+      next[row.containerId] = `${cpu} · ${numberValue(row.memUsageMB)}MB`;
     }
     liveStats.value = next;
   }, controller.signal, 5000).catch(() => {

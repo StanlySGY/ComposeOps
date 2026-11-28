@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia } from 'pinia';
+import { KeepAlive, h, ref } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 const { api, streamProjectStats } = vi.hoisted(() => ({
   api: Object.fromEntries(['getProjectUpdates', 'getProjectWebUi', 'getComposeFile', 'getProjectEnv', 'saveProjectPreference', 'runComposeServiceAction'].map(key => [key, vi.fn()])),
@@ -145,4 +146,51 @@ it('指标首帧前展示等待，收到数据后展示指标，断线不保留�
   expect(row().text()).toContain('CPU 12.0%');
   onFrame({ type: 'error', data: 'disconnected' }); await flushPromises();
   expect(row().text()).toContain('正在重连'); expect(row().text()).not.toContain('CPU 12.0%');
+});
+
+it('容器从停止恢复运行或首次纳管时，展开卡片开始订阅指标', async () => {
+  await start({ containers: [{ id: 'one', service: 'web', name: 'web', state: 'exited', image: 'nginx', ports: [] }] });
+  expect(streamProjectStats).not.toHaveBeenCalled();
+  await wrapper.setProps({ project: { ...project, containers: [{ ...project.containers[0], state: 'running' }] } });
+  expect(streamProjectStats).toHaveBeenCalledOnce();
+  const signal = streamProjectStats.mock.calls[0][2];
+  await wrapper.setProps({ project: { ...project, managed: false } });
+  expect(signal.aborted).toBe(true);
+  await wrapper.setProps({ project: { ...project, managed: true, containers: [{ ...project.containers[0], state: 'running' }] } });
+  expect(streamProjectStats).toHaveBeenCalledTimes(2);
+});
+
+it('旧订阅迟到帧不能覆盖收起后重新打开的指标，CPU 未就绪不显示零值', async () => {
+  await start();
+  const old = streamProjectStats.mock.calls[0][1];
+  await wrapper.setProps({ expanded: false });
+  await wrapper.setProps({ expanded: true });
+  const current = streamProjectStats.mock.calls.at(-1)[1];
+  current({ type: 'stats', data: [{ containerId: 'running', cpuPercent: 12, cpuReady: true, memUsageMB: 64 }] });
+  old({ type: 'stats', data: [{ containerId: 'running', cpuPercent: 99, cpuReady: true, memUsageMB: 99 }] });
+  await flushPromises();
+  expect(wrapper.get('[data-container="running"]').text()).toContain('CPU 12.0%');
+  current({ type: 'stats', data: [{ containerId: 'running', cpuPercent: 0, cpuReady: false, memUsageMB: 64 }] });
+  await flushPromises();
+  expect(wrapper.get('[data-container="running"]').text()).not.toContain('CPU 0.0%');
+  expect(wrapper.get('[data-container="running"]').text()).toContain('内存 64 MB');
+});
+
+
+it('缓存失活期间容器状态变化不重开指标，返回后只订阅一次', async () => {
+  const visible = ref(true);
+  const state = ref({ id: 'kept', projectName: '缓存项目', managed: true, editable: true, status: 'running', containers: [{ id: 'c', name: 'web', service: 'web', state: 'running', image: 'nginx', ports: [] }] });
+  const router = createRouter({ history: createMemoryHistory(), routes: ['/', '/services', '/logs', '/shell', '/compose', '/agent', '/review'].map(path => ({ path, component: {} })) });
+  await router.push('/');
+  wrapper = mount({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(Card, { project: state.value, expanded: true }) : null }) }, { global: { plugins: [router, createPinia()], stubs: { SparklineChart: true } } });
+  await flushPromises();
+  expect(streamProjectStats).toHaveBeenCalledOnce();
+  const signal = streamProjectStats.mock.calls[0][2];
+  visible.value = false; await flushPromises();
+  expect(signal.aborted).toBe(true);
+  state.value = { ...state.value, containers: [{ ...state.value.containers[0], id: 'replacement' }] };
+  await flushPromises();
+  expect(streamProjectStats).toHaveBeenCalledOnce();
+  visible.value = true; await flushPromises();
+  expect(streamProjectStats).toHaveBeenCalledTimes(2);
 });

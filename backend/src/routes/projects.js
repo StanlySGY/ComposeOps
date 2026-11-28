@@ -17,6 +17,7 @@ import { listProjectEnvBackups, restoreProjectEnvBackup } from '../services/proj
 import { getProjectUpdates, upgradeProject, rollbackProject } from '../services/image-updater.js';
 import { streamImageOperation } from '../lib/image-operation-stream.js';
 import { readContainerStat } from '../services/stats.js';
+import { createBoundedSseWriter } from '../lib/bounded-sse-writer.js';
 import { createComposeChangePreview, validateComposeSemantics } from '../services/compose-validator.js';
 import { getProjectDocker } from '../services/docker-hosts.js';
 import { listProjectDbContainers, runDbDump } from '../services/db-dumper.js';
@@ -629,13 +630,23 @@ export default async function projectRoutes(fastify, { imageUpgrade = upgradePro
     const interval = Math.max(1000, Math.min(Number(request.body.interval) || 2500, 10000));
     const wanted = new Set(request.body.projectIds);
     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    let closed = false, timer;
+    reply.raw.flushHeaders?.();
+    let closed = false, timer, heartbeat;
     const samples = new Set();
-    const send = frame => {
-      if (!closed && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`);
+    const close = () => {
+      if (closed) return;
+      closed = true; clearTimeout(timer); clearInterval(heartbeat);
+      for (const sample of samples) sample.abort();
+      if (!reply.raw.destroyed) reply.raw.end();
     };
-    const close = () => { closed = true; clearTimeout(timer); for (const sample of samples) sample.abort(); reply.raw.end(); };
+    const writer = createBoundedSseWriter(reply.raw, { onOverflow: close });
+    const send = frame => { if (!closed) writer.send(frame); };
     reply.raw.on('close', close);
+    heartbeat = setInterval(() => {
+      if (getActiveHostId() !== hostId) { close(); return; }
+      send({ type: 'heartbeat', ts: Date.now() });
+    }, 15_000);
+    heartbeat.unref?.();
     async function tick() {
       if (closed) return;
       if (getActiveHostId() !== hostId) return close();
